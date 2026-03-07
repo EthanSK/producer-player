@@ -206,3 +206,23 @@ Okay. I'm reviewing producer player, and I've got some feedback. So firstly, it'
 - Updated song normalization to use suffix-based `v<number>` grouping at end-of-name, with or without spacing (e.g. `Leakyv5`, `Leaky v5`).
 - Confirmed typo/fuzzy grouping was not added (final user intent preserved).
 - Added/updated E2E coverage for no-space `v<number>` grouping, watch update behavior, folder-path persistence, and persisted song order across restart.
+
+---
+
+## Naming-convention guidance copy follow-up (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Sat 2026-03-07 22:37 GMT
+
+```text
+Also, I want, I want you to have instructions under what is under the file file picker folder picker to to explain how the naming convention expects should be a v at the end. V one, v two, v three. This is an opinionated fucking app for the greats are good. For the great are good.
+```
+
+### Assistant implementation summary (this run)
+
+- Added a prominent instructional guidance panel directly under folder path picker controls in the left sidebar.
+- Guidance explicitly states required version suffix pattern at end-of-filename: `v1`, `v2`, `v3`, including both spaced and non-spaced forms (`Leaky v2`, `Leakyv2`).
+- Kept tone opinionated/pro-producer while staying clean and professional.
+- Added tooltip/help text reinforcement on the folder picker control and dedicated guidance help indicator.
+- Added E2E assertion to verify the naming guidance is visible in UI.

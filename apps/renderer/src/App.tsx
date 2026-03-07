@@ -425,7 +425,7 @@ export function App(): JSX.Element {
                 void handleOpenFolderDialog();
               }}
               data-testid="link-folder-dialog-button"
-              title="Choose a folder to watch for exported audio files."
+              title="Choose a folder to watch for exported audio files. Use end-of-name version tags like v1, v2, v3 for best grouping."
             >
               Add Folder…
             </button>
@@ -453,7 +453,7 @@ export function App(): JSX.Element {
               }
             }}
             placeholder="Paste folder path"
-            title="Paste a local folder path and press Enter or Link Path."
+            title="Paste a local folder path and press Enter or Link Path. Naming works best when versions end with v1, v2, v3."
           />
           <button
             type="button"
@@ -464,6 +464,28 @@ export function App(): JSX.Element {
             Link Path
           </button>
         </div>
+
+        <section
+          className="naming-guide"
+          data-testid="naming-guide"
+          title="Producer Player groups versions by end-of-name version suffixes. Use v1, v2, v3 at the end."
+        >
+          <div className="naming-guide-header">
+            <h3>Naming convention (opinionated by design)</h3>
+            <span
+              className="help-pill"
+              title="Keep version suffixes at the end of each filename so the app groups exports predictably for fast A/B listening."
+              aria-label="Naming convention help"
+            >
+              i
+            </span>
+          </div>
+          <p>
+            Built for disciplined producer workflows: put version suffixes at the very end of the
+            filename — <code>v1</code>, <code>v2</code>, <code>v3</code> (with or without a space
+            before <code>v</code>, e.g. <code>Leaky v2</code> or <code>Leakyv2</code>).
+          </p>
+        </section>
 
         <ul className="folder-list">
           {snapshot.linkedFolders.map((folder) => (

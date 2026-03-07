@@ -106,7 +106,7 @@
         <div class="container">
           <h2>Demo</h2>
           <p>
-            Current demo is committed as a local repository asset and can be promoted to a hosted URL once uploaded.
+            Demo is committed in-repo and also reachable via GitHub Pages once Pages deployment completes.
           </p>
           <video
             controls
@@ -124,29 +124,39 @@
 
       <section class="section" id="download">
         <div class="container">
-          <h2>Download / coming soon</h2>
+          <h2>Download prebuilt builds now</h2>
           <div class="grid download-grid">
             <article class="card">
-              <h3>Current state</h3>
+              <h3>Available now (unsigned CI artifacts)</h3>
               <ul>
-                <li>Source build available now (Swift + Electron).</li>
-                <li>Automated CI and release scaffold included.</li>
-                <li>GitHub Pages deployment workflow included.</li>
+                <li>macOS zipped <code>.app</code> bundle (<code>*-mac-*.zip</code>)</li>
+                <li>Windows portable <code>.exe</code> plus zipped app bundle (<code>*-win-*.*</code>)</li>
+                <li>Linux <code>.AppImage</code> plus <code>.tar.gz</code> bundle (<code>*-linux-*.*</code>)</li>
               </ul>
+              <p>
+                Download from Releases (tag runs):
+                <a href="https://github.com/EthanSK/producer-player/releases">github.com/EthanSK/producer-player/releases</a>
+              </p>
+              <p>
+                Or download run artifacts directly from Actions:
+                <a href="https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml"
+                  >actions/workflows/release-desktop.yml</a
+                >
+              </p>
             </article>
             <article class="card">
-              <h3>Planned public binaries</h3>
+              <h3>Current caveats + next hardening</h3>
               <ul>
-                <li>macOS signed package (planned)</li>
-                <li>Windows installer (planned)</li>
-                <li>Tag-based release pipeline (workflow scaffold ready)</li>
+                <li>Artifacts are intentionally unsigned for immediate testing.</li>
+                <li>macOS artifacts are not notarized yet.</li>
+                <li>Windows code-signing is not enabled yet.</li>
+                <li>Secret names and rollout steps are documented in <code>docs/RELEASING.md</code>.</li>
               </ul>
             </article>
           </div>
-          <pre><code># Local build (today)
+          <pre><code># Local unsigned macOS prebuilt package
 npm install
-npm run build
-swift build</code></pre>
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run release:desktop:mac</code></pre>
         </div>
       </section>
 
@@ -155,20 +165,20 @@ swift build</code></pre>
           <h2>What is public right now?</h2>
           <div class="grid status-grid">
             <article class="card status-card">
-              <h3>Public in repo</h3>
+              <h3>Public now</h3>
               <ul>
-                <li>Swift MVP source and docs</li>
-                <li>Electron/TypeScript vertical slice source</li>
-                <li>Landing page source + GitHub Actions workflows</li>
-                <li>Local demo clip committed in this repo</li>
+                <li>Swift MVP + Electron/TypeScript source</li>
+                <li>GitHub Pages landing source + demo asset</li>
+                <li>CI + Pages + desktop prebuilt workflows</li>
+                <li>Unsigned prebuilt artifacts for macOS, Windows, and Linux</li>
               </ul>
             </article>
             <article class="card status-card">
-              <h3>Still local-only / pending</h3>
+              <h3>Pending / not claimed yet</h3>
               <ul>
-                <li>Signed desktop installers</li>
-                <li>Release signing credentials/secrets</li>
-                <li>First tagged release run (`v0.1.0`)</li>
+                <li>Developer ID signing + notarized macOS distribution</li>
+                <li>Code-signed Windows binaries</li>
+                <li>Signing credentials in GitHub Secrets</li>
                 <li>Optional external demo mirror (YouTube/Vimeo)</li>
               </ul>
             </article>
@@ -180,7 +190,9 @@ swift build</code></pre>
     <footer class="site-footer">
       <div class="container">
         <p>
-          Producer Player · Public packaging scaffold · live at
+          Producer Player · repo:
+          <a href="https://github.com/EthanSK/producer-player">github.com/EthanSK/producer-player</a>
+          · live pages URL:
           <a href="https://ethansk.github.io/producer-player/">ethansk.github.io/producer-player</a>
         </p>
       </div>

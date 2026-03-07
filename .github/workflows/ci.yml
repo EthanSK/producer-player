@@ -25,8 +25,6 @@ jobs:
 
       - name: Typecheck workspaces
         run: |
-          npm run typecheck -w packages/contracts
-          npm run typecheck -w packages/domain
           npm run build -w packages/contracts
           npm run build -w packages/domain
           npm run typecheck -w apps/renderer

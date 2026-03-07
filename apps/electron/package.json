@@ -1,0 +1,21 @@
+{
+  "name": "@producer-player/electron",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.cjs",
+  "scripts": {
+    "dev": "npm run build && wait-on http://127.0.0.1:4207 && cross-env ELECTRON_DEV=true RENDERER_DEV_URL=http://127.0.0.1:4207 electron ./dist/main.cjs",
+    "build": "node ./scripts/build-main.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "electron ./dist/main.cjs"
+  },
+  "dependencies": {
+    "@producer-player/contracts": "*",
+    "@producer-player/domain": "*",
+    "electron": "^40.6.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.1",
+    "typescript": "^5.8.2"
+  }
+}

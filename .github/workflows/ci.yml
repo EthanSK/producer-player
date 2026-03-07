@@ -24,10 +24,19 @@ jobs:
         run: npm ci
 
       - name: Typecheck workspaces
-        run: npm run typecheck
+        run: |
+          npm --prefix packages/contracts run typecheck
+          npm --prefix packages/domain run typecheck
+          npm --prefix apps/renderer run typecheck
+          npm --prefix apps/electron run typecheck
+          npm --prefix apps/e2e run typecheck
 
       - name: Build workspaces
-        run: npm run build
+        run: |
+          npm --prefix packages/contracts run build
+          npm --prefix packages/domain run build
+          npm --prefix apps/renderer run build
+          npm --prefix apps/electron run build
 
   swift-build:
     name: Swift MVP build

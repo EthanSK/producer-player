@@ -39,7 +39,6 @@ export interface SongWithVersions extends LogicalSong {
 }
 
 export interface MatcherSettings {
-  fuzzyThreshold: number;
   autoMoveOld: boolean;
 }
 
@@ -59,7 +58,11 @@ export const IPC_CHANNELS = {
   LINK_FOLDER_PATH: 'producer-player:link-folder-path',
   UNLINK_FOLDER: 'producer-player:unlink-folder',
   RESCAN_LIBRARY: 'producer-player:rescan-library',
+  ORGANIZE_OLD_VERSIONS: 'producer-player:organize-old-versions',
+  SET_AUTO_MOVE_OLD: 'producer-player:set-auto-move-old',
+  REORDER_SONGS: 'producer-player:reorder-songs',
   OPEN_IN_FINDER: 'producer-player:open-in-finder',
+  OPEN_FOLDER: 'producer-player:open-folder',
   TO_FILE_URL: 'producer-player:to-file-url',
   SNAPSHOT_UPDATED: 'producer-player:snapshot-updated',
 } as const;
@@ -72,7 +75,11 @@ export interface ProducerPlayerBridge {
   linkFolder(folderPath: string): Promise<LibrarySnapshot>;
   unlinkFolder(folderId: string): Promise<LibrarySnapshot>;
   rescanLibrary(): Promise<LibrarySnapshot>;
+  organizeOldVersions(): Promise<LibrarySnapshot>;
+  setAutoMoveOld(enabled: boolean): Promise<LibrarySnapshot>;
+  reorderSongs(songIds: string[]): Promise<LibrarySnapshot>;
   revealFile(filePath: string): Promise<void>;
+  openFolder(folderPath: string): Promise<void>;
   toFileUrl(filePath: string): Promise<string>;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
 }

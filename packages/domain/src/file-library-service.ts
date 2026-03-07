@@ -6,15 +6,20 @@ import type {
   LibrarySnapshot,
   LinkedFolder,
   MatcherSettings,
+  SongWithVersions,
 } from '@producer-player/contracts';
 import { buildSongsFromFiles, isSupportedAudioFile, type ScannedAudioFile } from './song-model';
 
 const DEFAULT_MATCHER_SETTINGS: MatcherSettings = {
-  fuzzyThreshold: 0.72,
   autoMoveOld: true,
 };
 
 type SnapshotSubscriber = (snapshot: LibrarySnapshot) => void;
+
+interface FileLibraryServiceOptions {
+  autoMoveOld?: boolean;
+  songOrder?: string[];
+}
 
 function stableId(input: string): string {
   return createHash('sha1').update(input).digest('hex').slice(0, 16);
@@ -22,6 +27,31 @@ function stableId(input: string): string {
 
 function cloneSnapshot(snapshot: LibrarySnapshot): LibrarySnapshot {
   return JSON.parse(JSON.stringify(snapshot)) as LibrarySnapshot;
+}
+
+function dedupeIds(ids: string[]): string[] {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+
+  for (const id of ids) {
+    if (seen.has(id)) {
+      continue;
+    }
+
+    seen.add(id);
+    unique.push(id);
+  }
+
+  return unique;
+}
+
+async function pathExists(absolutePath: string): Promise<boolean> {
+  try {
+    await fs.access(absolutePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function collectAudioFiles(
@@ -48,9 +78,12 @@ async function collectAudioFiles(
       const absolutePath = path.join(current, entry.name);
 
       if (entry.isDirectory()) {
-        if (entry.name.startsWith('.')) {
+        const normalizedName = entry.name.toLowerCase();
+
+        if (normalizedName.startsWith('.') || normalizedName === 'old') {
           continue;
         }
+
         pendingDirectories.push(absolutePath);
         continue;
       }
@@ -76,6 +109,31 @@ async function collectAudioFiles(
   return files;
 }
 
+function isInsideOldDirectory(filePath: string, folderPath: string): boolean {
+  const relativePath = path.relative(folderPath, filePath);
+
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return false;
+  }
+
+  const firstSegment = relativePath.split(path.sep)[0]?.toLowerCase();
+  return firstSegment === 'old';
+}
+
+async function moveFile(sourcePath: string, targetPath: string): Promise<void> {
+  try {
+    await fs.rename(sourcePath, targetPath);
+    return;
+  } catch (error: unknown) {
+    if (!(error instanceof Error) || !('code' in error) || error.code !== 'EXDEV') {
+      throw error;
+    }
+  }
+
+  await fs.copyFile(sourcePath, targetPath);
+  await fs.unlink(sourcePath);
+}
+
 export class FileLibraryService {
   private readonly linkedFolders = new Map<string, LinkedFolder>();
   private readonly folderFiles = new Map<string, ScannedAudioFile[]>();
@@ -83,6 +141,7 @@ export class FileLibraryService {
   private readonly folderScanTimers = new Map<string, NodeJS.Timeout>();
   private readonly subscribers = new Set<SnapshotSubscriber>();
   private matcherSettings: MatcherSettings;
+  private songOrder: string[];
 
   private snapshot: LibrarySnapshot = {
     linkedFolders: [],
@@ -94,11 +153,15 @@ export class FileLibraryService {
     matcherSettings: DEFAULT_MATCHER_SETTINGS,
   };
 
-  constructor(settings?: Partial<MatcherSettings>) {
+  constructor(options: FileLibraryServiceOptions = {}) {
     this.matcherSettings = {
       ...DEFAULT_MATCHER_SETTINGS,
-      ...settings,
+      ...(typeof options.autoMoveOld === 'boolean'
+        ? { autoMoveOld: options.autoMoveOld }
+        : {}),
     };
+
+    this.songOrder = dedupeIds(options.songOrder ?? []);
 
     this.snapshot = {
       ...this.snapshot,
@@ -169,9 +232,17 @@ export class FileLibraryService {
 
     this.setStatus('scanning', `Linking ${folder.name}…`);
     await this.scanFolder(folder.id);
+
+    const movedCount = await this.maybeAutoOrganizeOldVersions();
+
     this.attachWatcher(folder);
 
-    this.rebuildSnapshot('watching', `Watching ${this.linkedFolders.size} folder(s).`);
+    const statusMessage =
+      movedCount > 0
+        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
+        : `Watching ${this.linkedFolders.size} folder(s).`;
+
+    this.rebuildSnapshot('watching', statusMessage);
     return this.getSnapshot();
   }
 
@@ -192,6 +263,7 @@ export class FileLibraryService {
     }
 
     if (this.linkedFolders.size === 0) {
+      this.songOrder = [];
       this.rebuildSnapshot('idle', 'No folders linked yet.');
       return this.getSnapshot();
     }
@@ -212,7 +284,113 @@ export class FileLibraryService {
       await this.scanFolder(folderId);
     }
 
-    this.rebuildSnapshot('watching', `Watching ${this.linkedFolders.size} folder(s).`);
+    const movedCount = await this.maybeAutoOrganizeOldVersions();
+
+    const statusMessage =
+      movedCount > 0
+        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
+        : `Watching ${this.linkedFolders.size} folder(s).`;
+
+    this.rebuildSnapshot('watching', statusMessage);
+    return this.getSnapshot();
+  }
+
+  async organizeOldVersions(): Promise<LibrarySnapshot> {
+    if (this.linkedFolders.size === 0) {
+      this.rebuildSnapshot('idle', 'No folders linked yet.');
+      return this.getSnapshot();
+    }
+
+    this.setStatus('scanning', 'Organizing old versions…');
+
+    for (const folderId of this.linkedFolders.keys()) {
+      await this.scanFolder(folderId);
+    }
+
+    const movedCount = await this.organizeOldVersionsInternal();
+
+    const statusMessage =
+      movedCount > 0
+        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
+        : `Watching ${this.linkedFolders.size} folder(s). No older versions needed organizing.`;
+
+    this.rebuildSnapshot('watching', statusMessage);
+    return this.getSnapshot();
+  }
+
+  async setAutoMoveOld(autoMoveOld: boolean): Promise<LibrarySnapshot> {
+    this.matcherSettings = {
+      ...this.matcherSettings,
+      autoMoveOld,
+    };
+
+    if (!autoMoveOld) {
+      this.snapshot = {
+        ...this.snapshot,
+        matcherSettings: this.matcherSettings,
+        statusMessage:
+          this.linkedFolders.size > 0
+            ? `Watching ${this.linkedFolders.size} folder(s). Auto-organize is OFF.`
+            : 'No folders linked yet.',
+      };
+
+      this.emitSnapshot();
+      return this.getSnapshot();
+    }
+
+    if (this.linkedFolders.size === 0) {
+      this.snapshot = {
+        ...this.snapshot,
+        matcherSettings: this.matcherSettings,
+      };
+      this.emitSnapshot();
+      return this.getSnapshot();
+    }
+
+    this.setStatus('scanning', 'Auto-organize enabled. Organizing old versions…');
+
+    for (const folderId of this.linkedFolders.keys()) {
+      await this.scanFolder(folderId);
+    }
+
+    const movedCount = await this.organizeOldVersionsInternal();
+
+    const statusMessage =
+      movedCount > 0
+        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
+        : `Watching ${this.linkedFolders.size} folder(s). Auto-organize is ON.`;
+
+    this.rebuildSnapshot('watching', statusMessage);
+    return this.getSnapshot();
+  }
+
+  async reorderSongs(orderedSongIds: string[]): Promise<LibrarySnapshot> {
+    const existingSongIds = this.snapshot.songs.map((song) => song.id);
+    if (existingSongIds.length === 0) {
+      return this.getSnapshot();
+    }
+
+    const existingSongIdSet = new Set(existingSongIds);
+
+    const nextOrder: string[] = [];
+    for (const songId of dedupeIds(orderedSongIds)) {
+      if (!existingSongIdSet.has(songId)) {
+        continue;
+      }
+      nextOrder.push(songId);
+    }
+
+    for (const songId of existingSongIds) {
+      if (nextOrder.includes(songId)) {
+        continue;
+      }
+      nextOrder.push(songId);
+    }
+
+    this.songOrder = nextOrder;
+
+    const nextStatus = this.snapshot.status === 'idle' ? 'idle' : 'watching';
+    this.rebuildSnapshot(nextStatus, 'Updated actual song order.');
     return this.getSnapshot();
   }
 
@@ -244,6 +422,7 @@ export class FileLibraryService {
       ...this.snapshot,
       status,
       statusMessage,
+      matcherSettings: this.matcherSettings,
     };
 
     this.emitSnapshot();
@@ -284,7 +463,11 @@ export class FileLibraryService {
         return;
       }
 
-      if (eventName !== 'addDir' && eventName !== 'unlinkDir' && !isSupportedAudioFile(changedPath)) {
+      if (
+        eventName !== 'addDir' &&
+        eventName !== 'unlinkDir' &&
+        !isSupportedAudioFile(changedPath)
+      ) {
         return;
       }
 
@@ -318,7 +501,129 @@ export class FileLibraryService {
 
     this.setStatus('scanning', 'Detected changes. Refreshing library…');
     await this.scanFolder(folderId);
-    this.rebuildSnapshot('watching', `Watching ${this.linkedFolders.size} folder(s).`);
+
+    const movedCount = await this.maybeAutoOrganizeOldVersions();
+
+    const statusMessage =
+      movedCount > 0
+        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
+        : `Watching ${this.linkedFolders.size} folder(s).`;
+
+    this.rebuildSnapshot('watching', statusMessage);
+  }
+
+  private async maybeAutoOrganizeOldVersions(): Promise<number> {
+    if (!this.matcherSettings.autoMoveOld) {
+      return 0;
+    }
+
+    return this.organizeOldVersionsInternal();
+  }
+
+  private async organizeOldVersionsInternal(): Promise<number> {
+    const files = Array.from(this.folderFiles.values()).flat();
+    const songs = buildSongsFromFiles(files);
+
+    const affectedFolderIds = new Set<string>();
+    let movedCount = 0;
+
+    for (const song of songs) {
+      const versions = [...song.versions].sort(
+        (left, right) =>
+          new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime()
+      );
+
+      for (const version of versions.slice(1)) {
+        const folder = this.linkedFolders.get(version.folderId);
+        if (!folder) {
+          continue;
+        }
+
+        if (isInsideOldDirectory(version.filePath, folder.path)) {
+          continue;
+        }
+
+        if (!(await pathExists(version.filePath))) {
+          continue;
+        }
+
+        const archiveDirectory = path.join(folder.path, 'old');
+        await fs.mkdir(archiveDirectory, { recursive: true });
+
+        const archivePath = await this.resolveArchivePath(
+          archiveDirectory,
+          path.basename(version.filePath)
+        );
+
+        await moveFile(version.filePath, archivePath);
+
+        movedCount += 1;
+        affectedFolderIds.add(version.folderId);
+      }
+    }
+
+    if (movedCount === 0) {
+      return 0;
+    }
+
+    for (const folderId of affectedFolderIds) {
+      await this.scanFolder(folderId);
+    }
+
+    return movedCount;
+  }
+
+  private async resolveArchivePath(
+    archiveDirectory: string,
+    fileName: string
+  ): Promise<string> {
+    const parsed = path.parse(fileName);
+    let candidatePath = path.join(archiveDirectory, fileName);
+
+    if (!(await pathExists(candidatePath))) {
+      return candidatePath;
+    }
+
+    const uniqueSuffix = Date.now();
+    let counter = 1;
+
+    while (await pathExists(candidatePath)) {
+      candidatePath = path.join(
+        archiveDirectory,
+        `${parsed.name}-${uniqueSuffix}-${counter}${parsed.ext}`
+      );
+      counter += 1;
+    }
+
+    return candidatePath;
+  }
+
+  private applySongOrder(songs: SongWithVersions[]): SongWithVersions[] {
+    const currentSongIds = songs.map((song) => song.id);
+    const currentSongIdSet = new Set(currentSongIds);
+
+    const retainedOrder = dedupeIds(this.songOrder).filter((songId) =>
+      currentSongIdSet.has(songId)
+    );
+
+    for (const songId of currentSongIds) {
+      if (!retainedOrder.includes(songId)) {
+        retainedOrder.push(songId);
+      }
+    }
+
+    this.songOrder = retainedOrder;
+
+    const songOrderIndex = new Map<string, number>();
+    for (let index = 0; index < retainedOrder.length; index += 1) {
+      songOrderIndex.set(retainedOrder[index], index);
+    }
+
+    return [...songs].sort((left, right) => {
+      const leftIndex = songOrderIndex.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+      const rightIndex = songOrderIndex.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+      return leftIndex - rightIndex;
+    });
   }
 
   private rebuildSnapshot(status: LibrarySnapshot['status'], statusMessage: string): void {
@@ -327,7 +632,8 @@ export class FileLibraryService {
     );
 
     const files = Array.from(this.folderFiles.values()).flat();
-    const songs = buildSongsFromFiles(files);
+    const unorderedSongs = buildSongsFromFiles(files);
+    const songs = this.applySongOrder(unorderedSongs);
     const versions = songs.flatMap((song) => song.versions);
 
     const fileCountByFolder = new Map<string, number>();

@@ -34,30 +34,47 @@ function getStateFilePath(): string {
 
 interface PersistedState {
   linkedFolderPaths: string[];
+  autoMoveOld: boolean;
+  songOrder: string[];
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((entry): entry is string => typeof entry === 'string');
 }
 
 async function readPersistedState(): Promise<PersistedState> {
+  const fallback: PersistedState = {
+    linkedFolderPaths: [],
+    autoMoveOld: true,
+    songOrder: [],
+  };
+
   try {
     const raw = await fs.readFile(getStateFilePath(), 'utf8');
     const parsed = JSON.parse(raw) as Partial<PersistedState>;
 
-    if (!Array.isArray(parsed.linkedFolderPaths)) {
-      return { linkedFolderPaths: [] };
-    }
-
     return {
-      linkedFolderPaths: parsed.linkedFolderPaths.filter(
-        (folderPath): folderPath is string => typeof folderPath === 'string'
-      ),
+      linkedFolderPaths: parseStringArray(parsed.linkedFolderPaths),
+      autoMoveOld:
+        typeof parsed.autoMoveOld === 'boolean'
+          ? parsed.autoMoveOld
+          : fallback.autoMoveOld,
+      songOrder: parseStringArray(parsed.songOrder),
     };
   } catch {
-    return { linkedFolderPaths: [] };
+    return fallback;
   }
 }
 
 async function writePersistedState(snapshot: LibrarySnapshot): Promise<void> {
   const payload: PersistedState = {
     linkedFolderPaths: snapshot.linkedFolders.map((folder) => folder.path),
+    autoMoveOld: snapshot.matcherSettings.autoMoveOld,
+    songOrder: snapshot.songs.map((song) => song.id),
   };
 
   await fs.mkdir(app.getPath('userData'), { recursive: true });
@@ -182,8 +199,13 @@ async function ensureLibraryService(): Promise<FileLibraryService> {
     return libraryService;
   }
 
-  const service = new FileLibraryService();
   const persistedState = await readPersistedState();
+
+  const service = new FileLibraryService({
+    autoMoveOld: persistedState.autoMoveOld,
+    songOrder: persistedState.songOrder,
+  });
+
   await service.hydrateLinkedFolders(persistedState.linkedFolderPaths);
 
   service.subscribe((snapshot) => {
@@ -234,8 +256,27 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.RESCAN_LIBRARY, async () => service.rescanLibrary());
 
+  ipcMain.handle(IPC_CHANNELS.ORGANIZE_OLD_VERSIONS, async () => {
+    return service.organizeOldVersions();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SET_AUTO_MOVE_OLD, async (_event, enabled: boolean) => {
+    return service.setAutoMoveOld(Boolean(enabled));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.REORDER_SONGS, async (_event, songIds: string[]) => {
+    return service.reorderSongs(Array.isArray(songIds) ? songIds : []);
+  });
+
   ipcMain.handle(IPC_CHANNELS.OPEN_IN_FINDER, async (_event, filePath: string) => {
     shell.showItemInFolder(filePath);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.OPEN_FOLDER, async (_event, folderPath: string) => {
+    const error = await shell.openPath(folderPath);
+    if (error) {
+      throw new Error(error);
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.TO_FILE_URL, async (_event, filePath: string) => {

@@ -38,24 +38,28 @@ function normalizeWhitespace(input: string): string {
   return input.replace(/\s+/g, ' ').trim();
 }
 
+function stripTrailingVersionSuffix(stem: string): string {
+  // Supports both "Leaky v5" and "Leakyv5" (and _v5 / -v5).
+  const match = stem.match(/^(.*?)(?:[\s_-]?v\d+)$/i);
+
+  if (!match) {
+    return stem;
+  }
+
+  const base = normalizeWhitespace(match[1] ?? '');
+  return base.length > 0 ? base : stem;
+}
+
 export function normalizeSongStem(stem: string): string {
-  const initial = normalizeWhitespace(
+  const withoutDecorators = normalizeWhitespace(
     stem
       .replace(/[_]+/g, ' ')
       .replace(/[()[\]]/g, ' ')
       .replace(/\.(wav|aiff|flac|mp3|m4a)$/i, '')
-  ).toLowerCase();
-
-  const withoutVersionTokens = normalizeWhitespace(
-    initial
-      .replace(
-        /\b(v\d+|version\s*\d+|mix\s*\d+|master\s*\d+|bounce\s*\d+|alt\s*\d+|final\s*\d*)\b/g,
-        ''
-      )
-      .replace(/\b\d{4}[-_]?\d{2}[-_]?\d{2}\b/g, '')
   );
 
-  return withoutVersionTokens.length > 0 ? withoutVersionTokens : initial;
+  const withoutVersionSuffix = stripTrailingVersionSuffix(withoutDecorators);
+  return withoutVersionSuffix.toLowerCase();
 }
 
 function titleFromNormalized(normalized: string): string {

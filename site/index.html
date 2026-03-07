@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Producer Player — Fast A/B auditioning for producer exports</title>
+    <meta
+      name="description"
+      content="Producer Player helps producers treat repeated exports as one logical song with version history, fast browsing, and instant re-auditioning."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <p class="eyebrow">Producer Player</p>
+        <h1>A desktop player built for real producer iteration loops.</h1>
+        <p class="lede">
+          Instead of managing dozens of near-duplicate exports manually, Producer Player groups them as
+          <strong>logical songs</strong> with version history so you can audition fast and stay in creative flow.
+        </p>
+
+        <div class="hero-actions">
+          <a class="button button-primary" href="#demo">Watch demo</a>
+          <a class="button button-secondary" href="#download">Download status</a>
+        </div>
+
+        <p class="hero-note">
+          Public repository URL is not configured in this local clone yet.
+          <span class="todo">TODO_REPO_URL</span>
+        </p>
+      </div>
+    </header>
+
+    <main>
+      <section class="section" id="overview">
+        <div class="container">
+          <h2>Overview</h2>
+          <p>
+            Producer Player currently ships as two implementations in one repo:
+            <strong>Swift MVP (existing)</strong> and a new
+            <strong>Electron + TypeScript cross-platform slice</strong>.
+            The Swift build remains untouched for baseline testing while the Electron app evolves toward broader
+            distribution.
+          </p>
+        </div>
+      </section>
+
+      <section class="section section-alt" id="features">
+        <div class="container">
+          <h2>Key features</h2>
+          <div class="grid features-grid">
+            <article class="card">
+              <h3>Logical song grouping</h3>
+              <p>
+                Auto-clusters repeated exports into one song entry with multiple versions, reducing manual file
+                cleanup.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Watch-folder workflow</h3>
+              <p>
+                Link one or more export folders and refresh instantly on add/change/delete events.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Version-aware inspector</h3>
+              <p>
+                Inspect active version state and version count in a dedicated right-hand panel.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Typed cross-platform architecture</h3>
+              <p>
+                Contracts/domain separation with shared types across Electron main process and React renderer.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="screenshots">
+        <div class="container">
+          <h2>Screenshots</h2>
+          <div class="grid screenshot-grid">
+            <figure class="shot">
+              <img src="./assets/screenshots/app-shell.png" alt="Producer Player Electron app shell window" />
+              <figcaption>Electron app shell and tri-panel layout.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img src="./assets/screenshots/logical-songs.png" alt="Logical song grouping in Producer Player" />
+              <figcaption>Logical song view showing grouped exports.</figcaption>
+            </figure>
+            <figure class="shot">
+              <img
+                src="./assets/screenshots/inspector-version-history.png"
+                alt="Version inspector with history details"
+              />
+              <figcaption>Inspector panel highlighting per-song version history.</figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-alt" id="demo">
+        <div class="container">
+          <h2>Demo</h2>
+          <p>
+            Current demo is committed as a local repository asset and can be promoted to a hosted URL once uploaded.
+          </p>
+          <video
+            controls
+            preload="metadata"
+            poster="./assets/screenshots/demo-poster.png"
+            src="./assets/demo/producer-player-demo.mp4"
+          >
+            Your browser does not support embedded video.
+          </video>
+          <p class="todo-line">
+            Public hosted demo URL placeholder: <code>TODO_DEMO_VIDEO_URL</code>
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="download">
+        <div class="container">
+          <h2>Download / coming soon</h2>
+          <div class="grid download-grid">
+            <article class="card">
+              <h3>Current state</h3>
+              <ul>
+                <li>Source build available now (Swift + Electron).</li>
+                <li>Automated CI and release scaffold included.</li>
+                <li>GitHub Pages deployment workflow included.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>Planned public binaries</h3>
+              <ul>
+                <li>macOS signed package (planned)</li>
+                <li>Windows installer (planned)</li>
+                <li>Tag-based release pipeline (workflow scaffold ready)</li>
+              </ul>
+            </article>
+          </div>
+          <pre><code># Local build (today)
+npm install
+npm run build
+swift build</code></pre>
+        </div>
+      </section>
+
+      <section class="section section-alt" id="public-status">
+        <div class="container">
+          <h2>What is public right now?</h2>
+          <div class="grid status-grid">
+            <article class="card status-card">
+              <h3>Public in repo</h3>
+              <ul>
+                <li>Swift MVP source and docs</li>
+                <li>Electron/TypeScript vertical slice source</li>
+                <li>Landing page source + GitHub Actions workflows</li>
+                <li>Local demo clip committed in this repo</li>
+              </ul>
+            </article>
+            <article class="card status-card">
+              <h3>Still local-only / pending</h3>
+              <ul>
+                <li>Remote repository URL</li>
+                <li>Published GitHub Pages URL</li>
+                <li>Hosted external demo link (YouTube/Vimeo/etc.)</li>
+                <li>Signed desktop installers</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <p>
+          Producer Player · Public packaging scaffold
+          <span class="todo">(update TODO links after remote is configured)</span>
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

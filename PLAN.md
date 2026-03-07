@@ -153,3 +153,30 @@ That is the CLI that is. And, also, make end to end tests running and all that. 
 - Added first runnable vertical slice for folder link/watch and logical song grouping
 - Added Playwright Electron E2E happy path and CI-friendly command
 - Wrote migration and E2E docs with current pass status
+
+---
+
+## Public prebuilt release readiness (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Sat 2026-03-07 21:11 GMT
+
+```text
+Yeah. In a sub agent, do all that.
+```
+
+**Task context in same run (verbatim):**
+
+```text
+He wants true downloadable prebuilt releases so users can download app directly (not build locally), using GitHub Actions.
+```
+
+### Assistant response summary (this run)
+
+- Upgraded release workflow from scaffold to real macOS prebuilt artifact pipeline.
+- Configured CI release workflow to build unsigned macOS ZIP artifacts on main/tag/manual runs.
+- Added SHA-256 checksum generation and release asset attachment on `v*` tags.
+- Updated README + landing page + public status docs to state exactly what can be downloaded now and where.
+- Added/updated release documentation + template/changelog process (`docs/RELEASING.md`, `.github/RELEASE_NOTES_TEMPLATE.md`, `CHANGELOG.md`).
+- Kept unrelated existing local E2E working-tree changes untouched.

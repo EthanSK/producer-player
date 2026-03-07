@@ -9,6 +9,32 @@ The Swift app remains available and untouched for MVP validation while cross-pla
 
 ---
 
+## Download prebuilt desktop artifacts (no local build required)
+
+You can now download CI-built desktop artifacts directly from GitHub.
+
+### GitHub Actions artifacts (manual + tag runs)
+
+- Workflow file: [`.github/workflows/release-desktop.yml`](.github/workflows/release-desktop.yml)
+- Workflow page: `https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml`
+
+Each workflow run uploads prebuilt artifacts:
+
+- **macOS:** `Producer Player-<version>-mac-<arch>.zip`
+- **Windows:** `Producer Player-<version>-win-<arch>.exe` and `.zip`
+- **Linux:** `Producer Player-<version>-linux-<arch>.AppImage` and `.tar.gz`
+
+### GitHub Releases assets (tag pushes)
+
+Push a tag that matches `v*` (for example `v0.1.0`) and the same artifacts are attached to a GitHub Release.
+
+- Releases page: `https://github.com/EthanSK/producer-player/releases`
+
+> Current artifacts are built for immediate testability and are **not Developer ID signed/notarized**.
+> See [`docs/RELEASING.md`](docs/RELEASING.md) for optional signing secret names and rollout steps.
+
+---
+
 ## Demo video
 
 - **Current in-repo demo clip:** [`site/assets/demo/producer-player-demo.mp4`](site/assets/demo/producer-player-demo.mp4)
@@ -59,9 +85,18 @@ This workflow deploys `site/` to GitHub Pages using the official Pages actions.
   - Swift MVP build on macOS
 - **GitHub Pages deploy:** `.github/workflows/pages.yml`
   - Uploads `site/` as Pages artifact and deploys
-- **Desktop release scaffold (optional):** `.github/workflows/release-desktop.yml`
-  - Builds project and uploads a draft archive scaffold
-  - Tag push (`v*`) can create a draft prerelease
+- **Desktop prebuilt releases:** `.github/workflows/release-desktop.yml`
+  - Builds downloadable desktop artifacts on macOS/Windows/Linux
+  - Uploads artifacts for every workflow run
+  - On `v*` tags, attaches artifacts to GitHub Releases
+
+---
+
+## Release notes + changelog process
+
+- Release automation categories: [`.github/release.yml`](.github/release.yml)
+- Release notes template + first release checklist: [`docs/RELEASING.md`](docs/RELEASING.md)
+- Changelog file: [`CHANGELOG.md`](CHANGELOG.md)
 
 ---
 

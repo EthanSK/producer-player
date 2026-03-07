@@ -226,3 +226,26 @@ Also, I want, I want you to have instructions under what is under the file file 
 - Kept tone opinionated/pro-producer while staying clean and professional.
 - Added tooltip/help text reinforcement on the folder picker control and dedicated guidance help indicator.
 - Added E2E assertion to verify the naming guidance is visible in UI.
+
+---
+
+## Release desktop mac script wiring fix + monitoring (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Sat 2026-03-07 23:35 GMT
+
+```text
+Well, I want you to spend a long running sub agent fixing the release desktop Mac Mac script wiring. Fix it locally, see if it works, and then you can push it. Inspect the logs every few minutes. Check back on it for a few minutes for, like, half an hour until it's done.
+```
+
+### Assistant implementation summary (this run)
+
+- Diagnosed workflow failure as missing `release:desktop:mac` script in root `package.json` while workflow still invokes it.
+- Rewired root packaging config by restoring:
+  - `release:desktop:mac` script
+  - root `main` entry for packaged app
+  - `build` block for electron-builder artifact naming/output
+  - `electron-builder` dev dependency
+- Validated locally with `npm run release:desktop:mac` producing `release/Producer-Player-0.1.0-mac-arm64.zip` and exiting successfully.
+- Pushed fix to `main` and began periodic monitoring of workflow runs/logs.

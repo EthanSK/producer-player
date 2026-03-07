@@ -9,52 +9,51 @@ The Swift app remains available and untouched for MVP validation while cross-pla
 
 ---
 
-## Download prebuilt desktop artifacts (no local build required)
+## Repository
 
-You can now download CI-built desktop artifacts directly from GitHub.
+- <https://github.com/EthanSK/producer-player>
 
-### GitHub Actions artifacts (manual + tag runs)
+---
+
+## Download prebuilt app (no local build required)
+
+### Available now
+
+Unsigned prebuilt macOS ZIP artifacts are produced by:
 
 - Workflow file: [`.github/workflows/release-desktop.yml`](.github/workflows/release-desktop.yml)
-- Workflow page: `https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml`
+- Workflow page: <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
 
-Each workflow run uploads prebuilt artifacts:
+Artifacts:
 
-- **macOS:** `Producer Player-<version>-mac-<arch>.zip`
-- **Windows:** `Producer Player-<version>-win-<arch>.exe` and `.zip`
-- **Linux:** `Producer Player-<version>-linux-<arch>.AppImage` and `.tar.gz`
+- `Producer-Player-<version>-mac-<arch>.zip`
+- matching checksum files: `*.zip.sha256`
 
-### GitHub Releases assets (tag pushes)
+Current workflow default builds for the GitHub macOS runner architecture (for example `arm64` on Apple Silicon runners).
 
-Push a tag that matches `v*` (for example `v0.1.0`) and the same artifacts are attached to a GitHub Release.
+Download sources:
 
-- Releases page: `https://github.com/EthanSK/producer-player/releases`
+1. **Workflow artifacts** (main branch pushes + manual dispatch)
+2. **GitHub Releases assets** on `v*` tags:
+   - <https://github.com/EthanSK/producer-player/releases>
 
-> Current artifacts are built for immediate testability and are **not Developer ID signed/notarized**.
-> See [`docs/RELEASING.md`](docs/RELEASING.md) for optional signing secret names and rollout steps.
+> These builds are intentionally unsigned for immediate testability.
+> On first launch, macOS Gatekeeper may require right-click → **Open**.
+
+### Planned (not yet enabled)
+
+- Signed/notarized macOS DMG
+- Signed Windows installer
+
+See [`docs/RELEASING.md`](docs/RELEASING.md) for roadmap and exact signing secret names.
 
 ---
 
 ## Demo video
 
-- **Current in-repo demo clip:** [`site/assets/demo/producer-player-demo.mp4`](site/assets/demo/producer-player-demo.mp4)
-- **Hosted public demo URL:** `https://ethansk.github.io/producer-player/assets/demo/producer-player-demo.mp4`
-
-### Demo link strategy
-
-This repo keeps both:
-
-1. an in-repo demo asset (`site/assets/demo/producer-player-demo.mp4`), and
-2. a hosted GitHub Pages URL for easy sharing:
-   - `https://ethansk.github.io/producer-player/assets/demo/producer-player-demo.mp4`
-
----
-
-## Public packaging status
-
-For an explicit breakdown of what is public now vs still local-only, see:
-
-- [`docs/PUBLIC_STATUS.md`](docs/PUBLIC_STATUS.md)
+- In-repo demo clip: [`site/assets/demo/producer-player-demo.mp4`](site/assets/demo/producer-player-demo.mp4)
+- Expected Pages-hosted demo path (after successful Pages deploy):
+  - <https://ethansk.github.io/producer-player/assets/demo/producer-player-demo.mp4>
 
 ---
 
@@ -66,15 +65,13 @@ A polished static landing page is included in:
 - `site/styles.css`
 - `site/assets/**`
 
-### Deploying the landing page
-
-Workflow included:
+Workflow:
 
 - `.github/workflows/pages.yml`
 
-This workflow deploys `site/` to GitHub Pages using the official Pages actions.
+Expected Pages URL:
 
-> Live Pages URL: `https://ethansk.github.io/producer-player/`
+- <https://ethansk.github.io/producer-player/>
 
 ---
 
@@ -86,17 +83,18 @@ This workflow deploys `site/` to GitHub Pages using the official Pages actions.
 - **GitHub Pages deploy:** `.github/workflows/pages.yml`
   - Uploads `site/` as Pages artifact and deploys
 - **Desktop prebuilt releases:** `.github/workflows/release-desktop.yml`
-  - Builds downloadable desktop artifacts on macOS/Windows/Linux
-  - Uploads artifacts for every workflow run
-  - On `v*` tags, attaches artifacts to GitHub Releases
+  - Builds unsigned macOS ZIP artifacts
+  - Uploads ZIP + checksum artifacts
+  - On `v*` tags, attaches assets to GitHub Releases
 
 ---
 
 ## Release notes + changelog process
 
-- Release automation categories: [`.github/release.yml`](.github/release.yml)
-- Release notes template + first release checklist: [`docs/RELEASING.md`](docs/RELEASING.md)
-- Changelog file: [`CHANGELOG.md`](CHANGELOG.md)
+- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
+- Release notes template: [`.github/RELEASE_NOTES_TEMPLATE.md`](.github/RELEASE_NOTES_TEMPLATE.md)
+- Release notes categories (optional): [`.github/release.yml`](.github/release.yml)
+- First-release instructions + signing guidance: [`docs/RELEASING.md`](docs/RELEASING.md)
 
 ---
 
@@ -143,12 +141,16 @@ npm install
 npm run dev
 ```
 
-This starts renderer + Electron together.
-
 ### Build
 
 ```bash
 npm run build
+```
+
+### Build prebuilt macOS ZIP locally
+
+```bash
+npm run release:desktop:mac
 ```
 
 ### Typecheck
@@ -172,3 +174,4 @@ npm run e2e:ci
 - [`docs/CROSS_PLATFORM_MIGRATION.md`](docs/CROSS_PLATFORM_MIGRATION.md)
 - [`docs/E2E.md`](docs/E2E.md)
 - [`docs/PUBLIC_STATUS.md`](docs/PUBLIC_STATUS.md)
+- [`docs/RELEASING.md`](docs/RELEASING.md)

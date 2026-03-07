@@ -8,20 +8,19 @@ This project follows [Semantic Versioning](https://semver.org/) and uses a Keep-
 
 ### Added
 
-- _Add upcoming user-facing changes here before release._
+- Real unsigned macOS prebuilt artifact workflow (`.github/workflows/release-desktop.yml`).
+- SHA-256 generation for release ZIP artifacts.
+- Release notes template (`.github/RELEASE_NOTES_TEMPLATE.md`).
+- Release process guide with first-release steps and signing secret names (`docs/RELEASING.md`).
 
 ### Changed
 
-- _Add updates to existing behavior here._
-
-### Fixed
-
-- _Add bug fixes here._
+- README + landing page copy now explains exactly what can be downloaded now.
+- Public status docs now separate currently available unsigned artifacts vs planned signed installers.
 
 ## [0.1.0] - TBD
 
 ### Added
 
-- First public prebuilt desktop release pipeline via GitHub Actions.
-- Downloadable macOS, Windows, and Linux prebuilt artifacts from CI.
-- Tag-based release asset publishing (`v*`) to GitHub Releases.
+- Initial Swift MVP and Electron/TypeScript cross-platform vertical slice.
+- Landing page + CI + GitHub Pages automation.

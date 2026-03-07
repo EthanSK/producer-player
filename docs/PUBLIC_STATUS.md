@@ -2,28 +2,24 @@
 
 _Last updated: 2026-03-07_
 
-## Public in this repository (ready to expose)
+## Public now
 
+- Public repo: `https://github.com/EthanSK/producer-player`
+- Public GitHub Pages site: `https://ethansk.github.io/producer-player/`
+- Public demo URL: `https://ethansk.github.io/producer-player/assets/demo/producer-player-demo.mp4`
 - Swift MVP source (`Sources/ProducerPlayer/**`)
-- Electron + TypeScript cross-platform slice (`apps/**`, `packages/**`)
-- Architecture and migration docs (`docs/**`)
-- Landing page source for GitHub Pages (`site/**`)
+- Electron + TypeScript slice (`apps/**`, `packages/**`)
+- Docs (`docs/**`)
+- Landing page source (`site/**`)
 - GitHub Actions workflows (`.github/workflows/**`)
-- Demo media committed in repo (`site/assets/demo/producer-player-demo.mp4`)
 
-## Local-only / not yet publicly resolved
+## Local-only / still pending
 
-- Remote repository URL is not configured in this local clone (`git remote -v` is empty)
-- Published GitHub Pages URL is unknown until remote + Pages settings are enabled
-- Hosted external demo URL (YouTube/Vimeo/etc.) not set yet
-- Signed desktop installers for macOS/Windows are not produced yet (workflow scaffold exists only)
+- Signed desktop installers for macOS/Windows/Linux are not produced yet (release scaffold exists).
+- Any machine-local test artifacts outside repo (workspace artifacts, temp captures) are not public.
 
-## What is needed next to fully publicize
+## Next steps to harden public release
 
-1. Add Git remote for the repo.
-2. Enable GitHub Pages with **GitHub Actions** as the source.
-3. Push the repository and let `.github/workflows/pages.yml` publish the landing page.
-4. Upload/host the demo video externally (optional), then replace:
-   - `TODO_DEMO_VIDEO_URL` in `README.md`
-   - `TODO_DEMO_VIDEO_URL` in `site/index.html`
-5. Configure release signing secrets and packaging config, then upgrade `release-desktop.yml` from scaffold to production installers.
+1. Add release signing/secrets and finalize `release-desktop.yml` for real installers.
+2. Create first tagged release (`v0.1.0`) to validate release workflow end-to-end.
+3. Optionally host the demo video on YouTube/Vimeo as a secondary marketing link.

@@ -12,16 +12,15 @@ The Swift app remains available and untouched for MVP validation while cross-pla
 ## Demo video
 
 - **Current in-repo demo clip:** [`site/assets/demo/producer-player-demo.mp4`](site/assets/demo/producer-player-demo.mp4)
-- **Hosted public demo URL (to add):** `TODO_DEMO_VIDEO_URL`
+- **Hosted public demo URL:** `https://ethansk.github.io/producer-player/assets/demo/producer-player-demo.mp4`
 
 ### Demo link strategy
 
-To avoid inventing URLs, this repo uses a two-step strategy:
+This repo keeps both:
 
-1. Keep a working local/in-repo demo asset committed for immediate reference.
-2. After upload to a public host (YouTube/Vimeo/GitHub Release), replace `TODO_DEMO_VIDEO_URL` in:
-   - this `README.md`
-   - `site/index.html` (landing page)
+1. an in-repo demo asset (`site/assets/demo/producer-player-demo.mp4`), and
+2. a hosted GitHub Pages URL for easy sharing:
+   - `https://ethansk.github.io/producer-player/assets/demo/producer-player-demo.mp4`
 
 ---
 
@@ -49,7 +48,7 @@ Workflow included:
 
 This workflow deploys `site/` to GitHub Pages using the official Pages actions.
 
-> Note: this local clone currently has no remote configured (`git remote -v` is empty), so a real public URL cannot be provided yet.
+> Live Pages URL: `https://ethansk.github.io/producer-player/`
 
 ---
 

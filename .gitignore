@@ -1,0 +1,17 @@
+.DS_Store
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+
+# Node/Electron/TypeScript
+node_modules/
+apps/*/dist/
+packages/*/dist/
+apps/e2e/playwright-report/
+apps/e2e/test-results/
+*.tsbuildinfo
+*.log

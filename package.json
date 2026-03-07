@@ -1,0 +1,28 @@
+{
+  "name": "producer-player",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Producer Player monorepo: existing Swift MVP + new cross-platform Electron/TypeScript implementation.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run build:packages && concurrently -k -n RENDERER,ELECTRON -c cyan,magenta \"npm run dev:renderer\" \"npm run dev:electron\"",
+    "dev:renderer": "npm run dev -w @producer-player/renderer",
+    "dev:electron": "npm run dev -w @producer-player/electron",
+    "build:packages": "npm run build -w @producer-player/contracts && npm run build -w @producer-player/domain",
+    "build": "npm run build:packages && npm run build -w @producer-player/renderer && npm run build -w @producer-player/electron",
+    "typecheck": "npm run typecheck -w @producer-player/contracts && npm run typecheck -w @producer-player/domain && npm run typecheck -w @producer-player/renderer && npm run typecheck -w @producer-player/electron && npm run typecheck -w @producer-player/e2e",
+    "e2e": "npm run build && npm run test -w @producer-player/e2e",
+    "e2e:ci": "npm run build && npm run ci -w @producer-player/e2e",
+    "clean": "rimraf \"apps/*/dist\" \"packages/*/dist\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.8.2",
+    "wait-on": "^9.0.1"
+  }
+}

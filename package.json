@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Producer Player monorepo: existing Swift MVP + new cross-platform Electron/TypeScript implementation.",
+  "main": "apps/electron/dist/main.cjs",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -16,11 +17,33 @@
     "typecheck": "npm run typecheck -w @producer-player/contracts && npm run typecheck -w @producer-player/domain && npm run typecheck -w @producer-player/renderer && npm run typecheck -w @producer-player/electron && npm run typecheck -w @producer-player/e2e",
     "e2e": "npm run build && npm run test -w @producer-player/e2e",
     "e2e:ci": "npm run build && npm run ci -w @producer-player/e2e",
-    "clean": "rimraf \"apps/*/dist\" \"packages/*/dist\""
+    "clean": "rimraf \"apps/*/dist\" \"packages/*/dist\"",
+    "release:desktop:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && electron-builder --mac zip --publish never"
+  },
+  "build": {
+    "appId": "com.ethansk.producerplayer",
+    "productName": "Producer Player",
+    "electronVersion": "40.6.1",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "apps/electron/dist/**/*",
+      "apps/renderer/dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "zip"
+      ],
+      "artifactName": "Producer-Player-${version}-mac-${arch}.${ext}"
+    }
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
+    "electron-builder": "^26.0.12",
     "rimraf": "^6.0.1",
     "typescript": "^5.8.2",
     "wait-on": "^9.0.1"

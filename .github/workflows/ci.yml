@@ -27,6 +27,8 @@ jobs:
         run: |
           npm run typecheck -w packages/contracts
           npm run typecheck -w packages/domain
+          npm run build -w packages/contracts
+          npm run build -w packages/domain
           npm run typecheck -w apps/renderer
           npm run typecheck -w apps/electron
           npm run typecheck -w apps/e2e

@@ -180,3 +180,29 @@ He wants true downloadable prebuilt releases so users can download app directly 
 - Updated README + landing page + public status docs to state exactly what can be downloaded now and where.
 - Added/updated release documentation + template/changelog process (`docs/RELEASING.md`, `.github/RELEASE_NOTES_TEMPLATE.md`, `CHANGELOG.md`).
 - Kept unrelated existing local E2E working-tree changes untouched.
+
+---
+
+## UX/player refactor feedback implementation (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Sat 2026-03-07 22:29 GMT
+
+```text
+Okay. I'm reviewing producer player, and I've got some feedback. So firstly, it's not a music player. Why can't I play the songs? It should play them properly. Now any modifications to the file, I need to be able to I'm actually adding all this to plan.md on what I'm saying. Yeah. So we've got logical songs. And then secondly, there's some issues with how it figures out. I I have a song called Leaky and then a song called Leaky five. What I wanted for the fuzzy search is actually for it to be fuzzy matching. Also, the whole point is for me to be able to drag and drop each item in the playlist, in the logical songs view, but I can't. The whole point is I have wanna have an order that's maintained. Also, can you verify that the path I choose is saved between sessions? Also, logical songs should be called actual songs. That's better u I u x. Make sure to call it that. But yeah. And for the detecting whether a song is a song, want to use the fuzzy fuzzy matching for that. That's what I meant by fuzzy because, like, I see songs like Leaky and Leaky five, and I might have made a small mistake. But I swear wait. What did I say originally about how to do that? I think I came up with a better plan. Anyway, want you to figure out the best way of, like, maybe overcoming some typos. Actually no. You know what? Fuck that. No. Ignore that whole typos thing. I should fix the typos. Also, there should be a button to open the folder that we were currently watching in Finder. Maybe next to library or something. I don't know. Somewhere good. Do good UI for that. Yeah. So it has to make sure it matches with the v thing, leaky v. So ignore that thing about the fuzzy matching. Also, I don't think the placeholder should be quick fuzzy search. Just why is it called quick fuzzy search? Maybe you misinterpreted my what I wanted. And, actually, what I want is a button in the app as well to oh, that's on by default, a checkbox. I swear I mentioned this in the original plan to, automatically move the old versions of the files to an old folder in the watching directory. Make sure everything I'm saying is implemented. Actually, you know what? Maybe that could be like an organized button. Click it organized. Also, all of these things should have tool tips. Every single button should have a tool to explaining what it's doing and how it works. Also, rescan button is a button, but it looks the exact same as logical songs and versions. I feel like if these buttons do different things, they should be doing different they should look a bit different. Oh, am I not using this currently? Rescan versions. Versions in logical songs are kinda similar, they can be the same. Yeah. We read all of this shit implemented, man. We should drag drag and drop the songs. What else? The v one v two detection currently forces you to have a space at the end before it, but it should actually allow for no space. Just check the very end for v and then the number. Yeah. You might need to spawn a sub agent for this in a long running long, long running task. These are big, big refactors.
+```
+
+### Assistant implementation summary (this run)
+
+- Added real playback transport in the Electron renderer (play/pause/stop/seek) for selected versions.
+- Renamed all user-facing "Logical Songs" labels to "Actual Songs".
+- Added drag-and-drop ordering in Actual Songs list and persisted order across sessions.
+- Extended persisted app state to store linked folder paths, auto-organize setting, and song order.
+- Added explicit watched-folder Finder open actions.
+- Added "Organize" action and default-on auto-organize setting for moving older versions to `old/`.
+- Added tooltips (`title`) to actionable controls.
+- Restyled controls so rescan/organize actions are visually distinct from Actual Songs/Versions toggles.
+- Updated song normalization to use suffix-based `v<number>` grouping at end-of-name, with or without spacing (e.g. `Leakyv5`, `Leaky v5`).
+- Confirmed typo/fuzzy grouping was not added (final user intent preserved).
+- Added/updated E2E coverage for no-space `v<number>` grouping, watch update behavior, folder-path persistence, and persisted song order across restart.

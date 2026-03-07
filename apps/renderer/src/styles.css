@@ -7,6 +7,8 @@
   --text-main: #ecf2f9;
   --text-muted: #9cafc4;
   --accent: #5ca7ff;
+  --accent-strong: #3d8dff;
+  --success: #5fd28f;
   --danger: #ff7d7d;
 }
 
@@ -29,7 +31,7 @@ body,
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-columns: 300px 1fr 360px;
+  grid-template-columns: 320px 1fr 380px;
   gap: 12px;
   padding: 12px;
 }
@@ -61,6 +63,8 @@ body,
 .actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 button,
@@ -75,10 +79,16 @@ button {
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 button.active,
@@ -87,8 +97,40 @@ button.selected {
   background: rgba(92, 167, 255, 0.15);
 }
 
+button.mode-toggle {
+  background: rgba(92, 167, 255, 0.08);
+}
+
+button.mode-toggle.active {
+  border-color: var(--accent);
+  background: rgba(92, 167, 255, 0.22);
+}
+
+button.action-button {
+  border-color: var(--accent-strong);
+  background: rgba(92, 167, 255, 0.2);
+}
+
+button.action-button:hover:not(:disabled) {
+  border-color: #80b8ff;
+}
+
+button.action-button.secondary {
+  border-color: var(--success);
+  background: rgba(95, 210, 143, 0.14);
+}
+
+button.action-button.secondary:hover:not(:disabled) {
+  border-color: #77e5aa;
+}
+
 button.ghost {
   background: transparent;
+}
+
+button.drag-source {
+  border-color: #ffca6b;
+  background: rgba(255, 202, 107, 0.15);
 }
 
 input {
@@ -97,6 +139,11 @@ input {
   color: var(--text-main);
   border-radius: 8px;
   padding: 8px 10px;
+}
+
+input[type='range'] {
+  width: 100%;
+  padding: 0;
 }
 
 .path-linker {
@@ -118,7 +165,7 @@ input {
 .folder-list {
   padding: 8px;
   overflow: auto;
-  max-height: 34%;
+  max-height: 36%;
   border-bottom: 1px solid var(--border);
 }
 
@@ -135,6 +182,21 @@ input {
 .folder-row:hover {
   border-color: var(--border);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.folder-row.selected {
+  border-color: var(--accent);
+  background: rgba(92, 167, 255, 0.13);
+}
+
+.folder-row-content {
+  min-width: 0;
+}
+
+.folder-row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .song-shortcuts {
@@ -199,6 +261,16 @@ input {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.player-card {
+  display: grid;
+  gap: 8px;
+}
+
+.transport-row {
+  display: flex;
+  gap: 8px;
+}
+
 .version-list {
   display: grid;
   gap: 8px;
@@ -214,6 +286,25 @@ input {
   align-items: center;
 }
 
+.version-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.checkbox-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.checkbox-row input {
+  width: 16px;
+  height: 16px;
+}
+
 .muted {
   color: var(--text-muted);
   margin: 2px 0;
@@ -222,6 +313,8 @@ input {
 
 .status-card {
   margin-top: auto;
+  display: grid;
+  gap: 6px;
 }
 
 .empty-state {
@@ -231,4 +324,5 @@ input {
 
 .error {
   color: var(--danger);
+  margin: 0;
 }

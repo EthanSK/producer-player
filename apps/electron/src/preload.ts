@@ -26,8 +26,24 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.RESCAN_LIBRARY);
   },
 
+  async organizeOldVersions() {
+    return ipcRenderer.invoke(IPC_CHANNELS.ORGANIZE_OLD_VERSIONS);
+  },
+
+  async setAutoMoveOld(enabled: boolean) {
+    return ipcRenderer.invoke(IPC_CHANNELS.SET_AUTO_MOVE_OLD, enabled);
+  },
+
+  async reorderSongs(songIds: string[]) {
+    return ipcRenderer.invoke(IPC_CHANNELS.REORDER_SONGS, songIds);
+  },
+
   async revealFile(filePath: string) {
     await ipcRenderer.invoke(IPC_CHANNELS.OPEN_IN_FINDER, filePath);
+  },
+
+  async openFolder(folderPath: string) {
+    await ipcRenderer.invoke(IPC_CHANNELS.OPEN_FOLDER, folderPath);
   },
 
   async toFileUrl(filePath: string) {

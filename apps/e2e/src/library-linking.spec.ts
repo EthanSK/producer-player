@@ -52,6 +52,10 @@ test.describe('Producer Player desktop shell', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
+      await expect(page.getByTestId('naming-guide')).toContainText('v1');
+      await expect(page.getByTestId('naming-guide')).toContainText('v2');
+      await expect(page.getByTestId('naming-guide')).toContainText('v3');
+
       await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
       await page.getByTestId('link-folder-path-button').click();
 
@@ -111,18 +115,28 @@ test.describe('Producer Player desktop shell', () => {
       await expect(firstLaunch.page.getByTestId('linked-folder-item')).toHaveCount(1);
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
 
-      const songIds = await firstLaunch.page
+      const rowData = await firstLaunch.page
         .getByTestId('main-list-row')
         .evaluateAll((elements) =>
           elements
-            .map((element) => element.getAttribute('data-song-id'))
-            .filter((value): value is string => Boolean(value))
+            .map((element) => ({
+              id: element.getAttribute('data-song-id') ?? '',
+              text: element.textContent ?? '',
+            }))
+            .filter((entry) => entry.id.length > 0)
         );
 
-      if (songIds.length >= 2) {
+      const betaEntry = rowData.find((entry) => entry.text.includes('Beta'));
+
+      if (betaEntry) {
+        const orderedSongIds = [
+          betaEntry.id,
+          ...rowData.filter((entry) => entry.id !== betaEntry.id).map((entry) => entry.id),
+        ];
+
         await firstLaunch.page.evaluate(async (ids) => {
-          await (window as any).producerPlayer.reorderSongs([ids[1], ids[0]]);
-        }, songIds);
+          await (window as any).producerPlayer.reorderSongs(ids);
+        }, orderedSongIds);
       }
 
       await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta');

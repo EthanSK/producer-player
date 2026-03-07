@@ -105,9 +105,7 @@
       <section class="section section-alt" id="demo">
         <div class="container">
           <h2>Demo</h2>
-          <p>
-            Demo is committed in-repo and also reachable via GitHub Pages once Pages deployment completes.
-          </p>
+          <p>Demo is committed in-repo and reachable from Pages once deployment succeeds.</p>
           <video
             controls
             preload="metadata"
@@ -127,11 +125,11 @@
           <h2>Download prebuilt builds now</h2>
           <div class="grid download-grid">
             <article class="card">
-              <h3>Available now (unsigned CI artifacts)</h3>
+              <h3>Available now (unsigned macOS prebuilt)</h3>
               <ul>
-                <li>macOS zipped <code>.app</code> bundle (<code>*-mac-*.zip</code>)</li>
-                <li>Windows portable <code>.exe</code> plus zipped app bundle (<code>*-win-*.*</code>)</li>
-                <li>Linux <code>.AppImage</code> plus <code>.tar.gz</code> bundle (<code>*-linux-*.*</code>)</li>
+                <li><code>Producer-Player-&lt;version&gt;-mac-&lt;arch&gt;.zip</code></li>
+                <li>Matching SHA-256 checksum files (<code>*.zip.sha256</code>)</li>
+                <li>Architecture depends on the macOS runner used by GitHub Actions.</li>
               </ul>
               <p>
                 Download from Releases (tag runs):
@@ -148,15 +146,14 @@
               <h3>Current caveats + next hardening</h3>
               <ul>
                 <li>Artifacts are intentionally unsigned for immediate testing.</li>
-                <li>macOS artifacts are not notarized yet.</li>
-                <li>Windows code-signing is not enabled yet.</li>
+                <li>Developer ID signing + notarized DMG are not enabled yet.</li>
+                <li>Windows installer packaging is planned but not shipped in this workflow yet.</li>
                 <li>Secret names and rollout steps are documented in <code>docs/RELEASING.md</code>.</li>
               </ul>
             </article>
           </div>
           <pre><code># Local unsigned macOS prebuilt package
-npm install
-CSC_IDENTITY_AUTO_DISCOVERY=false npm run release:desktop:mac</code></pre>
+npm run release:desktop:mac</code></pre>
         </div>
       </section>
 
@@ -170,14 +167,14 @@ CSC_IDENTITY_AUTO_DISCOVERY=false npm run release:desktop:mac</code></pre>
                 <li>Swift MVP + Electron/TypeScript source</li>
                 <li>GitHub Pages landing source + demo asset</li>
                 <li>CI + Pages + desktop prebuilt workflows</li>
-                <li>Unsigned prebuilt artifacts for macOS, Windows, and Linux</li>
+                <li>Unsigned macOS prebuilt ZIP artifacts</li>
               </ul>
             </article>
             <article class="card status-card">
               <h3>Pending / not claimed yet</h3>
               <ul>
-                <li>Developer ID signing + notarized macOS distribution</li>
-                <li>Code-signed Windows binaries</li>
+                <li>Developer ID signed + notarized macOS DMG</li>
+                <li>Windows installer artifacts</li>
                 <li>Signing credentials in GitHub Secrets</li>
                 <li>Optional external demo mirror (YouTube/Vimeo)</li>
               </ul>
@@ -192,7 +189,7 @@ CSC_IDENTITY_AUTO_DISCOVERY=false npm run release:desktop:mac</code></pre>
         <p>
           Producer Player · repo:
           <a href="https://github.com/EthanSK/producer-player">github.com/EthanSK/producer-player</a>
-          · live pages URL:
+          · expected pages URL:
           <a href="https://ethansk.github.io/producer-player/">ethansk.github.io/producer-player</a>
         </p>
       </div>

@@ -1,0 +1,63 @@
+name: Desktop release scaffold
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: Build desktop bundle scaffold
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Create scaffold archive
+        id: bundle
+        run: |
+          set -euo pipefail
+          ARCHIVE_NAME="producer-player-desktop-scaffold-${GITHUB_REF_NAME:-snapshot}.tar.gz"
+          tar -czf "$ARCHIVE_NAME" \
+            apps/electron/dist \
+            apps/renderer/dist \
+            packages/contracts/dist \
+            packages/domain/dist \
+            README.md \
+            docs
+          echo "archive=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload scaffold artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-scaffold-${{ github.ref_name || 'snapshot' }}
+          path: ${{ steps.bundle.outputs.archive }}
+
+      - name: Create draft release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: true
+          files: ${{ steps.bundle.outputs.archive }}
+          body: |
+            Automated scaffold release.
+
+            This workflow currently publishes a source-built archive only.
+            TODO: Replace with signed/installable Electron artifacts for macOS + Windows once packaging + signing secrets are configured.

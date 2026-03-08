@@ -3,11 +3,41 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Producer Player — Fast A/B auditioning for producer exports</title>
+    <title>Producer Player — Desktop app for fast A/B auditioning producer exports</title>
     <meta
       name="description"
-      content="Producer Player helps producers treat repeated exports as one logical song with version history, fast browsing, and instant re-auditioning."
+      content="Producer Player is a desktop app that groups repeated producer exports into logical songs with version history—so you can A/B audition fast and stay in creative flow."
     />
+    <meta name="robots" content="index, follow" />
+
+    <link rel="canonical" href="https://ethansk.github.io/producer-player/" />
+
+    <meta property="og:site_name" content="Producer Player" />
+    <meta property="og:title" content="Producer Player — Fast A/B auditioning for producer exports" />
+    <meta
+      property="og:description"
+      content="Producer Player is a desktop app that groups repeated producer exports into logical songs with version history—so you can A/B audition fast and stay in creative flow."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://ethansk.github.io/producer-player/" />
+    <meta
+      property="og:image"
+      content="https://ethansk.github.io/producer-player/assets/screenshots/demo-poster.png"
+    />
+    <meta property="og:image:alt" content="Producer Player demo video poster" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Producer Player — Fast A/B auditioning for producer exports" />
+    <meta
+      name="twitter:description"
+      content="Producer Player is a desktop app that groups repeated producer exports into logical songs with version history—so you can A/B audition fast and stay in creative flow."
+    />
+    <meta
+      name="twitter:image"
+      content="https://ethansk.github.io/producer-player/assets/screenshots/demo-poster.png"
+    />
+    <meta name="twitter:url" content="https://ethansk.github.io/producer-player/" />
+
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -22,7 +52,7 @@
 
         <div class="hero-actions">
           <a class="button button-primary" href="#demo">Watch demo</a>
-          <a class="button button-secondary" href="#download">Download status</a>
+          <a class="button button-secondary" href="#download">Downloads</a>
         </div>
 
         <p class="hero-note">
@@ -114,22 +144,22 @@
           >
             Your browser does not support embedded video.
           </video>
-          <p class="todo-line">
-            Hosted demo URL: <code>https://ethansk.github.io/producer-player/assets/demo/producer-player-demo.mp4</code>
-          </p>
+          <p>Direct video URL: <code>https://ethansk.github.io/producer-player/assets/demo/producer-player-demo.mp4</code></p>
         </div>
       </section>
 
       <section class="section" id="download">
         <div class="container">
-          <h2>Download prebuilt builds now</h2>
+          <h2>Downloads</h2>
           <div class="grid download-grid">
             <article class="card">
-              <h3>Available now (unsigned macOS prebuilt)</h3>
+              <h3>Available now (unsigned ZIP builds)</h3>
               <ul>
                 <li><code>Producer-Player-&lt;version&gt;-mac-&lt;arch&gt;.zip</code></li>
+                <li><code>Producer-Player-&lt;version&gt;-linux-&lt;arch&gt;.zip</code></li>
+                <li><code>Producer-Player-&lt;version&gt;-win-&lt;arch&gt;.zip</code></li>
                 <li>Matching SHA-256 checksum files (<code>*.zip.sha256</code>)</li>
-                <li>Architecture depends on the macOS runner used by GitHub Actions.</li>
+                <li>Architecture depends on the GitHub Actions runner for each OS.</li>
               </ul>
               <p>
                 Download from Releases (tag runs):
@@ -146,14 +176,16 @@
               <h3>Current caveats + next hardening</h3>
               <ul>
                 <li>Artifacts are intentionally unsigned for immediate testing.</li>
-                <li>Developer ID signing + notarized DMG are not enabled yet.</li>
-                <li>Windows installer packaging is planned but not shipped in this workflow yet.</li>
+                <li>macOS Developer ID signing + notarized DMG are not enabled yet.</li>
+                <li>Windows installer packaging is planned, but current output is a ZIP build.</li>
                 <li>Secret names and rollout steps are documented in <code>docs/RELEASING.md</code>.</li>
               </ul>
             </article>
           </div>
-          <pre><code># Local unsigned macOS prebuilt package
-npm run release:desktop:mac</code></pre>
+          <pre><code># Local unsigned desktop packages
+npm run release:desktop:mac
+npm run release:desktop:linux
+npm run release:desktop:win</code></pre>
         </div>
       </section>
 
@@ -167,14 +199,14 @@ npm run release:desktop:mac</code></pre>
                 <li>Swift MVP + Electron/TypeScript source</li>
                 <li>GitHub Pages landing source + demo asset</li>
                 <li>CI + Pages + desktop prebuilt workflows</li>
-                <li>Unsigned macOS prebuilt ZIP artifacts</li>
+                <li>Unsigned desktop ZIP artifacts (macOS, Linux, Windows)</li>
               </ul>
             </article>
             <article class="card status-card">
               <h3>Pending / not claimed yet</h3>
               <ul>
                 <li>Developer ID signed + notarized macOS DMG</li>
-                <li>Windows installer artifacts</li>
+                <li>Signed Windows installer artifacts</li>
                 <li>Signing credentials in GitHub Secrets</li>
                 <li>Optional external demo mirror (YouTube/Vimeo)</li>
               </ul>

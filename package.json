@@ -18,7 +18,9 @@
     "e2e": "npm run build && npm run test -w @producer-player/e2e",
     "e2e:ci": "npm run build && npm run ci -w @producer-player/e2e",
     "clean": "rimraf \"apps/*/dist\" \"packages/*/dist\"",
-    "release:desktop:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && electron-builder --mac zip --publish never"
+    "release:desktop:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && electron-builder --mac zip --publish never",
+    "release:desktop:linux": "npm run build && electron-builder --linux zip --publish never",
+    "release:desktop:win": "npm run build && electron-builder --win zip --publish never"
   },
   "build": {
     "appId": "com.ethansk.producerplayer",
@@ -38,6 +40,18 @@
         "zip"
       ],
       "artifactName": "Producer-Player-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "zip"
+      ],
+      "artifactName": "Producer-Player-${version}-linux-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        "zip"
+      ],
+      "artifactName": "Producer-Player-${version}-win-${arch}.${ext}"
     }
   },
   "devDependencies": {

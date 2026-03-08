@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ethansk.github.io/producer-player/sitemap.xml

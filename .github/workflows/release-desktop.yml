@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - master
     tags:
       - 'v*'
 
@@ -12,9 +13,19 @@ permissions:
   contents: write
 
 jobs:
-  build-macos:
-    name: Build macOS unsigned prebuilt
-    runs-on: macos-latest
+  build-desktop:
+    name: Build desktop unsigned (${{ matrix.slug }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            slug: mac
+          - runner: ubuntu-latest
+            slug: linux
+          - runner: windows-latest
+            slug: win
 
     steps:
       - name: Checkout
@@ -29,31 +40,49 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build unsigned macOS package
-        run: npm run release:desktop:mac
+      - name: Build unsigned desktop package
+        run: npm run release:desktop:${{ matrix.slug }}
 
-      - name: Generate SHA-256 checksum
+      - name: Generate SHA-256 checksum (macOS/Linux)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          for f in release/Producer-Player-*-mac-*.zip; do
+          shopt -s nullglob
+          files=(release/Producer-Player-*-${{ matrix.slug }}-*.zip)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No ZIP artifacts found for ${{ matrix.slug }}"
+            exit 1
+          fi
+          for f in "${files[@]}"; do
             shasum -a 256 "$f" > "$f.sha256"
           done
 
-      - name: Upload macOS artifacts
+      - name: Generate SHA-256 checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path release -Filter "Producer-Player-*-win-*.zip"
+          if (-not $files) { throw "No ZIP artifacts found for win" }
+          foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLower()
+            "$hash  $($file.Name)" | Out-File -FilePath "$($file.FullName).sha256" -Encoding ascii
+          }
+
+      - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-macos-${{ github.ref_name || 'snapshot' }}
+          name: desktop-${{ matrix.slug }}-${{ github.ref_name }}
           path: |
-            release/Producer-Player-*-mac-*.zip
-            release/Producer-Player-*-mac-*.zip.sha256
-            release/Producer-Player-*-mac-*.zip.blockmap
+            release/Producer-Player-*-${{ matrix.slug }}-*.zip
+            release/Producer-Player-*-${{ matrix.slug }}-*.zip.sha256
+            release/Producer-Player-*-${{ matrix.slug }}-*.zip.blockmap
           if-no-files-found: error
 
   publish-release:
     name: Publish release assets
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build-macos
+    needs: build-desktop
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -62,7 +91,7 @@ jobs:
       - name: Download built artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: desktop-macos-${{ github.ref_name }}
+          pattern: desktop-*-${{ github.ref_name }}
           merge-multiple: true
           path: release-assets
 

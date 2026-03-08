@@ -7,9 +7,11 @@ This repo now ships downloadable prebuilt desktop artifacts via:
 
 ## What the workflow currently publishes
 
-Unsigned macOS artifacts for immediate testability:
+Unsigned desktop artifacts for immediate testability:
 
 - `Producer-Player-<version>-mac-<arch>.zip`
+- `Producer-Player-<version>-linux-<arch>.zip`
+- `Producer-Player-<version>-win-<arch>.zip`
 - matching checksum files: `*.zip.sha256`
 
 > Current default is intentionally unsigned/not notarized.
@@ -61,4 +63,5 @@ Unsigned fallback path (today): keep `CSC_IDENTITY_AUTO_DISCOVERY=false` in CI a
 ## Planned next packaging targets (not yet enabled)
 
 - Signed/notarized macOS DMG
-- Signed Windows installer
+- Signed Windows installer (NSIS/MSIX)
+- Linux packages (AppImage/deb)

@@ -19,7 +19,7 @@ The Swift app remains available and untouched for MVP validation while cross-pla
 
 ### Available now
 
-Unsigned prebuilt macOS ZIP artifacts are produced by:
+Unsigned desktop ZIP artifacts (macOS, Linux, Windows) are produced by:
 
 - Workflow file: [`.github/workflows/release-desktop.yml`](.github/workflows/release-desktop.yml)
 - Workflow page: <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
@@ -27,13 +27,15 @@ Unsigned prebuilt macOS ZIP artifacts are produced by:
 Artifacts:
 
 - `Producer-Player-<version>-mac-<arch>.zip`
+- `Producer-Player-<version>-linux-<arch>.zip`
+- `Producer-Player-<version>-win-<arch>.zip`
 - matching checksum files: `*.zip.sha256`
 
-Current workflow default builds for the GitHub macOS runner architecture (for example `arm64` on Apple Silicon runners).
+Current workflow default builds for the GitHub Actions runner architecture for each OS.
 
 Download sources:
 
-1. **Workflow artifacts** (main branch pushes + manual dispatch)
+1. **Workflow artifacts** (main/master pushes + manual dispatch)
 2. **GitHub Releases assets** on `v*` tags:
    - <https://github.com/EthanSK/producer-player/releases>
 
@@ -43,7 +45,8 @@ Download sources:
 ### Planned (not yet enabled)
 
 - Signed/notarized macOS DMG
-- Signed Windows installer
+- Signed Windows installer (NSIS/MSIX)
+- Linux packages (AppImage/deb)
 
 See [`docs/RELEASING.md`](docs/RELEASING.md) for roadmap and exact signing secret names.
 
@@ -83,7 +86,7 @@ Expected Pages URL:
 - **GitHub Pages deploy:** `.github/workflows/pages.yml`
   - Uploads `site/` as Pages artifact and deploys
 - **Desktop prebuilt releases:** `.github/workflows/release-desktop.yml`
-  - Builds unsigned macOS ZIP artifacts
+  - Builds unsigned desktop ZIP artifacts (macOS, Linux, Windows)
   - Uploads ZIP + checksum artifacts
   - On `v*` tags, attaches assets to GitHub Releases
 
@@ -147,10 +150,12 @@ npm run dev
 npm run build
 ```
 
-### Build prebuilt macOS ZIP locally
+### Build prebuilt desktop ZIP locally
 
 ```bash
 npm run release:desktop:mac
+npm run release:desktop:linux
+npm run release:desktop:win
 ```
 
 ### Typecheck

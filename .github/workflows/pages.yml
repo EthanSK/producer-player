@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - master
     paths:
       - site/**
       - .github/workflows/pages.yml
@@ -30,6 +31,8 @@ jobs:
         run: |
           test -f site/index.html
           test -f site/styles.css
+          test -f site/robots.txt
+          test -f site/sitemap.xml
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

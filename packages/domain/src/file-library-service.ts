@@ -54,57 +54,54 @@ async function pathExists(absolutePath: string): Promise<boolean> {
   }
 }
 
+async function collectAudioFilesInDirectory(
+  directoryPath: string,
+  folderId: string
+): Promise<ScannedAudioFile[]> {
+  const files: ScannedAudioFile[] = [];
+
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(directoryPath, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+
+  for (const entry of entries) {
+    const absolutePath = path.join(directoryPath, entry.name);
+
+    if (!entry.isFile() || !isSupportedAudioFile(absolutePath)) {
+      continue;
+    }
+
+    try {
+      const stats = await fs.stat(absolutePath);
+      files.push({
+        folderId,
+        filePath: absolutePath,
+        sizeBytes: stats.size,
+        modifiedAt: stats.mtime,
+      });
+    } catch {
+      // Ignore transient stat errors while files are still being written.
+    }
+  }
+
+  return files;
+}
+
 async function collectAudioFiles(
   folderPath: string,
   folderId: string
 ): Promise<ScannedAudioFile[]> {
   const files: ScannedAudioFile[] = [];
-  const pendingDirectories = [folderPath];
 
-  while (pendingDirectories.length > 0) {
-    const current = pendingDirectories.pop();
-    if (!current) {
-      continue;
-    }
+  // Track top-level exports only.
+  files.push(...(await collectAudioFilesInDirectory(folderPath, folderId)));
 
-    let entries: Dirent[];
-    try {
-      entries = await fs.readdir(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const absolutePath = path.join(current, entry.name);
-
-      if (entry.isDirectory()) {
-        const normalizedName = entry.name.toLowerCase();
-
-        if (normalizedName.startsWith('.') || normalizedName === 'old') {
-          continue;
-        }
-
-        pendingDirectories.push(absolutePath);
-        continue;
-      }
-
-      if (!entry.isFile() || !isSupportedAudioFile(absolutePath)) {
-        continue;
-      }
-
-      try {
-        const stats = await fs.stat(absolutePath);
-        files.push({
-          folderId,
-          filePath: absolutePath,
-          sizeBytes: stats.size,
-          modifiedAt: stats.mtime,
-        });
-      } catch {
-        // Ignore transient stat errors while files are still being written.
-      }
-    }
-  }
+  // Track archived versions from the reserved old/ folder only.
+  const archivedDirectory = path.join(folderPath, 'old');
+  files.push(...(await collectAudioFilesInDirectory(archivedDirectory, folderId)));
 
   return files;
 }
@@ -390,7 +387,7 @@ export class FileLibraryService {
     this.songOrder = nextOrder;
 
     const nextStatus = this.snapshot.status === 'idle' ? 'idle' : 'watching';
-    this.rebuildSnapshot(nextStatus, 'Updated actual song order.');
+    this.rebuildSnapshot(nextStatus, 'Updated track order.');
     return this.getSnapshot();
   }
 
@@ -445,6 +442,7 @@ export class FileLibraryService {
 
     const watcher = chokidar.watch(folder.path, {
       ignoreInitial: true,
+      depth: 1,
       awaitWriteFinish: {
         stabilityThreshold: 300,
         pollInterval: 60,
@@ -528,18 +526,30 @@ export class FileLibraryService {
     let movedCount = 0;
 
     for (const song of songs) {
-      const versions = [...song.versions].sort(
-        (left, right) =>
-          new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime()
-      );
+      const nonArchivedVersions = [...song.versions]
+        .filter((version) => {
+          const folder = this.linkedFolders.get(version.folderId);
+          if (!folder) {
+            return false;
+          }
 
-      for (const version of versions.slice(1)) {
+          return !isInsideOldDirectory(version.filePath, folder.path);
+        })
+        .sort((left, right) => {
+          const modifiedAtDelta =
+            new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime();
+
+          if (modifiedAtDelta !== 0) {
+            return modifiedAtDelta;
+          }
+
+          return left.filePath.localeCompare(right.filePath);
+        });
+
+      // Keep the newest non-archived version in place, move the rest into old/.
+      for (const version of nonArchivedVersions.slice(1)) {
         const folder = this.linkedFolders.get(version.folderId);
         if (!folder) {
-          continue;
-        }
-
-        if (isInsideOldDirectory(version.filePath, folder.path)) {
           continue;
         }
 
@@ -584,13 +594,12 @@ export class FileLibraryService {
       return candidatePath;
     }
 
-    const uniqueSuffix = Date.now();
     let counter = 1;
 
     while (await pathExists(candidatePath)) {
       candidatePath = path.join(
         archiveDirectory,
-        `${parsed.name}-${uniqueSuffix}-${counter}${parsed.ext}`
+        `${parsed.name}-archived-${counter}${parsed.ext}`
       );
       counter += 1;
     }

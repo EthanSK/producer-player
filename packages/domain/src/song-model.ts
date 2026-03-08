@@ -39,8 +39,9 @@ function normalizeWhitespace(input: string): string {
 }
 
 function stripTrailingVersionSuffix(stem: string): string {
-  // Supports both "Leaky v5" and "Leakyv5" (and _v5 / -v5).
-  const match = stem.match(/^(.*?)(?:[\s_-]?v\d+)$/i);
+  // Supports both "Leaky v5" and "Leakyv5" (and _v5 / -v5), including
+  // deterministic archive suffixes such as "Leaky v5-archived-2".
+  const match = stem.match(/^(.*?)(?:[\s_-]?v\d+)(?:[\s_-]*archived[\s_-]*\d+)?$/i);
 
   if (!match) {
     return stem;
@@ -55,7 +56,6 @@ export function normalizeSongStem(stem: string): string {
     stem
       .replace(/[_]+/g, ' ')
       .replace(/[()[\]]/g, ' ')
-      .replace(/\.(wav|aiff|flac|mp3|m4a)$/i, '')
   );
 
   const withoutVersionSuffix = stripTrailingVersionSuffix(withoutDecorators);
@@ -139,10 +139,16 @@ export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions
   const songs: SongWithVersions[] = [];
 
   for (const { logicalSong, versions } of songMap.values()) {
-    versions.sort(
-      (a, b) =>
-        new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime()
-    );
+    versions.sort((a, b) => {
+      const modifiedAtDelta =
+        new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime();
+
+      if (modifiedAtDelta !== 0) {
+        return modifiedAtDelta;
+      }
+
+      return a.filePath.localeCompare(b.filePath);
+    });
 
     const activeVersion = versions[0] ?? null;
 
@@ -161,7 +167,13 @@ export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions
   songs.sort((a, b) => {
     const left = a.latestExportAt ? new Date(a.latestExportAt).getTime() : 0;
     const right = b.latestExportAt ? new Date(b.latestExportAt).getTime() : 0;
-    return right - left;
+    const modifiedAtDelta = right - left;
+
+    if (modifiedAtDelta !== 0) {
+      return modifiedAtDelta;
+    }
+
+    return a.normalizedTitle.localeCompare(b.normalizedTitle);
   });
 
   return songs;

@@ -1,4 +1,16 @@
-export const AUDIO_EXTENSIONS = ['wav', 'aiff', 'flac', 'mp3', 'm4a'] as const;
+export const AUDIO_EXTENSIONS = [
+  'wav',
+  'aiff',
+  'aif',
+  'flac',
+  'mp3',
+  'm4a',
+  'aac',
+  'ogg',
+  'opus',
+  'webm',
+  'mp4',
+] as const;
 export type AudioExtension = (typeof AUDIO_EXTENSIONS)[number];
 
 export type LibraryStatus = 'idle' | 'scanning' | 'watching' | 'error';

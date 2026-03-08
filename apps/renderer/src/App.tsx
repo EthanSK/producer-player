@@ -6,6 +6,8 @@ import type {
   SongWithVersions,
 } from '@producer-player/contracts';
 
+type RepeatMode = 'off' | 'one' | 'all';
+
 const EMPTY_SNAPSHOT: LibrarySnapshot = {
   linkedFolders: [],
   songs: [],
@@ -16,6 +18,12 @@ const EMPTY_SNAPSHOT: LibrarySnapshot = {
   matcherSettings: {
     autoMoveOld: true,
   },
+};
+
+const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
+  off: 'Off',
+  one: 'One',
+  all: 'All',
 };
 
 function formatDate(value: string | null): string {
@@ -61,9 +69,25 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function isArchivedVersion(version: SongVersion): boolean {
+  return /[\\/]old[\\/]/i.test(version.filePath);
+}
+
+function getActiveSongVersion(song: SongWithVersions): SongVersion | null {
+  if (song.activeVersionId) {
+    const matched = song.versions.find((version) => version.id === song.activeVersionId);
+    if (matched) {
+      return matched;
+    }
+  }
+
+  return sortVersions(song.versions)[0] ?? null;
+}
+
 export function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>(EMPTY_SNAPSHOT);
   const [displayMode, setDisplayMode] = useState<DisplayMode>('logicalSongs');
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
   const [searchText, setSearchText] = useState('');
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -80,6 +104,16 @@ export function App(): JSX.Element {
   const [durationSeconds, setDurationSeconds] = useState(0);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playOnNextLoadRef = useRef(false);
+  const repeatModeRef = useRef<RepeatMode>('off');
+  const moveInQueueRef = useRef<(
+    direction: 1 | -1,
+    options: { wrap: boolean; autoplay: boolean }
+  ) => boolean>(() => false);
+
+  useEffect(() => {
+    repeatModeRef.current = repeatMode;
+  }, [repeatMode]);
 
   useEffect(() => {
     const audio = new Audio();
@@ -94,17 +128,51 @@ export function App(): JSX.Element {
       setDurationSeconds(Number.isFinite(audio.duration) ? audio.duration : 0);
     };
 
+    const onCanPlay = () => {
+      if (!playOnNextLoadRef.current) {
+        return;
+      }
+
+      playOnNextLoadRef.current = false;
+      void audio.play().catch((cause: unknown) => {
+        setPlaybackError(cause instanceof Error ? cause.message : String(cause));
+      });
+    };
+
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
-    const onEnded = () => setIsPlaying(false);
+
+    const onEnded = () => {
+      const mode = repeatModeRef.current;
+
+      if (mode === 'one') {
+        audio.currentTime = 0;
+        void audio.play().catch((cause: unknown) => {
+          setPlaybackError(cause instanceof Error ? cause.message : String(cause));
+        });
+        return;
+      }
+
+      const advanced = moveInQueueRef.current(1, {
+        wrap: mode === 'all',
+        autoplay: true,
+      });
+
+      if (!advanced) {
+        setIsPlaying(false);
+      }
+    };
 
     const onError = () => {
-      setPlaybackError('Could not play this audio file in the current environment.');
+      const mediaError = audio.error;
+      const code = mediaError?.code ? ` (code ${mediaError.code})` : '';
+      setPlaybackError(`Playback failed. File format may be unsupported${code}.`);
       setIsPlaying(false);
     };
 
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('canplay', onCanPlay);
     audio.addEventListener('play', onPlay);
     audio.addEventListener('pause', onPause);
     audio.addEventListener('ended', onEnded);
@@ -117,6 +185,7 @@ export function App(): JSX.Element {
 
       audio.removeEventListener('timeupdate', onTimeUpdate);
       audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('canplay', onCanPlay);
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('pause', onPause);
       audio.removeEventListener('ended', onEnded);
@@ -221,7 +290,7 @@ export function App(): JSX.Element {
       return;
     }
 
-    const availableVersionIds = new Set(inspectorVersions.map((version) => version.id));
+    const availableVersionIds = new Set(selectedSong.versions.map((version) => version.id));
 
     if (
       selectedPlaybackVersionId &&
@@ -231,18 +300,13 @@ export function App(): JSX.Element {
     }
 
     const nextPlaybackVersionId =
-      selectedSong.activeVersionId ?? inspectorVersions[0]?.id ?? null;
+      selectedSong.activeVersionId ?? sortVersions(selectedSong.versions)[0]?.id ?? null;
 
     setSelectedPlaybackVersionId(nextPlaybackVersionId);
-  }, [
-    inspectorVersions,
-    selectedPlaybackVersionId,
-    selectedSong,
-    selectedSong?.activeVersionId,
-  ]);
+  }, [selectedPlaybackVersionId, selectedSong]);
 
   const selectedPlaybackVersion =
-    inspectorVersions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
+    snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -271,6 +335,7 @@ export function App(): JSX.Element {
         }
 
         audio.pause();
+        audio.src = '';
         audio.src = fileUrl;
         audio.load();
       })
@@ -287,13 +352,64 @@ export function App(): JSX.Element {
     };
   }, [selectedPlaybackVersion]);
 
-  const selectedFolder = useMemo(() => {
-    if (!selectedFolderId) {
-      return null;
+  const playbackQueue = useMemo(() => {
+    if (displayMode === 'versions') {
+      return versions;
     }
 
-    return snapshot.linkedFolders.find((folder) => folder.id === selectedFolderId) ?? null;
-  }, [selectedFolderId, snapshot.linkedFolders]);
+    const queue: SongVersion[] = [];
+
+    for (const song of songs) {
+      const activeVersion = getActiveSongVersion(song);
+      if (activeVersion) {
+        queue.push(activeVersion);
+      }
+    }
+
+    return queue;
+  }, [displayMode, songs, versions]);
+
+  const currentQueueIndex = useMemo(() => {
+    if (!selectedPlaybackVersion) {
+      return -1;
+    }
+
+    return playbackQueue.findIndex((version) => version.id === selectedPlaybackVersion.id);
+  }, [playbackQueue, selectedPlaybackVersion]);
+
+  useEffect(() => {
+    moveInQueueRef.current = (direction, { wrap, autoplay }) => {
+      if (playbackQueue.length === 0) {
+        return false;
+      }
+
+      const currentIndex = currentQueueIndex;
+      let nextIndex =
+        currentIndex === -1
+          ? direction > 0
+            ? 0
+            : playbackQueue.length - 1
+          : currentIndex + direction;
+
+      if (nextIndex < 0 || nextIndex >= playbackQueue.length) {
+        if (!wrap) {
+          return false;
+        }
+
+        nextIndex = (nextIndex + playbackQueue.length) % playbackQueue.length;
+      }
+
+      const nextVersion = playbackQueue[nextIndex];
+      if (!nextVersion) {
+        return false;
+      }
+
+      playOnNextLoadRef.current = autoplay;
+      setSelectedSongId(nextVersion.songId);
+      setSelectedPlaybackVersionId(nextVersion.id);
+      return true;
+    };
+  }, [currentQueueIndex, playbackQueue]);
 
   const canReorderSongs =
     displayMode === 'logicalSongs' && searchText.trim().length === 0;
@@ -331,7 +447,15 @@ export function App(): JSX.Element {
     await runSnapshotTask(() => window.producerPlayer.linkFolderWithDialog());
   }
 
-  async function handleUnlinkFolder(folderId: string): Promise<void> {
+  async function handleUnlinkFolder(folderId: string, folderName: string): Promise<void> {
+    const confirmed = window.confirm(
+      `Unlink "${folderName}"?\n\nThis removes the folder from Producer Player and resets saved ordering/history for that linked folder in the app state.\n\nAudio files on disk are not deleted.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     await runSnapshotTask(() => window.producerPlayer.unlinkFolder(folderId));
   }
 
@@ -345,14 +469,6 @@ export function App(): JSX.Element {
 
   async function handleSetAutoMoveOld(enabled: boolean): Promise<void> {
     await runSnapshotTask(() => window.producerPlayer.setAutoMoveOld(enabled));
-  }
-
-  async function handleOpenSelectedFolder(): Promise<void> {
-    if (!selectedFolder) {
-      return;
-    }
-
-    await runVoidTask(() => window.producerPlayer.openFolder(selectedFolder.path));
   }
 
   async function handleReorderSongs(droppedOnSongId: string): Promise<void> {
@@ -377,7 +493,19 @@ export function App(): JSX.Element {
 
   async function handleTogglePlayback(): Promise<void> {
     const audio = audioRef.current;
-    if (!audio || !selectedPlaybackVersion) {
+    if (!audio) {
+      return;
+    }
+
+    if (!selectedPlaybackVersion && playbackQueue.length > 0) {
+      const firstVersion = playbackQueue[0];
+      playOnNextLoadRef.current = true;
+      setSelectedSongId(firstVersion.songId);
+      setSelectedPlaybackVersionId(firstVersion.id);
+      return;
+    }
+
+    if (!selectedPlaybackVersion) {
       return;
     }
 
@@ -392,17 +520,6 @@ export function App(): JSX.Element {
     }
   }
 
-  function handleStopPlayback(): void {
-    const audio = audioRef.current;
-    if (!audio) {
-      return;
-    }
-
-    audio.pause();
-    audio.currentTime = 0;
-    setCurrentTimeSeconds(0);
-  }
-
   function handleSeek(nextTimeSeconds: number): void {
     const audio = audioRef.current;
     if (!audio || !Number.isFinite(nextTimeSeconds)) {
@@ -411,6 +528,34 @@ export function App(): JSX.Element {
 
     audio.currentTime = nextTimeSeconds;
     setCurrentTimeSeconds(nextTimeSeconds);
+  }
+
+  function handlePreviousTrack(): void {
+    void moveInQueueRef.current(-1, {
+      wrap: repeatMode === 'all',
+      autoplay: isPlaying,
+    });
+  }
+
+  function handleNextTrack(): void {
+    void moveInQueueRef.current(1, {
+      wrap: repeatMode === 'all',
+      autoplay: isPlaying,
+    });
+  }
+
+  function handleCycleRepeatMode(): void {
+    setRepeatMode((current) => {
+      if (current === 'off') {
+        return 'one';
+      }
+
+      if (current === 'one') {
+        return 'all';
+      }
+
+      return 'off';
+    });
   }
 
   return (
@@ -425,19 +570,9 @@ export function App(): JSX.Element {
                 void handleOpenFolderDialog();
               }}
               data-testid="link-folder-dialog-button"
-              title="Choose a folder to watch for exported audio files. Use end-of-name version tags like v1, v2, v3 for best grouping."
+              title="Choose a folder to watch for exported audio files."
             >
               Add Folder…
-            </button>
-            <button
-              type="button"
-              disabled={!selectedFolder}
-              onClick={() => {
-                void handleOpenSelectedFolder();
-              }}
-              title="Open the currently selected watched folder in Finder."
-            >
-              Open Folder
             </button>
           </div>
         </header>
@@ -453,7 +588,7 @@ export function App(): JSX.Element {
               }
             }}
             placeholder="Paste folder path"
-            title="Paste a local folder path and press Enter or Link Path. Naming works best when versions end with v1, v2, v3."
+            title="Paste a local folder path and press Enter or Link Path."
           />
           <button
             type="button"
@@ -468,22 +603,21 @@ export function App(): JSX.Element {
         <section
           className="naming-guide"
           data-testid="naming-guide"
-          title="Producer Player groups versions by end-of-name version suffixes. Use v1, v2, v3 at the end."
+          title="Use end-of-name version tags for grouping: v1, v2, v3."
         >
           <div className="naming-guide-header">
-            <h3>Naming convention (opinionated by design)</h3>
+            <h3>Naming</h3>
             <span
               className="help-pill"
-              title="Keep version suffixes at the end of each filename so the app groups exports predictably for fast A/B listening."
-              aria-label="Naming convention help"
+              title="Version tags should be at the end of the file name."
+              aria-label="Naming help"
             >
               i
             </span>
           </div>
           <p>
-            Built for disciplined producer workflows: put version suffixes at the very end of the
-            filename — <code>v1</code>, <code>v2</code>, <code>v3</code> (with or without a space
-            before <code>v</code>, e.g. <code>Leaky v2</code> or <code>Leakyv2</code>).
+            Use end-of-name version tags: <code>v1</code>, <code>v2</code>, <code>v3</code>{' '}
+            (for example <code>Leaky v2.wav</code> or <code>Leakyv2.wav</code>).
           </p>
         </section>
 
@@ -501,25 +635,27 @@ export function App(): JSX.Element {
                 <p className="muted">{folder.fileCount} tracked files</p>
               </div>
               <div className="folder-row-actions">
+                {folder.path ? (
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void runVoidTask(() => window.producerPlayer.openFolder(folder.path));
+                    }}
+                    title="Open this watched folder in Finder."
+                  >
+                    Open in Finder
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="ghost"
                   onClick={(event) => {
                     event.stopPropagation();
-                    void runVoidTask(() => window.producerPlayer.openFolder(folder.path));
+                    void handleUnlinkFolder(folder.id, folder.name);
                   }}
-                  title="Open this watched folder in Finder."
-                >
-                  Open
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleUnlinkFolder(folder.id);
-                  }}
-                  title="Stop watching this folder and remove it from the library."
+                  title="Unlink this folder from the app. Files on disk are not deleted."
                 >
                   Unlink
                 </button>
@@ -530,45 +666,30 @@ export function App(): JSX.Element {
             <li className="empty-state">No watch folders linked yet.</li>
           )}
         </ul>
-
-        <section className="song-shortcuts">
-          <h3>Actual Songs</h3>
-          <ul>
-            {songs.slice(0, 15).map((song) => (
-              <li key={song.id}>
-                <button
-                  type="button"
-                  className={song.id === selectedSongId ? 'selected' : ''}
-                  onClick={() => setSelectedSongId(song.id)}
-                  title="Select this song and inspect its versions."
-                >
-                  {song.title}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
       </aside>
 
       <main className="panel panel-main">
         <header className="panel-header">
-          <h2>Library</h2>
+          <div className="panel-title">
+            <h2>Group / Album</h2>
+            <p className="muted">{snapshot.songs.length} track(s)</p>
+          </div>
           <div className="actions">
             <button
               type="button"
               onClick={() => setDisplayMode('logicalSongs')}
               className={`mode-toggle ${displayMode === 'logicalSongs' ? 'active' : ''}`}
-              data-testid="mode-actual-songs"
-              title="Show one row per actual song, grouped by version suffix matching."
+              data-testid="mode-tracks"
+              title="Show one row per track, grouped by version suffix."
             >
-              Actual Songs
+              Tracks
             </button>
             <button
               type="button"
               onClick={() => setDisplayMode('versions')}
               className={`mode-toggle ${displayMode === 'versions' ? 'active' : ''}`}
               data-testid="mode-versions"
-              title="Show every individual export version as its own row."
+              title="Show every individual version file."
             >
               Versions
             </button>
@@ -578,7 +699,8 @@ export function App(): JSX.Element {
               onClick={() => {
                 void handleRescan();
               }}
-              title="Rescan all watched folders right now for added, changed, or removed files."
+              data-testid="rescan-button"
+              title="Rescan watched folders now. Saved ordering data is retained."
             >
               Rescan
             </button>
@@ -588,7 +710,7 @@ export function App(): JSX.Element {
               onClick={() => {
                 void handleOrganize();
               }}
-              title="Move older versions into each folder's old/ directory, keeping the newest version in place."
+              title="Move older non-archived versions into old/ and keep newest version in place."
             >
               Organize
             </button>
@@ -599,9 +721,9 @@ export function App(): JSX.Element {
           <input
             value={searchText}
             onChange={(event) => setSearchText(event.target.value)}
-            placeholder="Search songs or versions"
+            placeholder="Search tracks or versions"
             data-testid="search-input"
-            title="Search by song title, normalized title, or file name."
+            title="Search by track title, normalized title, or file name."
           />
         </div>
 
@@ -643,8 +765,8 @@ export function App(): JSX.Element {
                   }}
                   title={
                     canReorderSongs
-                      ? 'Select song. Drag rows to reorder actual song playback/list order.'
-                      : 'Select song. Clear search to enable drag-and-drop reordering.'
+                      ? 'Select track. Drag rows to reorder track order.'
+                      : 'Select track. Clear search to enable drag-and-drop ordering.'
                   }
                 >
                   <div>
@@ -656,7 +778,7 @@ export function App(): JSX.Element {
               </li>
             ))}
             {songs.length === 0 && (
-              <li className="empty-state">No songs found in linked folders.</li>
+              <li className="empty-state">No tracks found in linked folders.</li>
             )}
           </ul>
         ) : (
@@ -670,7 +792,7 @@ export function App(): JSX.Element {
                     setSelectedPlaybackVersionId(version.id);
                   }}
                   data-testid="main-list-row"
-                  title="Select this specific version in the inspector and player."
+                  title="Select this version in the inspector and player."
                 >
                   <div>
                     <strong>{version.fileName}</strong>
@@ -685,6 +807,90 @@ export function App(): JSX.Element {
             )}
           </ul>
         )}
+
+        {selectedPlaybackVersion && (
+          <section className="player-dock" data-testid="player-dock">
+            <div className="player-dock-top">
+              <div>
+                <strong data-testid="player-track-name">{selectedPlaybackVersion.fileName}</strong>
+                <p className="muted">
+                  {selectedSong?.title ?? 'Unknown Track'}
+                  {isArchivedVersion(selectedPlaybackVersion) ? ' · Archived in old/' : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  void window.producerPlayer.revealFile(selectedPlaybackVersion.filePath);
+                }}
+                title="Open this version in Finder."
+              >
+                Open in Finder
+              </button>
+            </div>
+
+            <div className="player-transport">
+              <button
+                type="button"
+                data-testid="player-prev"
+                onClick={handlePreviousTrack}
+                title="Jump to previous track in the current queue."
+              >
+                ◀◀
+              </button>
+              <button
+                type="button"
+                className="play-toggle"
+                data-testid="player-play-toggle"
+                onClick={() => {
+                  void handleTogglePlayback();
+                }}
+                title="Play or pause the selected track."
+              >
+                {isPlaying ? 'Pause' : 'Play'}
+              </button>
+              <button
+                type="button"
+                data-testid="player-next"
+                onClick={handleNextTrack}
+                title="Jump to next track in the current queue."
+              >
+                ▶▶
+              </button>
+              <button
+                type="button"
+                data-testid="player-repeat"
+                onClick={handleCycleRepeatMode}
+                title="Toggle repeat mode: Off, One, or All."
+              >
+                Repeat: {REPEAT_MODE_LABEL[repeatMode]}
+              </button>
+            </div>
+
+            <div className="player-scrubber-row">
+              <span className="muted">{formatTime(currentTimeSeconds)}</span>
+              <input
+                type="range"
+                min={0}
+                max={durationSeconds > 0 ? durationSeconds : 0}
+                step={0.1}
+                value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
+                disabled={durationSeconds <= 0}
+                onChange={(event) => handleSeek(Number(event.target.value))}
+                data-testid="player-scrubber"
+                title="Scrub through the selected track."
+              />
+              <span className="muted">{formatTime(durationSeconds)}</span>
+            </div>
+
+            {playbackError ? (
+              <p className="error" data-testid="playback-error">
+                {playbackError}
+              </p>
+            ) : null}
+          </section>
+        )}
       </main>
 
       <aside className="panel panel-right">
@@ -696,62 +902,13 @@ export function App(): JSX.Element {
           <section className="inspector-card">
             <h3 data-testid="inspector-song-title">{selectedSong.title}</h3>
             <p className="muted">Normalized: {selectedSong.normalizedTitle}</p>
-            <p className="muted">
-              Latest export: {formatDate(selectedSong.latestExportAt)}
-            </p>
+            <p className="muted">Latest export: {formatDate(selectedSong.latestExportAt)}</p>
           </section>
         ) : (
           <section className="inspector-card empty-state">
-            Select a song to inspect versions.
+            Select a track to inspect versions.
           </section>
         )}
-
-        <section className="inspector-card player-card">
-          <h3>Player</h3>
-          <p className="muted">
-            {selectedPlaybackVersion
-              ? `Selected: ${selectedPlaybackVersion.fileName}`
-              : 'Select a version to play.'}
-          </p>
-
-          <div className="transport-row">
-            <button
-              type="button"
-              disabled={!selectedPlaybackVersion}
-              onClick={() => {
-                void handleTogglePlayback();
-              }}
-              title="Play or pause the selected version."
-            >
-              {isPlaying ? 'Pause' : 'Play'}
-            </button>
-            <button
-              type="button"
-              disabled={!selectedPlaybackVersion}
-              onClick={handleStopPlayback}
-              title="Stop playback and return to the start of the selected version."
-            >
-              Stop
-            </button>
-          </div>
-
-          <input
-            type="range"
-            min={0}
-            max={durationSeconds > 0 ? durationSeconds : 0}
-            step={0.1}
-            value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
-            disabled={!selectedPlaybackVersion || durationSeconds <= 0}
-            onChange={(event) => handleSeek(Number(event.target.value))}
-            title="Seek within the selected version."
-          />
-
-          <p className="muted">
-            {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
-          </p>
-
-          {playbackError && <p className="error">{playbackError}</p>}
-        </section>
 
         <section className="inspector-card">
           <h3>Version History</h3>
@@ -766,12 +923,15 @@ export function App(): JSX.Element {
                   <strong>{version.fileName}</strong>
                   <p className="muted">{formatDate(version.modifiedAt)}</p>
                   <p className="muted">{formatFileSize(version.sizeBytes)}</p>
+                  {isArchivedVersion(version) ? (
+                    <p className="muted archived-label">Archived in old/</p>
+                  ) : null}
                 </div>
                 <div className="version-actions">
                   <button
                     type="button"
                     onClick={() => setSelectedPlaybackVersionId(version.id)}
-                    title="Set this version as the currently selected track for playback."
+                    title="Cue this version into the player."
                   >
                     Cue
                   </button>
@@ -780,9 +940,9 @@ export function App(): JSX.Element {
                     onClick={() => {
                       void window.producerPlayer.revealFile(version.filePath);
                     }}
-                    title="Reveal this file in Finder."
+                    title="Open this version in Finder."
                   >
-                    Reveal
+                    Open in Finder
                   </button>
                 </div>
               </li>
@@ -800,13 +960,18 @@ export function App(): JSX.Element {
           </p>
           <p className="muted">Last scan: {formatDate(snapshot.scannedAt)}</p>
 
-          <label className="checkbox-row" title="Automatically move older versions into old/ folders while keeping the newest version in place.">
+          <label
+            className="checkbox-row"
+            title="Automatically move older non-archived versions into old/ while keeping the newest version in place."
+          >
             <input
               type="checkbox"
               checked={snapshot.matcherSettings.autoMoveOld}
               onChange={(event) => {
                 void handleSetAutoMoveOld(event.target.checked);
               }}
+              data-testid="auto-organize-checkbox"
+              title="Toggle automatic organize behavior for old versions."
             />
             Auto-organize old versions
           </label>

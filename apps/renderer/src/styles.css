@@ -31,7 +31,7 @@ body,
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-columns: 320px 1fr 380px;
+  grid-template-columns: 340px 1fr 380px;
   gap: 12px;
   padding: 12px;
 }
@@ -60,6 +60,15 @@ body,
   font-size: 16px;
 }
 
+.panel-title {
+  display: grid;
+  gap: 2px;
+}
+
+.panel-title .muted {
+  margin: 0;
+}
+
 .actions {
   display: flex;
   gap: 8px;
@@ -79,7 +88,7 @@ button {
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease;
+  transition: border-color 80ms linear, background-color 80ms linear;
 }
 
 button:hover:not(:disabled) {
@@ -133,6 +142,12 @@ button.drag-source {
   background: rgba(255, 202, 107, 0.15);
 }
 
+button.play-toggle {
+  min-width: 110px;
+  border-color: var(--accent);
+  background: rgba(92, 167, 255, 0.18);
+}
+
 input {
   border: 1px solid var(--border);
   background: var(--bg-2);
@@ -173,7 +188,6 @@ input[type='range'] {
 .naming-guide h3 {
   margin: 0;
   font-size: 13px;
-  letter-spacing: 0.01em;
 }
 
 .naming-guide p {
@@ -215,8 +229,9 @@ input[type='range'] {
 .folder-list {
   padding: 8px;
   overflow: auto;
-  max-height: 36%;
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  min-height: 0;
+  flex: 1;
 }
 
 .folder-row {
@@ -249,30 +264,6 @@ input[type='range'] {
   gap: 6px;
 }
 
-.song-shortcuts {
-  padding: 12px;
-  overflow: auto;
-}
-
-.song-shortcuts h3,
-.inspector-card h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-}
-
-.song-shortcuts ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 6px;
-}
-
-.song-shortcuts button {
-  width: 100%;
-  text-align: left;
-}
-
 .filter-row {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
@@ -287,6 +278,8 @@ input[type='range'] {
   padding: 8px;
   display: grid;
   gap: 6px;
+  min-height: 0;
+  flex: 1;
 }
 
 .main-list button {
@@ -297,6 +290,35 @@ input[type='range'] {
   gap: 12px;
   align-items: center;
   padding: 10px;
+}
+
+.player-dock {
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(15, 23, 38, 0.9), rgba(12, 18, 31, 0.95));
+  padding: 10px 14px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.player-dock-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.player-transport {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-scrubber-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .panel-right {
@@ -311,14 +333,9 @@ input[type='range'] {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.player-card {
-  display: grid;
-  gap: 8px;
-}
-
-.transport-row {
-  display: flex;
-  gap: 8px;
+.inspector-card h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
 }
 
 .version-list {
@@ -340,6 +357,10 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.archived-label {
+  color: #f5cb8a;
 }
 
 .checkbox-row {
@@ -375,4 +396,10 @@ input[type='range'] {
 .error {
   color: var(--danger);
   margin: 0;
+}
+
+@media (max-width: 1360px) {
+  .app-shell {
+    grid-template-columns: 320px 1fr 350px;
+  }
 }

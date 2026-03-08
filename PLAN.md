@@ -289,3 +289,28 @@ Okay. I'm gonna review it now. I'm gonna talk to you while I'm doing it, then yo
 - Changed scan behavior to top-level + explicit `old/` folder only (non-recursive for arbitrary nested dirs).
 - Integrated `old/` files into version history display and added archived indicator label.
 - Expanded supported extension list to broader common formats (`wav`, `aiff`, `aif`, `flac`, `mp3`, `m4a`, `aac`, `ogg`, `opus`, `webm`, `mp4`) while still relying on Chromium codec support at runtime.
+
+---
+
+## SEO + all-platform release automation follow-up (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Sun 2026-03-08 01:19 GMT
+
+```text
+Make sure the GitHub page that's being hosted is SEO friendly, update the build. Wait. Make sure it runs the GitHub action to build and release for all the platforms every time we push to master.
+```
+
+### Assistant implementation summary (this run)
+
+- Tightened landing-page SEO metadata and marketing copy:
+  - stronger title/description
+  - canonical URL retained
+  - refined Open Graph + Twitter metadata copy
+  - added schema.org `SoftwareApplication` JSON-LD
+  - kept robots meta and static `robots.txt`
+  - upgraded `sitemap.xml` with `lastmod/changefreq/priority`
+- Verified workflow wiring for all-platform desktop release runs on both `main` and `master` pushes (plus tags), using matrix builds across macOS, Linux, and Windows.
+- Validated locally where possible (`build`, mac desktop packaging, SEO sanity checks).
+- Pushed updates to `main` and monitored resulting workflow runs for first-pass outcomes.

@@ -3,22 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Producer Player — Desktop app for fast A/B auditioning producer exports</title>
+    <title>Producer Player | Desktop Track Versioning for Music Producers</title>
     <meta
       name="description"
-      content="Producer Player is a desktop app that groups repeated producer exports into logical songs with version history—so you can A/B audition fast and stay in creative flow."
+      content="Producer Player helps music producers group export versions into track history, compare faster, and stay in creative flow with desktop-first playback tools."
     />
     <meta name="robots" content="index, follow" />
 
     <link rel="canonical" href="https://ethansk.github.io/producer-player/" />
 
     <meta property="og:site_name" content="Producer Player" />
-    <meta property="og:title" content="Producer Player — Fast A/B auditioning for producer exports" />
+    <meta property="og:title" content="Producer Player | Desktop Track Versioning for Music Producers" />
     <meta
       property="og:description"
-      content="Producer Player is a desktop app that groups repeated producer exports into logical songs with version history—so you can A/B audition fast and stay in creative flow."
+      content="Group export versions into track history, compare faster, and keep momentum with a desktop workflow built for producers."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_GB" />
     <meta property="og:url" content="https://ethansk.github.io/producer-player/" />
     <meta
       property="og:image"
@@ -27,16 +28,31 @@
     <meta property="og:image:alt" content="Producer Player demo video poster" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Producer Player — Fast A/B auditioning for producer exports" />
+    <meta name="twitter:title" content="Producer Player | Desktop Track Versioning for Music Producers" />
     <meta
       name="twitter:description"
-      content="Producer Player is a desktop app that groups repeated producer exports into logical songs with version history—so you can A/B audition fast and stay in creative flow."
+      content="Group export versions into track history, compare faster, and keep momentum with a desktop workflow built for producers."
     />
     <meta
       name="twitter:image"
       content="https://ethansk.github.io/producer-player/assets/screenshots/demo-poster.png"
     />
     <meta name="twitter:url" content="https://ethansk.github.io/producer-player/" />
+    <meta name="theme-color" content="#0b1020" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Producer Player",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "macOS, Linux, Windows",
+        "description": "Desktop app for music producers to group track export versions, compare quickly, and stay in creative flow.",
+        "url": "https://ethansk.github.io/producer-player/",
+        "downloadUrl": "https://github.com/EthanSK/producer-player/releases",
+        "softwareVersion": "0.1.0"
+      }
+    </script>
 
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -44,10 +60,10 @@
     <header class="site-header">
       <div class="container">
         <p class="eyebrow">Producer Player</p>
-        <h1>A desktop player built for real producer iteration loops.</h1>
+        <h1>Desktop track versioning built for producer iteration.</h1>
         <p class="lede">
-          Instead of managing dozens of near-duplicate exports manually, Producer Player groups them as
-          <strong>logical songs</strong> with version history so you can audition fast and stay in creative flow.
+          Producer Player turns repeated exports into clean <strong>track version history</strong>, so you can compare
+          quickly, keep context, and stay in creative flow.
         </p>
 
         <div class="hero-actions">
@@ -81,9 +97,9 @@
           <h2>Key features</h2>
           <div class="grid features-grid">
             <article class="card">
-              <h3>Logical song grouping</h3>
+              <h3>Track version grouping</h3>
               <p>
-                Auto-clusters repeated exports into one song entry with multiple versions, reducing manual file
+                Auto-clusters repeated exports into one track entry with multiple versions, reducing manual file
                 cleanup.
               </p>
             </article>
@@ -118,8 +134,8 @@
               <figcaption>Electron app shell and tri-panel layout.</figcaption>
             </figure>
             <figure class="shot">
-              <img src="./assets/screenshots/logical-songs.png" alt="Logical song grouping in Producer Player" />
-              <figcaption>Logical song view showing grouped exports.</figcaption>
+              <img src="./assets/screenshots/logical-songs.png" alt="Track version grouping in Producer Player" />
+              <figcaption>Track view showing grouped exports.</figcaption>
             </figure>
             <figure class="shot">
               <img

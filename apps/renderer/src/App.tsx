@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import type {
   LibrarySnapshot,
+  PlaylistOrderExportV1,
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
   SongVersion,
@@ -883,6 +884,8 @@ export function App(): JSX.Element {
   }, [selectedPlaybackFilePath, selectedPlaybackSongId, selectedPlaybackVersionId]);
 
   const canReorderSongs = searchText.trim().length === 0;
+  const canExportPlaylistOrder = songs.length > 0;
+  const canImportPlaylistOrder = snapshot.linkedFolders.length > 0;
 
   const playbackQueue = useMemo(() => {
     const queue: SongVersion[] = [];
@@ -1043,6 +1046,161 @@ export function App(): JSX.Element {
 
   async function handleOrganize(): Promise<void> {
     await runSnapshotTask(() => window.producerPlayer.organizeOldVersions());
+  }
+
+  function buildPlaylistOrderExportPayload(): PlaylistOrderExportV1 {
+    const selectedFolder =
+      snapshot.linkedFolders.find((folder) => folder.id === selectedFolderId) ?? null;
+
+    const selectedSong = selectedSongId
+      ? songs.find((song) => song.id === selectedSongId) ?? null
+      : null;
+
+    return {
+      schema: 'producer-player.playlist-order',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      selection: {
+        selectedFolderId: selectedFolder?.id ?? null,
+        selectedFolderPath: selectedFolder?.path ?? null,
+        selectedFolderName: selectedFolder?.name ?? null,
+        selectedSongId: selectedSong?.id ?? null,
+        selectedSongTitle: selectedSong?.title ?? null,
+        selectedSongNormalizedTitle: selectedSong?.normalizedTitle ?? null,
+        selectedPlaybackVersionId: selectedPlaybackVersionId ?? null,
+        selectedPlaybackFilePath: selectedPlaybackVersion?.filePath ?? null,
+        selectedPlaybackFileName: selectedPlaybackVersion?.fileName ?? null,
+      },
+      ordering: {
+        songIds: songs.map((song) => song.id),
+        normalizedTitles: songs.map((song) => song.normalizedTitle),
+      },
+      folders: snapshot.linkedFolders,
+      songs,
+    };
+  }
+
+  async function handleExportPlaylistOrder(): Promise<void> {
+    await runVoidTask(async () => {
+      const payload = buildPlaylistOrderExportPayload();
+
+      if (payload.songs.length === 0) {
+        throw new Error('Nothing to export yet (no tracks in the current album view).');
+      }
+
+      await window.producerPlayer.exportPlaylistOrder(payload);
+    });
+  }
+
+  async function handleImportPlaylistOrder(): Promise<void> {
+    await runSnapshotTask(async () => {
+      const payload = await window.producerPlayer.importPlaylistOrder();
+      if (!payload) {
+        return snapshot;
+      }
+
+      const folderPath = payload.selection.selectedFolderPath;
+      const folderId = payload.selection.selectedFolderId;
+
+      const folder =
+        (folderPath && folderPath.length > 0
+          ? snapshot.linkedFolders.find((entry) => entry.path === folderPath) ?? null
+          : null) ??
+        (folderId
+          ? snapshot.linkedFolders.find((entry) => entry.id === folderId) ?? null
+          : null);
+
+      if ((folderPath || folderId) && !folder) {
+        throw new Error(
+          `Import references a folder that is not linked: ${folderPath ?? folderId}\n\nLink that folder first, then import again.`
+        );
+      }
+
+      if (folder) {
+        setSelectedFolderId(folder.id);
+      }
+
+      const folderSongs = folder ? snapshot.songs.filter((song) => song.folderId === folder.id) : snapshot.songs;
+      const byNormalizedTitle = new Map(folderSongs.map((song) => [song.normalizedTitle, song.id]));
+      const existingSongIdSet = new Set(folderSongs.map((song) => song.id));
+
+      const resolvedOrder: string[] = [];
+      const seen = new Set<string>();
+
+      for (let index = 0; index < payload.ordering.songIds.length; index += 1) {
+        const songIdCandidate = payload.ordering.songIds[index];
+        const normalizedTitleCandidate = payload.ordering.normalizedTitles[index];
+
+        let resolvedSongId: string | null = null;
+
+        if (existingSongIdSet.has(songIdCandidate)) {
+          resolvedSongId = songIdCandidate;
+        } else if (normalizedTitleCandidate && byNormalizedTitle.has(normalizedTitleCandidate)) {
+          resolvedSongId = byNormalizedTitle.get(normalizedTitleCandidate) ?? null;
+        }
+
+        if (!resolvedSongId || seen.has(resolvedSongId)) {
+          continue;
+        }
+
+        seen.add(resolvedSongId);
+        resolvedOrder.push(resolvedSongId);
+      }
+
+      if (resolvedOrder.length === 0) {
+        throw new Error('Import did not match any songs in the currently linked library.');
+      }
+
+      const nextSnapshot = await window.producerPlayer.reorderSongs(resolvedOrder);
+
+      const nextFolderSongs = folder
+        ? nextSnapshot.songs.filter((song) => song.folderId === folder.id)
+        : nextSnapshot.songs;
+
+      const selectionSongId =
+        (payload.selection.selectedSongId &&
+          nextFolderSongs.some((song) => song.id === payload.selection.selectedSongId)
+          ? payload.selection.selectedSongId
+          : null) ??
+        (payload.selection.selectedSongNormalizedTitle
+          ? nextFolderSongs.find(
+              (song) => song.normalizedTitle === payload.selection.selectedSongNormalizedTitle
+            )?.id ?? null
+          : null) ??
+        (payload.selection.selectedSongTitle
+          ? nextFolderSongs.find((song) => song.title === payload.selection.selectedSongTitle)
+              ?.id ?? null
+          : null);
+
+      if (selectionSongId) {
+        setSelectedSongId(selectionSongId);
+
+        const selectedSong =
+          nextFolderSongs.find((song) => song.id === selectionSongId) ?? null;
+        const selectedVersion =
+          (payload.selection.selectedPlaybackVersionId
+            ? selectedSong?.versions.find(
+                (version) => version.id === payload.selection.selectedPlaybackVersionId
+              ) ?? null
+            : null) ??
+          (payload.selection.selectedPlaybackFilePath
+            ? selectedSong?.versions.find(
+                (version) => version.filePath === payload.selection.selectedPlaybackFilePath
+              ) ?? null
+            : null) ??
+          (payload.selection.selectedPlaybackFileName
+            ? selectedSong?.versions.find(
+                (version) => version.fileName === payload.selection.selectedPlaybackFileName
+              ) ?? null
+            : null);
+
+        if (selectedVersion) {
+          setSelectedPlaybackVersionId(selectedVersion.id);
+        }
+      }
+
+      return nextSnapshot;
+    });
   }
 
   async function handleSetAutoMoveOld(enabled: boolean): Promise<void> {
@@ -1485,6 +1643,40 @@ export function App(): JSX.Element {
               title="Move older non-archived versions into old/ and keep the newest version in place."
             >
               Organize
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => {
+                void handleExportPlaylistOrder();
+              }}
+              data-testid="export-playlist-order-button"
+              aria-label="Export playlist ordering"
+              title={
+                canExportPlaylistOrder
+                  ? 'Export the current album selection + ordering (with metadata) as JSON.'
+                  : 'Link a folder and load tracks before exporting a playlist JSON.'
+              }
+              disabled={!canExportPlaylistOrder}
+            >
+              <span aria-hidden="true">⤓</span>
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => {
+                void handleImportPlaylistOrder();
+              }}
+              data-testid="import-playlist-order-button"
+              aria-label="Import playlist ordering"
+              title={
+                canImportPlaylistOrder
+                  ? 'Import a previously exported playlist/order JSON and apply it to the current library.'
+                  : 'Link the target album folder before importing a playlist JSON.'
+              }
+              disabled={!canImportPlaylistOrder}
+            >
+              <span aria-hidden="true">⤒</span>
             </button>
           </div>
         </header>

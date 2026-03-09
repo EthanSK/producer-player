@@ -146,6 +146,23 @@ button.ghost {
   background: transparent;
 }
 
+button.icon-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 10px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 15px;
+}
+
+button.icon-button:hover:not(:disabled) {
+  background: rgba(92, 167, 255, 0.12);
+}
+
 button.drag-source {
   border-color: #ffca6b;
   background: rgba(255, 202, 107, 0.15);

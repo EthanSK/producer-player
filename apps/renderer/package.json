@@ -11,11 +11,11 @@
   },
   "dependencies": {
     "@producer-player/contracts": "*",
-    "react": "^18.3.1",
+    "react": "^19.2.4",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@types/react": "^18.3.19",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "^5.8.2",

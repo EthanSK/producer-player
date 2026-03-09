@@ -1,0 +1,137 @@
+<svg width="1600" height="1000" viewBox="0 0 1600 1000" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="180" y1="80" x2="1420" y2="920" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#122347"/>
+      <stop offset="1" stop-color="#091121"/>
+    </linearGradient>
+    <linearGradient id="windowFill" x1="160" y1="110" x2="1420" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F1B35"/>
+      <stop offset="1" stop-color="#08101F"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#15264A"/>
+      <stop offset="1" stop-color="#0E1A33"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#73C7FF"/>
+      <stop offset="1" stop-color="#4A8CFF"/>
+    </linearGradient>
+    <linearGradient id="success" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#8FF4C7"/>
+      <stop offset="1" stop-color="#52D39F"/>
+    </linearGradient>
+    <filter id="shadow" x="40" y="30" width="1520" height="940" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="24"/>
+      <feGaussianBlur stdDeviation="32"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0117647 0 0 0 0 0.0431373 0 0 0 0 0.101961 0 0 0 0.42 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <circle cx="1260" cy="170" r="240" fill="#2B5C9E" fill-opacity="0.18"/>
+  <circle cx="260" cy="880" r="220" fill="#59B8FF" fill-opacity="0.12"/>
+  <circle cx="1470" cy="850" r="200" fill="#183564" fill-opacity="0.4"/>
+
+  <g filter="url(#shadow)">
+    <rect x="92" y="72" width="1416" height="856" rx="34" fill="url(#windowFill)" stroke="#243B6B" stroke-width="2"/>
+  </g>
+
+  <circle cx="144" cy="112" r="7" fill="#FF736A"/>
+  <circle cx="170" cy="112" r="7" fill="#F7C85A"/>
+  <circle cx="196" cy="112" r="7" fill="#53D978"/>
+
+  <text x="232" y="118" fill="#EAF1FF" font-size="24" font-family="Inter, Arial, sans-serif" font-weight="700">Producer Player</text>
+  <text x="1260" y="118" fill="#9CB1D8" font-size="18" font-family="Inter, Arial, sans-serif">Album view · macOS preview</text>
+
+  <rect x="118" y="148" width="280" height="734" rx="26" fill="#0B152A" stroke="#22365F"/>
+  <rect x="420" y="148" width="806" height="734" rx="26" fill="#091426" stroke="#22365F"/>
+  <rect x="1248" y="148" width="232" height="734" rx="26" fill="#0B152A" stroke="#22365F"/>
+
+  <rect x="144" y="182" width="228" height="68" rx="18" fill="url(#accent)" fill-opacity="0.18" stroke="#77B9FF"/>
+  <text x="258" y="223" text-anchor="middle" fill="#F5F8FF" font-size="26" font-family="Inter, Arial, sans-serif" font-weight="700">Add Folder…</text>
+
+  <text x="144" y="284" fill="#DCE7FF" font-size="24" font-family="Inter, Arial, sans-serif" font-weight="700">Album</text>
+  <text x="144" y="314" fill="#91A7D2" font-size="16" font-family="Inter, Arial, sans-serif">Link one export folder.</text>
+
+  <rect x="144" y="346" width="228" height="110" rx="18" fill="#10213F" stroke="#254473"/>
+  <text x="166" y="383" fill="#A6F2CD" font-size="20" font-family="Inter, Arial, sans-serif" font-weight="700">💡 File names should end</text>
+  <text x="166" y="411" fill="#A6F2CD" font-size="20" font-family="Inter, Arial, sans-serif" font-weight="700">with v1, v2, v3…</text>
+  <text x="166" y="438" fill="#A6F2CD" font-size="16" font-family="Inter, Arial, sans-serif">Example: Neon Nights v2.wav</text>
+
+  <rect x="144" y="480" width="228" height="150" rx="18" fill="#101D37" stroke="#223F6D"/>
+  <text x="166" y="515" fill="#F1F6FF" font-size="22" font-family="Inter, Arial, sans-serif" font-weight="700">Midnight Sessions</text>
+  <text x="166" y="547" fill="#92A7D2" font-size="18" font-family="Inter, Arial, sans-serif">4 tracked files</text>
+  <rect x="166" y="573" width="86" height="36" rx="12" fill="#14294C" stroke="#2E548C"/>
+  <text x="209" y="596" text-anchor="middle" fill="#E7F1FF" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="600">Watching</text>
+  <rect x="262" y="573" width="88" height="36" rx="12" fill="#0E1B32" stroke="#355B91"/>
+  <text x="306" y="596" text-anchor="middle" fill="#E7F1FF" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="600">Organize</text>
+
+  <rect x="144" y="652" width="228" height="110" rx="18" fill="#0F1C36" stroke="#203A65"/>
+  <text x="166" y="688" fill="#F1F6FF" font-size="20" font-family="Inter, Arial, sans-serif" font-weight="700">Status</text>
+  <text x="166" y="718" fill="#92A7D2" font-size="18" font-family="Inter, Arial, sans-serif">Watching 1 folder</text>
+  <text x="166" y="744" fill="#92A7D2" font-size="18" font-family="Inter, Arial, sans-serif">Organized 1 old version</text>
+
+  <text x="454" y="206" fill="#F3F7FF" font-size="28" font-family="Inter, Arial, sans-serif" font-weight="700">Album</text>
+  <text x="454" y="238" fill="#96ABD4" font-size="18" font-family="Inter, Arial, sans-serif">Drag tracks to keep their release order intact.</text>
+
+  <rect x="936" y="180" width="122" height="42" rx="14" fill="#10213E" stroke="#3C6EB5"/>
+  <text x="997" y="206" text-anchor="middle" fill="#F2F7FF" font-size="18" font-family="Inter, Arial, sans-serif" font-weight="700">Rescan</text>
+  <rect x="1072" y="180" width="132" height="42" rx="14" fill="#10213E" stroke="#4FA46E"/>
+  <text x="1138" y="206" text-anchor="middle" fill="#F2F7FF" font-size="18" font-family="Inter, Arial, sans-serif" font-weight="700">Organize</text>
+
+  <rect x="454" y="266" width="718" height="56" rx="16" fill="#0F1C35" stroke="#223F6D"/>
+  <text x="484" y="301" fill="#7187B1" font-size="20" font-family="Inter, Arial, sans-serif">Search tracks or versions</text>
+
+  <text x="454" y="354" fill="#7E95C0" font-size="18" font-family="Inter, Arial, sans-serif">1</text>
+  <rect x="486" y="336" width="654" height="94" rx="20" fill="#132544" stroke="#4A89E6" stroke-width="2"/>
+  <text x="518" y="376" fill="#F6FAFF" font-size="28" font-family="Inter, Arial, sans-serif" font-weight="700">City Lights v1.wav</text>
+  <text x="518" y="407" fill="#97ADD8" font-size="18" font-family="Inter, Arial, sans-serif">1 version</text>
+  <text x="1048" y="392" fill="#A9BDE1" font-size="18" font-family="Inter, Arial, sans-serif">09/03/2026 · 18:14</text>
+
+  <text x="454" y="472" fill="#7E95C0" font-size="18" font-family="Inter, Arial, sans-serif">2</text>
+  <rect x="486" y="454" width="654" height="94" rx="20" fill="#10203D" stroke="#2A4C82"/>
+  <text x="518" y="494" fill="#F6FAFF" font-size="28" font-family="Inter, Arial, sans-serif" font-weight="700">Neon Nights v2.wav</text>
+  <text x="518" y="525" fill="#97ADD8" font-size="18" font-family="Inter, Arial, sans-serif">2 versions</text>
+  <text x="1048" y="510" fill="#A9BDE1" font-size="18" font-family="Inter, Arial, sans-serif">09/03/2026 · 18:14</text>
+
+  <text x="454" y="590" fill="#7E95C0" font-size="18" font-family="Inter, Arial, sans-serif">3</text>
+  <rect x="486" y="572" width="654" height="94" rx="20" fill="#10203D" stroke="#2A4C82"/>
+  <text x="518" y="612" fill="#F6FAFF" font-size="28" font-family="Inter, Arial, sans-serif" font-weight="700">Aurora Intro v1.wav</text>
+  <text x="518" y="643" fill="#97ADD8" font-size="18" font-family="Inter, Arial, sans-serif">1 version</text>
+  <text x="1048" y="628" fill="#A9BDE1" font-size="18" font-family="Inter, Arial, sans-serif">09/03/2026 · 18:14</text>
+
+  <rect x="454" y="706" width="718" height="144" rx="22" fill="#0D1A31" stroke="#213C67"/>
+  <text x="486" y="750" fill="#F3F8FF" font-size="24" font-family="Inter, Arial, sans-serif" font-weight="700">Now Playing · Neon Nights v2.wav</text>
+  <text x="486" y="778" fill="#8DA5D1" font-size="18" font-family="Inter, Arial, sans-serif">Direct file playback for auditioning current exports and archived versions.</text>
+  <rect x="486" y="804" width="500" height="12" rx="6" fill="#193357"/>
+  <rect x="486" y="804" width="304" height="12" rx="6" fill="url(#accent)"/>
+  <circle cx="790" cy="810" r="15" fill="#D8EAFF"/>
+  <circle cx="670" cy="809" r="34" fill="url(#accent)" fill-opacity="0.22" stroke="#7ABFFF"/>
+  <polygon points="658,791 658,827 690,809" fill="#EAF4FF"/>
+  <rect x="1020" y="786" width="120" height="42" rx="14" fill="#10213E" stroke="#355B91"/>
+  <text x="1080" y="812" text-anchor="middle" fill="#F2F7FF" font-size="18" font-family="Inter, Arial, sans-serif" font-weight="700">Repeat: All</text>
+
+  <text x="1278" y="206" fill="#F3F7FF" font-size="28" font-family="Inter, Arial, sans-serif" font-weight="700">Inspector</text>
+  <rect x="1274" y="246" width="180" height="118" rx="18" fill="#111F39" stroke="#264574"/>
+  <text x="1296" y="285" fill="#F6FAFF" font-size="20" font-family="Inter, Arial, sans-serif" font-weight="700">Neon Nights v2.wav</text>
+  <text x="1296" y="318" fill="#92A7D2" font-size="18" font-family="Inter, Arial, sans-serif">Latest export · 09 Mar 2026</text>
+
+  <text x="1278" y="410" fill="#F3F7FF" font-size="22" font-family="Inter, Arial, sans-serif" font-weight="700">Version History</text>
+  <rect x="1274" y="432" width="180" height="110" rx="18" fill="#101D37" stroke="#223F6D"/>
+  <text x="1296" y="470" fill="#F6FAFF" font-size="18" font-family="Inter, Arial, sans-serif" font-weight="700">Neon Nights v2.wav</text>
+  <text x="1296" y="500" fill="#93A8D2" font-size="17" font-family="Inter, Arial, sans-serif">Current export</text>
+
+  <rect x="1274" y="554" width="180" height="118" rx="18" fill="#101D37" stroke="#223F6D"/>
+  <text x="1296" y="592" fill="#F6FAFF" font-size="18" font-family="Inter, Arial, sans-serif" font-weight="700">Neon Nights v1.wav</text>
+  <text x="1296" y="622" fill="#93A8D2" font-size="17" font-family="Inter, Arial, sans-serif">Archived in old/</text>
+
+  <rect x="1274" y="706" width="180" height="144" rx="18" fill="#0F1C35" stroke="#203A65"/>
+  <text x="1296" y="744" fill="#F3F8FF" font-size="22" font-family="Inter, Arial, sans-serif" font-weight="700">Public status</text>
+  <text x="1296" y="778" fill="#9AB0D8" font-size="17" font-family="Inter, Arial, sans-serif">• Live GitHub Pages front door</text>
+  <text x="1296" y="806" fill="#9AB0D8" font-size="17" font-family="Inter, Arial, sans-serif">• Automated macOS arm64 build path</text>
+  <text x="1296" y="834" fill="#9AB0D8" font-size="17" font-family="Inter, Arial, sans-serif">• Signing &amp; notarization still pending</text>
+</svg>

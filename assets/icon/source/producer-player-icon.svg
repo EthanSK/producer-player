@@ -1,0 +1,55 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="128" y1="96" x2="864" y2="928" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0A1320"/>
+      <stop offset="0.52" stop-color="#142B46"/>
+      <stop offset="1" stop-color="#1E4A75"/>
+    </linearGradient>
+
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(760 276) rotate(126.254) scale(518.307)">
+      <stop stop-color="#7CCFFF" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#7CCFFF" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="front" x1="184" y1="560" x2="852" y2="742" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#74CCFF"/>
+      <stop offset="0.55" stop-color="#4EAFFF"/>
+      <stop offset="1" stop-color="#2E85FF"/>
+    </linearGradient>
+
+    <filter id="stackShadow" x="122" y="220" width="780" height="584" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="12"/>
+      <feGaussianBlur stdDeviation="10"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0117647 0 0 0 0 0.0823529 0 0 0 0 0.160784 0 0 0 0.28 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_0_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_0_1" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#bg)"/>
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#glow)"/>
+
+  <g filter="url(#stackShadow)">
+    <rect x="208" y="266" width="608" height="138" rx="62" fill="#A8DCFF" fill-opacity="0.20"/>
+    <rect x="192" y="404" width="640" height="144" rx="64" fill="#A8DCFF" fill-opacity="0.30"/>
+    <rect x="172" y="548" width="680" height="190" rx="82" fill="url(#front)"/>
+  </g>
+
+  <g opacity="0.65" stroke="#D9F2FF" stroke-width="18" stroke-linecap="round">
+    <path d="M300 335H360"/>
+    <path d="M432 335H776"/>
+    <path d="M282 476H342"/>
+    <path d="M414 476H760"/>
+  </g>
+
+  <g opacity="0.92" fill="#0A1B31">
+    <circle cx="254" cy="333" r="24"/>
+    <circle cx="238" cy="475" r="24"/>
+  </g>
+
+  <path d="M474 605C474 594.653 485.32 588.253 494.2 593.625L606.327 661.465C615.042 666.737 614.842 679.469 605.967 684.465L493.84 747.611C484.958 752.613 474 746.204 474 736.01V605Z" fill="#092240" fill-opacity="0.94"/>
+
+  <rect x="198" y="574" width="628" height="16" rx="8" fill="#D9F2FF" fill-opacity="0.22"/>
+</svg>

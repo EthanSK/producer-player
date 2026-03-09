@@ -164,6 +164,15 @@ Tradeoffs:
 
 This screenshot shows a realistic test fixture with multiple tracks in the library list (center panel) and older exports archived under `old/` in the inspector version history (right panel).
 
+### App icon
+
+Producer Player now uses a dedicated app icon direction: **Stacked Takes** (layered export versions + play focus).
+
+![Producer Player app icon preview](docs/assets/icon/producer-player-icon-preview.png)
+
+- Source + exported assets: [`docs/APP_ICON.md`](docs/APP_ICON.md)
+- macOS packaging icon path: `assets/icon/ProducerPlayer.icns`
+
 ### Run (Electron dev)
 
 ```bash

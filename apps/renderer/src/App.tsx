@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import type {
   LibrarySnapshot,
   PlaybackSourceInfo,
+  ProducerPlayerEnvironment,
   SongVersion,
   SongWithVersions,
+  TransportCommand,
 } from '@producer-player/contracts';
 
 type RepeatMode = 'off' | 'one' | 'all';
@@ -18,6 +20,12 @@ const EMPTY_SNAPSHOT: LibrarySnapshot = {
   matcherSettings: {
     autoMoveOld: true,
   },
+};
+
+const EMPTY_ENVIRONMENT: ProducerPlayerEnvironment = {
+  isMacAppStoreSandboxed: false,
+  canLinkFolderByPath: true,
+  canRequestSecurityScopedBookmarks: false,
 };
 
 const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
@@ -92,6 +100,20 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function arraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function isArchivedVersion(version: SongVersion): boolean {
   return /[\\/]old[\\/]/i.test(version.filePath);
 }
@@ -107,8 +129,14 @@ function getActiveSongVersion(song: SongWithVersions): SongVersion | null {
   return sortVersions(song.versions)[0] ?? null;
 }
 
+function getSongDisplayFileName(song: SongWithVersions): string {
+  return getActiveSongVersion(song)?.fileName ?? song.title;
+}
+
 export function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>(EMPTY_SNAPSHOT);
+  const [environment, setEnvironment] =
+    useState<ProducerPlayerEnvironment>(EMPTY_ENVIRONMENT);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
   const [searchText, setSearchText] = useState('');
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
@@ -117,6 +145,8 @@ export function App(): JSX.Element {
     null
   );
   const [dragSongId, setDragSongId] = useState<string | null>(null);
+  const [dragOverSongId, setDragOverSongId] = useState<string | null>(null);
+  const [dragOverPosition, setDragOverPosition] = useState<'before' | 'after'>('before');
   const [folderPathInput, setFolderPathInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +173,15 @@ export function App(): JSX.Element {
     direction: 1 | -1,
     options: { wrap: boolean; autoplay: boolean }
   ) => boolean>(() => false);
+  const transportActionRef = useRef<{
+    toggle: () => void;
+    next: () => void;
+    previous: () => void;
+  }>({
+    toggle: () => undefined,
+    next: () => undefined,
+    previous: () => undefined,
+  });
 
   useEffect(() => {
     repeatModeRef.current = repeatMode;
@@ -172,7 +211,9 @@ export function App(): JSX.Element {
       timestamp: new Date().toISOString(),
       selectedVersionId: selectedPlaybackVersionId,
       selectedFilePath: playbackSourceRef.current?.filePath ?? null,
+      selectedOriginalFilePath: playbackSourceRef.current?.originalFilePath ?? null,
       selectedSourceUrl: playbackSourceRef.current?.url ?? null,
+      sourceStrategy: playbackSourceRef.current?.sourceStrategy ?? null,
       sourceSupport: playbackSourceSupportRef.current,
       readyState: audio?.readyState ?? null,
       networkState: audio?.networkState ?? null,
@@ -402,14 +443,17 @@ export function App(): JSX.Element {
   useEffect(() => {
     let mounted = true;
 
-    window.producerPlayer
-      .getLibrarySnapshot()
-      .then((initial) => {
+    Promise.all([
+      window.producerPlayer.getLibrarySnapshot(),
+      window.producerPlayer.getEnvironment(),
+    ])
+      .then(([initialSnapshot, environmentInfo]) => {
         if (!mounted) {
           return;
         }
 
-        setSnapshot(initial);
+        setSnapshot(initialSnapshot);
+        setEnvironment(environmentInfo);
         setLoading(false);
       })
       .catch((cause: unknown) => {
@@ -502,6 +546,7 @@ export function App(): JSX.Element {
 
   const selectedPlaybackVersion =
     snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
+  const selectedPlaybackFilePath = selectedPlaybackVersion?.filePath ?? null;
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -520,7 +565,7 @@ export function App(): JSX.Element {
     setPlaybackSourceReady(false);
     setPlaybackSourceSupport('unknown');
 
-    if (!selectedPlaybackVersion) {
+    if (!selectedPlaybackVersionId || !selectedPlaybackFilePath) {
       playOnNextLoadRef.current = false;
       setPlaybackSource(null);
       audio.pause();
@@ -533,7 +578,7 @@ export function App(): JSX.Element {
     }
 
     window.producerPlayer
-      .resolvePlaybackSource(selectedPlaybackVersion.filePath)
+      .resolvePlaybackSource(selectedPlaybackFilePath)
       .then((source) => {
         if (cancelled || requestId !== sourceRequestIdRef.current) {
           return;
@@ -548,6 +593,10 @@ export function App(): JSX.Element {
             message,
           });
           return;
+        }
+
+        if (!audio.paused) {
+          playOnNextLoadRef.current = true;
         }
 
         audio.pause();
@@ -592,7 +641,48 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [selectedPlaybackVersion]);
+  }, [selectedPlaybackFilePath, selectedPlaybackVersionId]);
+
+  const canReorderSongs = searchText.trim().length === 0;
+
+  const songsById = useMemo(() => {
+    return new Map(songs.map((song) => [song.id, song]));
+  }, [songs]);
+
+  const previewSongIds = useMemo(() => {
+    const ids = songs.map((song) => song.id);
+
+    if (!canReorderSongs || !dragSongId || !dragOverSongId || dragSongId === dragOverSongId) {
+      return ids;
+    }
+
+    const sourceIndex = ids.indexOf(dragSongId);
+    const targetIndex = ids.indexOf(dragOverSongId);
+
+    if (sourceIndex === -1 || targetIndex === -1) {
+      return ids;
+    }
+
+    const withoutSource = [...ids];
+    withoutSource.splice(sourceIndex, 1);
+
+    const insertionTargetIndex = withoutSource.indexOf(dragOverSongId);
+    if (insertionTargetIndex === -1) {
+      return ids;
+    }
+
+    const insertionIndex =
+      dragOverPosition === 'after' ? insertionTargetIndex + 1 : insertionTargetIndex;
+
+    withoutSource.splice(insertionIndex, 0, dragSongId);
+    return withoutSource;
+  }, [canReorderSongs, dragOverPosition, dragOverSongId, dragSongId, songs]);
+
+  const previewSongs = useMemo(() => {
+    return previewSongIds
+      .map((songId) => songsById.get(songId))
+      .filter((song): song is SongWithVersions => Boolean(song));
+  }, [previewSongIds, songsById]);
 
   const playbackQueue = useMemo(() => {
     const queue: SongVersion[] = [];
@@ -608,12 +698,12 @@ export function App(): JSX.Element {
   }, [songs]);
 
   const currentQueueIndex = useMemo(() => {
-    if (!selectedPlaybackVersion) {
+    if (!selectedPlaybackVersionId) {
       return -1;
     }
 
-    return playbackQueue.findIndex((version) => version.id === selectedPlaybackVersion.id);
-  }, [playbackQueue, selectedPlaybackVersion]);
+    return playbackQueue.findIndex((version) => version.id === selectedPlaybackVersionId);
+  }, [playbackQueue, selectedPlaybackVersionId]);
 
   useEffect(() => {
     moveInQueueRef.current = (direction, { wrap, autoplay }) => {
@@ -649,7 +739,57 @@ export function App(): JSX.Element {
     };
   }, [currentQueueIndex, playbackQueue]);
 
-  const canReorderSongs = searchText.trim().length === 0;
+  useEffect(() => {
+    return window.producerPlayer.onTransportCommand((command: TransportCommand) => {
+      if (command === 'play-pause') {
+        transportActionRef.current.toggle();
+        return;
+      }
+
+      if (command === 'next-track') {
+        transportActionRef.current.next();
+        return;
+      }
+
+      transportActionRef.current.previous();
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || event.code !== 'Space') {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      if (
+        target.isContentEditable ||
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT'
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      transportActionRef.current.toggle();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canReorderSongs) {
+      clearDragState();
+    }
+  }, [canReorderSongs]);
 
   async function runSnapshotTask(task: () => Promise<LibrarySnapshot>): Promise<void> {
     setError(null);
@@ -708,24 +848,64 @@ export function App(): JSX.Element {
     await runSnapshotTask(() => window.producerPlayer.setAutoMoveOld(enabled));
   }
 
-  async function handleReorderSongs(droppedOnSongId: string): Promise<void> {
-    if (!dragSongId || dragSongId === droppedOnSongId) {
-      return;
-    }
-
+  async function handleReorderSongs(nextOrder: string[]): Promise<void> {
     const currentOrder = snapshot.songs.map((song) => song.id);
-    const fromIndex = currentOrder.indexOf(dragSongId);
-    const toIndex = currentOrder.indexOf(droppedOnSongId);
-
-    if (fromIndex === -1 || toIndex === -1) {
+    if (arraysEqual(currentOrder, nextOrder)) {
       return;
     }
-
-    const nextOrder = [...currentOrder];
-    nextOrder.splice(fromIndex, 1);
-    nextOrder.splice(toIndex, 0, dragSongId);
 
     await runSnapshotTask(() => window.producerPlayer.reorderSongs(nextOrder));
+  }
+
+  function clearDragState(): void {
+    setDragSongId(null);
+    setDragOverSongId(null);
+    setDragOverPosition('before');
+  }
+
+  function shouldAutoplayOnTransport(): boolean {
+    const audio = audioRef.current;
+    if (!audio) {
+      return isPlaying;
+    }
+
+    return playOnNextLoadRef.current || !audio.paused;
+  }
+
+  function handleSongRowSelect(songId: string): void {
+    const shouldKeepPlaying = shouldAutoplayOnTransport();
+    setSelectedSongId(songId);
+
+    if (shouldKeepPlaying) {
+      playOnNextLoadRef.current = true;
+      schedulePlaybackLoadTimeout('song-switch-autoplay');
+    }
+  }
+
+  function updateDragOverPosition(
+    event: DragEvent<HTMLButtonElement>,
+    hoveredSongId: string
+  ): void {
+    if (!canReorderSongs || !dragSongId || dragSongId === hoveredSongId) {
+      setDragOverSongId(null);
+      return;
+    }
+
+    event.preventDefault();
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const offsetY = event.clientY - bounds.top;
+    const nextPosition = offsetY >= bounds.height / 2 ? 'after' : 'before';
+
+    if (dragOverSongId !== hoveredSongId) {
+      setDragOverSongId(hoveredSongId);
+    }
+
+    if (dragOverPosition !== nextPosition) {
+      setDragOverPosition(nextPosition);
+    }
+
+    event.dataTransfer.dropEffect = 'move';
   }
 
   async function handleTogglePlayback(): Promise<void> {
@@ -814,14 +994,14 @@ export function App(): JSX.Element {
   function handlePreviousTrack(): void {
     void moveInQueueRef.current(-1, {
       wrap: repeatMode === 'all',
-      autoplay: isPlaying,
+      autoplay: shouldAutoplayOnTransport(),
     });
   }
 
   function handleNextTrack(): void {
     void moveInQueueRef.current(1, {
       wrap: repeatMode === 'all',
-      autoplay: isPlaying,
+      autoplay: shouldAutoplayOnTransport(),
     });
   }
 
@@ -838,6 +1018,14 @@ export function App(): JSX.Element {
       return 'off';
     });
   }
+
+  transportActionRef.current = {
+    toggle: () => {
+      void handleTogglePlayback();
+    },
+    next: handleNextTrack,
+    previous: handlePreviousTrack,
+  };
 
   return (
     <div className="app-shell" data-testid="app-shell">
@@ -858,35 +1046,50 @@ export function App(): JSX.Element {
           </div>
         </header>
 
-        <div className="path-linker">
-          <input
-            data-testid="link-folder-path-input"
-            value={folderPathInput}
-            onChange={(event) => setFolderPathInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                handleLinkFolderPath();
-              }
-            }}
-            placeholder="Paste folder path"
-            title="Paste a local folder path and press Enter or Link Path."
-          />
-          <button
-            type="button"
-            onClick={handleLinkFolderPath}
-            data-testid="link-folder-path-button"
-            title="Link the folder path typed in the input field."
+        {environment.canLinkFolderByPath ? (
+          <div className="path-linker">
+            <input
+              data-testid="link-folder-path-input"
+              value={folderPathInput}
+              onChange={(event) => setFolderPathInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  handleLinkFolderPath();
+                }
+              }}
+              placeholder="Paste folder path"
+              title="Paste a local folder path and press Enter or Link Path."
+            />
+            <button
+              type="button"
+              onClick={handleLinkFolderPath}
+              data-testid="link-folder-path-button"
+              title="Link the folder path typed in the input field."
+            >
+              Link Path
+            </button>
+          </div>
+        ) : (
+          <p
+            className="muted"
+            data-testid="path-linker-disabled-message"
+            title="In Mac App Store sandbox builds, folder access must come from Add Folder so the app can request a security-scoped bookmark."
           >
-            Link Path
-          </button>
-        </div>
+            Mac App Store build: use Add Folder… so Producer Player can retain sandbox access.
+          </p>
+        )}
 
         <section
           className="naming-guide"
           data-testid="naming-guide"
           title="File names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
         >
-          <p>File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.</p>
+          <p>
+            <span className="naming-guide-icon" aria-hidden="true">
+              ℹ︎
+            </span>{' '}
+            File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.
+          </p>
         </section>
 
         <section className="sidebar-status" data-testid="status-card">
@@ -966,7 +1169,7 @@ export function App(): JSX.Element {
       <main className="panel panel-main">
         <header className="panel-header">
           <div className="panel-title">
-            <h2>Group / Album</h2>
+            <h2>Album</h2>
             <p className="muted">{snapshot.songs.length} track(s)</p>
           </div>
           <div className="actions">
@@ -1014,55 +1217,91 @@ export function App(): JSX.Element {
         </p>
 
         <ul className="main-list" data-testid="main-list">
-          {songs.map((song) => (
-            <li key={song.id}>
-              <button
-                type="button"
-                className={`${song.id === selectedSongId ? 'selected' : ''} ${
-                  dragSongId === song.id ? 'drag-source' : ''
-                }`}
-                onClick={() => setSelectedSongId(song.id)}
-                data-testid="main-list-row"
-                data-song-id={song.id}
-                draggable={canReorderSongs}
-                onDragStart={(event) => {
-                  if (!canReorderSongs) {
-                    return;
-                  }
+          {previewSongs.map((song, index) => {
+            const showDropBefore =
+              dragSongId !== null &&
+              dragOverSongId === song.id &&
+              dragOverPosition === 'before' &&
+              dragSongId !== song.id;
 
-                  setDragSongId(song.id);
-                  event.dataTransfer.effectAllowed = 'move';
-                  event.dataTransfer.setData('text/plain', song.id);
-                }}
-                onDragOver={(event) => {
-                  if (!canReorderSongs) {
-                    return;
-                  }
-                  event.preventDefault();
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  void handleReorderSongs(song.id);
-                  setDragSongId(null);
-                }}
-                onDragEnd={() => {
-                  setDragSongId(null);
-                }}
-                title={
-                  canReorderSongs
-                    ? 'Select track. Drag rows to reorder track order.'
-                    : 'Select track. Clear search to enable drag-and-drop ordering.'
-                }
+            const showDropAfter =
+              dragSongId !== null &&
+              dragOverSongId === song.id &&
+              dragOverPosition === 'after' &&
+              dragSongId !== song.id;
+
+            return (
+              <li
+                key={song.id}
+                className={`main-list-item ${showDropBefore ? 'drop-preview-before' : ''} ${
+                  showDropAfter ? 'drop-preview-after' : ''
+                }`}
               >
-                <div>
-                  <strong>{song.title}</strong>
-                  <p className="muted">{song.versions.length} version(s)</p>
-                </div>
-                <span className="muted">{formatDate(song.latestExportAt)}</span>
-              </button>
-            </li>
-          ))}
-          {songs.length === 0 && (
+                <span className="track-number" aria-label={`Track ${index + 1}`}>
+                  {index + 1}
+                </span>
+                <button
+                  type="button"
+                  className={`${song.id === selectedSongId ? 'selected' : ''} ${
+                    dragSongId === song.id ? 'drag-source' : ''
+                  }`}
+                  onClick={() => handleSongRowSelect(song.id)}
+                  data-testid="main-list-row"
+                  data-song-id={song.id}
+                  draggable={canReorderSongs}
+                  onDragStart={(event) => {
+                    if (!canReorderSongs) {
+                      return;
+                    }
+
+                    setDragSongId(song.id);
+                    setDragOverSongId(null);
+                    setDragOverPosition('before');
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', song.id);
+                  }}
+                  onDragOver={(event) => {
+                    updateDragOverPosition(event, song.id);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+
+                    if (!canReorderSongs) {
+                      clearDragState();
+                      return;
+                    }
+
+                    void handleReorderSongs(previewSongIds);
+                    clearDragState();
+                  }}
+                  onDragLeave={(event) => {
+                    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      return;
+                    }
+
+                    if (dragOverSongId === song.id) {
+                      setDragOverSongId(null);
+                    }
+                  }}
+                  onDragEnd={() => {
+                    clearDragState();
+                  }}
+                  title={
+                    canReorderSongs
+                      ? 'Select track. Drag rows to reorder track order.'
+                      : 'Select track. Clear search to enable drag-and-drop ordering.'
+                  }
+                >
+                  <div>
+                    <strong>{getSongDisplayFileName(song)}</strong>
+                    <p className="muted">{song.versions.length} version(s)</p>
+                  </div>
+                  <span className="muted">{formatDate(song.latestExportAt)}</span>
+                </button>
+              </li>
+            );
+          })}
+          {previewSongs.length === 0 && (
             <li className="empty-state">No tracks found in linked folders.</li>
           )}
         </ul>
@@ -1073,11 +1312,14 @@ export function App(): JSX.Element {
               <div>
                 <strong data-testid="player-track-name">{selectedPlaybackVersion.fileName}</strong>
                 <p className="muted">
-                  {selectedSong?.title ?? 'Unknown track'}
+                  {selectedSong ? getSongDisplayFileName(selectedSong) : 'Unknown track'}
                   {isArchivedVersion(selectedPlaybackVersion) ? ' · Archived in old/' : ''}
                 </p>
                 <p className="muted" data-testid="playback-source-meta">
                   Source: {playbackSource?.mimeType ?? 'unknown MIME'} · canPlayType: {playbackSourceSupport}
+                  {playbackSource?.sourceStrategy === 'transcoded-cache'
+                    ? ` · prepared from ${playbackSource.originalFilePath ?? 'source file'}`
+                    : ''}
                 </p>
               </div>
               <button
@@ -1164,8 +1406,7 @@ export function App(): JSX.Element {
 
         {selectedSong ? (
           <section className="inspector-card">
-            <h3 data-testid="inspector-song-title">{selectedSong.title}</h3>
-            <p className="muted">Normalized title: {selectedSong.normalizedTitle}</p>
+            <h3 data-testid="inspector-song-title">{getSongDisplayFileName(selectedSong)}</h3>
             <p className="muted">Latest export: {formatDate(selectedSong.latestExportAt)}</p>
           </section>
         ) : (
@@ -1194,7 +1435,14 @@ export function App(): JSX.Element {
                 <div className="version-actions">
                   <button
                     type="button"
-                    onClick={() => setSelectedPlaybackVersionId(version.id)}
+                    onClick={() => {
+                      if (shouldAutoplayOnTransport()) {
+                        playOnNextLoadRef.current = true;
+                        schedulePlaybackLoadTimeout('version-cue-autoplay');
+                      }
+
+                      setSelectedPlaybackVersionId(version.id);
+                    }}
                     title="Cue this version into the player."
                   >
                     Cue

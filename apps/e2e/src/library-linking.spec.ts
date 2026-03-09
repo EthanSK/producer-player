@@ -119,7 +119,7 @@ test.describe('Producer Player desktop shell', () => {
         'File names must end with v1, v2, v3'
       );
       await expect(page.getByTestId('naming-guide')).not.toContainText('opinionated by design');
-      await expect(page.getByRole('heading', { name: 'Group / Album' })).toHaveCount(1);
+      await expect(page.getByRole('heading', { name: 'Album' })).toHaveCount(1);
       await expect(page.getByTestId('organize-button')).toHaveText('Organize');
       await expect(page.getByTestId('track-order-hint')).toContainText('positions are preserved');
       await expect(page.locator('.panel-left [data-testid="status-card"]')).toHaveCount(1);
@@ -131,6 +131,7 @@ test.describe('Producer Player desktop shell', () => {
       // Nested folders are ignored by scan policy.
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await expect(page.getByTestId('main-list-row').first()).toContainText('Midnight Echo');
+      await expect(page.locator('.track-number').first()).toHaveText('1');
       await expect(page.getByRole('button', { name: /^Versions$/ })).toHaveCount(0);
 
       await page.getByTestId('main-list-row').first().click();
@@ -361,11 +362,11 @@ test.describe('Producer Player desktop shell', () => {
 
     await writeTestWav(path.join(fixtureDirectory, 'Pulse v1.wav'), {
       frequencyHz: 440,
-      durationMs: 3_000,
+      durationMs: 10_000,
     });
     await writeTestWav(path.join(fixtureDirectory, 'Pulse v2.wav'), {
       frequencyHz: 520,
-      durationMs: 3_000,
+      durationMs: 10_000,
     });
 
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);

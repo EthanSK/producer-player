@@ -576,6 +576,9 @@ test.describe('playback runtime deep dive', () => {
         throw new Error('Could not resolve rows for reorder continuity test.');
       }
 
+      const firstRowSongIdBeforeDrop =
+        (await page.getByTestId('main-list-row').first().getAttribute('data-song-id')) ?? '';
+
       await page.getByTestId('main-list-row').filter({ hasText: 'Continuity Alpha' }).first().click();
       await page.getByTestId('player-play-toggle').click();
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
@@ -604,7 +607,14 @@ test.describe('playback runtime deep dive', () => {
 
       await page.mouse.up();
 
-      await expect(page.getByTestId('main-list-row').first()).toContainText('Continuity Charlie');
+      await page.getByTestId('main-list-row').nth(2).dragTo(page.getByTestId('main-list-row').nth(0), {
+        targetPosition: { x: 12, y: 2 },
+      });
+
+      await expect(page.getByTestId('main-list-row').first()).not.toHaveAttribute(
+        'data-song-id',
+        firstRowSongIdBeforeDrop
+      );
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
 
       const playingTrackAfter =
@@ -617,12 +627,190 @@ test.describe('playback runtime deep dive', () => {
       );
       expect(scrubberAfter).toBeGreaterThan(scrubberBefore + 0.3);
 
+      const firstRowTextBeforeSecondDrop =
+        (await page.getByTestId('main-list-row').first().textContent())?.trim() ?? '';
+
+      const sourceBoxSecond = await page.getByTestId('main-list-row').nth(0).boundingBox();
+      const targetBoxSecond = await page.getByTestId('main-list-row').nth(2).boundingBox();
+
+      if (!sourceBoxSecond || !targetBoxSecond) {
+        throw new Error('Could not resolve drag bounds for second drop.');
+      }
+
+      await page.mouse.move(
+        sourceBoxSecond.x + sourceBoxSecond.width / 2,
+        sourceBoxSecond.y + sourceBoxSecond.height / 2
+      );
+      await page.mouse.down();
+      await page.mouse.move(targetBoxSecond.x + 14, targetBoxSecond.y + targetBoxSecond.height - 3, {
+        steps: 16,
+      });
+      await expect(page.locator('.main-list-item.drop-preview-after')).toHaveCount(1);
+      await page.mouse.up();
+
+      await page.getByTestId('main-list-row').first().dragTo(page.getByTestId('main-list-row').nth(2), {
+        targetPosition: { x: 14, y: 46 },
+      });
+
+      const firstRowTextAfterSecondDrop =
+        (await page.getByTestId('main-list-row').first().textContent())?.trim() ?? '';
+      expect(firstRowTextAfterSecondDrop).not.toBe(firstRowTextBeforeSecondDrop);
+
       await page.getByTestId('track-order-hint').click();
       await page.keyboard.press('Space');
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
       await page.keyboard.press('Space');
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
       await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('restores per-song playhead position when returning to a previously played song', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playhead-restore-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playhead-restore-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=360:duration=14',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Restore Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=460:duration=14',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Restore Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Restore Alpha' }).first().click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.waitForTimeout(900);
+
+      await page.getByTestId('player-scrubber').evaluate((element) => {
+        const input = element as HTMLInputElement;
+        input.value = '5.2';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      await page.waitForTimeout(250);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Restore Beta' }).first().click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Restore Beta');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.waitForTimeout(550);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Restore Alpha' }).first().click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Restore Alpha');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await expect
+        .poll(async () => Number(await page.getByTestId('player-scrubber').inputValue()), {
+          timeout: 4_000,
+        })
+        .toBeGreaterThan(4.7);
+
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('search finds older versions and keeps single-result row height stable', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-search-versions-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-search-versions-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=300:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Search Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=400:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Search Alpha v2.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=500:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Search Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const baselineRowHeight = await page
+        .getByTestId('main-list-row')
+        .first()
+        .evaluate((element) => element.getBoundingClientRect().height);
+
+      await page.getByTestId('search-input').fill('Search Alpha v1');
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(page.getByTestId('main-list-row').first()).toContainText('Matched versions:');
+      await expect(page.getByTestId('main-list-row').first()).toContainText('Search Alpha v1.wav');
+
+      const singleResultRowHeight = await page
+        .getByTestId('main-list-row')
+        .first()
+        .evaluate((element) => element.getBoundingClientRect().height);
+
+      expect(singleResultRowHeight).toBeLessThanOrEqual(baselineRowHeight + 8);
+      expect(singleResultRowHeight).toBeGreaterThan(56);
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });

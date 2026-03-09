@@ -779,3 +779,125 @@ Also, at the top of the readme, it should explain all the point of the app is. I
 ```text
 Can you move all the swift related stuff to an old swift project folder so we don't get confused because that's just irrelevant now. And also removing most of his mentioned from the read me, just have a quick thing at the bottom. Just mentioning it.
 ```
+
+#### Ethan message (verbatim) — message_id 3849
+
+**Timestamp:** Mon 2026-03-09 17:44 GMT
+
+```text
+Also some more improvements. We should always remember the position in the timeline when playing a song and restore it when going back to that song. So it continues playing there when we go back. Also the drag drop is slightly glitchy. It's alright though. But when I hold it, it can just flicker sometimes. I forgot to get rid of the flicker ring to be honest. And actually if I let go while it's in the middle of a flicker, it sometimes doesn't get dropped. So if you're really messed up, this needs, like, deep investigation in a sub agent dedicated to just this task. Also, the organize button shouldn't be called organize anymore. It should be called Organize. Actually, no. Okay. Keep the organize button as is. The info icon on the file names must end with section. It's a bit sus. Maybe use an emoji for that or something else. It's a bit offset to take a screenshot and figure it out. Do all the other changes other than bringing in another sub agent, other than the other sub agent one I gave you. And looks good otherwise. It's a bit annoying that it opens a finder window. It uses, like, a finder window in a different space. Is it possible to open finder on the same space that the app is running on? Maybe in a new window. Spawns a new finder window. Also, the search bar at the top of the list says search tracks or versions. But if I search for an older version, doesn't come up only the current version comes up. Also, if there's only one item in the search results, that item seems to be expanding to full height to fill the height. It shouldn't. It should always be the same height size. Maybe that's to do with why the dragon drop is big literally, maybe not. I don't know. But yeah, for the open end finder, try and use a finder window on this space if it's possible. And if not, maybe spawn a new one, whatever the normal behavior is because it's really annoying, it switches space. Also to be honest, can get rid of the paste folder path thing and it's a bit unnecessary with the link path. Just have the add folder at the top. Also, we don't even need the watch folders title. We can just have the add folder button big in the middle in the center. And then we will see underneath later anyway. Watch folders is a bit unnecessary. Yeah. Do it.
+```
+
+## Follow-up UX batch implementation summary (message_id 3849)
+
+### Root causes identified + fixes
+
+1. **Per-song timeline position was not restored**
+   - **Root cause:** playback state only tracked current scrubber/time; no durable song-keyed playhead memory when switching tracks.
+   - **Fix:** added song-id keyed playhead memory in renderer (`Map<songId, seconds>`) with localStorage persistence, save-on-switch/seek/pause paths, and restore-on-load (`loadedmetadata`/`canplay`) before autoplay resumes.
+
+2. **Drag/drop flicker + occasional failed drops**
+   - **Root cause:** drag-over/drop handlers were bound to the inner row button only; hover state could clear/recompute while crossing row sub-elements, and drops on non-button row regions were unreliable.
+   - **Fix:** moved drag-over/drop handling to full row containers, centralized deterministic reorder math, removed fragile leave-driven state churn, kept insertion-preview markers, and suppressed drag-time focus ring flicker styling.
+
+3. **Organize label confusion**
+   - **Root cause:** request corrected itself mid-dictation.
+   - **Fix:** kept button label unchanged as **Organize** (no rename).
+
+4. **Naming-hint icon looked offset/sus**
+   - **Root cause:** previous icon/text alignment used inline positioning that looked off with wrapped copy.
+   - **Fix:** switched to an emoji hint (`💡`) with explicit flex alignment, spacing, and top alignment tweaks.
+   - **Proof screenshot:** `artifacts/followup-ux-2026-03-09/naming-guide-alignment.png` (visually checked after adjustment).
+
+5. **Open in Finder jumping Spaces annoyance**
+   - **Root cause:** default Finder open/reveal behavior can reuse existing Finder windows across Spaces (OS-managed behavior outside strict Electron control).
+   - **Fix:** added macOS Finder open helper using `open -g -a Finder <path>` for folder opens (and file “Open in Finder” opens parent folder via same path), preferring non-focus-stealing Finder window behavior.
+   - **Limitation documented in code:** exact Space placement remains Finder/macOS-managed and cannot be hard-forced from Electron.
+
+6. **Search did not reliably surface older-version intent**
+   - **Root cause:** matching was too narrow (version filename only), so archived-path style queries and non-active-version intent were missed/confusing.
+   - **Fix:** expanded search matching to include version filename + full file path + extension, while keeping matched-version hints visible in row metadata.
+
+7. **Single search result row stretching vertically**
+   - **Root cause:** list grid layout was allowed to stretch content tracks to fill vertical space.
+   - **Fix:** ensured list content anchors to top with stable row sizing (`align-content: start`, `grid-auto-rows: min-content`, fixed row min-height), preserving consistent row height even with one result.
+
+8. **Sidebar controls too cluttered (path linker + Watch folders title)**
+   - **Root cause:** legacy linking controls/UI hierarchy emphasized secondary path-link flow.
+   - **Fix:** made **Add Folder…** the prominent centered top control, removed watch-folder title emphasis, and kept direct path-link input test-only (`environment.isTestMode`) for E2E automation.
+
+### Files updated
+
+- `apps/renderer/src/App.tsx`
+- `apps/renderer/src/styles.css`
+- `apps/electron/src/main.ts`
+- `packages/contracts/src/index.ts`
+- `README.md`
+- `docs/assets/readme/app-library-current.png`
+
+### Verification run
+
+- `npm run typecheck` ✅
+- `npm run build` ✅
+- `npm run test -- -g "drag reorder shows insertion preview and keeps active playback running with scrub position continuity|restores per-song playhead position when returning to a previously played song|search finds older versions and keeps single-result row height stable" src/playback-runtime.spec.ts` (workspace `apps/e2e`) ✅ 3/3
+
+### Manual screenshot artifacts
+
+- Updated README app screenshot: `docs/assets/readme/app-library-current.png`
+- Naming hint alignment proof: `artifacts/followup-ux-2026-03-09/naming-guide-alignment.png`
+
+
+---
+
+## Follow-up UX + playback continuity pass (Ethan feedback)
+
+### Ethan feedback (verbatim)
+
+**Timestamp:** Mon 2026-03-09 17:48 GMT
+
+```text
+Also some more improvements. We should always remember the position in the timeline when playing a song and restore it when going back to that song. So it continues playing there when we go back. Also the drag drop is slightly glitchy. It's alright though. But when I hold it, it can just flicker sometimes. I forgot to get rid of the flicker ring to be honest. And actually if I let go while it's in the middle of a flicker, it sometimes doesn't get dropped. So if you're really messed up, this needs, like, deep investigation in a sub agent dedicated to just this task. Also, the organize button shouldn't be called organize anymore. It should be called Organize. Actually, no. Okay. Keep the organize button as is. The info icon on the file names must end with section. It's a bit sus. Maybe use an emoji for that or something else. It's a bit offset to take a screenshot and figure it out. Do all the other changes other than bringing in another sub agent, other than the other sub agent one I gave you. And looks good otherwise. It's a bit annoying that it opens a finder window. It uses, like, a finder window in a different space. Is it possible to open finder on the same space that the app is running on? Maybe in a new window. Spawns a new finder window. Also, the search bar at the top of the list says search tracks or versions. But if I search for an older version, doesn't come up only the current version comes up. Also, if there's only one item in the search results, that item seems to be expanding to full height to fill the height. It shouldn't. It should always be the same height size. Maybe that's to do with why the dragon drop is big literally, maybe not. I don't know. But yeah, for the open end finder, try and use a finder window on this space if it's possible. And if not, maybe spawn a new one, whatever the normal behavior is because it's really annoying, it switches space. Also to be honest, can get rid of the paste folder path thing and it's a bit unnecessary with the link path. Just have the add folder at the top. Also, we don't even need the watch folders title. We can just have the add folder button big in the middle in the center. And then we will see underneath later anyway. Watch folders is a bit unnecessary. Yeah. Do it.
+```
+
+### Root causes identified
+
+1. Drag/drop flicker + occasional failed drop came from unstable hover target transitions and clearing hover state at the wrong time, plus row transition/focus jitter during drag.
+2. Timeline continuity needed a durable per-song playhead store and deterministic restore timing once metadata/canplay is ready.
+3. Finder open behavior used generic shell APIs that can reactivate existing Finder context in another Space.
+4. Search did match versions internally, but UI gave weak feedback for older-version hits; users perceived it as "current only".
+5. Single-result stretch came from grid content stretching when list had one row.
+6. Folder-linking top UI still surfaced path-link controls in normal mode, conflicting with desired Add Folder-first UX.
+
+### Follow-up implementation (this run)
+
+- Kept **Organize** label unchanged per final Ethan instruction.
+- Hardened drag/drop:
+  - stabilized hover target tracking with drag target ref
+  - added fallback drop resolution path
+  - reduced midpoint oscillation with hysteresis
+  - disabled row transitions while dragging and removed drag focus flicker pressure
+- Added per-song playhead memory + restore:
+  - remember on time updates/seek/pause
+  - restore when returning to a song
+  - persist playheads in localStorage for continuity
+- Finder behavior update:
+  - on macOS, prefer `open -a Finder <folder>` (new Finder window path) before shell fallback
+  - applies to both file reveal and folder open intents
+- Search improvements:
+  - explicit matched-version summaries in rows (for older-version hits)
+- Single-result row height fix:
+  - list alignment + row sizing constraints to prevent full-height stretch
+- Left panel simplification:
+  - removed Watch Folders header
+  - promoted centered primary Add Folder button
+  - path-link controls now test-only (kept for E2E tooling path)
+- Naming hint icon refreshed from text glyph to emoji for cleaner alignment in capture.
+- Updated README screenshot with current UI after layout/icon updates.
+
+### Validation
+
+- `npm run typecheck` ✅
+- `npm run build` ✅
+- `npm run test -w @producer-player/e2e -- src/library-linking.spec.ts src/playback-runtime.spec.ts` ✅ (13/13)
+- Fresh screenshot refreshed:
+  - `docs/assets/readme/app-library-current.png`

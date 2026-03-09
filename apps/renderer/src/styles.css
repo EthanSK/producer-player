@@ -143,9 +143,21 @@ button.drag-source {
 }
 
 button.play-toggle {
-  min-width: 110px;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 999px;
   border-color: var(--accent);
-  background: rgba(92, 167, 255, 0.18);
+  background: rgba(92, 167, 255, 0.2);
+  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button.play-toggle[data-playing='true'] {
+  background: rgba(95, 210, 143, 0.22);
+  border-color: var(--success);
 }
 
 input {
@@ -171,51 +183,33 @@ input[type='range'] {
 
 .naming-guide {
   margin: 10px 12px;
-  border: 1px solid #8a6b2f;
+  border: 1px solid rgba(95, 210, 143, 0.75);
   border-radius: 10px;
-  padding: 10px;
-  background: rgba(255, 202, 107, 0.08);
-}
-
-.naming-guide-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.naming-guide h3 {
-  margin: 0;
-  font-size: 13px;
+  padding: 12px;
+  background: rgba(95, 210, 143, 0.12);
 }
 
 .naming-guide p {
   margin: 0;
-  font-size: 12px;
-  color: #f6e6c9;
-  line-height: 1.45;
+  font-size: 16px;
+  font-weight: 600;
+  color: #84f1b5;
+  line-height: 1.35;
 }
 
-.naming-guide code {
-  color: #fff3db;
-  background: rgba(0, 0, 0, 0.25);
-  padding: 1px 5px;
-  border-radius: 6px;
+.sidebar-status {
+  margin: 0 12px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
-.help-pill {
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  border: 1px solid #b29153;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
-  color: #ffe4b0;
-  background: rgba(178, 145, 83, 0.22);
+.sidebar-status h3 {
+  margin: 0;
+  font-size: 14px;
 }
 
 .folder-list,
@@ -271,6 +265,14 @@ input[type='range'] {
 
 .filter-row input {
   width: 100%;
+}
+
+.list-hint {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .main-list {
@@ -380,12 +382,6 @@ input[type='range'] {
   color: var(--text-muted);
   margin: 2px 0;
   font-size: 12px;
-}
-
-.status-card {
-  margin-top: auto;
-  display: grid;
-  gap: 6px;
 }
 
 .empty-state {

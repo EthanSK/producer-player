@@ -432,7 +432,28 @@ export class FileLibraryService {
     }
 
     const files = await collectAudioFiles(folder.path, folderId);
+
+    // Guard against unlink races where an in-flight scan completes after folder removal.
+    if (!this.linkedFolders.has(folderId)) {
+      return;
+    }
+
     this.folderFiles.set(folderId, files);
+  }
+
+  private collectTrackedFiles(): ScannedAudioFile[] {
+    const linkedFolderIds = new Set(this.linkedFolders.keys());
+    const files: ScannedAudioFile[] = [];
+
+    for (const [folderId, folderFiles] of this.folderFiles.entries()) {
+      if (!linkedFolderIds.has(folderId)) {
+        continue;
+      }
+
+      files.push(...folderFiles);
+    }
+
+    return files;
   }
 
   private attachWatcher(folder: LinkedFolder): void {
@@ -519,7 +540,7 @@ export class FileLibraryService {
   }
 
   private async organizeOldVersionsInternal(): Promise<number> {
-    const files = Array.from(this.folderFiles.values()).flat();
+    const files = this.collectTrackedFiles();
     const songs = buildSongsFromFiles(files);
 
     const affectedFolderIds = new Set<string>();
@@ -640,7 +661,7 @@ export class FileLibraryService {
       a.name.localeCompare(b.name)
     );
 
-    const files = Array.from(this.folderFiles.values()).flat();
+    const files = this.collectTrackedFiles();
     const unorderedSongs = buildSongsFromFiles(files);
     const songs = this.applySongOrder(unorderedSongs);
     const versions = songs.flatMap((song) => song.versions);

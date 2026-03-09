@@ -314,3 +314,77 @@ Make sure the GitHub page that's being hosted is SEO friendly, update the build.
 - Verified workflow wiring for all-platform desktop release runs on both `main` and `master` pushes (plus tags), using matrix builds across macOS, Linux, and Windows.
 - Validated locally where possible (`build`, mac desktop packaging, SEO sanity checks).
 - Pushed updates to `main` and monitored resulting workflow runs for first-pass outcomes.
+
+---
+
+## Phase 1 full checklist verification + completion pass (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Mon 2026-03-09 00:08 GMT
+
+```text
+Double check you everything I said, every single thing. All the agents that you haven't run that I said have to be run now. It's if it's finished, sync it. Make sure it's all done based on every single thing I said. I don't wanna be ignored.
+```
+
+### Request-to-implementation checklist (Phase 1 scope)
+
+| Request from Ethan feedback history | Status | Implementation notes |
+| --- | --- | --- |
+| Link folder paths and keep watching for new/changed/deleted files | DONE | `FileLibraryService` watch + rescan pipeline with snapshot updates. |
+| Auto-move old versions into `old/` by default, with toggle | DONE | `matcherSettings.autoMoveOld` default true + UI checkbox + organize pipeline. |
+| Keep Swift MVP while building cross-platform Electron + TypeScript app | DONE | Swift tree kept; Electron/TS monorepo shipped and iterated. |
+| End-to-end tests running | DONE | Playwright Electron E2E suite in `apps/e2e` passes. |
+| True playback (not a static file list) | DONE | Bottom player dock with working transport + seek + repeat + previous/next. |
+| Fix “no supported sources” reliability issue by testing with real audio | DONE | Playback source readiness logic added; valid WAV-based E2E + additional real-format manual checks. |
+| Maintain drag/drop ordering in tracks view | DONE | Track row drag/drop reorder wired and persisted. |
+| Persist linked paths + ordering between sessions | DONE | UserData state file stores linked folders, auto-organize setting, song order. |
+| Rename user-facing “Logical Songs/Actual Songs” to “Tracks” wording | DONE | Main UX uses single tracks list; no “Actual Songs” label remains. |
+| Top title should be “Group / Album” | DONE | Main header set to `Group / Album`. |
+| Show track count in library/main header | DONE | `track(s)` count shown beside Group / Album title. |
+| Remove duplicated mini tracks section | DONE | Single tracks list retained in main panel; duplicate mini list removed. |
+| Add naming instructions under folder picker | DONE | Naming guide card directly under link-path controls. |
+| Remove “opinionated by design” copy; keep minimal guidance + example | DONE | Naming guide copy simplified and includes `Leaky v2.wav / Leakyv2.wav` example. |
+| Use `Open in Finder` wording and only show when folder path exists | DONE | Folder action label is `Open in Finder`; rendered only when `folder.path` exists. |
+| Add organize action and explain it with tooltip | DONE | `Organize` button + tooltip describing old-version archiving behavior. |
+| Ensure tooltips on all buttons + checkbox controls | DONE | Actionable controls include `title` text, including auto-organize checkbox. |
+| Make rescan/organize look distinct from mode toggles | DONE | Dedicated action-button styling retained for operational actions. |
+| Handle v-suffix grouping at end (`v1`, `v2`) with/without space | DONE | Normalization supports `Leaky v2`, `Leakyv2`, `_v3`, `-v4` suffix forms. |
+| Ignore arbitrary nested folders; only top-level + `old/` | DONE | Scan logic restricted to top-level plus reserved `old/` directory. |
+| Version history should include archived files from `old/` | DONE | Inspector displays archived entries and `Archived in old/` marker. |
+| Unlink must ask for confirmation | DONE | Explicit confirmation dialog before unlink. |
+| Unlink should start fresh (no stale ordering/data leakage) | DONE | Order reset on full unlink; race fix prevents stale songs after unlink. |
+| Rescan should refresh library without wiping saved ordering | DONE | Reorder state retained across rescans and restarts. |
+| Add weird/messy folder-structure E2E tests | DONE | `folder-structure-hardening.spec.ts` covers nested-junk ignore + old/history + reorder/unlink flows. |
+| “All audio formats” support expectation | DONE | Supported extension set expanded; playback verified on real WAV/MP3/FLAC/M4A fixtures (codec availability remains Chromium-dependent). |
+| Build/release workflows + SEO asks from follow-up | DONE | Prior runs wired all-platform release automation + SEO metadata updates; retained in this pass. |
+| OpenClaw skill/CLI/tooling-meta request from early planning chat | NOT APPLICABLE | Out of Producer Player Phase 1 app implementation scope; no product blocker for desktop app behavior. |
+| “Status of other agents” request | NOT APPLICABLE | Coordination/meta request, not a Producer Player code requirement. |
+
+### This run’s implementation summary (new work)
+
+- Re-read full `PLAN.md` feedback history and validated implementation coverage item-by-item.
+- Improved playback reliability by gating autoplay/plays on source readiness (`loadstart`/`canplay`) and safer source reset flow.
+- Hardened unlink behavior against watcher race conditions by ignoring stale folder scans after unlink and filtering snapshots to linked folders only.
+- Finalized wording/placement details for Phase 1 UI:
+  - `Group / Album` header
+  - single tracks section + track-order hint
+  - naming guide with minimal example copy
+  - sidebar status card placement
+  - `Open in Finder` / `Organize` action wording
+- Preserved tooltip coverage across operational controls.
+
+### Validation evidence (this run)
+
+- `npm run build` ✅
+- `npm run typecheck` ✅
+- `node --test packages/domain/test/file-library-service.integration.test.cjs` ✅ (5/5)
+- `npm run test -w @producer-player/e2e` ✅ (5/5)
+- Manual playback verification with real generated fixtures (WAV/MP3/FLAC/M4A) ✅
+
+### Screenshot proof (this run)
+
+- `/Users/ethansk/.openclaw/workspace/artifacts/producer-player-phase1-20260309/01-group-album-and-naming.png`
+- `/Users/ethansk/.openclaw/workspace/artifacts/producer-player-phase1-20260309/02-version-history-old-folder.png`
+- `/Users/ethansk/.openclaw/workspace/artifacts/producer-player-phase1-20260309/03-player-controls-playing.png`
+

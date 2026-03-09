@@ -115,16 +115,23 @@ test.describe('Producer Player desktop shell', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await expect(page.getByTestId('naming-guide')).toContainText('v1');
-      await expect(page.getByTestId('naming-guide')).toContainText('v2');
-      await expect(page.getByTestId('naming-guide')).toContainText('v3');
+      await expect(page.getByTestId('naming-guide')).toContainText(
+        'File names must end with v1, v2, v3'
+      );
       await expect(page.getByTestId('naming-guide')).not.toContainText('opinionated by design');
+      await expect(page.getByRole('heading', { name: 'Group / Album' })).toHaveCount(1);
+      await expect(page.getByTestId('organize-button')).toHaveText('Organize');
+      await expect(page.getByTestId('track-order-hint')).toContainText('positions are preserved');
+      await expect(page.locator('.panel-left [data-testid="status-card"]')).toHaveCount(1);
+      await expect(page.locator('.panel-right [data-testid="status-card"]')).toHaveCount(0);
 
       await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
       await page.getByTestId('link-folder-path-button').click();
 
       // Nested folders are ignored by scan policy.
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(page.getByTestId('main-list-row').first()).toContainText('Midnight Echo');
+      await expect(page.getByRole('button', { name: /^Versions$/ })).toHaveCount(0);
 
       await page.getByTestId('main-list-row').first().click();
       await expect(page.getByTestId('inspector-song-title')).toContainText('Midnight Echo');
@@ -151,6 +158,7 @@ test.describe('Producer Player desktop shell', () => {
       // Version history includes archived old/ files.
       await expect(page.getByTestId('inspector-version-row')).toHaveCount(2);
       await expect(page.getByText('Archived in old/')).toHaveCount(1);
+      await expect(page.getByTestId('inspector-song-title')).toContainText('Midnight Echo');
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });
@@ -273,7 +281,10 @@ test.describe('Producer Player desktop shell', () => {
       await expect(page.getByTestId('player-dock')).toBeVisible();
 
       await page.getByTestId('player-play-toggle').click();
-      await expect(page.getByTestId('player-play-toggle')).toContainText('Pause');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute(
+        'aria-label',
+        'Pause'
+      );
       await expect(page.getByTestId('playback-error')).toHaveCount(0);
 
       // Previous/next should be functional controls even when queue length is 1.
@@ -292,6 +303,12 @@ test.describe('Producer Player desktop shell', () => {
       const scrubber = page.getByTestId('player-scrubber');
       await expect(scrubber).toBeEnabled();
       await scrubber.fill('0.2');
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute(
+        'aria-label',
+        'Play'
+      );
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });

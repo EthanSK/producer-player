@@ -1,6 +1,6 @@
 # Producer Player
 
-Producer Player is for producers who need to manage tracks in an album while exporting new versions over time.
+Producer Player is for producers who need to manage songs in an album, export new versions over time, and keep the ordering intact.
 
 The core workflow is simple:
 
@@ -9,16 +9,9 @@ The core workflow is simple:
 - Keep old exports visible in history (`old/`) without losing current ordering
 - Audition versions quickly without breaking the album sequence
 
-## Current app UI (fresh screenshot)
+## Current app UI
 
 ![Producer Player current album workflow UI](docs/assets/readme/app-library-current.png)
-
-Producer Player currently has **two implementations in the same repo**:
-
-1. **Swift MVP (existing, kept intact)** for current macOS testing
-2. **Electron + TypeScript vertical slice (new)** for cross-platform direction
-
-The Swift app remains available and untouched for MVP validation while cross-platform packaging is built out.
 
 ---
 
@@ -95,7 +88,6 @@ Expected Pages URL:
 
 - **CI checks/build:** `.github/workflows/ci.yml`
   - Node workspace install + typecheck + build
-  - Swift MVP build on macOS
 - **GitHub Pages deploy:** `.github/workflows/pages.yml`
   - Uploads `site/` as Pages artifact and deploys
 - **Desktop prebuilt releases:** `.github/workflows/release-desktop.yml`
@@ -114,21 +106,7 @@ Expected Pages URL:
 
 ---
 
-## 1) Swift MVP (existing)
-
-SwiftUI + AVFoundation + SQLite implementation for producer re-render workflows.
-
-### Run
-
-```bash
-cd /Users/ethansk/Projects/producer-player
-swift build
-swift run ProducerPlayer
-```
-
----
-
-## 2) Electron + TypeScript (cross-platform workstream)
+## App implementation (Electron + TypeScript)
 
 Monorepo-ish workspace with typed boundaries:
 
@@ -225,11 +203,21 @@ npm run e2e:ci
 
 ---
 
-## Architecture + migration docs
+## Current docs
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/CROSS_PLATFORM_MIGRATION.md`](docs/CROSS_PLATFORM_MIGRATION.md)
 - [`docs/E2E.md`](docs/E2E.md)
 - [`docs/PLAN_LOGGING_WORKFLOW.md`](docs/PLAN_LOGGING_WORKFLOW.md)
 - [`docs/PUBLIC_STATUS.md`](docs/PUBLIC_STATUS.md)
 - [`docs/RELEASING.md`](docs/RELEASING.md)
+- [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+---
+
+## Legacy Swift MVP
+
+The old Swift prototype has been moved out of the way to `old-swift-project/` so the main repo stays focused on the current app.
+
+If you need it later, the archived Swift sources/docs now live under:
+- `old-swift-project/Package.swift`
+- `old-swift-project/Sources/ProducerPlayer/`
+- `old-swift-project/docs/`

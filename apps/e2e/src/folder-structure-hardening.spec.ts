@@ -98,7 +98,7 @@ test.describe('folder structure hardening', () => {
     }
   });
 
-  test('keeps custom order after organize/rescan and resets to fresh order after unlink + relink', async () => {
+  test('keeps custom order after organize/rescan and preserves it after unlink + relink via sidecar', async () => {
     const directories = await createE2ETestDirectories('producer-player-e2e-relink');
 
     await writeFixtureFiles(directories.fixtureDirectory, [
@@ -169,7 +169,7 @@ test.describe('folder structure hardening', () => {
       await page.getByTestId('link-folder-path-button').click();
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-      await expect(page.getByTestId('main-list-row').first()).toContainText('Beta');
+      await expect(page.getByTestId('main-list-row').first()).toContainText('Alpha');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

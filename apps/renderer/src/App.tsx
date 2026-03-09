@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { LibrarySnapshot, SongVersion, SongWithVersions } from '@producer-player/contracts';
+import type {
+  LibrarySnapshot,
+  PlaybackSourceInfo,
+  SongVersion,
+  SongWithVersions,
+} from '@producer-player/contracts';
 
 type RepeatMode = 'off' | 'one' | 'all';
 
@@ -20,6 +25,29 @@ const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
   one: 'One',
   all: 'All',
 };
+
+const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
+
+function describeMediaErrorCode(code: number | undefined): string {
+  switch (code) {
+    case 1:
+      return 'MEDIA_ERR_ABORTED';
+    case 2:
+      return 'MEDIA_ERR_NETWORK';
+    case 3:
+      return 'MEDIA_ERR_DECODE';
+    case 4:
+      return 'MEDIA_ERR_SRC_NOT_SUPPORTED';
+    default:
+      return 'UNKNOWN_MEDIA_ERROR';
+  }
+}
+
+function buildPlaybackFallbackGuidance(source: PlaybackSourceInfo | null): string {
+  const extension = source?.extension ? `.${source.extension}` : 'this file format';
+
+  return `If ${extension} cannot be decoded by this Chromium runtime, convert to WAV/MP3/AAC-M4A (for example: ffmpeg -i input${extension === 'this file format' ? '' : extension} -c:a pcm_s16le output.wav).`;
+}
 
 function formatDate(value: string | null): string {
   if (!value) {
@@ -93,6 +121,10 @@ export function App(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [playbackSource, setPlaybackSource] = useState<PlaybackSourceInfo | null>(null);
+  const [playbackSourceSupport, setPlaybackSourceSupport] = useState<'unknown' | 'maybe' | 'probably' | 'no'>(
+    'unknown'
+  );
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
@@ -101,6 +133,12 @@ export function App(): JSX.Element {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
   const repeatModeRef = useRef<RepeatMode>('off');
+  const playbackSourceRef = useRef<PlaybackSourceInfo | null>(null);
+  const expectedSourceUrlRef = useRef<string | null>(null);
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sourceRequestIdRef = useRef(0);
+  const playbackSourceSupportRef = useRef<'unknown' | 'maybe' | 'probably' | 'no'>('unknown');
+  const playbackSourceReadyRef = useRef(false);
   const moveInQueueRef = useRef<(
     direction: 1 | -1,
     options: { wrap: boolean; autoplay: boolean }
@@ -109,6 +147,84 @@ export function App(): JSX.Element {
   useEffect(() => {
     repeatModeRef.current = repeatMode;
   }, [repeatMode]);
+
+  useEffect(() => {
+    playbackSourceRef.current = playbackSource;
+    expectedSourceUrlRef.current = playbackSource?.url ?? null;
+  }, [playbackSource]);
+
+  useEffect(() => {
+    playbackSourceSupportRef.current = playbackSourceSupport;
+  }, [playbackSourceSupport]);
+
+  useEffect(() => {
+    playbackSourceReadyRef.current = playbackSourceReady;
+  }, [playbackSourceReady]);
+
+  function logPlaybackEvent(
+    event: string,
+    details: Record<string, unknown> = {}
+  ): void {
+    const audio = audioRef.current;
+
+    console.info('[producer-player:playback]', {
+      event,
+      timestamp: new Date().toISOString(),
+      selectedVersionId: selectedPlaybackVersionId,
+      selectedFilePath: playbackSourceRef.current?.filePath ?? null,
+      selectedSourceUrl: playbackSourceRef.current?.url ?? null,
+      sourceSupport: playbackSourceSupportRef.current,
+      readyState: audio?.readyState ?? null,
+      networkState: audio?.networkState ?? null,
+      currentSrc: audio?.currentSrc ?? null,
+      ...details,
+    });
+  }
+
+  function clearPlaybackLoadTimeout(): void {
+    if (!loadTimeoutRef.current) {
+      return;
+    }
+
+    clearTimeout(loadTimeoutRef.current);
+    loadTimeoutRef.current = null;
+  }
+
+  function schedulePlaybackLoadTimeout(context: string): void {
+    clearPlaybackLoadTimeout();
+
+    loadTimeoutRef.current = setTimeout(() => {
+      const source = playbackSourceRef.current;
+      const activeAudio = audioRef.current;
+
+      if (!playOnNextLoadRef.current) {
+        return;
+      }
+
+      if (!activeAudio || playbackSourceReadyRef.current) {
+        return;
+      }
+
+      playOnNextLoadRef.current = false;
+
+      const extensionText = source?.extension ? `.${source.extension}` : 'unknown format';
+      const supportText =
+        playbackSourceSupportRef.current === 'no'
+          ? `${extensionText} is not reported as playable by this Chromium runtime.`
+          : `The source never reached canplay within ${PLAYBACK_LOAD_TIMEOUT_MS}ms.`;
+
+      const message = `Playback could not start (${context}). ${supportText} ${buildPlaybackFallbackGuidance(
+        source
+      )}`;
+
+      setPlaybackError(message);
+      setIsPlaying(false);
+      logPlaybackEvent('load-timeout', {
+        context,
+        message,
+      });
+    }, PLAYBACK_LOAD_TIMEOUT_MS);
+  }
 
   useEffect(() => {
     const audio = new Audio();
@@ -121,35 +237,66 @@ export function App(): JSX.Element {
 
     const onLoadedMetadata = () => {
       setDurationSeconds(Number.isFinite(audio.duration) ? audio.duration : 0);
+      logPlaybackEvent('loadedmetadata', {
+        durationSeconds: Number.isFinite(audio.duration) ? audio.duration : null,
+      });
     };
 
     const onLoadStart = () => {
       setPlaybackSourceReady(false);
+      logPlaybackEvent('loadstart');
     };
 
     const onCanPlay = () => {
       setPlaybackSourceReady(true);
+      clearPlaybackLoadTimeout();
+      logPlaybackEvent('canplay');
 
       if (!playOnNextLoadRef.current) {
         return;
       }
 
       playOnNextLoadRef.current = false;
+
       void audio.play().catch((cause: unknown) => {
-        setPlaybackError(cause instanceof Error ? cause.message : String(cause));
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setPlaybackError(
+          `Playback start failed after canplay: ${message}. ${buildPlaybackFallbackGuidance(
+            playbackSourceRef.current
+          )}`
+        );
+        logPlaybackEvent('play-rejected-after-canplay', {
+          message,
+        });
       });
     };
 
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
+    const onPlay = () => {
+      clearPlaybackLoadTimeout();
+      setPlaybackError(null);
+      setIsPlaying(true);
+      logPlaybackEvent('play');
+    };
+
+    const onPause = () => {
+      setIsPlaying(false);
+      logPlaybackEvent('pause');
+    };
 
     const onEnded = () => {
       const mode = repeatModeRef.current;
+      logPlaybackEvent('ended', {
+        repeatMode: mode,
+      });
 
       if (mode === 'one') {
         audio.currentTime = 0;
         void audio.play().catch((cause: unknown) => {
-          setPlaybackError(cause instanceof Error ? cause.message : String(cause));
+          const message = cause instanceof Error ? cause.message : String(cause);
+          setPlaybackError(`Repeat-one playback restart failed: ${message}.`);
+          logPlaybackEvent('repeat-one-restart-failed', {
+            message,
+          });
         });
         return;
       }
@@ -165,11 +312,55 @@ export function App(): JSX.Element {
     };
 
     const onError = () => {
+      clearPlaybackLoadTimeout();
+
+      const expectedUrl = expectedSourceUrlRef.current;
+      if (expectedUrl && audio.currentSrc && audio.currentSrc !== expectedUrl) {
+        logPlaybackEvent('error-ignored-stale-source', {
+          expectedUrl,
+        });
+        return;
+      }
+
+      const source = playbackSourceRef.current;
       const mediaError = audio.error;
-      const code = mediaError?.code ? ` (code ${mediaError.code})` : '';
+      const code = mediaError?.code;
+      const codeLabel = describeMediaErrorCode(code);
+
       setPlaybackSourceReady(false);
-      setPlaybackError(`Playback failed. File format may be unsupported${code}.`);
       setIsPlaying(false);
+
+      const detail = code ? `${codeLabel} (code ${code})` : codeLabel;
+      const compatibilityHint =
+        code === 4 || playbackSourceSupportRef.current === 'no'
+          ? `${source?.extension ? `.${source.extension}` : 'This format'} appears unsupported or blocked in this Chromium runtime.`
+          : 'Chromium could not decode or load the selected source.';
+
+      const message = `Playback failed: ${detail}. ${compatibilityHint} ${buildPlaybackFallbackGuidance(
+        source
+      )}`;
+
+      setPlaybackError(message);
+      logPlaybackEvent('error', {
+        detail,
+        message,
+      });
+    };
+
+    const onStalled = () => {
+      logPlaybackEvent('stalled');
+    };
+
+    const onWaiting = () => {
+      logPlaybackEvent('waiting');
+    };
+
+    const onEmptied = () => {
+      logPlaybackEvent('emptied');
+    };
+
+    const onAbort = () => {
+      logPlaybackEvent('abort');
     };
 
     audio.addEventListener('timeupdate', onTimeUpdate);
@@ -180,8 +371,15 @@ export function App(): JSX.Element {
     audio.addEventListener('pause', onPause);
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('error', onError);
+    audio.addEventListener('stalled', onStalled);
+    audio.addEventListener('waiting', onWaiting);
+    audio.addEventListener('emptied', onEmptied);
+    audio.addEventListener('abort', onAbort);
 
     return () => {
+      clearPlaybackLoadTimeout();
+      playOnNextLoadRef.current = false;
+
       audio.pause();
       audio.removeAttribute('src');
       audio.load();
@@ -194,6 +392,10 @@ export function App(): JSX.Element {
       audio.removeEventListener('pause', onPause);
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('error', onError);
+      audio.removeEventListener('stalled', onStalled);
+      audio.removeEventListener('waiting', onWaiting);
+      audio.removeEventListener('emptied', onEmptied);
+      audio.removeEventListener('abort', onAbort);
     };
   }, []);
 
@@ -308,38 +510,83 @@ export function App(): JSX.Element {
     }
 
     let cancelled = false;
+    const requestId = sourceRequestIdRef.current + 1;
+    sourceRequestIdRef.current = requestId;
 
+    clearPlaybackLoadTimeout();
     setPlaybackError(null);
     setCurrentTimeSeconds(0);
     setDurationSeconds(0);
     setPlaybackSourceReady(false);
+    setPlaybackSourceSupport('unknown');
 
     if (!selectedPlaybackVersion) {
       playOnNextLoadRef.current = false;
+      setPlaybackSource(null);
       audio.pause();
       audio.removeAttribute('src');
       audio.load();
+      logPlaybackEvent('source-cleared', {
+        reason: 'no-selected-version',
+      });
       return;
     }
 
     window.producerPlayer
-      .toFileUrl(selectedPlaybackVersion.filePath)
-      .then((fileUrl) => {
-        if (cancelled) {
+      .resolvePlaybackSource(selectedPlaybackVersion.filePath)
+      .then((source) => {
+        if (cancelled || requestId !== sourceRequestIdRef.current) {
+          return;
+        }
+
+        setPlaybackSource(source);
+
+        if (!source.exists) {
+          const message = `Selected file is missing on disk: ${source.filePath}. Rescan or relink the folder.`;
+          setPlaybackError(message);
+          logPlaybackEvent('source-missing', {
+            message,
+          });
           return;
         }
 
         audio.pause();
         audio.removeAttribute('src');
-        audio.src = fileUrl;
+        audio.src = source.url;
+
+        const supportHintRaw = source.mimeType
+          ? audio.canPlayType(source.mimeType)
+          : '';
+
+        const supportHint =
+          supportHintRaw === 'probably' || supportHintRaw === 'maybe'
+            ? supportHintRaw
+            : 'no';
+
+        setPlaybackSourceSupport(supportHint);
+
+        logPlaybackEvent('source-selected', {
+          requestId,
+          filePath: source.filePath,
+          url: source.url,
+          mimeType: source.mimeType,
+          supportHint,
+        });
+
         audio.load();
       })
       .catch((cause: unknown) => {
-        if (cancelled) {
+        if (cancelled || requestId !== sourceRequestIdRef.current) {
           return;
         }
 
-        setPlaybackError(cause instanceof Error ? cause.message : String(cause));
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setPlaybackError(message);
+        setPlaybackSource(null);
+        logPlaybackEvent('source-resolve-failed', {
+          requestId,
+          message,
+        });
       });
 
     return () => {
@@ -494,6 +741,7 @@ export function App(): JSX.Element {
       playOnNextLoadRef.current = true;
       setSelectedSongId(firstVersion.songId);
       setSelectedPlaybackVersionId(firstVersion.id);
+      schedulePlaybackLoadTimeout('queue-prime');
       return;
     }
 
@@ -501,26 +749,55 @@ export function App(): JSX.Element {
       return;
     }
 
+    const source = playbackSourceRef.current;
+    if (source && !source.exists) {
+      setPlaybackError(`Selected file is missing on disk: ${source.filePath}. Rescan or relink the folder.`);
+      logPlaybackEvent('play-blocked-missing-source', {
+        filePath: source.filePath,
+      });
+      return;
+    }
+
     if (audio.paused) {
       const hasSource = audio.currentSrc.length > 0 || audio.src.length > 0;
 
-      if (!hasSource || !playbackSourceReady) {
+      if (!hasSource || !playbackSourceReadyRef.current) {
         playOnNextLoadRef.current = true;
-        if (!hasSource && audio.src.length > 0) {
+        schedulePlaybackLoadTimeout('awaiting-canplay');
+
+        if (hasSource) {
           audio.load();
+          logPlaybackEvent('play-requested-reload-source', {
+            reason: 'source-not-ready',
+          });
         }
+
+        if (playbackSourceSupportRef.current === 'no') {
+          setPlaybackError(
+            `This source is not reported as playable by this Chromium runtime (${source?.mimeType ?? 'unknown MIME'}). ${buildPlaybackFallbackGuidance(
+              source
+            )}`
+          );
+        }
+
         return;
       }
 
       try {
         await audio.play();
+        logPlaybackEvent('play-requested-direct');
       } catch (cause: unknown) {
-        setPlaybackError(cause instanceof Error ? cause.message : String(cause));
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setPlaybackError(`Playback start failed: ${message}. ${buildPlaybackFallbackGuidance(source)}`);
+        logPlaybackEvent('play-rejected', {
+          message,
+        });
       }
       return;
     }
 
     playOnNextLoadRef.current = false;
+    clearPlaybackLoadTimeout();
     audio.pause();
   }
 
@@ -798,6 +1075,9 @@ export function App(): JSX.Element {
                 <p className="muted">
                   {selectedSong?.title ?? 'Unknown track'}
                   {isArchivedVersion(selectedPlaybackVersion) ? ' · Archived in old/' : ''}
+                </p>
+                <p className="muted" data-testid="playback-source-meta">
+                  Source: {playbackSource?.mimeType ?? 'unknown MIME'} · canPlayType: {playbackSourceSupport}
                 </p>
               </div>
               <button

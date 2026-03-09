@@ -33,20 +33,36 @@ npm run ci -w @producer-player/e2e
 
 ## Current status (latest run)
 
-- Date: 2026-03-07
-- `npm run e2e` → **PASS** (1 passed)
-- `npm run e2e:ci` → **PASS** (1 passed)
+- Date: 2026-03-09
+- `npm run test -w @producer-player/e2e` → **PASS** (9 passed)
 
 ## Current coverage
 
 ### `library-linking.spec.ts`
 
-Happy path validates:
+- folder link + watcher refresh loop
+- top-level + `old/` scanning behavior
+- naming guidance visibility
+- state persistence in user data (linked folders + song order)
+- reinstall-like recovery via sidecar ordering restoration
+- baseline transport controls with valid WAV fixtures
 
-1. launch production-built Electron shell
-2. link a folder via direct path input
-3. detect initial export file and show one logical song/version
-4. add a second version file in watched folder
-5. verify watcher-driven auto-refresh updates inspector version count to 2
+### `folder-structure-hardening.spec.ts`
 
-This test covers the first vertical-slice risk: **folder link + watch + logical grouping refresh loop**.
+- ignores nested junk folders
+- stable grouping across `v` suffix variants
+- deterministic archive naming under `old/`
+- custom ordering preservation through organize/rescan + unlink/relink (sidecar path)
+
+### `playback-runtime.spec.ts`
+
+- real fixture matrix (wav/mp3/m4a/flac/aiff)
+- validates `producer-media://` source resolution + MIME metadata
+- asserts either real playback or actionable fallback error guidance
+- stress flow: play/pause, rapid next/prev switching, rescan, relink, archived-old selection
+- dev-mode regression: no `file://` local-resource block when renderer is hosted at `http://127.0.0.1:4207`
+
+## Fixture notes
+
+- Codec fixtures are generated via `ffmpeg` in test runtime.
+- If `ffmpeg` is unavailable, playback-runtime tests are skipped with an explicit reason.

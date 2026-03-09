@@ -13,6 +13,12 @@ export interface LaunchedApp {
   page: Page;
 }
 
+export interface LaunchProducerPlayerOptions {
+  devMode?: boolean;
+  rendererDevUrl?: string;
+  extraEnv?: Record<string, string>;
+}
+
 export interface FixtureFile {
   relativePath: string;
   contents?: string;
@@ -24,7 +30,10 @@ export interface E2ETestDirectories {
   userDataDirectory: string;
 }
 
-export async function launchProducerPlayer(userDataDirectory: string): Promise<LaunchedApp> {
+export async function launchProducerPlayer(
+  userDataDirectory: string,
+  options: LaunchProducerPlayerOptions = {}
+): Promise<LaunchedApp> {
   const workspaceRoot = path.resolve(__dirname, '../../../..');
   const electronEntry = path.join(workspaceRoot, 'apps/electron/dist/main.cjs');
 
@@ -35,6 +44,9 @@ export async function launchProducerPlayer(userDataDirectory: string): Promise<L
       PRODUCER_PLAYER_USER_DATA_DIR: userDataDirectory,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       PRODUCER_PLAYER_TEST_ID: randomUUID(),
+      ...(options.devMode ? { ELECTRON_DEV: 'true' } : {}),
+      ...(options.rendererDevUrl ? { RENDERER_DEV_URL: options.rendererDevUrl } : {}),
+      ...(options.extraEnv ?? {}),
     },
   });
 

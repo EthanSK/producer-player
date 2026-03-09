@@ -37,6 +37,14 @@ export interface SongVersion {
   isActive: boolean;
 }
 
+export interface PlaybackSourceInfo {
+  filePath: string;
+  url: string;
+  mimeType: string;
+  extension: string;
+  exists: boolean;
+}
+
 export interface LogicalSong {
   id: string;
   folderId: string;
@@ -76,6 +84,7 @@ export const IPC_CHANNELS = {
   OPEN_IN_FINDER: 'producer-player:open-in-finder',
   OPEN_FOLDER: 'producer-player:open-folder',
   TO_FILE_URL: 'producer-player:to-file-url',
+  RESOLVE_PLAYBACK_SOURCE: 'producer-player:resolve-playback-source',
   SNAPSHOT_UPDATED: 'producer-player:snapshot-updated',
 } as const;
 
@@ -93,5 +102,6 @@ export interface ProducerPlayerBridge {
   revealFile(filePath: string): Promise<void>;
   openFolder(folderPath: string): Promise<void>;
   toFileUrl(filePath: string): Promise<string>;
+  resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo>;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
 }

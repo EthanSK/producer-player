@@ -388,3 +388,70 @@ Double check you everything I said, every single thing. All the agents that you 
 - `/Users/ethansk/.openclaw/workspace/artifacts/producer-player-phase1-20260309/02-version-history-old-folder.png`
 - `/Users/ethansk/.openclaw/workspace/artifacts/producer-player-phase1-20260309/03-player-controls-playing.png`
 
+---
+
+## Playback code4 deep-dive + order durability hardening (sub-agent run)
+
+### Ethan complaint (verbatim)
+
+**Timestamp:** Mon 2026-03-09 00:55 GMT
+
+```text
+Tito, did I not tell you to actually test the playing back? The playback still doesn't work. This time it says file format may be unsupported to code four. You need to deep dive this in a sub agent.
+```
+
+### Additional scope added by Ethan (verbatim)
+
+**Timestamp:** Mon 2026-03-09 00:56 GMT
+
+```text
+By the way, we need to make sure the order how is the order preserved? We we need to make sure it's safe. Even if they delete the app, it should be saved properly on the user's library, wherever the right folder places, because that is important, you know, ordering.
+```
+
+### Root-cause findings
+
+1. **Dev runtime source transport bug:** renderer dev mode (`http://127.0.0.1:4207`) was attempting raw `file://` playback URLs, which Chromium blocks from HTTP origins (`Not allowed to load local resource`), causing code-4 style unsupported/source failures.
+2. **Insufficient playback diagnostics/state handling:** source lifecycle had limited instrumentation; unsupported/blocked sources could fail without precise, actionable user guidance.
+3. **Ordering durability gap:** ordering persisted only in app user-data JSON; if app-data is wiped/recreated, ordering was not recoverable from linked folders.
+
+### Exact fixes implemented
+
+- Added **custom Electron media protocol** (`producer-media://`) with:
+  - explicit MIME mapping per extension
+  - byte-range support (206 responses)
+  - IPC resolver `resolvePlaybackSource(...)` returning `{ url, mimeType, exists, extension }`
+- Updated renderer playback pipeline to:
+  - resolve sources via `resolvePlaybackSource`
+  - instrument lifecycle events (`loadstart`, `canplay`, `error`, `stalled`, `waiting`, etc.) with `[producer-player:playback]` logs
+  - guard stale source/error races
+  - use timeout-based startup detection for stuck loads
+  - emit precise fallback guidance for unsupported codecs (WAV/MP3/AAC-M4A conversion guidance)
+- Hardened durability model for ordering:
+  - primary persisted state remains in user library app-data (`producer-player-electron-state.json`)
+  - added per-folder sidecar: `<linked-folder>/.producer-player/order-state.json`
+  - sidecar-based order restore path when app state has no order (reinstall/app-data reset scenarios)
+  - atomic JSON writes for persisted files
+- Added/updated tests:
+  - real codec matrix e2e (`wav`, `mp3`, `m4a`, `flac`, `aiff`) with play-or-graceful-fallback assertions
+  - dev-mode regression test verifying no `file://` local-resource block
+  - playback stress flow test: play/pause, rapid next/prev, rescan, relink, archived-old playback
+  - reinstall-like ordering restoration test via sidecar persistence
+
+### Validation + evidence (this run)
+
+- `npm run typecheck` ✅
+- `npm run build` ✅
+- `node --test packages/domain/test/file-library-service.integration.test.cjs` ✅ (5/5)
+- `npm run test -w @producer-player/e2e` ✅ (9/9)
+
+Artifacts:
+
+- Evidence matrix + logs: `artifacts/playback-code4-fix-2026-03-09/evidence.json`
+- Screenshots:
+  - `artifacts/playback-code4-fix-2026-03-09/production-wav.png`
+  - `artifacts/playback-code4-fix-2026-03-09/production-mp3.png`
+  - `artifacts/playback-code4-fix-2026-03-09/production-m4a.png`
+  - `artifacts/playback-code4-fix-2026-03-09/production-flac.png`
+  - `artifacts/playback-code4-fix-2026-03-09/production-aiff.png`
+  - `artifacts/playback-code4-fix-2026-03-09/dev-mode-wav.png`
+

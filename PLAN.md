@@ -1034,3 +1034,33 @@ In another sub agent, I need you to completely get rid of all the videos from th
 - Set up Developer ID signing for macOS.
 - Complete Apple notarization.
 - Publish a polished signed public release/download channel after those steps are done.
+
+---
+
+## Playlist export/import ordering feature (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Mon 2026-03-09 22:29 GMT
+
+```text
+Also, in another sub a new feature called export playlist and order. Actually, it should be icon buttons and export and import icon button, just small ones with tool tips on hover to let you export the current selection and ordering to JSON with all the metadata and import it with that same type. That'd be useful.
+```
+
+### Additional Ethan message (verbatim)
+
+**Timestamp:** Mon 2026-03-09 22:29 GMT
+
+```text
+And, of course, make sure that gets pushed to the end.
+```
+
+### Assistant implementation summary (this run)
+
+- Added compact export/import icon buttons to the Album header beside the existing Rescan/Organize controls.
+- Wired the buttons through Electron IPC + preload bridge so the app can save/load playlist-order JSON files through native dialogs (with test-path injection for E2E coverage).
+- Added a typed `producer-player.playlist-order` v1 JSON contract plus runtime validation for imported files.
+- Export now captures current folder/selection metadata, ordered song ids + normalized-title fallbacks, linked-folder metadata, and full song/version metadata for the current selection.
+- Import restores the saved ordering by song id with normalized-title fallback matching, then restores the saved selected song + playback version when possible.
+- Added Playwright Electron E2E coverage for successful export/import round-tripping plus invalid-JSON error handling.
+- Manually verified the built app shows the new compact icon buttons in the Album header, exports the JSON payload, and preserves the selected playback version metadata (`Alpha v1.wav`) in the exported document.

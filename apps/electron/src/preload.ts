@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
+  type PlaylistOrderExportV1,
   type ProducerPlayerBridge,
   type SnapshotListener,
   type TransportCommand,
@@ -42,6 +43,14 @@ const bridge: ProducerPlayerBridge = {
 
   async reorderSongs(songIds: string[]) {
     return ipcRenderer.invoke(IPC_CHANNELS.REORDER_SONGS, songIds);
+  },
+
+  async exportPlaylistOrder(payload: PlaylistOrderExportV1) {
+    return ipcRenderer.invoke(IPC_CHANNELS.EXPORT_PLAYLIST_ORDER, payload);
+  },
+
+  async importPlaylistOrder() {
+    return ipcRenderer.invoke(IPC_CHANNELS.IMPORT_PLAYLIST_ORDER);
   },
 
   async revealFile(filePath: string) {

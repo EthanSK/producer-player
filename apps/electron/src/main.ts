@@ -7,11 +7,12 @@ import { dirname, extname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import type {
   LibrarySnapshot,
+  PlaylistOrderExportV1,
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
   TransportCommand,
 } from '@producer-player/contracts';
-import { IPC_CHANNELS } from '@producer-player/contracts';
+import { IPC_CHANNELS, parsePlaylistOrderExport } from '@producer-player/contracts';
 import { FileLibraryService } from '@producer-player/domain';
 
 const DEFAULT_RENDERER_DEV_URL =
@@ -30,6 +31,9 @@ const IS_MAC_APP_STORE_SANDBOX = process.mas === true;
 const IS_TEST_MODE =
   process.env.APP_TEST_MODE === 'true' ||
   Boolean(process.env.PRODUCER_PLAYER_TEST_ID);
+
+const TEST_PLAYLIST_EXPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_EXPORT_PATH ?? null;
+const TEST_PLAYLIST_IMPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_IMPORT_PATH ?? null;
 
 const PLAYBACK_MIME_BY_EXTENSION: Record<string, string> = {
   wav: 'audio/wav',
@@ -1130,6 +1134,78 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.REORDER_SONGS, async (_event, songIds: string[]) => {
     return service.reorderSongs(Array.isArray(songIds) ? songIds : []);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.EXPORT_PLAYLIST_ORDER,
+    async (_event, payload: PlaylistOrderExportV1) => {
+      const validated = parsePlaylistOrderExport(payload);
+      const raw = `${JSON.stringify(validated, null, 2)}\n`;
+
+      if (IS_TEST_MODE && TEST_PLAYLIST_EXPORT_PATH) {
+        const resolvedPath = resolve(TEST_PLAYLIST_EXPORT_PATH);
+        await fs.mkdir(dirname(resolvedPath), { recursive: true });
+        await fs.writeFile(resolvedPath, raw, 'utf8');
+        return { filePath: resolvedPath };
+      }
+
+      const folderSlug = validated.selection.selectedFolderName
+        ? validated.selection.selectedFolderName.replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+        : 'playlist';
+
+      const defaultPath = `producer-player-${folderSlug}-order.json`;
+
+      const result = mainWindow
+        ? await dialog.showSaveDialog(mainWindow, {
+            title: 'Export playlist ordering',
+            defaultPath,
+            filters: [{ name: 'JSON', extensions: ['json'] }],
+          })
+        : await dialog.showSaveDialog({
+            title: 'Export playlist ordering',
+            defaultPath,
+            filters: [{ name: 'JSON', extensions: ['json'] }],
+          });
+
+      if (result.canceled || !result.filePath) {
+        return { filePath: null };
+      }
+
+      await fs.writeFile(result.filePath, raw, 'utf8');
+      return { filePath: result.filePath };
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.IMPORT_PLAYLIST_ORDER, async () => {
+    if (IS_TEST_MODE && TEST_PLAYLIST_IMPORT_PATH) {
+      const resolvedPath = resolve(TEST_PLAYLIST_IMPORT_PATH);
+      const raw = await fs.readFile(resolvedPath, 'utf8');
+      return parsePlaylistOrderExport(JSON.parse(raw));
+    }
+
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, {
+          title: 'Import playlist ordering',
+          properties: ['openFile'],
+          filters: [{ name: 'JSON', extensions: ['json'] }],
+        })
+      : await dialog.showOpenDialog({
+          title: 'Import playlist ordering',
+          properties: ['openFile'],
+          filters: [{ name: 'JSON', extensions: ['json'] }],
+        });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    const filePath = result.filePaths[0];
+    if (!filePath) {
+      return null;
+    }
+
+    const raw = await fs.readFile(filePath, 'utf8');
+    return parsePlaylistOrderExport(JSON.parse(raw));
   });
 
   ipcMain.handle(IPC_CHANNELS.OPEN_IN_FINDER, async (_event, filePath: string) => {

@@ -20,13 +20,17 @@
     "clean": "rimraf \"apps/*/dist\" \"packages/*/dist\"",
     "release:desktop:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && electron-builder --mac zip --publish never",
     "release:desktop:linux": "npm run build && electron-builder --linux zip --publish never",
-    "release:desktop:win": "npm run build && electron-builder --win zip --publish never"
+    "release:desktop:win": "npm run build && electron-builder --win zip --publish never",
+    "icon:build": "./scripts/generate-app-icon.sh"
   },
   "build": {
     "appId": "com.ethansk.producerplayer",
     "productName": "Producer Player",
     "electronVersion": "40.6.1",
     "asar": true,
+    "asarUnpack": [
+      "apps/electron/dist/bin/**"
+    ],
     "directories": {
       "output": "release"
     },
@@ -39,6 +43,7 @@
       "target": [
         "zip"
       ],
+      "icon": "assets/icon/ProducerPlayer.icns",
       "artifactName": "Producer-Player-${version}-mac-${arch}.${ext}"
     },
     "linux": {

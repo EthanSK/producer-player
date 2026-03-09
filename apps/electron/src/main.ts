@@ -106,52 +106,6 @@ function registerGlobalMediaShortcuts(): void {
   }
 }
 
-async function runOpenCommand(args: string[]): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn('open', args, {
-      stdio: ['ignore', 'ignore', 'pipe'],
-    });
-
-    let stderr = '';
-
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', (error) => {
-      reject(error);
-    });
-
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(new Error(stderr.trim() || `open exited with code ${String(code)}`));
-    });
-  });
-}
-
-async function openFinderWindowAtPath(pathToOpen: string): Promise<boolean> {
-  // macOS Spaces placement is Finder-managed; from Electron we can only nudge behavior.
-  // `open -g -a Finder <path>` tends to open a new window without stealing focus/spaces.
-  if (process.platform !== 'darwin') {
-    return false;
-  }
-
-  try {
-    await runOpenCommand(['-g', '-a', 'Finder', pathToOpen]);
-    return true;
-  } catch (error: unknown) {
-    console.warn('[producer-player:finder] macOS Finder open command failed', {
-      pathToOpen,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-}
-
 function isDevelopment(): boolean {
   return process.env.ELECTRON_DEV === 'true';
 }
@@ -1179,30 +1133,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.OPEN_IN_FINDER, async (_event, filePath: string) => {
-    const resolvedPath = resolve(filePath);
-
-    let stats;
-    try {
-      stats = await fs.stat(resolvedPath);
-    } catch {
-      throw new Error(`Path not accessible: ${resolvedPath}`);
-    }
-
-    const targetDirectory = stats.isDirectory() ? resolvedPath : dirname(resolvedPath);
-
-    if (await openFinderWindowAtPath(targetDirectory)) {
-      return;
-    }
-
-    if (stats.isDirectory()) {
-      const error = await shell.openPath(resolvedPath);
-      if (error) {
-        throw new Error(error);
-      }
-      return;
-    }
-
-    shell.showItemInFolder(resolvedPath);
+    shell.showItemInFolder(resolve(filePath));
   });
 
   ipcMain.handle(IPC_CHANNELS.OPEN_FOLDER, async (_event, folderPath: string) => {
@@ -1217,10 +1148,6 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
     if (!stats.isDirectory()) {
       throw new Error(`Path is not a folder: ${resolvedPath}`);
-    }
-
-    if (await openFinderWindowAtPath(resolvedPath)) {
-      return;
     }
 
     const error = await shell.openPath(resolvedPath);

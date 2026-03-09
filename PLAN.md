@@ -901,3 +901,34 @@ Also some more improvements. We should always remember the position in the timel
 - `npm run test -w @producer-player/e2e -- src/library-linking.spec.ts src/playback-runtime.spec.ts` ✅ (13/13)
 - Fresh screenshot refreshed:
   - `docs/assets/readme/app-library-current.png`
+
+#### Ethan message (verbatim)
+
+**Timestamp:** Mon 2026-03-09 18:59 GMT
+
+```text
+What are you doing? My thing is like a tune. Okay. So few issues. Open and finder just isn't working at all. We'll just do the door normal default open and finder behavior now, I guess, if you couldn't figure it out or investigate. Also, Yeah. Sure. Other than that, it looks good. Just do that. Push it.
+```
+
+## Final finder reliability fix (post-follow-up)
+
+### Root cause
+
+- The custom Finder workaround (`open -g -a Finder <path>`) introduced a non-standard path that was less reliable than Electron’s default behavior in this environment.
+- Ethan explicitly requested reliability-first default behavior over Spaces-specific experimentation.
+
+### Fix applied
+
+- Reverted `Open in Finder` handlers to default Electron behavior:
+  - `OPEN_IN_FINDER` now uses `shell.showItemInFolder(resolve(filePath))`.
+  - `OPEN_FOLDER` now uses `shell.openPath(resolvedPath)` after directory validation.
+- Removed custom Finder-opening helper path from the handler flow.
+
+### Manual verification
+
+- Rebuilt Electron main process.
+- Launched app runtime and manually exercised both APIs against real temp paths:
+  - `window.producerPlayer.openFolder(folderPath)` ✅
+  - `window.producerPlayer.revealFile(filePath)` ✅
+- Both calls resolved without error and triggered Finder open/reveal behavior via default shell routes.
+

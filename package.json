@@ -69,7 +69,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "cross-env": "^7.0.3",
+    "cross-env": "^10.1.0",
     "electron-builder": "^26.0.12",
     "rimraf": "^6.0.1",
     "typescript": "^5.8.2",

@@ -9,6 +9,7 @@ import type {
 } from '@producer-player/contracts';
 
 type RepeatMode = 'off' | 'one' | 'all';
+type DragOverPosition = 'before' | 'after';
 
 const EMPTY_SNAPSHOT: LibrarySnapshot = {
   linkedFolders: [],
@@ -26,6 +27,7 @@ const EMPTY_ENVIRONMENT: ProducerPlayerEnvironment = {
   isMacAppStoreSandboxed: false,
   canLinkFolderByPath: true,
   canRequestSecurityScopedBookmarks: false,
+  isTestMode: false,
 };
 
 const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
@@ -35,6 +37,86 @@ const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
 };
 
 const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
+const SONG_PLAYHEAD_STORAGE_KEY = 'producer-player-song-playheads-v1';
+const PLAYHEAD_END_RESET_THRESHOLD_SECONDS = 0.8;
+
+function readPersistedSongPlayheads(): Map<string, number> {
+  if (typeof window === 'undefined') {
+    return new Map();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SONG_PLAYHEAD_STORAGE_KEY);
+    if (!raw) {
+      return new Map();
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, number>;
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return new Map();
+    }
+
+    const entries = Object.entries(parsed).filter(
+      (entry): entry is [string, number] =>
+        typeof entry[0] === 'string' && Number.isFinite(entry[1]) && entry[1] > 0
+    );
+
+    return new Map(entries);
+  } catch {
+    return new Map();
+  }
+}
+
+function persistSongPlayheads(playheads: Map<string, number>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const payload = Object.fromEntries(
+    Array.from(playheads.entries()).filter(([, seconds]) =>
+      Number.isFinite(seconds) && seconds > 0
+    )
+  );
+
+  try {
+    window.localStorage.setItem(SONG_PLAYHEAD_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore persistence failures (private mode/full storage).
+  }
+}
+
+function reorderSongIds(
+  songIds: string[],
+  dragSongId: string,
+  hoveredSongId: string,
+  position: DragOverPosition
+): string[] {
+  if (dragSongId === hoveredSongId) {
+    return songIds;
+  }
+
+  const sourceIndex = songIds.indexOf(dragSongId);
+  const targetIndex = songIds.indexOf(hoveredSongId);
+
+  if (sourceIndex === -1 || targetIndex === -1) {
+    return songIds;
+  }
+
+  const withoutSource = [...songIds];
+  withoutSource.splice(sourceIndex, 1);
+
+  const insertionTargetIndex = withoutSource.indexOf(hoveredSongId);
+  if (insertionTargetIndex === -1) {
+    return songIds;
+  }
+
+  const insertionIndex =
+    position === 'after' ? insertionTargetIndex + 1 : insertionTargetIndex;
+
+  withoutSource.splice(insertionIndex, 0, dragSongId);
+  return withoutSource;
+}
 
 function describeMediaErrorCode(code: number | undefined): string {
   switch (code) {
@@ -146,7 +228,7 @@ export function App(): JSX.Element {
   );
   const [dragSongId, setDragSongId] = useState<string | null>(null);
   const [dragOverSongId, setDragOverSongId] = useState<string | null>(null);
-  const [dragOverPosition, setDragOverPosition] = useState<'before' | 'after'>('before');
+  const [dragOverPosition, setDragOverPosition] = useState<DragOverPosition>('before');
   const [folderPathInput, setFolderPathInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -169,6 +251,10 @@ export function App(): JSX.Element {
   const sourceRequestIdRef = useRef(0);
   const playbackSourceSupportRef = useRef<'unknown' | 'maybe' | 'probably' | 'no'>('unknown');
   const playbackSourceReadyRef = useRef(false);
+  const lastLoadedSongIdRef = useRef<string | null>(null);
+  const playbackPositionBySongIdRef = useRef<Map<string, number>>(readPersistedSongPlayheads());
+  const pendingRestoreTimeRef = useRef<number | null>(null);
+  const dragTargetRef = useRef<{ songId: string; position: DragOverPosition } | null>(null);
   const moveInQueueRef = useRef<(
     direction: 1 | -1,
     options: { wrap: boolean; autoplay: boolean }
@@ -199,6 +285,94 @@ export function App(): JSX.Element {
   useEffect(() => {
     playbackSourceReadyRef.current = playbackSourceReady;
   }, [playbackSourceReady]);
+
+  useEffect(() => {
+    return () => {
+      persistSongPlayheads(playbackPositionBySongIdRef.current);
+    };
+  }, []);
+
+  function rememberSongPlayhead(
+    songId: string | null,
+    seconds: number,
+    options: { durationSeconds?: number; forceResetAtEnd?: boolean } = {}
+  ): void {
+    if (!songId || !Number.isFinite(seconds) || seconds < 0) {
+      return;
+    }
+
+    const duration = options.durationSeconds;
+    const isNearEnd =
+      Number.isFinite(duration) &&
+      typeof duration === 'number' &&
+      duration > 0 &&
+      seconds >= Math.max(duration - PLAYHEAD_END_RESET_THRESHOLD_SECONDS, 0);
+
+    const nextSeconds =
+      options.forceResetAtEnd && isNearEnd ? 0 : Math.max(0, Math.min(seconds, duration ?? seconds));
+
+    if (nextSeconds <= 0.01) {
+      playbackPositionBySongIdRef.current.delete(songId);
+    } else {
+      playbackPositionBySongIdRef.current.set(songId, nextSeconds);
+    }
+
+    persistSongPlayheads(playbackPositionBySongIdRef.current);
+  }
+
+  function rememberCurrentSongPlayhead(options: { forceResetAtEnd?: boolean } = {}): void {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    rememberSongPlayhead(lastLoadedSongIdRef.current, audio.currentTime, {
+      durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
+      forceResetAtEnd: options.forceResetAtEnd,
+    });
+  }
+
+  function deriveDragOverPosition(event: DragEvent<HTMLElement>): DragOverPosition {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const offsetY = event.clientY - bounds.top;
+    return offsetY >= bounds.height / 2 ? 'after' : 'before';
+  }
+
+  function restorePendingPlayhead(audio: HTMLAudioElement): void {
+    const pendingRestoreTime = pendingRestoreTimeRef.current;
+
+    if (pendingRestoreTime === null || !Number.isFinite(pendingRestoreTime) || pendingRestoreTime <= 0) {
+      pendingRestoreTimeRef.current = null;
+      return;
+    }
+
+    const duration = Number.isFinite(audio.duration) ? audio.duration : null;
+    const clampedRestoreTime =
+      duration && duration > 0
+        ? Math.min(Math.max(pendingRestoreTime, 0), Math.max(duration - 0.05, 0))
+        : Math.max(pendingRestoreTime, 0);
+
+    if (clampedRestoreTime <= 0) {
+      pendingRestoreTimeRef.current = null;
+      return;
+    }
+
+    try {
+      audio.currentTime = clampedRestoreTime;
+      setCurrentTimeSeconds(clampedRestoreTime);
+      rememberSongPlayhead(lastLoadedSongIdRef.current, clampedRestoreTime, {
+        durationSeconds: duration ?? undefined,
+      });
+
+      logPlaybackEvent('playhead-restored', {
+        restoredSeconds: clampedRestoreTime,
+      });
+    } catch {
+      // Ignore transient seek errors while metadata is still settling.
+    }
+
+    pendingRestoreTimeRef.current = null;
+  }
 
   function logPlaybackEvent(
     event: string,
@@ -273,13 +447,22 @@ export function App(): JSX.Element {
     audioRef.current = audio;
 
     const onTimeUpdate = () => {
-      setCurrentTimeSeconds(audio.currentTime || 0);
+      const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+      setCurrentTimeSeconds(currentTime);
+
+      const activeSongId = lastLoadedSongIdRef.current;
+      if (activeSongId && currentTime >= 0) {
+        playbackPositionBySongIdRef.current.set(activeSongId, currentTime);
+      }
     };
 
     const onLoadedMetadata = () => {
-      setDurationSeconds(Number.isFinite(audio.duration) ? audio.duration : 0);
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      setDurationSeconds(duration);
+      restorePendingPlayhead(audio);
+
       logPlaybackEvent('loadedmetadata', {
-        durationSeconds: Number.isFinite(audio.duration) ? audio.duration : null,
+        durationSeconds: duration || null,
       });
     };
 
@@ -291,6 +474,7 @@ export function App(): JSX.Element {
     const onCanPlay = () => {
       setPlaybackSourceReady(true);
       clearPlaybackLoadTimeout();
+      restorePendingPlayhead(audio);
       logPlaybackEvent('canplay');
 
       if (!playOnNextLoadRef.current) {
@@ -321,11 +505,15 @@ export function App(): JSX.Element {
 
     const onPause = () => {
       setIsPlaying(false);
-      logPlaybackEvent('pause');
+      logPlaybackEvent('pause', {
+        currentTimeSeconds: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+      });
     };
 
     const onEnded = () => {
       const mode = repeatModeRef.current;
+      rememberCurrentSongPlayhead({ forceResetAtEnd: true });
+
       logPlaybackEvent('ended', {
         repeatMode: mode,
       });
@@ -490,20 +678,51 @@ export function App(): JSX.Element {
     }
   }, [snapshot.linkedFolders, selectedFolderId]);
 
-  const songs = useMemo(() => {
+  const { songs, matchedVersionNamesBySongId } = useMemo(() => {
     const query = searchText.trim().toLowerCase();
+    const matchedVersions = new Map<string, string[]>();
 
     if (query.length === 0) {
-      return snapshot.songs;
+      return {
+        songs: snapshot.songs,
+        matchedVersionNamesBySongId: matchedVersions,
+      };
     }
 
-    return snapshot.songs.filter((song) => {
-      return (
-        song.title.toLowerCase().includes(query) ||
-        song.normalizedTitle.toLowerCase().includes(query) ||
-        song.versions.some((version) => version.fileName.toLowerCase().includes(query))
+    const filteredSongs = snapshot.songs.filter((song) => {
+      const matchingVersionNames = Array.from(
+        new Set(
+          song.versions
+            .filter((version) => {
+              const searchableFields = [
+                version.fileName,
+                version.filePath,
+                version.extension,
+              ];
+
+              return searchableFields.some((field) =>
+                field.toLowerCase().includes(query)
+              );
+            })
+            .map((version) => version.fileName)
+        )
       );
+
+      const matchesSongText =
+        song.title.toLowerCase().includes(query) ||
+        song.normalizedTitle.toLowerCase().includes(query);
+
+      if (matchingVersionNames.length > 0) {
+        matchedVersions.set(song.id, matchingVersionNames);
+      }
+
+      return matchesSongText || matchingVersionNames.length > 0;
     });
+
+    return {
+      songs: filteredSongs,
+      matchedVersionNamesBySongId: matchedVersions,
+    };
   }, [searchText, snapshot.songs]);
 
   useEffect(() => {
@@ -547,12 +766,17 @@ export function App(): JSX.Element {
   const selectedPlaybackVersion =
     snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
   const selectedPlaybackFilePath = selectedPlaybackVersion?.filePath ?? null;
+  const selectedPlaybackSongId = selectedPlaybackVersion?.songId ?? null;
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) {
       return;
     }
+
+    rememberSongPlayhead(lastLoadedSongIdRef.current, audio.currentTime, {
+      durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
+    });
 
     let cancelled = false;
     const requestId = sourceRequestIdRef.current + 1;
@@ -565,7 +789,9 @@ export function App(): JSX.Element {
     setPlaybackSourceReady(false);
     setPlaybackSourceSupport('unknown');
 
-    if (!selectedPlaybackVersionId || !selectedPlaybackFilePath) {
+    if (!selectedPlaybackVersionId || !selectedPlaybackFilePath || !selectedPlaybackSongId) {
+      pendingRestoreTimeRef.current = null;
+      lastLoadedSongIdRef.current = null;
       playOnNextLoadRef.current = false;
       setPlaybackSource(null);
       audio.pause();
@@ -576,6 +802,14 @@ export function App(): JSX.Element {
       });
       return;
     }
+
+    const rememberedPosition =
+      playbackPositionBySongIdRef.current.get(selectedPlaybackSongId) ?? null;
+
+    pendingRestoreTimeRef.current =
+      rememberedPosition !== null && Number.isFinite(rememberedPosition) && rememberedPosition > 0
+        ? rememberedPosition
+        : null;
 
     window.producerPlayer
       .resolvePlaybackSource(selectedPlaybackFilePath)
@@ -600,6 +834,7 @@ export function App(): JSX.Element {
         }
 
         audio.pause();
+        lastLoadedSongIdRef.current = selectedPlaybackSongId;
         audio.removeAttribute('src');
         audio.src = source.url;
 
@@ -620,6 +855,7 @@ export function App(): JSX.Element {
           url: source.url,
           mimeType: source.mimeType,
           supportHint,
+          pendingRestoreTimeSeconds: pendingRestoreTimeRef.current,
         });
 
         audio.load();
@@ -641,48 +877,9 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [selectedPlaybackFilePath, selectedPlaybackVersionId]);
+  }, [selectedPlaybackFilePath, selectedPlaybackSongId, selectedPlaybackVersionId]);
 
   const canReorderSongs = searchText.trim().length === 0;
-
-  const songsById = useMemo(() => {
-    return new Map(songs.map((song) => [song.id, song]));
-  }, [songs]);
-
-  const previewSongIds = useMemo(() => {
-    const ids = songs.map((song) => song.id);
-
-    if (!canReorderSongs || !dragSongId || !dragOverSongId || dragSongId === dragOverSongId) {
-      return ids;
-    }
-
-    const sourceIndex = ids.indexOf(dragSongId);
-    const targetIndex = ids.indexOf(dragOverSongId);
-
-    if (sourceIndex === -1 || targetIndex === -1) {
-      return ids;
-    }
-
-    const withoutSource = [...ids];
-    withoutSource.splice(sourceIndex, 1);
-
-    const insertionTargetIndex = withoutSource.indexOf(dragOverSongId);
-    if (insertionTargetIndex === -1) {
-      return ids;
-    }
-
-    const insertionIndex =
-      dragOverPosition === 'after' ? insertionTargetIndex + 1 : insertionTargetIndex;
-
-    withoutSource.splice(insertionIndex, 0, dragSongId);
-    return withoutSource;
-  }, [canReorderSongs, dragOverPosition, dragOverSongId, dragSongId, songs]);
-
-  const previewSongs = useMemo(() => {
-    return previewSongIds
-      .map((songId) => songsById.get(songId))
-      .filter((song): song is SongWithVersions => Boolean(song));
-  }, [previewSongIds, songsById]);
 
   const playbackQueue = useMemo(() => {
     const queue: SongVersion[] = [];
@@ -733,6 +930,7 @@ export function App(): JSX.Element {
       }
 
       playOnNextLoadRef.current = autoplay;
+      rememberCurrentSongPlayhead();
       setSelectedSongId(nextVersion.songId);
       setSelectedPlaybackVersionId(nextVersion.id);
       return true;
@@ -848,6 +1046,15 @@ export function App(): JSX.Element {
     await runSnapshotTask(() => window.producerPlayer.setAutoMoveOld(enabled));
   }
 
+  function buildSongOrderAfterDrop(
+    draggedSongId: string,
+    targetSongId: string,
+    position: DragOverPosition
+  ): string[] {
+    const currentOrder = songs.map((song) => song.id);
+    return reorderSongIds(currentOrder, draggedSongId, targetSongId, position);
+  }
+
   async function handleReorderSongs(nextOrder: string[]): Promise<void> {
     const currentOrder = snapshot.songs.map((song) => song.id);
     if (arraysEqual(currentOrder, nextOrder)) {
@@ -858,6 +1065,7 @@ export function App(): JSX.Element {
   }
 
   function clearDragState(): void {
+    dragTargetRef.current = null;
     setDragSongId(null);
     setDragOverSongId(null);
     setDragOverPosition('before');
@@ -874,6 +1082,11 @@ export function App(): JSX.Element {
 
   function handleSongRowSelect(songId: string): void {
     const shouldKeepPlaying = shouldAutoplayOnTransport();
+
+    if (songId !== selectedSongId) {
+      rememberCurrentSongPlayhead();
+    }
+
     setSelectedSongId(songId);
 
     if (shouldKeepPlaying) {
@@ -883,19 +1096,18 @@ export function App(): JSX.Element {
   }
 
   function updateDragOverPosition(
-    event: DragEvent<HTMLButtonElement>,
+    event: DragEvent<HTMLElement>,
     hoveredSongId: string
   ): void {
     if (!canReorderSongs || !dragSongId || dragSongId === hoveredSongId) {
+      dragTargetRef.current = null;
       setDragOverSongId(null);
       return;
     }
 
     event.preventDefault();
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const offsetY = event.clientY - bounds.top;
-    const nextPosition = offsetY >= bounds.height / 2 ? 'after' : 'before';
+    const nextPosition = deriveDragOverPosition(event);
 
     if (dragOverSongId !== hoveredSongId) {
       setDragOverSongId(hoveredSongId);
@@ -905,7 +1117,78 @@ export function App(): JSX.Element {
       setDragOverPosition(nextPosition);
     }
 
+    dragTargetRef.current = {
+      songId: hoveredSongId,
+      position: nextPosition,
+    };
+
     event.dataTransfer.dropEffect = 'move';
+  }
+
+  async function handleDropOnSongRow(
+    event: DragEvent<HTMLElement>,
+    hoveredSongId: string
+  ): Promise<void> {
+    event.preventDefault();
+
+    if (!canReorderSongs) {
+      clearDragState();
+      return;
+    }
+
+    const draggedSongId = dragSongId;
+    if (!draggedSongId) {
+      clearDragState();
+      return;
+    }
+
+    let dropTarget = dragTargetRef.current;
+
+    if (!dropTarget || dropTarget.songId !== hoveredSongId) {
+      dropTarget = {
+        songId: hoveredSongId,
+        position: deriveDragOverPosition(event),
+      };
+    }
+
+    const nextOrder = buildSongOrderAfterDrop(
+      draggedSongId,
+      dropTarget.songId,
+      dropTarget.position
+    );
+
+    await handleReorderSongs(nextOrder);
+    clearDragState();
+  }
+
+  async function handleDropOnMainList(event: DragEvent<HTMLUListElement>): Promise<void> {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (!canReorderSongs) {
+      clearDragState();
+      return;
+    }
+
+    const draggedSongId = dragSongId;
+    const dropTarget = dragTargetRef.current;
+
+    if (!draggedSongId || !dropTarget) {
+      clearDragState();
+      return;
+    }
+
+    const nextOrder = buildSongOrderAfterDrop(
+      draggedSongId,
+      dropTarget.songId,
+      dropTarget.position
+    );
+
+    await handleReorderSongs(nextOrder);
+    clearDragState();
   }
 
   async function handleTogglePlayback(): Promise<void> {
@@ -978,6 +1261,7 @@ export function App(): JSX.Element {
 
     playOnNextLoadRef.current = false;
     clearPlaybackLoadTimeout();
+    rememberCurrentSongPlayhead();
     audio.pause();
   }
 
@@ -989,6 +1273,10 @@ export function App(): JSX.Element {
 
     audio.currentTime = nextTimeSeconds;
     setCurrentTimeSeconds(nextTimeSeconds);
+
+    rememberSongPlayhead(lastLoadedSongIdRef.current, nextTimeSeconds, {
+      durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
+    });
   }
 
   function handlePreviousTrack(): void {
@@ -1030,23 +1318,31 @@ export function App(): JSX.Element {
   return (
     <div className="app-shell" data-testid="app-shell">
       <aside className="panel panel-left">
-        <header className="panel-header">
-          <h2>Watch Folders</h2>
-          <div className="actions">
-            <button
-              type="button"
-              onClick={() => {
-                void handleOpenFolderDialog();
-              }}
-              data-testid="link-folder-dialog-button"
-              title="Choose a folder to watch for exported audio files."
+        <section className="folder-add-cta">
+          <button
+            type="button"
+            className="add-folder-primary"
+            onClick={() => {
+              void handleOpenFolderDialog();
+            }}
+            data-testid="link-folder-dialog-button"
+            title="Choose a folder to watch for exported audio files."
+          >
+            Add Folder…
+          </button>
+          <p className="muted">Link folders to keep album order and version history in sync.</p>
+          {environment.isMacAppStoreSandboxed ? (
+            <p
+              className="muted"
+              data-testid="path-linker-disabled-message"
+              title="In Mac App Store sandbox builds, folder access must come from Add Folder so the app can request a security-scoped bookmark."
             >
-              Add Folder…
-            </button>
-          </div>
-        </header>
+              Mac App Store build: use Add Folder… so Producer Player can retain sandbox access.
+            </p>
+          ) : null}
+        </section>
 
-        {environment.canLinkFolderByPath ? (
+        {environment.isTestMode && environment.canLinkFolderByPath ? (
           <div className="path-linker">
             <input
               data-testid="link-folder-path-input"
@@ -1069,26 +1365,18 @@ export function App(): JSX.Element {
               Link Path
             </button>
           </div>
-        ) : (
-          <p
-            className="muted"
-            data-testid="path-linker-disabled-message"
-            title="In Mac App Store sandbox builds, folder access must come from Add Folder so the app can request a security-scoped bookmark."
-          >
-            Mac App Store build: use Add Folder… so Producer Player can retain sandbox access.
-          </p>
-        )}
+        ) : null}
 
         <section
           className="naming-guide"
           data-testid="naming-guide"
           title="File names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
         >
-          <p>
+          <p className="naming-guide-copy">
             <span className="naming-guide-icon" aria-hidden="true">
-              ℹ︎
-            </span>{' '}
-            File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.
+              💡
+            </span>
+            <span>File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.</span>
           </p>
         </section>
 
@@ -1161,7 +1449,7 @@ export function App(): JSX.Element {
             </li>
           ))}
           {snapshot.linkedFolders.length === 0 && (
-            <li className="empty-state">No watch folders linked yet.</li>
+            <li className="empty-state">No folders linked yet.</li>
           )}
         </ul>
       </aside>
@@ -1204,7 +1492,7 @@ export function App(): JSX.Element {
             onChange={(event) => setSearchText(event.target.value)}
             placeholder="Search tracks or versions"
             data-testid="search-input"
-            title="Search by raw file name, grouped title, or version file name."
+            title="Search by track title, version name, extension, or archived old/ paths."
           />
         </div>
 
@@ -1216,8 +1504,22 @@ export function App(): JSX.Element {
           Drag tracks to reorder — track positions are preserved.
         </p>
 
-        <ul className="main-list" data-testid="main-list">
-          {previewSongs.map((song, index) => {
+        <ul
+          className={`main-list ${dragSongId ? 'drag-active' : ''}`}
+          data-testid="main-list"
+          onDragOver={(event) => {
+            if (!canReorderSongs || !dragSongId) {
+              return;
+            }
+
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+          }}
+          onDrop={(event) => {
+            void handleDropOnMainList(event);
+          }}
+        >
+          {songs.map((song, index) => {
             const showDropBefore =
               dragSongId !== null &&
               dragOverSongId === song.id &&
@@ -1230,12 +1532,34 @@ export function App(): JSX.Element {
               dragOverPosition === 'after' &&
               dragSongId !== song.id;
 
+            const matchedVersionNames = matchedVersionNamesBySongId.get(song.id) ?? [];
+            const showMatchedVersions =
+              searchText.trim().length > 0 && matchedVersionNames.length > 0;
+
+            const secondaryRowText = showMatchedVersions
+              ? `Matched versions: ${matchedVersionNames.slice(0, 2).join(', ')}${
+                  matchedVersionNames.length > 2
+                    ? ` (+${matchedVersionNames.length - 2} more)`
+                    : ''
+                }`
+              : `${song.versions.length} version(s)`;
+
             return (
               <li
                 key={song.id}
                 className={`main-list-item ${showDropBefore ? 'drop-preview-before' : ''} ${
                   showDropAfter ? 'drop-preview-after' : ''
                 }`}
+                onDragEnter={(event) => {
+                  updateDragOverPosition(event, song.id);
+                }}
+                onDragOver={(event) => {
+                  updateDragOverPosition(event, song.id);
+                }}
+                onDrop={(event) => {
+                  event.stopPropagation();
+                  void handleDropOnSongRow(event, song.id);
+                }}
               >
                 <span className="track-number" aria-label={`Track ${index + 1}`}>
                   {index + 1}
@@ -1254,35 +1578,15 @@ export function App(): JSX.Element {
                       return;
                     }
 
+                    event.currentTarget.blur();
                     setDragSongId(song.id);
+                    dragTargetRef.current = null;
                     setDragOverSongId(null);
                     setDragOverPosition('before');
                     event.dataTransfer.effectAllowed = 'move';
                     event.dataTransfer.setData('text/plain', song.id);
                   }}
-                  onDragOver={(event) => {
-                    updateDragOverPosition(event, song.id);
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
 
-                    if (!canReorderSongs) {
-                      clearDragState();
-                      return;
-                    }
-
-                    void handleReorderSongs(previewSongIds);
-                    clearDragState();
-                  }}
-                  onDragLeave={(event) => {
-                    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                      return;
-                    }
-
-                    if (dragOverSongId === song.id) {
-                      setDragOverSongId(null);
-                    }
-                  }}
                   onDragEnd={() => {
                     clearDragState();
                   }}
@@ -1294,14 +1598,14 @@ export function App(): JSX.Element {
                 >
                   <div>
                     <strong>{getSongDisplayFileName(song)}</strong>
-                    <p className="muted">{song.versions.length} version(s)</p>
+                    <p className="muted">{secondaryRowText}</p>
                   </div>
                   <span className="muted">{formatDate(song.latestExportAt)}</span>
                 </button>
               </li>
             );
           })}
-          {previewSongs.length === 0 && (
+          {songs.length === 0 && (
             <li className="empty-state">No tracks found in linked folders.</li>
           )}
         </ul>

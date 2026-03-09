@@ -79,6 +79,7 @@ export interface ProducerPlayerEnvironment {
   isMacAppStoreSandboxed: boolean;
   canLinkFolderByPath: boolean;
   canRequestSecurityScopedBookmarks: boolean;
+  isTestMode: boolean;
 }
 
 export const IPC_CHANNELS = {

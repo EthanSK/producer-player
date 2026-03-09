@@ -118,12 +118,12 @@ Monorepo-ish workspace with typed boundaries:
 
 ### What the current vertical slice includes
 
-- Folder linking (dialog + direct path input)
+- Folder linking focused on a primary **Add Folder…** control (plus test-only path hook for E2E automation)
 - Folder watch + auto refresh on export changes
 - Logical song grouping skeleton (normalization + versions)
 - Tri-panel UI direction:
-  - left: watch folders + song shortcuts
-  - middle: library list with search and songs/versions toggle
+  - left: Add Folder controls + linked folder management
+  - middle: library list with search, drag ordering, and playback queue
   - right: inspector with version history + status
 - Typed IPC bridge and shared contracts package
 
@@ -155,7 +155,7 @@ Tradeoffs:
 
 ![Producer Player library with album ordering, track numbers, and archived old versions](docs/assets/readme/app-library-current.png)
 
-This screenshot shows a realistic fixture with album order + track numbers in the list, drag-and-drop ordering, and archived exports in `old/` inside version history.
+This screenshot shows the current desktop UI with the centered Add Folder control, naming hint panel, stable track rows with drag-and-drop ordering, and archived exports in `old/` inside version history.
 
 ### App icon
 

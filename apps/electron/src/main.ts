@@ -29,7 +29,7 @@ const IS_MAC_APP_STORE_SANDBOX = process.mas === true;
 
 const IS_TEST_MODE =
   process.env.APP_TEST_MODE === 'true' ||
-  typeof process.env.PRODUCER_PLAYER_TEST_ID === 'string';
+  Boolean(process.env.PRODUCER_PLAYER_TEST_ID);
 
 const PLAYBACK_MIME_BY_EXTENSION: Record<string, string> = {
   wav: 'audio/wav',
@@ -103,6 +103,52 @@ function registerGlobalMediaShortcuts(): void {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+}
+
+async function runOpenCommand(args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('open', args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (error) => {
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(stderr.trim() || `open exited with code ${String(code)}`));
+    });
+  });
+}
+
+async function openFinderWindowAtPath(pathToOpen: string): Promise<boolean> {
+  // macOS Spaces placement is Finder-managed; from Electron we can only nudge behavior.
+  // `open -g -a Finder <path>` tends to open a new window without stealing focus/spaces.
+  if (process.platform !== 'darwin') {
+    return false;
+  }
+
+  try {
+    await runOpenCommand(['-g', '-a', 'Finder', pathToOpen]);
+    return true;
+  } catch (error: unknown) {
+    console.warn('[producer-player:finder] macOS Finder open command failed', {
+      pathToOpen,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
   }
 }
 
@@ -908,6 +954,7 @@ function buildEnvironmentInfo(): ProducerPlayerEnvironment {
     isMacAppStoreSandboxed: IS_MAC_APP_STORE_SANDBOX,
     canLinkFolderByPath: !IS_MAC_APP_STORE_SANDBOX,
     canRequestSecurityScopedBookmarks: IS_MAC_APP_STORE_SANDBOX,
+    isTestMode: IS_TEST_MODE,
   };
 }
 
@@ -1132,7 +1179,30 @@ function registerIpcHandlers(service: FileLibraryService): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.OPEN_IN_FINDER, async (_event, filePath: string) => {
-    shell.showItemInFolder(filePath);
+    const resolvedPath = resolve(filePath);
+
+    let stats;
+    try {
+      stats = await fs.stat(resolvedPath);
+    } catch {
+      throw new Error(`Path not accessible: ${resolvedPath}`);
+    }
+
+    const targetDirectory = stats.isDirectory() ? resolvedPath : dirname(resolvedPath);
+
+    if (await openFinderWindowAtPath(targetDirectory)) {
+      return;
+    }
+
+    if (stats.isDirectory()) {
+      const error = await shell.openPath(resolvedPath);
+      if (error) {
+        throw new Error(error);
+      }
+      return;
+    }
+
+    shell.showItemInFolder(resolvedPath);
   });
 
   ipcMain.handle(IPC_CHANNELS.OPEN_FOLDER, async (_event, folderPath: string) => {
@@ -1147,6 +1217,10 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
     if (!stats.isDirectory()) {
       throw new Error(`Path is not a folder: ${resolvedPath}`);
+    }
+
+    if (await openFinderWindowAtPath(resolvedPath)) {
+      return;
     }
 
     const error = await shell.openPath(resolvedPath);

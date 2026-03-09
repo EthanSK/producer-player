@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  DisplayMode,
-  LibrarySnapshot,
-  SongVersion,
-  SongWithVersions,
-} from '@producer-player/contracts';
+import type { LibrarySnapshot, SongVersion, SongWithVersions } from '@producer-player/contracts';
 
 type RepeatMode = 'off' | 'one' | 'all';
 
@@ -86,7 +81,6 @@ function getActiveSongVersion(song: SongWithVersions): SongVersion | null {
 
 export function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>(EMPTY_SNAPSHOT);
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('logicalSongs');
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
   const [searchText, setSearchText] = useState('');
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
@@ -102,6 +96,7 @@ export function App(): JSX.Element {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
+  const [playbackSourceReady, setPlaybackSourceReady] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
@@ -128,7 +123,13 @@ export function App(): JSX.Element {
       setDurationSeconds(Number.isFinite(audio.duration) ? audio.duration : 0);
     };
 
+    const onLoadStart = () => {
+      setPlaybackSourceReady(false);
+    };
+
     const onCanPlay = () => {
+      setPlaybackSourceReady(true);
+
       if (!playOnNextLoadRef.current) {
         return;
       }
@@ -166,12 +167,14 @@ export function App(): JSX.Element {
     const onError = () => {
       const mediaError = audio.error;
       const code = mediaError?.code ? ` (code ${mediaError.code})` : '';
+      setPlaybackSourceReady(false);
       setPlaybackError(`Playback failed. File format may be unsupported${code}.`);
       setIsPlaying(false);
     };
 
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('loadstart', onLoadStart);
     audio.addEventListener('canplay', onCanPlay);
     audio.addEventListener('play', onPlay);
     audio.addEventListener('pause', onPause);
@@ -185,6 +188,7 @@ export function App(): JSX.Element {
 
       audio.removeEventListener('timeupdate', onTimeUpdate);
       audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('loadstart', onLoadStart);
       audio.removeEventListener('canplay', onCanPlay);
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('pause', onPause);
@@ -256,17 +260,6 @@ export function App(): JSX.Element {
     });
   }, [searchText, snapshot.songs]);
 
-  const versions = useMemo(() => {
-    const query = searchText.trim().toLowerCase();
-    const filtered = query.length
-      ? snapshot.versions.filter((version) =>
-          version.fileName.toLowerCase().includes(query)
-        )
-      : snapshot.versions;
-
-    return sortVersions(filtered);
-  }, [searchText, snapshot.versions]);
-
   useEffect(() => {
     if (songs.length === 0) {
       setSelectedSongId(null);
@@ -319,8 +312,10 @@ export function App(): JSX.Element {
     setPlaybackError(null);
     setCurrentTimeSeconds(0);
     setDurationSeconds(0);
+    setPlaybackSourceReady(false);
 
     if (!selectedPlaybackVersion) {
+      playOnNextLoadRef.current = false;
       audio.pause();
       audio.removeAttribute('src');
       audio.load();
@@ -335,7 +330,7 @@ export function App(): JSX.Element {
         }
 
         audio.pause();
-        audio.src = '';
+        audio.removeAttribute('src');
         audio.src = fileUrl;
         audio.load();
       })
@@ -353,10 +348,6 @@ export function App(): JSX.Element {
   }, [selectedPlaybackVersion]);
 
   const playbackQueue = useMemo(() => {
-    if (displayMode === 'versions') {
-      return versions;
-    }
-
     const queue: SongVersion[] = [];
 
     for (const song of songs) {
@@ -367,7 +358,7 @@ export function App(): JSX.Element {
     }
 
     return queue;
-  }, [displayMode, songs, versions]);
+  }, [songs]);
 
   const currentQueueIndex = useMemo(() => {
     if (!selectedPlaybackVersion) {
@@ -411,8 +402,7 @@ export function App(): JSX.Element {
     };
   }, [currentQueueIndex, playbackQueue]);
 
-  const canReorderSongs =
-    displayMode === 'logicalSongs' && searchText.trim().length === 0;
+  const canReorderSongs = searchText.trim().length === 0;
 
   async function runSnapshotTask(task: () => Promise<LibrarySnapshot>): Promise<void> {
     setError(null);
@@ -497,6 +487,8 @@ export function App(): JSX.Element {
       return;
     }
 
+    setPlaybackError(null);
+
     if (!selectedPlaybackVersion && playbackQueue.length > 0) {
       const firstVersion = playbackQueue[0];
       playOnNextLoadRef.current = true;
@@ -509,15 +501,27 @@ export function App(): JSX.Element {
       return;
     }
 
-    try {
-      if (audio.paused) {
-        await audio.play();
-      } else {
-        audio.pause();
+    if (audio.paused) {
+      const hasSource = audio.currentSrc.length > 0 || audio.src.length > 0;
+
+      if (!hasSource || !playbackSourceReady) {
+        playOnNextLoadRef.current = true;
+        if (!hasSource && audio.src.length > 0) {
+          audio.load();
+        }
+        return;
       }
-    } catch (cause: unknown) {
-      setPlaybackError(cause instanceof Error ? cause.message : String(cause));
+
+      try {
+        await audio.play();
+      } catch (cause: unknown) {
+        setPlaybackError(cause instanceof Error ? cause.message : String(cause));
+      }
+      return;
     }
+
+    playOnNextLoadRef.current = false;
+    audio.pause();
   }
 
   function handleSeek(nextTimeSeconds: number): void {
@@ -603,22 +607,36 @@ export function App(): JSX.Element {
         <section
           className="naming-guide"
           data-testid="naming-guide"
-          title="Use end-of-name version tags for grouping: v1, v2, v3."
+          title="File names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
         >
-          <div className="naming-guide-header">
-            <h3>Naming</h3>
-            <span
-              className="help-pill"
-              title="Version tags should be at the end of the file name."
-              aria-label="Naming help"
-            >
-              i
-            </span>
-          </div>
+          <p>File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.</p>
+        </section>
+
+        <section className="sidebar-status" data-testid="status-card">
+          <h3>Status</h3>
           <p>
-            Use end-of-name version tags: <code>v1</code>, <code>v2</code>, <code>v3</code>{' '}
-            (for example <code>Leaky v2.wav</code> or <code>Leakyv2.wav</code>).
+            <strong>{snapshot.status}</strong> — {snapshot.statusMessage}
           </p>
+          <p className="muted">Last scan: {formatDate(snapshot.scannedAt)}</p>
+
+          <label
+            className="checkbox-row"
+            title="Automatically move older non-archived versions into old/ while keeping the newest version in place."
+          >
+            <input
+              type="checkbox"
+              checked={snapshot.matcherSettings.autoMoveOld}
+              onChange={(event) => {
+                void handleSetAutoMoveOld(event.target.checked);
+              }}
+              data-testid="auto-organize-checkbox"
+              title="Toggle automatic organize behavior for old versions."
+            />
+            Auto-organize old versions
+          </label>
+
+          {loading && <p className="muted">Loading snapshot…</p>}
+          {error && <p className="error">{error}</p>}
         </section>
 
         <ul className="folder-list">
@@ -677,24 +695,6 @@ export function App(): JSX.Element {
           <div className="actions">
             <button
               type="button"
-              onClick={() => setDisplayMode('logicalSongs')}
-              className={`mode-toggle ${displayMode === 'logicalSongs' ? 'active' : ''}`}
-              data-testid="mode-tracks"
-              title="Show one row per track, grouped by version suffix."
-            >
-              Tracks
-            </button>
-            <button
-              type="button"
-              onClick={() => setDisplayMode('versions')}
-              className={`mode-toggle ${displayMode === 'versions' ? 'active' : ''}`}
-              data-testid="mode-versions"
-              title="Show every individual version file."
-            >
-              Versions
-            </button>
-            <button
-              type="button"
               className="action-button"
               onClick={() => {
                 void handleRescan();
@@ -710,7 +710,8 @@ export function App(): JSX.Element {
               onClick={() => {
                 void handleOrganize();
               }}
-              title="Move older non-archived versions into old/ and keep newest version in place."
+              data-testid="organize-button"
+              title="Move older non-archived versions into old/ and keep the newest version in place."
             >
               Organize
             </button>
@@ -723,90 +724,71 @@ export function App(): JSX.Element {
             onChange={(event) => setSearchText(event.target.value)}
             placeholder="Search tracks or versions"
             data-testid="search-input"
-            title="Search by track title, normalized title, or file name."
+            title="Search by raw file name, grouped title, or version file name."
           />
         </div>
 
-        {displayMode === 'logicalSongs' ? (
-          <ul className="main-list" data-testid="main-list">
-            {songs.map((song) => (
-              <li key={song.id}>
-                <button
-                  type="button"
-                  className={`${song.id === selectedSongId ? 'selected' : ''} ${
-                    dragSongId === song.id ? 'drag-source' : ''
-                  }`}
-                  onClick={() => setSelectedSongId(song.id)}
-                  data-testid="main-list-row"
-                  data-song-id={song.id}
-                  draggable={canReorderSongs}
-                  onDragStart={(event) => {
-                    if (!canReorderSongs) {
-                      return;
-                    }
+        <p
+          className="list-hint"
+          data-testid="track-order-hint"
+          title="Drag and drop tracks to reorder them. Producer Player keeps this order between sessions."
+        >
+          Drag tracks to reorder — track positions are preserved.
+        </p>
 
-                    setDragSongId(song.id);
-                    event.dataTransfer.effectAllowed = 'move';
-                    event.dataTransfer.setData('text/plain', song.id);
-                  }}
-                  onDragOver={(event) => {
-                    if (!canReorderSongs) {
-                      return;
-                    }
-                    event.preventDefault();
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    void handleReorderSongs(song.id);
-                    setDragSongId(null);
-                  }}
-                  onDragEnd={() => {
-                    setDragSongId(null);
-                  }}
-                  title={
-                    canReorderSongs
-                      ? 'Select track. Drag rows to reorder track order.'
-                      : 'Select track. Clear search to enable drag-and-drop ordering.'
+        <ul className="main-list" data-testid="main-list">
+          {songs.map((song) => (
+            <li key={song.id}>
+              <button
+                type="button"
+                className={`${song.id === selectedSongId ? 'selected' : ''} ${
+                  dragSongId === song.id ? 'drag-source' : ''
+                }`}
+                onClick={() => setSelectedSongId(song.id)}
+                data-testid="main-list-row"
+                data-song-id={song.id}
+                draggable={canReorderSongs}
+                onDragStart={(event) => {
+                  if (!canReorderSongs) {
+                    return;
                   }
-                >
-                  <div>
-                    <strong>{song.title}</strong>
-                    <p className="muted">{song.versions.length} version(s)</p>
-                  </div>
-                  <span className="muted">{formatDate(song.latestExportAt)}</span>
-                </button>
-              </li>
-            ))}
-            {songs.length === 0 && (
-              <li className="empty-state">No tracks found in linked folders.</li>
-            )}
-          </ul>
-        ) : (
-          <ul className="main-list" data-testid="main-list">
-            {versions.map((version) => (
-              <li key={version.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedSongId(version.songId);
-                    setSelectedPlaybackVersionId(version.id);
-                  }}
-                  data-testid="main-list-row"
-                  title="Select this version in the inspector and player."
-                >
-                  <div>
-                    <strong>{version.fileName}</strong>
-                    <p className="muted">{version.filePath}</p>
-                  </div>
-                  <span className="muted">{formatDate(version.modifiedAt)}</span>
-                </button>
-              </li>
-            ))}
-            {versions.length === 0 && (
-              <li className="empty-state">No versions match your search.</li>
-            )}
-          </ul>
-        )}
+
+                  setDragSongId(song.id);
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', song.id);
+                }}
+                onDragOver={(event) => {
+                  if (!canReorderSongs) {
+                    return;
+                  }
+                  event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  void handleReorderSongs(song.id);
+                  setDragSongId(null);
+                }}
+                onDragEnd={() => {
+                  setDragSongId(null);
+                }}
+                title={
+                  canReorderSongs
+                    ? 'Select track. Drag rows to reorder track order.'
+                    : 'Select track. Clear search to enable drag-and-drop ordering.'
+                }
+              >
+                <div>
+                  <strong>{song.title}</strong>
+                  <p className="muted">{song.versions.length} version(s)</p>
+                </div>
+                <span className="muted">{formatDate(song.latestExportAt)}</span>
+              </button>
+            </li>
+          ))}
+          {songs.length === 0 && (
+            <li className="empty-state">No tracks found in linked folders.</li>
+          )}
+        </ul>
 
         {selectedPlaybackVersion && (
           <section className="player-dock" data-testid="player-dock">
@@ -814,7 +796,7 @@ export function App(): JSX.Element {
               <div>
                 <strong data-testid="player-track-name">{selectedPlaybackVersion.fileName}</strong>
                 <p className="muted">
-                  {selectedSong?.title ?? 'Unknown Track'}
+                  {selectedSong?.title ?? 'Unknown track'}
                   {isArchivedVersion(selectedPlaybackVersion) ? ' · Archived in old/' : ''}
                 </p>
               </div>
@@ -843,12 +825,14 @@ export function App(): JSX.Element {
                 type="button"
                 className="play-toggle"
                 data-testid="player-play-toggle"
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+                data-playing={isPlaying ? 'true' : 'false'}
                 onClick={() => {
                   void handleTogglePlayback();
                 }}
                 title="Play or pause the selected track."
               >
-                {isPlaying ? 'Pause' : 'Play'}
+                <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
               </button>
               <button
                 type="button"
@@ -901,7 +885,7 @@ export function App(): JSX.Element {
         {selectedSong ? (
           <section className="inspector-card">
             <h3 data-testid="inspector-song-title">{selectedSong.title}</h3>
-            <p className="muted">Normalized: {selectedSong.normalizedTitle}</p>
+            <p className="muted">Normalized title: {selectedSong.normalizedTitle}</p>
             <p className="muted">Latest export: {formatDate(selectedSong.latestExportAt)}</p>
           </section>
         ) : (
@@ -953,32 +937,6 @@ export function App(): JSX.Element {
           </ul>
         </section>
 
-        <section className="inspector-card status-card" data-testid="status-card">
-          <h3>Status</h3>
-          <p>
-            <strong>{snapshot.status}</strong> — {snapshot.statusMessage}
-          </p>
-          <p className="muted">Last scan: {formatDate(snapshot.scannedAt)}</p>
-
-          <label
-            className="checkbox-row"
-            title="Automatically move older non-archived versions into old/ while keeping the newest version in place."
-          >
-            <input
-              type="checkbox"
-              checked={snapshot.matcherSettings.autoMoveOld}
-              onChange={(event) => {
-                void handleSetAutoMoveOld(event.target.checked);
-              }}
-              data-testid="auto-organize-checkbox"
-              title="Toggle automatic organize behavior for old versions."
-            />
-            Auto-organize old versions
-          </label>
-
-          {loading && <p className="muted">Loading snapshot…</p>}
-          {error && <p className="error">{error}</p>}
-        </section>
       </aside>
     </div>
   );

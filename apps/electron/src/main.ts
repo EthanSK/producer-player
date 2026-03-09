@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import { existsSync, promises as fs } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { LibrarySnapshot } from '@producer-player/contracts';
 import { IPC_CHANNELS } from '@producer-player/contracts';
@@ -273,7 +273,20 @@ function registerIpcHandlers(service: FileLibraryService): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.OPEN_FOLDER, async (_event, folderPath: string) => {
-    const error = await shell.openPath(folderPath);
+    const resolvedPath = resolve(folderPath);
+
+    let stats;
+    try {
+      stats = await fs.stat(resolvedPath);
+    } catch {
+      throw new Error(`Folder not accessible: ${resolvedPath}`);
+    }
+
+    if (!stats.isDirectory()) {
+      throw new Error(`Path is not a folder: ${resolvedPath}`);
+    }
+
+    const error = await shell.openPath(resolvedPath);
     if (error) {
       throw new Error(error);
     }

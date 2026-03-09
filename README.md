@@ -1,5 +1,18 @@
 # Producer Player
 
+Producer Player is for producers who need to manage tracks in an album while exporting new versions over time.
+
+The core workflow is simple:
+
+- Keep one album-level track order that you can drag/reorder
+- Keep multiple exported versions per track (`v1`, `v2`, `v3`, …)
+- Keep old exports visible in history (`old/`) without losing current ordering
+- Audition versions quickly without breaking the album sequence
+
+## Current app UI (fresh screenshot)
+
+![Producer Player current album workflow UI](docs/assets/readme/app-library-current.png)
+
 Producer Player currently has **two implementations in the same repo**:
 
 1. **Swift MVP (existing, kept intact)** for current macOS testing
@@ -141,6 +154,8 @@ Monorepo-ish workspace with typed boundaries:
 - Audio sources are resolved through a dedicated `producer-media://` protocol (instead of raw `file://` renderer links).
   - This avoids dev-mode `Not allowed to load local resource` failures when renderer runs on `http://127.0.0.1`.
   - The protocol serves explicit MIME types and supports byte-range requests.
+- For direct-file playback (for example WAV/MP3/FLAC), bytes are streamed directly from disk without EQ/normalization/DSP.
+- AIFF-family files (`.aiff`, `.aif`, `.aifc`) are prepared into a local WAV cache only when needed for Chromium decode compatibility (still no EQ/effects processing).
 - Renderer playback telemetry logs source lifecycle and error context (`[producer-player:playback]` console events).
 - Unsupported codecs fail with actionable guidance (convert to WAV/MP3/AAC-M4A), rather than silent no-op behavior.
 
@@ -160,9 +175,9 @@ Tradeoffs:
 
 ### App snapshot (test files + archived versions)
 
-![Producer Player library showing active tracks and archived old versions](docs/assets/readme/app-library-test-and-old-files.png)
+![Producer Player library with album ordering, track numbers, and archived old versions](docs/assets/readme/app-library-current.png)
 
-This screenshot shows a realistic test fixture with multiple tracks in the library list (center panel) and older exports archived under `old/` in the inspector version history (right panel).
+This screenshot shows a realistic fixture with album order + track numbers in the list, drag-and-drop ordering, and archived exports in `old/` inside version history.
 
 ### App icon
 

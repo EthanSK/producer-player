@@ -719,3 +719,55 @@ In ten minutes schedule, OCRON to make sure everything that I just asked for in 
   - `npm run plan:audit:append`
 - Executed the audit and backfilled all missing prompts from this session transcript to restore full coverage.
 
+
+---
+
+## Drag/drop + playback-state + README refresh implementation summary (sub-agent)
+
+### Ethan feedback (verbatim)
+
+**Timestamp:** Mon 2026-03-09 15:52 GMT
+
+```text
+Also have a new screenshot and put it at the top of the read me and also make can you screenshot the new version of the app because it seems old and a bit weird. Why is the spacing so big?
+```
+
+### Ethan feedback (verbatim)
+
+**Timestamp:** Mon 2026-03-09 15:52 GMT
+
+```text
+Also, at the top of the readme, it should explain all the point of the app is. It's for producers who need to manage songs in an album and export new versions and keep the ordering.
+```
+
+### Root causes found
+
+1. **Reorder interrupted playback**: playback source reload effect depended on the full `selectedPlaybackVersion` object (new object identity on every snapshot update), so reorder snapshots reloaded audio, reset scrub, and paused transport.
+2. **Play/pause toggle desync on switching**: transport/autoplay decisions relied on stale UI state (`isPlaying`) instead of actual audio/play-intent state; track switches could land in paused state unexpectedly.
+3. **No insertion preview affordance**: drag/drop only tracked source ID and final drop target, with no hover position state (`before/after`) and no temporary visual ordering.
+4. **Filename mutation in rows/inspector**: list/inspector rendered normalized/capitalized grouped title instead of raw exported file names.
+5. **Repeat-all uncertainty**: no explicit regression coverage for end-of-queue wrap behavior.
+6. **README drift**: screenshot + intro no longer reflected current UI and product framing.
+
+### Implemented fixes (this run)
+
+- Added drag hover position state + preview ordering + insertion marker line + track numbers in album list.
+- Changed playback source reload dependency to stable version ID/path primitives so reorder snapshots do not restart active playback.
+- Added autoplay continuity handling when switching tracks/versions while currently playing.
+- Updated transport behavior for keyboard/command events and queue moves to use live audio/play-intent state.
+- Added global Space shortcut handler (outside editable fields) and a main-process transport-command channel for media-key command routing.
+- Registered macOS media-key shortcuts (`MediaPlayPause`, `MediaNextTrack`, `MediaPreviousTrack`) in Electron main process.
+- Updated visible labels/content:
+  - `Group / Album` → `Album`
+  - naming hint includes leading info icon
+  - list and inspector show raw file-name based labels (no auto-capitalized normalized title display)
+- Tightened UI spacing and refreshed visual density in panels/list/player.
+- Captured fresh README screenshot and moved product-purpose framing + screenshot to top of README.
+- Added runtime note clarifying direct-file raw-byte playback vs AIFF compatibility preparation path.
+
+### Validation performed
+
+- `npm run typecheck` ✅
+- `npm run test -w @producer-player/e2e -- src/library-linking.spec.ts src/playback-runtime.spec.ts` ✅ (11/11)
+- Fresh screenshot generated in Electron runtime fixture:
+  - `docs/assets/readme/app-library-current.png`

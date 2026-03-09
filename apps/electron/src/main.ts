@@ -1,9 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron';
+import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, protocol, shell } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, promises as fs } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
-import type { LibrarySnapshot, PlaybackSourceInfo } from '@producer-player/contracts';
+import type {
+  LibrarySnapshot,
+  PlaybackSourceInfo,
+  ProducerPlayerEnvironment,
+  TransportCommand,
+} from '@producer-player/contracts';
 import { IPC_CHANNELS } from '@producer-player/contracts';
 import { FileLibraryService } from '@producer-player/domain';
 
@@ -15,6 +22,10 @@ const ORDER_SIDECAR_DIRECTORY = '.producer-player';
 const ORDER_SIDECAR_FILE = 'order-state.json';
 const PLAYBACK_PROTOCOL = 'producer-media';
 const PLAYBACK_PROTOCOL_HOST = 'file';
+const PLAYBACK_CACHE_DIRECTORY = 'playback-cache';
+const FFMPEG_BINARY_DIRECTORY = 'bin';
+const AIFF_LIKE_EXTENSIONS = new Set(['aiff', 'aif', 'aifc']);
+const IS_MAC_APP_STORE_SANDBOX = process.mas === true;
 
 const IS_TEST_MODE =
   process.env.APP_TEST_MODE === 'true' ||
@@ -24,6 +35,7 @@ const PLAYBACK_MIME_BY_EXTENSION: Record<string, string> = {
   wav: 'audio/wav',
   aiff: 'audio/aiff',
   aif: 'audio/aiff',
+  aifc: 'audio/aiff',
   flac: 'audio/flac',
   mp3: 'audio/mpeg',
   m4a: 'audio/mp4',
@@ -58,6 +70,41 @@ let mainWindow: BrowserWindow | null = null;
 let libraryService: FileLibraryService | null = null;
 let shouldAttemptSidecarOrderRestore = false;
 let playbackProtocolRegistered = false;
+const playbackTranscodeJobs = new Map<string, Promise<string>>();
+const linkedFolderSecurityBookmarks = new Map<string, string>();
+const linkedFolderSecurityAccessStops = new Map<string, () => void>();
+
+function emitTransportCommand(command: TransportCommand): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send(IPC_CHANNELS.TRANSPORT_COMMAND, command);
+}
+
+function registerGlobalMediaShortcuts(): void {
+  const bindings: Array<[string, TransportCommand]> = [
+    ['MediaPlayPause', 'play-pause'],
+    ['MediaNextTrack', 'next-track'],
+    ['MediaPreviousTrack', 'previous-track'],
+  ];
+
+  for (const [accelerator, command] of bindings) {
+    try {
+      const registered = globalShortcut.register(accelerator, () => {
+        emitTransportCommand(command);
+      });
+
+      if (!registered) {
+        console.warn(`[producer-player:transport] accelerator not available: ${accelerator}`);
+      }
+    } catch (error: unknown) {
+      console.warn(`[producer-player:transport] failed to register ${accelerator}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
 
 function isDevelopment(): boolean {
   return process.env.ELECTRON_DEV === 'true';
@@ -86,6 +133,7 @@ function getFolderOrderSidecarPath(folderPath: string): string {
 interface PersistedState {
   version: number;
   linkedFolderPaths: string[];
+  linkedFolderBookmarks: Record<string, string>;
   autoMoveOld: boolean;
   songOrder: string[];
   updatedAt: string;
@@ -106,8 +154,9 @@ interface FolderOrderSidecar {
 
 function createFallbackState(): PersistedState {
   return {
-    version: 2,
+    version: 3,
     linkedFolderPaths: [],
+    linkedFolderBookmarks: {},
     autoMoveOld: true,
     songOrder: [],
     updatedAt: new Date(0).toISOString(),
@@ -120,6 +169,18 @@ function parseStringArray(value: unknown): string[] {
   }
 
   return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function parseStringRecord(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'
+  );
+
+  return Object.fromEntries(entries);
 }
 
 function dedupeStrings(values: string[]): string[] {
@@ -169,9 +230,26 @@ function parsePersistedState(raw: string): PersistedState {
   const fallback = createFallbackState();
   const parsed = JSON.parse(raw) as Partial<PersistedState>;
 
+  const linkedFolderPaths = dedupeStrings(
+    parseStringArray(parsed.linkedFolderPaths).map((folderPath) => resolve(folderPath))
+  );
+
+  const parsedBookmarks = parseStringRecord(parsed.linkedFolderBookmarks);
+  const linkedFolderBookmarks: Record<string, string> = {};
+
+  for (const folderPath of linkedFolderPaths) {
+    const bookmark = parsedBookmarks[folderPath] ?? parsedBookmarks[resolve(folderPath)];
+    if (typeof bookmark !== 'string' || bookmark.length === 0) {
+      continue;
+    }
+
+    linkedFolderBookmarks[folderPath] = bookmark;
+  }
+
   return {
     version: typeof parsed.version === 'number' ? parsed.version : fallback.version,
-    linkedFolderPaths: parseStringArray(parsed.linkedFolderPaths),
+    linkedFolderPaths,
+    linkedFolderBookmarks,
     autoMoveOld:
       typeof parsed.autoMoveOld === 'boolean' ? parsed.autoMoveOld : fallback.autoMoveOld,
     songOrder: dedupeStrings(parseStringArray(parsed.songOrder)),
@@ -202,7 +280,7 @@ async function readPersistedState(): Promise<PersistedStateLoadResult> {
       if (candidatePath !== primaryStatePath) {
         await writeJsonAtomic(primaryStatePath, {
           ...parsed,
-          version: 2,
+          version: 3,
           updatedAt: new Date().toISOString(),
         }).catch(() => undefined);
       }
@@ -220,6 +298,99 @@ async function readPersistedState(): Promise<PersistedStateLoadResult> {
     state: fallback,
     shouldAttemptSidecarOrderRestore: true,
   };
+}
+
+function cachePersistedFolderBookmarks(bookmarks: Record<string, string>): void {
+  linkedFolderSecurityBookmarks.clear();
+
+  for (const [folderPath, bookmark] of Object.entries(bookmarks)) {
+    if (typeof bookmark !== 'string' || bookmark.length === 0) {
+      continue;
+    }
+
+    linkedFolderSecurityBookmarks.set(resolve(folderPath), bookmark);
+  }
+}
+
+function rememberFolderBookmark(folderPath: string, bookmark: string | null | undefined): void {
+  if (typeof bookmark !== 'string' || bookmark.length === 0) {
+    return;
+  }
+
+  linkedFolderSecurityBookmarks.set(resolve(folderPath), bookmark);
+}
+
+function forgetFolderBookmark(folderPath: string): void {
+  linkedFolderSecurityBookmarks.delete(resolve(folderPath));
+}
+
+function releaseFolderSecurityScope(folderPath: string): void {
+  const resolvedPath = resolve(folderPath);
+  const stopAccess = linkedFolderSecurityAccessStops.get(resolvedPath);
+  if (!stopAccess) {
+    return;
+  }
+
+  try {
+    stopAccess();
+  } catch {
+    // Ignore security-scope cleanup failures on shutdown/unlink.
+  }
+
+  linkedFolderSecurityAccessStops.delete(resolvedPath);
+}
+
+function releaseAllFolderSecurityScopes(): void {
+  for (const stopAccess of linkedFolderSecurityAccessStops.values()) {
+    try {
+      stopAccess();
+    } catch {
+      // Ignore security-scope cleanup failures on shutdown.
+    }
+  }
+
+  linkedFolderSecurityAccessStops.clear();
+}
+
+function beginFolderSecurityScope(folderPath: string): void {
+  if (!IS_MAC_APP_STORE_SANDBOX) {
+    return;
+  }
+
+  const resolvedPath = resolve(folderPath);
+  const bookmark = linkedFolderSecurityBookmarks.get(resolvedPath);
+  if (!bookmark) {
+    return;
+  }
+
+  releaseFolderSecurityScope(resolvedPath);
+
+  try {
+    const stopAccess = app.startAccessingSecurityScopedResource(bookmark);
+    if (typeof stopAccess === 'function') {
+      linkedFolderSecurityAccessStops.set(resolvedPath, stopAccess as () => void);
+    }
+  } catch (error: unknown) {
+    console.warn('[producer-player:sandbox] Failed to start security-scoped access', {
+      folderPath: resolvedPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function buildPersistedBookmarksForSnapshot(snapshot: LibrarySnapshot): Record<string, string> {
+  const nextBookmarks: Record<string, string> = {};
+
+  for (const folder of snapshot.linkedFolders) {
+    const bookmark = linkedFolderSecurityBookmarks.get(resolve(folder.path));
+    if (!bookmark) {
+      continue;
+    }
+
+    nextBookmarks[resolve(folder.path)] = bookmark;
+  }
+
+  return nextBookmarks;
 }
 
 function buildFolderOrderSidecar(
@@ -358,8 +529,9 @@ async function restoreSongOrderFromSidecars(
 
 async function writePersistedState(snapshot: LibrarySnapshot): Promise<void> {
   const payload: PersistedState = {
-    version: 2,
-    linkedFolderPaths: snapshot.linkedFolders.map((folder) => folder.path),
+    version: 3,
+    linkedFolderPaths: snapshot.linkedFolders.map((folder) => resolve(folder.path)),
+    linkedFolderBookmarks: buildPersistedBookmarksForSnapshot(snapshot),
     autoMoveOld: snapshot.matcherSettings.autoMoveOld,
     songOrder: snapshot.songs.map((song) => song.id),
     updatedAt: new Date().toISOString(),
@@ -367,6 +539,158 @@ async function writePersistedState(snapshot: LibrarySnapshot): Promise<void> {
 
   await writeJsonAtomic(getStateFilePath(), payload);
   await writeFolderOrderSidecars(snapshot);
+}
+
+function getPlaybackCacheDirectoryPath(): string {
+  return join(getStateDirectoryPath(), PLAYBACK_CACHE_DIRECTORY);
+}
+
+function getBundledFfmpegPath(): string {
+  if (typeof process.env.PRODUCER_PLAYER_FFMPEG_PATH === 'string') {
+    return process.env.PRODUCER_PLAYER_FFMPEG_PATH;
+  }
+
+  const binaryName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+
+  if (app.isPackaged) {
+    return join(
+      process.resourcesPath,
+      'app.asar.unpacked',
+      'apps/electron/dist',
+      FFMPEG_BINARY_DIRECTORY,
+      binaryName
+    );
+  }
+
+  return join(__dirname, FFMPEG_BINARY_DIRECTORY, binaryName);
+}
+
+function createPlaybackCacheKey(
+  filePath: string,
+  stats: { size: number; mtimeMs: number }
+): string {
+  return createHash('sha1')
+    .update(`${filePath}::${stats.size}::${stats.mtimeMs}`)
+    .digest('hex');
+}
+
+function shouldTranscodeForPlayback(extension: string): boolean {
+  if (IS_MAC_APP_STORE_SANDBOX) {
+    return false;
+  }
+
+  return AIFF_LIKE_EXTENSIONS.has(extension.toLowerCase());
+}
+
+async function transcodeAudioForPlayback(
+  sourcePath: string,
+  outputPath: string
+): Promise<void> {
+  const ffmpegPath = getBundledFfmpegPath();
+
+  if (!existsSync(ffmpegPath)) {
+    throw new Error(`Bundled ffmpeg binary is missing: ${ffmpegPath}`);
+  }
+
+  await fs.mkdir(dirname(outputPath), { recursive: true });
+
+  const temporaryOutputPath = `${outputPath}.tmp-${process.pid}-${Date.now()}.wav`;
+
+  try {
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      const ffmpeg = spawn(
+        ffmpegPath,
+        ['-v', 'error', '-y', '-i', sourcePath, '-vn', '-c:a', 'pcm_s16le', temporaryOutputPath],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }
+      );
+
+      let stderr = '';
+      ffmpeg.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      ffmpeg.on('error', (error) => {
+        rejectPromise(error);
+      });
+
+      ffmpeg.on('close', (code) => {
+        if (code === 0) {
+          resolvePromise();
+          return;
+        }
+
+        rejectPromise(
+          new Error(
+            `ffmpeg failed while preparing playback for ${sourcePath} (exit ${code}): ${stderr.trim()}`
+          )
+        );
+      });
+    });
+
+    try {
+      await fs.rename(temporaryOutputPath, outputPath);
+    } catch (error: unknown) {
+      const code =
+        typeof error === 'object' && error && 'code' in error
+          ? String((error as { code?: unknown }).code)
+          : null;
+
+      if (code !== 'EEXIST' && code !== 'EPERM') {
+        throw error;
+      }
+
+      await fs.rm(outputPath, { force: true });
+      await fs.rename(temporaryOutputPath, outputPath);
+    }
+  } finally {
+    await fs.rm(temporaryOutputPath, { force: true }).catch(() => undefined);
+  }
+}
+
+async function ensureTranscodedPlaybackFile(
+  sourcePath: string,
+  stats: { size: number; mtimeMs: number }
+): Promise<string> {
+  const cacheKey = createPlaybackCacheKey(sourcePath, stats);
+  const outputPath = join(getPlaybackCacheDirectoryPath(), `${cacheKey}.wav`);
+
+  if (existsSync(outputPath)) {
+    return outputPath;
+  }
+
+  const existingJob = playbackTranscodeJobs.get(outputPath);
+  if (existingJob) {
+    return existingJob;
+  }
+
+  const job = (async () => {
+    try {
+      await transcodeAudioForPlayback(sourcePath, outputPath);
+      return outputPath;
+    } finally {
+      playbackTranscodeJobs.delete(outputPath);
+    }
+  })();
+
+  playbackTranscodeJobs.set(outputPath, job);
+  return job;
+}
+
+function buildDirectPlaybackSourceInfo(
+  filePath: string,
+  exists: boolean
+): PlaybackSourceInfo {
+  return {
+    filePath,
+    url: buildPlaybackUrl(filePath),
+    mimeType: getPlaybackMimeType(filePath),
+    extension: extname(filePath).replace('.', '').toLowerCase(),
+    exists,
+    sourceStrategy: 'direct-file',
+    originalFilePath: null,
+  };
 }
 
 function getPlaybackMimeType(filePath: string): string {
@@ -429,21 +753,46 @@ function parseByteRange(
 async function resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo> {
   const resolvedPath = resolve(filePath);
 
-  let exists = false;
+  let stats;
   try {
-    const stats = await fs.stat(resolvedPath);
-    exists = stats.isFile();
+    stats = await fs.stat(resolvedPath);
   } catch {
-    exists = false;
+    return buildDirectPlaybackSourceInfo(resolvedPath, false);
   }
 
-  return {
-    filePath: resolvedPath,
-    url: buildPlaybackUrl(resolvedPath),
-    mimeType: getPlaybackMimeType(resolvedPath),
-    extension: extname(resolvedPath).replace('.', '').toLowerCase(),
-    exists,
-  };
+  if (!stats.isFile()) {
+    return buildDirectPlaybackSourceInfo(resolvedPath, false);
+  }
+
+  const extension = extname(resolvedPath).replace('.', '').toLowerCase();
+
+  if (!shouldTranscodeForPlayback(extension)) {
+    return buildDirectPlaybackSourceInfo(resolvedPath, true);
+  }
+
+  try {
+    const transcodedPath = await ensureTranscodedPlaybackFile(resolvedPath, {
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+    });
+
+    return {
+      filePath: transcodedPath,
+      url: buildPlaybackUrl(transcodedPath),
+      mimeType: 'audio/wav',
+      extension: 'wav',
+      exists: true,
+      sourceStrategy: 'transcoded-cache',
+      originalFilePath: resolvedPath,
+    };
+  } catch (error) {
+    console.warn(
+      `[producer-player:playback] failed to prepare AIFF source, falling back to direct file: ${resolvedPath}`,
+      error
+    );
+
+    return buildDirectPlaybackSourceInfo(resolvedPath, true);
+  }
 }
 
 async function registerPlaybackProtocol(): Promise<void> {
@@ -554,6 +903,14 @@ function validateRendererDevUrl(url: string): void {
   }
 }
 
+function buildEnvironmentInfo(): ProducerPlayerEnvironment {
+  return {
+    isMacAppStoreSandboxed: IS_MAC_APP_STORE_SANDBOX,
+    canLinkFolderByPath: !IS_MAC_APP_STORE_SANDBOX,
+    canRequestSecurityScopedBookmarks: IS_MAC_APP_STORE_SANDBOX,
+  };
+}
+
 async function createMainWindow(): Promise<void> {
   const productionIndexPath = findProductionIndexPath();
   const developmentMode = isDevelopment();
@@ -647,13 +1004,24 @@ async function ensureLibraryService(): Promise<FileLibraryService> {
 
   const persistedState = await readPersistedState();
   shouldAttemptSidecarOrderRestore = persistedState.shouldAttemptSidecarOrderRestore;
+  cachePersistedFolderBookmarks(persistedState.state.linkedFolderBookmarks);
 
   const service = new FileLibraryService({
     autoMoveOld: persistedState.state.autoMoveOld,
     songOrder: persistedState.state.songOrder,
   });
 
-  await service.hydrateLinkedFolders(persistedState.state.linkedFolderPaths);
+  for (const folderPath of persistedState.state.linkedFolderPaths) {
+    const resolvedPath = resolve(folderPath);
+    beginFolderSecurityScope(resolvedPath);
+
+    try {
+      await service.linkFolder(resolvedPath);
+    } catch {
+      releaseFolderSecurityScope(resolvedPath);
+      // Keep going so one bad folder does not block startup.
+    }
+  }
 
   if (shouldAttemptSidecarOrderRestore) {
     await restoreSongOrderFromSidecars(service);
@@ -673,12 +1041,14 @@ async function ensureLibraryService(): Promise<FileLibraryService> {
 
 function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.GET_LIBRARY_SNAPSHOT, async () => service.getSnapshot());
+  ipcMain.handle(IPC_CHANNELS.GET_ENVIRONMENT, async () => buildEnvironmentInfo());
 
   ipcMain.handle(IPC_CHANNELS.LINK_FOLDER_DIALOG, async () => {
     const dialogOptions: OpenDialogOptions = {
       properties: ['openDirectory', 'createDirectory'],
       title: 'Link Producer Folder',
       message: 'Choose a folder to watch for exports.',
+      securityScopedBookmarks: IS_MAC_APP_STORE_SANDBOX,
     };
 
     const result = mainWindow
@@ -690,10 +1060,29 @@ function registerIpcHandlers(service: FileLibraryService): void {
     }
 
     let snapshot = service.getSnapshot();
-    for (const selectedPath of result.filePaths) {
-      snapshot = await service.linkFolder(selectedPath);
+    for (const [index, selectedPath] of result.filePaths.entries()) {
+      const resolvedPath = resolve(selectedPath);
+      const bookmark = result.bookmarks?.[index];
+
+      if (IS_MAC_APP_STORE_SANDBOX && (!bookmark || bookmark.length === 0)) {
+        throw new Error(
+          `macOS App Store sandbox did not return a security-scoped bookmark for: ${resolvedPath}`
+        );
+      }
+
+      rememberFolderBookmark(resolvedPath, bookmark);
+      beginFolderSecurityScope(resolvedPath);
+
+      try {
+        snapshot = await service.linkFolder(resolvedPath);
+      } catch (error) {
+        releaseFolderSecurityScope(resolvedPath);
+        forgetFolderBookmark(resolvedPath);
+        throw error;
+      }
+
       if (shouldAttemptSidecarOrderRestore) {
-        snapshot = await restoreSongOrderFromSidecars(service, [selectedPath]);
+        snapshot = await restoreSongOrderFromSidecars(service, [resolvedPath]);
       }
     }
 
@@ -701,16 +1090,31 @@ function registerIpcHandlers(service: FileLibraryService): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.LINK_FOLDER_PATH, async (_event, folderPath: string) => {
-    let snapshot = await service.linkFolder(folderPath);
+    if (IS_MAC_APP_STORE_SANDBOX) {
+      throw new Error(
+        'Manual path linking is disabled in the Mac App Store sandbox build. Use Add Folder… so the app can request folder access.'
+      );
+    }
+
+    const resolvedPath = resolve(folderPath);
+    let snapshot = await service.linkFolder(resolvedPath);
     if (shouldAttemptSidecarOrderRestore) {
-      snapshot = await restoreSongOrderFromSidecars(service, [folderPath]);
+      snapshot = await restoreSongOrderFromSidecars(service, [resolvedPath]);
     }
 
     return snapshot;
   });
 
   ipcMain.handle(IPC_CHANNELS.UNLINK_FOLDER, async (_event, folderId: string) => {
-    return service.unlinkFolder(folderId);
+    const folder = service.getSnapshot().linkedFolders.find((entry) => entry.id === folderId);
+    const snapshot = await service.unlinkFolder(folderId);
+
+    if (folder) {
+      releaseFolderSecurityScope(folder.path);
+      forgetFolderBookmark(folder.path);
+    }
+
+    return snapshot;
   });
 
   ipcMain.handle(IPC_CHANNELS.RESCAN_LIBRARY, async () => service.rescanLibrary());
@@ -766,6 +1170,7 @@ app.whenReady().then(async () => {
   const service = await ensureLibraryService();
   registerIpcHandlers(service);
   await createMainWindow();
+  registerGlobalMediaShortcuts();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -775,6 +1180,9 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  globalShortcut.unregisterAll();
+  releaseAllFolderSecurityScopes();
+
   if (libraryService) {
     void libraryService.dispose();
   }

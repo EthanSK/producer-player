@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,17 +33,44 @@ async function runFfmpeg(args: string[]): Promise<void> {
   });
 }
 
-async function startRendererDevServer(workspaceRoot: string): Promise<ChildProcess> {
+function sha256Hex(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
+async function hashUrlInRenderer(page: import('@playwright/test').Page, url: string): Promise<string> {
+  return page.evaluate(async (targetUrl) => {
+    const response = await fetch(targetUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${targetUrl}: ${response.status}`);
+    }
+
+    const bytes = await response.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+
+    return Array.from(new Uint8Array(digest))
+      .map((value) => value.toString(16).padStart(2, '0'))
+      .join('');
+  }, url);
+}
+
+async function startRendererDevServer(
+  workspaceRoot: string,
+  port: number
+): Promise<ChildProcess> {
   const rendererDirectory = path.join(workspaceRoot, 'apps/renderer');
 
-  const child = spawn('npm', ['run', 'dev'], {
-    cwd: rendererDirectory,
-    env: {
-      ...process.env,
-      FORCE_COLOR: '0',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const child = spawn(
+    'npx',
+    ['vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+    {
+      cwd: rendererDirectory,
+      env: {
+        ...process.env,
+        FORCE_COLOR: '0',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }
+  );
 
   let stderr = '';
   child.stderr?.on('data', (chunk) => {
@@ -57,7 +85,7 @@ async function startRendererDevServer(workspaceRoot: string): Promise<ChildProce
     }
 
     try {
-      const response = await fetch('http://127.0.0.1:4207');
+      const response = await fetch(`http://127.0.0.1:${port}`);
       if (response.ok) {
         return child;
       }
@@ -122,7 +150,7 @@ async function writeRealAudioFixtures(fixtureDirectory: string): Promise<Record<
 test.describe('playback runtime deep dive', () => {
   test.skip(!hasFfmpeg(), 'ffmpeg is required for real codec fixture generation.');
 
-  test('uses real wav/mp3/m4a/flac/aiff fixtures and either plays or shows actionable codec guidance', async () => {
+  test('uses real wav/mp3/m4a/flac/aiff fixtures and plays all of them, including AIFF via local preparation', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-playback-fixture-')
     );
@@ -135,7 +163,7 @@ test.describe('playback runtime deep dive', () => {
 
     const matrix: Array<{
       format: string;
-      status: 'playing' | 'graceful-fallback';
+      status: 'playing' | 'error';
       meta: string;
       error: string;
     }> = [];
@@ -150,8 +178,22 @@ test.describe('playback runtime deep dive', () => {
         return (window as any).producerPlayer.resolvePlaybackSource(wavPath);
       }, fixturePathsByFormat.wav);
 
+      const aiffSourceProbe = await page.evaluate(async (aiffPath) => {
+        return (window as any).producerPlayer.resolvePlaybackSource(aiffPath);
+      }, fixturePathsByFormat.aiff);
+
       expect(sourceProbe.url.startsWith('producer-media://')).toBe(true);
       expect(sourceProbe.mimeType).toBe('audio/wav');
+      expect(sourceProbe.sourceStrategy).toBe('direct-file');
+
+      const expectedWavHash = sha256Hex(await fs.readFile(fixturePathsByFormat.wav));
+      const streamedWavHash = await hashUrlInRenderer(page, sourceProbe.url);
+      expect(streamedWavHash).toBe(expectedWavHash);
+
+      expect(aiffSourceProbe.url.startsWith('producer-media://')).toBe(true);
+      expect(aiffSourceProbe.mimeType).toBe('audio/wav');
+      expect(aiffSourceProbe.sourceStrategy).toBe('transcoded-cache');
+      expect(aiffSourceProbe.originalFilePath).toBe(fixturePathsByFormat.aiff);
 
       for (const format of ['wav', 'mp3', 'm4a', 'flac', 'aiff']) {
         await page
@@ -165,7 +207,7 @@ test.describe('playback runtime deep dive', () => {
 
         await page.getByTestId('player-play-toggle').click();
 
-        let status: 'playing' | 'graceful-fallback' = 'graceful-fallback';
+        let status: 'playing' | 'error' = 'error';
         let errorText = '';
         let resolved = false;
 
@@ -185,7 +227,7 @@ test.describe('playback runtime deep dive', () => {
           const errorNode = page.getByTestId('playback-error');
           if ((await errorNode.count()) > 0) {
             errorText = (await errorNode.first().textContent())?.trim() ?? '';
-            status = 'graceful-fallback';
+            status = 'error';
             resolved = true;
             break;
           }
@@ -195,15 +237,14 @@ test.describe('playback runtime deep dive', () => {
 
         expect(resolved).toBe(true);
 
-        if (status === 'playing') {
-          await page.getByTestId('player-play-toggle').click();
-          await expect(page.getByTestId('player-play-toggle')).toHaveAttribute(
-            'aria-label',
-            'Play'
-          );
-        } else {
-          expect(errorText).toContain('convert to WAV/MP3/AAC-M4A');
-        }
+        expect(status).toBe('playing');
+        expect(errorText).toBe('');
+
+        await page.getByTestId('player-play-toggle').click();
+        await expect(page.getByTestId('player-play-toggle')).toHaveAttribute(
+          'aria-label',
+          'Play'
+        );
 
         matrix.push({
           format,
@@ -216,10 +257,12 @@ test.describe('playback runtime deep dive', () => {
       const wavResult = matrix.find((entry) => entry.format === 'wav');
       const mp3Result = matrix.find((entry) => entry.format === 'mp3');
       const m4aResult = matrix.find((entry) => entry.format === 'm4a');
+      const aiffResult = matrix.find((entry) => entry.format === 'aiff');
 
       expect(wavResult?.status).toBe('playing');
       expect(mp3Result?.status).toBe('playing');
       expect(m4aResult?.status).toBe('playing');
+      expect(aiffResult?.status).toBe('playing');
 
       const matrixOutputPath = path.join(
         userDataDirectory,
@@ -344,6 +387,73 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
+  test('plays multiple AIFF variants by preparing them into local WAV cache', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-aiff-variants-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-aiff-variants-user-data-')
+    );
+
+    const variants = [
+      {
+        label: 'Aiff 16',
+        outputName: 'Variant Aiff 16 v1.aiff',
+        codecArgs: ['-c:a', 'pcm_s16be'],
+      },
+      {
+        label: 'Aiff 24',
+        outputName: 'Variant Aiff 24 v1.aiff',
+        codecArgs: ['-c:a', 'pcm_s24be'],
+      },
+      {
+        label: 'Aif 16',
+        outputName: 'Variant Aif 16 v1.aif',
+        codecArgs: ['-c:a', 'pcm_s16be'],
+      },
+    ];
+
+    for (const variant of variants) {
+      await runFfmpeg([
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=440:duration=4',
+        ...variant.codecArgs,
+        path.join(fixtureDirectory, variant.outputName),
+      ]);
+    }
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(3);
+
+      for (const variant of variants) {
+        await page.getByTestId('main-list-row').filter({ hasText: variant.label }).first().click();
+
+        const meta =
+          (await page.getByTestId('playback-source-meta').textContent())?.trim() ?? '';
+        expect(meta).toContain('prepared from');
+
+        await page.getByTestId('player-play-toggle').click();
+        await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+        await expect(page.getByTestId('playback-error')).toHaveCount(0);
+
+        await page.getByTestId('player-play-toggle').click();
+        await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+      }
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('development renderer can play local files through producer-media protocol (no file:// block)', async () => {
     const workspaceRoot = path.resolve(__dirname, '../../..');
     const fixtureDirectory = await fs.mkdtemp(
@@ -353,7 +463,8 @@ test.describe('playback runtime deep dive', () => {
       path.join(os.tmpdir(), 'producer-player-e2e-dev-playback-user-data-')
     );
 
-    const rendererServer = await startRendererDevServer(workspaceRoot);
+    const devServerPort = 4300 + Math.floor(Math.random() * 400);
+    const rendererServer = await startRendererDevServer(workspaceRoot, devServerPort);
 
     await runFfmpeg([
       '-y',
@@ -368,7 +479,7 @@ test.describe('playback runtime deep dive', () => {
 
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory, {
       devMode: true,
-      rendererDevUrl: 'http://127.0.0.1:4207',
+      rendererDevUrl: `http://127.0.0.1:${devServerPort}`,
     });
 
     const consoleMessages: string[] = [];
@@ -398,6 +509,263 @@ test.describe('playback runtime deep dive', () => {
     } finally {
       await electronApp.close();
       await stopProcess(rendererServer);
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('drag reorder shows insertion preview and keeps active playback running with scrub position continuity', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-reorder-continuity-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-reorder-continuity-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=330:duration=12',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Continuity Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=12',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Continuity Bravo v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=550:duration=12',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Continuity Charlie v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(3);
+
+      const rows = await page.getByTestId('main-list-row').evaluateAll((elements) => {
+        return elements.map((element) => ({
+          id: element.getAttribute('data-song-id') ?? '',
+          text: element.textContent ?? '',
+        }));
+      });
+
+      const alpha = rows.find((row) => row.text.includes('Continuity Alpha'));
+
+      if (!alpha || !alpha.id) {
+        throw new Error('Could not resolve rows for reorder continuity test.');
+      }
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Continuity Alpha' }).first().click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      const playingTrackBefore =
+        (await page.getByTestId('player-track-name').textContent())?.trim() ?? '';
+
+      await page.waitForTimeout(1_200);
+
+      const scrubberBefore = Number(
+        (await page.getByTestId('player-scrubber').inputValue()).trim() || '0'
+      );
+
+      const sourceBox = await page.getByTestId('main-list-row').nth(2).boundingBox();
+      const targetBox = await page.getByTestId('main-list-row').nth(0).boundingBox();
+
+      if (!sourceBox || !targetBox) {
+        throw new Error('Could not resolve drag source/target bounds.');
+      }
+
+      await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(targetBox.x + 12, targetBox.y + 2, { steps: 12 });
+
+      await expect(page.locator('.main-list-item.drop-preview-before')).toHaveCount(1);
+
+      await page.mouse.up();
+
+      await expect(page.getByTestId('main-list-row').first()).toContainText('Continuity Charlie');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      const playingTrackAfter =
+        (await page.getByTestId('player-track-name').textContent())?.trim() ?? '';
+      expect(playingTrackAfter).toBe(playingTrackBefore);
+
+      await page.waitForTimeout(900);
+      const scrubberAfter = Number(
+        (await page.getByTestId('player-scrubber').inputValue()).trim() || '0'
+      );
+      expect(scrubberAfter).toBeGreaterThan(scrubberBefore + 0.3);
+
+      await page.getByTestId('track-order-hint').click();
+      await page.keyboard.press('Space');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+      await page.keyboard.press('Space');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('repeat-all wraps from the last track back to the first track', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-repeat-all-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-repeat-all-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=300:duration=1.2',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Repeat Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=500:duration=1.2',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Repeat Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Repeat Alpha' }).first().click();
+
+      await page.getByTestId('player-repeat').click();
+      await page.getByTestId('player-repeat').click();
+      await expect(page.getByTestId('player-repeat')).toContainText('Repeat: All');
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await expect
+        .poll(
+          async () =>
+            ((await page.getByTestId('player-track-name').textContent()) ?? '').trim(),
+          { timeout: 8_000 }
+        )
+        .toContain('Repeat Beta');
+
+      await expect
+        .poll(
+          async () =>
+            ((await page.getByTestId('player-track-name').textContent()) ?? '').trim(),
+          { timeout: 8_000 }
+        )
+        .toContain('Repeat Alpha');
+
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('responds to main-process transport command events (media-key command path)', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-transport-events-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-transport-events-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=380:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Transport Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=580:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Transport Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Transport Alpha' }).first().click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows()[0];
+        window?.webContents.send('producer-player:transport-command', 'play-pause');
+      });
+
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+
+      await electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows()[0];
+        window?.webContents.send('producer-player:transport-command', 'play-pause');
+      });
+
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows()[0];
+        window?.webContents.send('producer-player:transport-command', 'previous-track');
+      });
+
+      await expect(page.getByTestId('player-track-name')).toContainText('Transport Beta');
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });
       await fs.rm(userDataDirectory, { recursive: true, force: true });
     }

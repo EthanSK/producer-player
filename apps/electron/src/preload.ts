@@ -3,11 +3,17 @@ import {
   IPC_CHANNELS,
   type ProducerPlayerBridge,
   type SnapshotListener,
+  type TransportCommand,
+  type TransportCommandListener,
 } from '@producer-player/contracts';
 
 const bridge: ProducerPlayerBridge = {
   async getLibrarySnapshot() {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_LIBRARY_SNAPSHOT);
+  },
+
+  async getEnvironment() {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_ENVIRONMENT);
   },
 
   async linkFolderWithDialog() {
@@ -63,6 +69,24 @@ const bridge: ProducerPlayerBridge = {
 
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.SNAPSHOT_UPDATED, wrappedListener);
+    };
+  },
+
+  onTransportCommand(listener: TransportCommandListener) {
+    const wrappedListener = (_event: unknown, command: unknown) => {
+      if (
+        command === 'play-pause' ||
+        command === 'next-track' ||
+        command === 'previous-track'
+      ) {
+        listener(command as TransportCommand);
+      }
+    };
+
+    ipcRenderer.on(IPC_CHANNELS.TRANSPORT_COMMAND, wrappedListener);
+
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.TRANSPORT_COMMAND, wrappedListener);
     };
   },
 };

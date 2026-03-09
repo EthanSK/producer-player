@@ -2,6 +2,7 @@ export const AUDIO_EXTENSIONS = [
   'wav',
   'aiff',
   'aif',
+  'aifc',
   'flac',
   'mp3',
   'm4a',
@@ -43,6 +44,8 @@ export interface PlaybackSourceInfo {
   mimeType: string;
   extension: string;
   exists: boolean;
+  sourceStrategy: 'direct-file' | 'transcoded-cache';
+  originalFilePath: string | null;
 }
 
 export interface LogicalSong {
@@ -72,8 +75,15 @@ export interface LibrarySnapshot {
   matcherSettings: MatcherSettings;
 }
 
+export interface ProducerPlayerEnvironment {
+  isMacAppStoreSandboxed: boolean;
+  canLinkFolderByPath: boolean;
+  canRequestSecurityScopedBookmarks: boolean;
+}
+
 export const IPC_CHANNELS = {
   GET_LIBRARY_SNAPSHOT: 'producer-player:get-library-snapshot',
+  GET_ENVIRONMENT: 'producer-player:get-environment',
   LINK_FOLDER_DIALOG: 'producer-player:link-folder-dialog',
   LINK_FOLDER_PATH: 'producer-player:link-folder-path',
   UNLINK_FOLDER: 'producer-player:unlink-folder',
@@ -86,12 +96,16 @@ export const IPC_CHANNELS = {
   TO_FILE_URL: 'producer-player:to-file-url',
   RESOLVE_PLAYBACK_SOURCE: 'producer-player:resolve-playback-source',
   SNAPSHOT_UPDATED: 'producer-player:snapshot-updated',
+  TRANSPORT_COMMAND: 'producer-player:transport-command',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
+export type TransportCommand = 'play-pause' | 'next-track' | 'previous-track';
+export type TransportCommandListener = (command: TransportCommand) => void;
 
 export interface ProducerPlayerBridge {
   getLibrarySnapshot(): Promise<LibrarySnapshot>;
+  getEnvironment(): Promise<ProducerPlayerEnvironment>;
   linkFolderWithDialog(): Promise<LibrarySnapshot>;
   linkFolder(folderPath: string): Promise<LibrarySnapshot>;
   unlinkFolder(folderId: string): Promise<LibrarySnapshot>;
@@ -104,4 +118,5 @@ export interface ProducerPlayerBridge {
   toFileUrl(filePath: string): Promise<string>;
   resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo>;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
+  onTransportCommand(listener: TransportCommandListener): () => void;
 }

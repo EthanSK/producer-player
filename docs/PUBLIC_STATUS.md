@@ -6,8 +6,8 @@ _Last updated: 2026-03-08_
 
 - Repository: <https://github.com/EthanSK/producer-player>
 - Source code:
-  - Swift MVP (`Sources/ProducerPlayer/**`)
-  - Electron + TypeScript slice (`apps/**`, `packages/**`)
+  - Legacy Swift MVP archive (`old-swift-project/Sources/ProducerPlayer/**`)
+  - Electron + TypeScript app (`apps/**`, `packages/**`)
 - Documentation + landing page source (`README.md`, `docs/**`, `site/**`)
 - GitHub workflows (`.github/workflows/**`) for CI, Pages, and desktop prebuilt release
 - Downloadable **unsigned desktop ZIP artifacts** from `.github/workflows/release-desktop.yml`

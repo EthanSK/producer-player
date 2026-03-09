@@ -771,3 +771,11 @@ Also, at the top of the readme, it should explain all the point of the app is. I
 - `npm run test -w @producer-player/e2e -- src/library-linking.spec.ts src/playback-runtime.spec.ts` ✅ (11/11)
 - Fresh screenshot generated in Electron runtime fixture:
   - `docs/assets/readme/app-library-current.png`
+
+#### Ethan message (verbatim) — message_id 3848
+
+**Timestamp:** Mon 2026-03-09 17:39 GMT
+
+```text
+Can you move all the swift related stuff to an old swift project folder so we don't get confused because that's just irrelevant now. And also removing most of his mentioned from the read me, just have a quick thing at the bottom. Just mentioning it.
+```

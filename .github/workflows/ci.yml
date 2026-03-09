@@ -38,13 +38,3 @@ jobs:
           npm run build -w packages/domain
           npm run build -w apps/renderer
           npm run build -w apps/electron
-
-  swift-build:
-    name: Swift MVP build
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build Swift package
-        run: swift build

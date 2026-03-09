@@ -136,6 +136,12 @@ Monorepo-ish workspace with typed boundaries:
   - right: inspector with version history + status
 - Typed IPC bridge and shared contracts package
 
+### App snapshot (test files + archived versions)
+
+![Producer Player library showing active tracks and archived old versions](docs/assets/readme/app-library-test-and-old-files.png)
+
+This screenshot shows a realistic test fixture with multiple tracks in the library list (center panel) and older exports archived under `old/` in the inspector version history (right panel).
+
 ### Run (Electron dev)
 
 ```bash

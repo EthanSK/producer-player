@@ -15,6 +15,7 @@ apps/*/dist/
 packages/*/dist/
 apps/e2e/playwright-report/
 apps/e2e/test-results/
+/artifacts/
 /release/
 *.tsbuildinfo
 *.log

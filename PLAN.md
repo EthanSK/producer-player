@@ -977,3 +977,60 @@ Also, in a sub agent, you didn't test it. It doesn't work at least on my end. Ma
     - first run Album A: `Alpha v1.wav`, `Outro v1.wav`
     - first run Album B: `Beta v1.wav`
     - after restart Album B: `Beta v1.wav`
+
+#### Ethan message (verbatim) — landing / README / security cleanup pass
+
+**Timestamp:** Mon 2026-03-09 22:32 GMT
+
+```text
+Okay. What's this? So, yeah, it's all pushed, all done. Have you built a home page, landing page, very nice one for people to see the download link? And it's hosted with GitHub pages right now. If so, send me the URL. It should be also nice on mobile. I want you to do a full check of it in a sub agent. And then after that sub agent, there's reports about what what's going on. He's changing in another sub agent. You can fix it and make it good. Make sure the latest Mac OS is built. Everything is all good to go. Also, make sure there's no security vulnerabilities because it's gonna be a public repo. Also, clean up the read me. I don't think it's that good, to be honest. Also, do the all the sub agents with the GVC 5.4 model.
+```
+
+**Additional Ethan feedback (verbatim):**
+
+```text
+In another sub agent, I need you to completely get rid of all the videos from the read me or public profile, like, get her back pages, all the videos, all the pictures, screenshots, and redo them all. Actually, I think it's also outdated. Maybe modify the existing sub agent that's dealing with this aspect of the app to do that or something because, like, they're outdated. They need to be redone, and the videos needed. The video can just go, and everything can just be cleaned up a bit, I think.
+```
+
+## Landing page / README / security hygiene cleanup (this run)
+
+### Public-surface cleanup completed
+
+- Rebuilt the GitHub Pages landing page into a simpler mobile-friendly front door with honest release status and fewer public claims.
+- Replaced stale public media with one fresh generated product visual:
+  - source: `assets/marketing/producer-player-hero.svg`
+  - exports: `site/assets/screenshots/app-hero.png`, `docs/assets/readme/app-hero.png`
+- Removed stale public demo/video and old screenshot set from tracked repo files.
+- Rewrote `README.md` to act as a cleaner public-facing front door.
+- Rewrote `docs/PUBLIC_STATUS.md` to match current reality.
+
+### Security / repo hygiene completed
+
+- Added `SECURITY.md`.
+- Added Dependabot config: `.github/dependabot.yml`.
+- Added CodeQL workflow: `.github/workflows/codeql.yml`.
+- Added `docs/LICENSE_STATUS.md` instead of guessing a public license.
+- Added `/artifacts/` to `.gitignore` and removed previously tracked artifact evidence files from the repo.
+
+### Public copy corrections
+
+- Removed stale video references from public surfaces.
+- Removed outdated screenshot references and regenerated public-facing imagery.
+- Removed public-facing internal/process-heavy wording where possible.
+- Kept public copy explicit that signing/notarization are still pending.
+
+### Validation performed
+
+- Local site preview checked after landing-page rewrite.
+- `npm run build` ✅
+- `npm run typecheck` ✅
+- `npm run e2e:ci` ✅
+- `npm run release:desktop:mac` ✅
+  - verified local output: `release/Producer-Player-0.1.0-mac-arm64.zip`
+
+### Remaining manual blockers
+
+- Choose and add an explicit public license.
+- Set up Developer ID signing for macOS.
+- Complete Apple notarization.
+- Publish a polished signed public release/download channel after those steps are done.

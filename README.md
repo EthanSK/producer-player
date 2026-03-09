@@ -1,175 +1,53 @@
 # Producer Player
 
-Producer Player is for producers who need to manage songs in an album, export new versions over time, and keep the ordering intact.
+Producer Player is a desktop app for producers who export the same songs repeatedly and need one clean place to keep track of versions, audition older takes, and preserve album order.
 
-The core workflow is simple:
+![Illustrated preview of the Producer Player desktop app](docs/assets/readme/app-hero.png)
 
-- Keep one album-level track order that you can drag/reorder
-- Keep multiple exported versions per track (`v1`, `v2`, `v3`, …)
-- Keep old exports visible in history (`old/`) without losing current ordering
-- Audition versions quickly without breaking the album sequence
+## Public links
 
-## Current app UI
+- Live page: <https://ethansk.github.io/producer-player/>
+- Repository: <https://github.com/EthanSK/producer-player>
+- Releases: <https://github.com/EthanSK/producer-player/releases>
+- Desktop build workflow: <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
+- Security policy: [`SECURITY.md`](SECURITY.md)
 
-![Producer Player current album workflow UI](docs/assets/readme/app-library-current.png)
+## What it does
 
----
+- Groups repeated exports into one logical song entry
+- Keeps track order stable while versions change over time
+- Surfaces archived versions in history instead of losing them
+- Lets you audition current and older exports quickly
 
-## Repository
+## Public readiness right now
 
-- <https://github.com/EthanSK/producer-player>
+What is true today:
 
----
+- The GitHub Pages landing page is live.
+- The repository is public.
+- The desktop build path is wired up.
+- Local verification on Apple Silicon produces a macOS ZIP build (`Producer-Player-0.1.0-mac-arm64.zip`).
 
-## Download prebuilt app (no local build required)
+What is **not** being claimed yet:
 
-### Available now
+- A signed macOS release
+- Apple notarization
+- A polished launch-ready public download channel
 
-Unsigned desktop ZIP artifacts (macOS, Linux, Windows) are produced by:
+That means the project is publicly visible and buildable, but it should **not** be presented as a finished signed macOS launch release yet.
 
-- Workflow file: [`.github/workflows/release-desktop.yml`](.github/workflows/release-desktop.yml)
-- Workflow page: <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
+## Downloads
 
-Artifacts:
+The intended public download surface is the GitHub Releases page:
 
-- `Producer-Player-<version>-mac-<arch>.zip`
-- `Producer-Player-<version>-linux-<arch>.zip`
-- `Producer-Player-<version>-win-<arch>.zip`
-- matching checksum files: `*.zip.sha256`
+- <https://github.com/EthanSK/producer-player/releases>
 
-Current workflow default builds for the GitHub Actions runner architecture for each OS.
+Until signing and notarization are in place, any macOS ZIP build should be treated as a test build.
+If you open an unsigned macOS build, Gatekeeper friction is expected.
 
-Download sources:
-
-1. **Workflow artifacts** (main/master pushes + manual dispatch)
-2. **GitHub Releases assets** on `v*` tags:
-   - <https://github.com/EthanSK/producer-player/releases>
-
-> These builds are intentionally unsigned for immediate testability.
-> On first launch, macOS Gatekeeper may require right-click → **Open**.
-
-### Planned (not yet enabled)
-
-- Signed/notarized macOS DMG
-- Signed Windows installer (NSIS/MSIX)
-- Linux packages (AppImage/deb)
-
-See [`docs/RELEASING.md`](docs/RELEASING.md) for roadmap and exact signing secret names.
-
----
-
-## Demo video
-
-- In-repo demo clip: [`site/assets/demo/producer-player-demo.mp4`](site/assets/demo/producer-player-demo.mp4)
-- Expected Pages-hosted demo path (after successful Pages deploy):
-  - <https://ethansk.github.io/producer-player/assets/demo/producer-player-demo.mp4>
-
----
-
-## GitHub Pages landing page
-
-A polished static landing page is included in:
-
-- `site/index.html`
-- `site/styles.css`
-- `site/assets/**`
-
-Workflow:
-
-- `.github/workflows/pages.yml`
-
-Expected Pages URL:
-
-- <https://ethansk.github.io/producer-player/>
-
----
-
-## GitHub Actions workflows
-
-- **CI checks/build:** `.github/workflows/ci.yml`
-  - Node workspace install + typecheck + build
-- **GitHub Pages deploy:** `.github/workflows/pages.yml`
-  - Uploads `site/` as Pages artifact and deploys
-- **Desktop prebuilt releases:** `.github/workflows/release-desktop.yml`
-  - Builds unsigned desktop ZIP artifacts (macOS, Linux, Windows)
-  - Uploads ZIP + checksum artifacts
-  - On `v*` tags, attaches assets to GitHub Releases
-
----
-
-## Release notes + changelog process
-
-- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
-- Release notes template: [`.github/RELEASE_NOTES_TEMPLATE.md`](.github/RELEASE_NOTES_TEMPLATE.md)
-- Release notes categories (optional): [`.github/release.yml`](.github/release.yml)
-- First-release instructions + signing guidance: [`docs/RELEASING.md`](docs/RELEASING.md)
-
----
-
-## App implementation (Electron + TypeScript)
-
-Monorepo-ish workspace with typed boundaries:
-
-- `apps/electron` → Electron main + preload process
-- `apps/renderer` → React + Vite desktop UI
-- `packages/contracts` → shared types + IPC contracts
-- `packages/domain` → folder scan/watch + logical song model skeleton
-- `apps/e2e` → Playwright E2E tests for desktop shell happy path
-
-### What the current vertical slice includes
-
-- Folder linking focused on a primary **Add Folder…** control (plus test-only path hook for E2E automation)
-- Folder watch + auto refresh on export changes
-- Logical song grouping skeleton (normalization + versions)
-- Tri-panel UI direction:
-  - left: Add Folder controls + linked folder management
-  - middle: library list with search, drag ordering, and playback queue
-  - right: inspector with version history + status
-- Typed IPC bridge and shared contracts package
-
-### Playback runtime (Electron/Chromium)
-
-- Audio sources are resolved through a dedicated `producer-media://` protocol (instead of raw `file://` renderer links).
-  - This avoids dev-mode `Not allowed to load local resource` failures when renderer runs on `http://127.0.0.1`.
-  - The protocol serves explicit MIME types and supports byte-range requests.
-- For direct-file playback (for example WAV/MP3/FLAC), bytes are streamed directly from disk without EQ/normalization/DSP.
-- AIFF-family files (`.aiff`, `.aif`, `.aifc`) are prepared into a local WAV cache only when needed for Chromium decode compatibility (still no EQ/effects processing).
-- Renderer playback telemetry logs source lifecycle and error context (`[producer-player:playback]` console events).
-- Unsupported codecs fail with actionable guidance (convert to WAV/MP3/AAC-M4A), rather than silent no-op behavior.
-
-### Ordering durability model (reinstall-safe focus)
-
-Ordering is persisted in two layers:
-
-1. **Primary app state** in user library app-data (`producer-player-electron-state.json`).
-2. **Per-linked-folder sidecar** at `<linked-folder>/.producer-player/order-state.json`.
-
-Tradeoffs:
-
-- If the app bundle is deleted/reinstalled, primary app-data usually survives and order is preserved.
-- If app-data is wiped but linked folders remain, sidecars restore order after relinking.
-- Sidecar writes are best-effort; read-only/network-restricted folders may block writing.
-- Sidecars intentionally store ordering metadata only (no audio content).
-
-### App snapshot (test files + archived versions)
-
-![Producer Player library with album ordering, track numbers, and archived old versions](docs/assets/readme/app-library-current.png)
-
-This screenshot shows the current desktop UI with the centered Add Folder control, naming hint panel, stable track rows with drag-and-drop ordering, and archived exports in `old/` inside version history.
-
-### App icon
-
-Producer Player now uses a dedicated app icon direction: **Stacked Takes** (layered export versions + play focus).
-
-![Producer Player app icon preview](docs/assets/icon/producer-player-icon-preview.png)
-
-- Source + exported assets: [`docs/APP_ICON.md`](docs/APP_ICON.md)
-- macOS packaging icon path: `assets/icon/ProducerPlayer.icns`
-
-### Run (Electron dev)
+## Local development
 
 ```bash
-cd /Users/ethansk/Projects/producer-player
 npm install
 npm run dev
 ```
@@ -180,7 +58,20 @@ npm run dev
 npm run build
 ```
 
-### Build prebuilt desktop ZIP locally
+### Typecheck
+
+```bash
+npm run typecheck
+```
+
+### End-to-end tests
+
+```bash
+npm run e2e
+npm run e2e:ci
+```
+
+### Local desktop packages
 
 ```bash
 npm run release:desktop:mac
@@ -188,36 +79,29 @@ npm run release:desktop:linux
 npm run release:desktop:win
 ```
 
-### Typecheck
+## Repo layout
 
-```bash
-npm run typecheck
-```
+- `apps/electron` — Electron main process and preload bridge
+- `apps/renderer` — React renderer UI
+- `packages/contracts` — shared IPC/types
+- `packages/domain` — folder scanning, grouping, and ordering logic
+- `apps/e2e` — Playwright desktop tests
+- `site/` — GitHub Pages landing page
 
-### E2E
+## Security and repo hygiene
 
-```bash
-npm run e2e
-npm run e2e:ci
-```
+This repo now includes:
 
----
+- [`SECURITY.md`](SECURITY.md) for vulnerability reporting guidance
+- Dependabot configuration for npm and GitHub Actions updates
+- A CodeQL workflow for automated code scanning
 
-## Current docs
+## License status
 
-- [`docs/E2E.md`](docs/E2E.md)
-- [`docs/PLAN_LOGGING_WORKFLOW.md`](docs/PLAN_LOGGING_WORKFLOW.md)
-- [`docs/PUBLIC_STATUS.md`](docs/PUBLIC_STATUS.md)
-- [`docs/RELEASING.md`](docs/RELEASING.md)
-- [`docs/ROADMAP.md`](docs/ROADMAP.md)
+No open-source license has been chosen yet.
+Until a license is added, the repository should be treated as **all rights reserved by default**.
+See [`docs/LICENSE_STATUS.md`](docs/LICENSE_STATUS.md).
 
----
+## Archived Swift prototype
 
-## Legacy Swift MVP
-
-The old Swift prototype has been moved out of the way to `old-swift-project/` so the main repo stays focused on the current app.
-
-If you need it later, the archived Swift sources/docs now live under:
-- `old-swift-project/Package.swift`
-- `old-swift-project/Sources/ProducerPlayer/`
-- `old-swift-project/docs/`
+An older Swift prototype is still kept in `old-swift-project/` as historical archive material, but the public-facing app direction is the current Electron + TypeScript implementation.

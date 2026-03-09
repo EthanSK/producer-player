@@ -258,6 +258,99 @@ test.describe('Producer Player desktop shell', () => {
     }
   });
 
+  test('restores track order from folder sidecar after reinstall-like user-data reset', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-fixture-')
+    );
+    const firstUserDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-user-data-first-')
+    );
+    const secondUserDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-user-data-second-')
+    );
+
+    await writeTestWav(path.join(fixtureDirectory, 'Alpha v1.wav'), { frequencyHz: 330 });
+    await writeTestWav(path.join(fixtureDirectory, 'Beta v1.wav'), { frequencyHz: 660 });
+
+    let firstLaunch: LaunchedApp | null = null;
+
+    try {
+      firstLaunch = await launchProducerPlayer(firstUserDataDirectory);
+
+      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const rowData = await firstLaunch.page
+        .getByTestId('main-list-row')
+        .evaluateAll((elements) =>
+          elements
+            .map((element) => ({
+              id: element.getAttribute('data-song-id') ?? '',
+              text: element.textContent ?? '',
+            }))
+            .filter((entry) => entry.id.length > 0)
+        );
+
+      const alphaEntry = rowData.find((entry) => entry.text.includes('Alpha'));
+      const betaEntry = rowData.find((entry) => entry.text.includes('Beta'));
+
+      if (!alphaEntry || !betaEntry) {
+        throw new Error('Could not resolve Alpha/Beta rows for reorder test.');
+      }
+
+      await firstLaunch.page.evaluate(async (orderedIds) => {
+        await (window as any).producerPlayer.reorderSongs(orderedIds);
+      }, [alphaEntry.id, betaEntry.id]);
+
+      await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Alpha');
+    } finally {
+      await firstLaunch?.electronApp.close();
+    }
+
+    const sidecarPath = path.join(
+      fixtureDirectory,
+      '.producer-player',
+      'order-state.json'
+    );
+
+    const sidecarRaw = await fs.readFile(sidecarPath, 'utf8');
+    const sidecar = JSON.parse(sidecarRaw) as {
+      normalizedTitleOrder?: string[];
+      songOrder?: string[];
+    };
+
+    expect(sidecar.normalizedTitleOrder).toEqual(
+      expect.arrayContaining(['alpha', 'beta'])
+    );
+    expect((sidecar.songOrder ?? []).length).toBeGreaterThan(0);
+
+    await fs.rm(firstUserDataDirectory, { recursive: true, force: true });
+
+    let secondLaunch: LaunchedApp | null = null;
+
+    try {
+      secondLaunch = await launchProducerPlayer(secondUserDataDirectory);
+
+      await secondLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await secondLaunch.page.getByTestId('link-folder-path-button').click();
+
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+      await expect(secondLaunch.page.getByTestId('main-list-row').first()).toContainText('Alpha');
+
+      const newStatePath = path.join(secondUserDataDirectory, STATE_FILE_NAME);
+      const stateRaw = await fs.readFile(newStatePath, 'utf8');
+      const state = JSON.parse(stateRaw) as { songOrder?: string[] };
+      expect((state.songOrder ?? []).length).toBeGreaterThan(0);
+    } finally {
+      await secondLaunch?.electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(firstUserDataDirectory, { recursive: true, force: true });
+      await fs.rm(secondUserDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('plays valid test audio and supports producer transport controls', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-fixture-')
@@ -266,8 +359,14 @@ test.describe('Producer Player desktop shell', () => {
       path.join(os.tmpdir(), 'producer-player-e2e-user-data-')
     );
 
-    await writeTestWav(path.join(fixtureDirectory, 'Pulse v1.wav'), { frequencyHz: 440 });
-    await writeTestWav(path.join(fixtureDirectory, 'Pulse v2.wav'), { frequencyHz: 520 });
+    await writeTestWav(path.join(fixtureDirectory, 'Pulse v1.wav'), {
+      frequencyHz: 440,
+      durationMs: 3_000,
+    });
+    await writeTestWav(path.join(fixtureDirectory, 'Pulse v2.wav'), {
+      frequencyHz: 520,
+      durationMs: 3_000,
+    });
 
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 

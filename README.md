@@ -136,6 +136,28 @@ Monorepo-ish workspace with typed boundaries:
   - right: inspector with version history + status
 - Typed IPC bridge and shared contracts package
 
+### Playback runtime (Electron/Chromium)
+
+- Audio sources are resolved through a dedicated `producer-media://` protocol (instead of raw `file://` renderer links).
+  - This avoids dev-mode `Not allowed to load local resource` failures when renderer runs on `http://127.0.0.1`.
+  - The protocol serves explicit MIME types and supports byte-range requests.
+- Renderer playback telemetry logs source lifecycle and error context (`[producer-player:playback]` console events).
+- Unsupported codecs fail with actionable guidance (convert to WAV/MP3/AAC-M4A), rather than silent no-op behavior.
+
+### Ordering durability model (reinstall-safe focus)
+
+Ordering is persisted in two layers:
+
+1. **Primary app state** in user library app-data (`producer-player-electron-state.json`).
+2. **Per-linked-folder sidecar** at `<linked-folder>/.producer-player/order-state.json`.
+
+Tradeoffs:
+
+- If the app bundle is deleted/reinstalled, primary app-data usually survives and order is preserved.
+- If app-data is wiped but linked folders remain, sidecars restore order after relinking.
+- Sidecar writes are best-effort; read-only/network-restricted folders may block writing.
+- Sidecars intentionally store ordering metadata only (no audio content).
+
 ### App snapshot (test files + archived versions)
 
 ![Producer Player library showing active tracks and archived old versions](docs/assets/readme/app-library-test-and-old-files.png)

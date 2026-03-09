@@ -932,3 +932,48 @@ What are you doing? My thing is like a tune. Okay. So few issues. Open and finde
   - `window.producerPlayer.revealFile(filePath)` ✅
 - Both calls resolved without error and triggered Finder open/reveal behavior via default shell routes.
 
+
+#### Ethan message (verbatim) — message_id 3902
+
+**Timestamp:** Mon 2026-03-09 22:23 GMT
+
+```text
+Also, in a sub agent, you didn't test it. It doesn't work at least on my end. Maybe I didn't pull, but I'm pretty sure I did. But test it properly deeply because in a 5.4, I want you to use that model 5.4 for future sub agents. Actually, use your default model for future sub agents if I need to specify differently. Anyway, when I add folders and I click on them on the left side pane, it doesn't switch the list of tracks. It's just keep showing the old ones still. So that wasn't fixed. Do that in a sub agent.
+```
+
+## Multi-watch-folder sidebar selection regression fix (sub-agent run)
+
+### Root cause
+
+- The left sidebar updated `selectedFolderId`, but the main track-list selector still rendered from `snapshot.songs` globally.
+- Result: clicking a different watched folder changed the highlighted sidebar row, but **did not scope the visible track list, count, playback queue, or inspector selection** to that folder.
+- Previous validation missed this because E2E coverage did not include a true multi-folder click-through regression test.
+
+### Fix implemented
+
+- Scoped the renderer’s derived `songs` list to the currently selected linked folder before applying search.
+- Updated the Album header count to use the folder-scoped track list rather than the full library.
+- Added targeted Electron E2E coverage for the exact bug and for practical lifecycle checks around it:
+  - multi-folder add/link
+  - sidebar switching between folders
+  - rescan while a non-default folder is selected
+  - restart with multiple linked folders
+  - unlink fallback back to the remaining folder
+
+### Validation completed
+
+- Reproduced pre-fix bug locally on latest `main`: linked two folders, clicked the second folder, and confirmed the main list still showed tracks from both folders.
+- Targeted regression test added and passing:
+  - `switches the track list when selecting different linked folders and keeps the filter after rescan, unlink, and restart`
+- Broader validation rerun:
+  - `npm run typecheck` ✅
+  - `node --test packages/domain/test/file-library-service.integration.test.cjs` ✅ (5/5)
+  - `npm run test -w @producer-player/e2e -- src/library-linking.spec.ts src/folder-structure-hardening.spec.ts` ✅ (7/7)
+- Manual Electron verification artifacts captured:
+  - `artifacts/multi-folder-sidebar-fix-2026-03-09/01-album-a-selected.png`
+  - `artifacts/multi-folder-sidebar-fix-2026-03-09/02-album-b-selected.png`
+  - `artifacts/multi-folder-sidebar-fix-2026-03-09/03-after-restart-album-b-selected.png`
+  - JSON row captures confirm visible list switching:
+    - first run Album A: `Alpha v1.wav`, `Outro v1.wav`
+    - first run Album B: `Beta v1.wav`
+    - after restart Album B: `Beta v1.wav`

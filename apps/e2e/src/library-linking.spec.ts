@@ -352,6 +352,104 @@ test.describe('Producer Player desktop shell', () => {
     }
   });
 
+  test('switches the track list when selecting different linked folders and keeps the filter after rescan, unlink, and restart', async () => {
+    const fixtureRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-multi-folder-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-user-data-')
+    );
+    const albumADirectory = path.join(fixtureRoot, 'Album A');
+    const albumBDirectory = path.join(fixtureRoot, 'Album B');
+
+    await fs.mkdir(albumADirectory, { recursive: true });
+    await fs.mkdir(albumBDirectory, { recursive: true });
+
+    await writeTestWav(path.join(albumADirectory, 'Alpha v1.wav'), {
+      frequencyHz: 330,
+    });
+    await writeTestWav(path.join(albumADirectory, 'Outro v1.wav'), {
+      frequencyHz: 392,
+    });
+    await writeTestWav(path.join(albumBDirectory, 'Beta v1.wav'), {
+      frequencyHz: 523,
+    });
+
+    let firstLaunch: LaunchedApp | null = null;
+
+    try {
+      firstLaunch = await launchProducerPlayer(userDataDirectory);
+
+      await firstLaunch.page.getByTestId('link-folder-path-input').fill(albumADirectory);
+      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+      await firstLaunch.page.getByTestId('link-folder-path-input').fill(albumBDirectory);
+      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+
+      await expect(firstLaunch.page.getByTestId('linked-folder-item')).toHaveCount(2);
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+      await expect(firstLaunch.page.locator('.panel-header .muted').first()).toHaveText('2 track(s)');
+      await expect(firstLaunch.page.getByTestId('main-list')).toContainText('Alpha v1.wav');
+      await expect(firstLaunch.page.getByTestId('main-list')).toContainText('Outro v1.wav');
+      await expect(firstLaunch.page.getByTestId('main-list')).not.toContainText('Beta v1.wav');
+
+      await firstLaunch.page
+        .getByTestId('linked-folder-item')
+        .filter({ hasText: 'Album B' })
+        .click();
+
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(firstLaunch.page.locator('.panel-header .muted').first()).toHaveText('1 track(s)');
+      await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta v1.wav');
+      await expect(firstLaunch.page.getByTestId('main-list')).not.toContainText('Alpha v1.wav');
+
+      await firstLaunch.page.getByTestId('main-list-row').first().click();
+      await expect(firstLaunch.page.getByTestId('inspector-song-title')).toContainText('Beta');
+
+      await firstLaunch.page.getByTestId('rescan-button').click();
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta v1.wav');
+    } finally {
+      await firstLaunch?.electronApp.close();
+    }
+
+    let secondLaunch: LaunchedApp | null = null;
+
+    try {
+      secondLaunch = await launchProducerPlayer(userDataDirectory);
+
+      await expect(secondLaunch.page.getByTestId('linked-folder-item')).toHaveCount(2);
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await secondLaunch.page
+        .getByTestId('linked-folder-item')
+        .filter({ hasText: 'Album B' })
+        .click();
+
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(secondLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta v1.wav');
+
+      secondLaunch.page.once('dialog', async (dialog) => {
+        await dialog.accept();
+      });
+
+      await secondLaunch.page
+        .getByTestId('linked-folder-item')
+        .filter({ hasText: 'Album B' })
+        .getByRole('button', { name: 'Unlink' })
+        .click();
+
+      await expect(secondLaunch.page.getByTestId('linked-folder-item')).toHaveCount(1);
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+      await expect(secondLaunch.page.getByTestId('main-list')).toContainText('Alpha v1.wav');
+      await expect(secondLaunch.page.getByTestId('main-list')).toContainText('Outro v1.wav');
+      await expect(secondLaunch.page.getByTestId('main-list')).not.toContainText('Beta v1.wav');
+    } finally {
+      await secondLaunch?.electronApp.close();
+      await fs.rm(fixtureRoot, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('plays valid test audio and supports producer transport controls', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-fixture-')

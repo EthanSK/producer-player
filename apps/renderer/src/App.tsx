@@ -681,15 +681,18 @@ export function App(): JSX.Element {
   const { songs, matchedVersionNamesBySongId } = useMemo(() => {
     const query = searchText.trim().toLowerCase();
     const matchedVersions = new Map<string, string[]>();
+    const folderScopedSongs = selectedFolderId
+      ? snapshot.songs.filter((song) => song.folderId === selectedFolderId)
+      : snapshot.songs;
 
     if (query.length === 0) {
       return {
-        songs: snapshot.songs,
+        songs: folderScopedSongs,
         matchedVersionNamesBySongId: matchedVersions,
       };
     }
 
-    const filteredSongs = snapshot.songs.filter((song) => {
+    const filteredSongs = folderScopedSongs.filter((song) => {
       const matchingVersionNames = Array.from(
         new Set(
           song.versions
@@ -723,7 +726,7 @@ export function App(): JSX.Element {
       songs: filteredSongs,
       matchedVersionNamesBySongId: matchedVersions,
     };
-  }, [searchText, snapshot.songs]);
+  }, [searchText, selectedFolderId, snapshot.songs]);
 
   useEffect(() => {
     if (songs.length === 0) {
@@ -1458,7 +1461,7 @@ export function App(): JSX.Element {
         <header className="panel-header">
           <div className="panel-title">
             <h2>Album</h2>
-            <p className="muted">{snapshot.songs.length} track(s)</p>
+            <p className="muted">{songs.length} track(s)</p>
           </div>
           <div className="actions">
             <button

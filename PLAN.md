@@ -455,3 +455,267 @@ Artifacts:
   - `artifacts/playback-code4-fix-2026-03-09/production-aiff.png`
   - `artifacts/playback-code4-fix-2026-03-09/dev-mode-wav.png`
 
+
+---
+
+## Playback continuity / drag-drop / raw-filename integrity follow-up (main-session log)
+
+### Ethan feedback (verbatim)
+
+**Timestamp:** Mon 2026-03-09 15:33 GMT
+
+```text
+Okay. Nice. Playback works. There's a few issues. Firstly, when I'm dragging and dropping, there's no, like, indication of where the new one will go. It should give, like, a little preview and, like, shift everything just like that standard UI. Also, after I finish dragging and dropping, it resets the play position and stops playing. Also, the pause button doesn't change the play button properly. Like when I switch track, it stays paused even though it's paused already. So the toggle is wrong. You need to investigate all this deeply in the sub agent to see why. Also, on the left of each item have the number of the track outside the bubble maybe. Or maybe inside, I don't know. Just so we know what number the track is in the album. Also, group slash album title is still called group slash album. It should just be album, not group. And The file names must end with v one hint. Should have an info icon at the start so the user knows this info. Maybe we can come back to it. Anyway yeah. For now, it works with GitHub tokens since I renewed it, and that part is so yeah. Interesting.
+```
+
+### Ethan feedback (verbatim)
+
+**Timestamp:** Mon 2026-03-09 15:44 GMT
+
+```text
+Also, how is it playing the audio? Is it playing the raw audio? No modification or EQ or anything weird being applied? Because that's very important. Also, it'd be nice to have a space to play pause even if play area isn't focused because right now it has to be focused for play pause to work. Also, it should work with a macOS native play pause button. Also, is repeat all not working? I don't think the repeat functionality is working. You need to do some tests around that. I think repeat one is working, but not repeat all. Also, why have a normalized title in the inspector? Is that just showing how it's passing the version numbers or something? Wait. Are you auto capitalizing the titles? You shouldn't be changing the file names when showing them as titles, the items in the row. They should be just the file names. Don't capitalize that shit, man. What are you doing?
+```
+
+### Tracking note
+
+These items were handed to focused sub-agent `producer-player-drag-playback-state-deepdive` for investigation/fix, including:
+- drag/drop insertion preview
+- playback continuity during reorder
+- play/pause state correctness
+- track numbering
+- Album title rename
+- naming-hint info icon
+- proof of raw/unmodified audio path
+- global spacebar play/pause
+- macOS media-key support
+- repeat-all verification/fix
+- raw filename display without auto-capitalization/mutation
+
+---
+
+## Chat-to-PLAN audit backfill (session transcript reconciliation)
+
+Recovered from transcript:
+`/Users/ethansk/.openclaw/agents/main/sessions/abb3c30f-ef6e-4c19-8ca8-921dc866b247.jsonl`
+
+### Missing Ethan prompts backfilled verbatim
+
+#### Ethan message (verbatim) — message_id 3756
+
+**Timestamp:** Sun 2026-03-08 22:52 GMT
+
+```text
+Were we working on producer player recently?
+```
+
+#### Ethan message (verbatim) — message_id 3760
+
+**Timestamp:** Sun 2026-03-08 22:59 GMT
+
+```text
+I have some feedback on producer player. Play it says playback failed. Okay. For the play, the button should be the icon, play pause icon. But it says playback failed, and then it says, when I click play, it says this the element has no supported sources. So you clearly didn't do an end to end test properly. Actually, okay. Fine. Now the play button can okay. No. Change the play button to the icon. Let's see. The version history seems to work nicely. Oh, I just clicked open and find the it switched to open the app. I guess that's because it's in dev mode. Okay. Whatever. Wait. No. Open and Okay. Opening final. Does it work? Yeah. It works. Okay. Oh, the track name should show the version thing at the end. We wanna show the raw file name as the track name. Right now you're removing the v five or whatever. The naming background color should be green because it's like a friendly hint. The little naming use end of name version tags. But it shouldn't that's that's confusing. Change it to okay. There shouldn't be a title. It should just be very brief big text saying file names must end with v one, v two, v three, etcetera, all caps. Actually, not all caps, but just green text. No title. Just straight up save the text, and the text should be bigger than it is now. The open and find a button doesn't seem to use the finder window on this screen or space. It goes to the next space. Is there like a proper way of doing this? So use the finder window that's already on. Like just is is it standard UX? I don't wanna do anything wacky, but it just feels a bit weird. Maybe it's just unlucky right now. Oh, I just saw your message. You haven't recently logged work on Producer Player. Fuck. Okay. Well okay. Fine. Just still do this, modify it, look at past memories to gain context before spinning up this sub agent to do all this work just to figure out what to ask it. Reset. What else? Add a button to the top. Actually, don't need versions. What the fuck is versions for? The versions button at the top. Also group slash album is confusing. Just have it album for the title. We should also say, as a little informative thing, drag tracks will keep their position, yeah, as an informative tool to or, like, text at the top of the list. What the fuck is the organize button? It doesn't even do anything. Wait. Does it? Oh, I guess it moves the old things, the old versions to the old folder. Okay. Rename that button to prune bold. Make sure it also has a tool tip. Yeah. Implement all these changes, but first do the research and spin up a long sub agent then do the progress reporting thing to me. Yeah. Make sure the fucking playback works, and we need to tell the sub agent to test it manually when you're done. Well, actually, Once that sub agent is done with a hook, start a new sub agent to test it, to play functionality, and instruct it to restart sub agent. It will tell you to start sub agent again to fix it if needed. So this should be a long running chain of fucking agent.
+```
+
+#### Ethan message (verbatim) — message_id 3761
+
+**Timestamp:** Sun 2026-03-08 22:59 GMT
+
+```text
+Also, one more thing to pass to it. The status thing in the bottom right, that seems to always be there. So, like, why not put it in the left side pane when where we have space to just, like, empty space now with the auto organize all folders. Also, don't call it status. Actually, Call it status. But, yeah, I moved it.
+```
+
+#### Ethan message (verbatim) — message_id 3763
+
+**Timestamp:** Sun 2026-03-08 23:02 GMT
+
+```text
+What the fuck? What happened? What failed? Why did you fail? Sounded.
+```
+
+#### Ethan message (verbatim) — message_id 3768
+
+**Timestamp:** Sun 2026-03-08 23:16 GMT
+
+```text
+Oh, it failed. Restart.
+```
+
+#### Ethan message (verbatim) — message_id 3769
+
+**Timestamp:** Sun 2026-03-08 23:16 GMT
+
+```text
+Think you don't miss a single detail on why I said
+```
+
+#### Ethan message (verbatim) — message_id 3772
+
+**Timestamp:** Sun 2026-03-08 23:31 GMT
+
+```text
+How's it going?
+```
+
+#### Ethan message (verbatim) — message_id 3774
+
+**Timestamp:** Sun 2026-03-08 23:57 GMT
+
+```text
+Still.
+```
+
+#### Ethan message (verbatim) — message_id 3786
+
+**Timestamp:** Mon 2026-03-09 00:56 GMT
+
+```text
+In a separate sub agent, can you take screenshots of the app and add text overlay saying explaining how it works? Actually, no. Just take one screenshot of the app with a bunch of test files in there and old old files to illustrate the point. And you put that in the GitHub read me.
+```
+
+#### Ethan message (verbatim) — message_id 3792
+
+**Timestamp:** Mon 2026-03-09 01:31 GMT
+
+```text
+Also, folders should actually be called watch folder, and then the add folder button should be
+```
+
+#### Ethan message (verbatim) — message_id 3794
+
+**Timestamp:** Mon 2026-03-09 01:32 GMT
+
+```text
+Why does AIFF not work? All the major formats should work. We have to figure out a solution for all of them, figure out a long running sub agent. This shouldn't be hard. What's the industry standard? What's the proper way of doing this locally? Should work in the app.
+```
+
+#### Ethan message (verbatim) — message_id 3796
+
+**Timestamp:** Mon 2026-03-09 02:04 GMT
+
+```text
+How's the Asian going?
+```
+
+#### Ethan message (verbatim) — message_id 3797
+
+**Timestamp:** Mon 2026-03-09 02:04 GMT
+
+```text
+By the way, I'm testing on WAV files, but it should work on anything. You need to test on all the file types.
+```
+
+#### Ethan message (verbatim) — message_id 3799
+
+**Timestamp:** Mon 2026-03-09 02:07 GMT
+
+```text
+And you tested with all the file formats, and it worked?
+```
+
+#### Ethan message (verbatim) — message_id 3802
+
+**Timestamp:** Mon 2026-03-09 02:09 GMT
+
+```text
+In a sub agent, figure out how to get AIFF working. That'll be important for people.
+```
+
+#### Ethan message (verbatim) — message_id 3806
+
+**Timestamp:** Mon 2026-03-09 02:11 GMT
+
+```text
+Also, want to maybe another sub agent. Come up with an app icon. Actually, also, maybe get it ready for publishing on the App Store. Why not? The Mac OS App Store. I have an Apple developer account in there as well. Go on my App Store Connects page account if you can. If not, it's fine. Another sub agent yet again. And then we should also take screenshots and descriptions and all that. I don't know if I can what you can do.
+```
+
+#### Ethan message (verbatim) — message_id 3811
+
+**Timestamp:** Mon 2026-03-09 02:18 GMT
+
+```text
+Me a picture of the icon so I can see it here.
+```
+
+#### Ethan message (verbatim) — message_id 3813
+
+**Timestamp:** Mon 2026-03-09 02:20 GMT
+
+```text
+That is really shit. Make it beautiful. Use my use the right model on Fowl AI or the Fowl AI skill set up or whatever. Do we have a Fowl skill, by the way? If we don't, we should make one. Because recently I made an image with Fowl. Just say that you can choose whatever model from Fowl first, look at the list of models, figure out in research sub agent how to find this and then use that. It should combine the icon should combine music and playing the music.
+```
+
+#### Ethan message (verbatim) — message_id 3815
+
+**Timestamp:** Mon 2026-03-09 02:23 GMT
+
+```text
+Yeah fal do the skill
+```
+
+#### Ethan message (verbatim) — message_id 3822
+
+**Timestamp:** Mon 2026-03-09 11:16 GMT
+
+```text
+Hello. You didn't
+```
+
+#### Ethan message (verbatim) — message_id 3829
+
+**Timestamp:** Mon 2026-03-09 15:44 GMT
+
+```text
+Also, have you been keeping track of absolutely everything I've asked you to in the plan m d file or from wherever?
+```
+
+#### Ethan message (verbatim) — message_id 3834
+
+**Timestamp:** Mon 2026-03-09 15:49 GMT
+
+```text
+Also have a new screenshot and put it at the top of the read me and also make can you screenshot the new version of the app because it seems old and a bit weird. Why is the spacing so big?
+```
+
+#### Ethan message (verbatim) — message_id 3835
+
+**Timestamp:** Mon 2026-03-09 15:49 GMT
+
+```text
+Also, at the top of the readme, it should explain all the point of the app is. It's for producers who need to manage songs in an album and export new versions and keep the ordering.
+```
+
+#### Ethan message (verbatim) — message_id 3840
+
+**Timestamp:** Mon 2026-03-09 15:52 GMT
+
+```text
+We need to go back through every single chat in this chat and make sure all the prompts related to this project are there as I instructed and figure out why that wasn't happening and fix the root cause as well in a sub agent.
+```
+
+#### Ethan message (verbatim) — message_id 3841
+
+**Timestamp:** Mon 2026-03-09 15:52 GMT
+
+```text
+In ten minutes schedule, OCRON to make sure everything that I just asked for in the past two hours has been added properly
+```
+
+### Root-cause analysis (chat-to-PLAN reliability)
+
+- PLAN updates had drifted into **summary-only logging** for some runs, so short follow-up prompts were executed but not copied verbatim.
+- There was **no transcript reconciliation step** before completion, so omissions were not detected automatically.
+- Multi-sub-agent chains increased context switching, and without a hard audit gate, prompt coverage became non-deterministic.
+
+### Fix implemented in-repo
+
+- Added transcript audit tool: `scripts/plan_verbatim_audit.py`
+  - parses OpenClaw session JSONL
+  - detects Producer Player prompt thread
+  - reports prompts missing verbatim coverage in `PLAN.md`
+  - can auto-append missing prompts with timestamp + message id
+- Added workflow doc: `docs/PLAN_LOGGING_WORKFLOW.md`
+- Added npm wrappers for repeatable usage:
+  - `npm run plan:audit`
+  - `npm run plan:audit:append`
+- Executed the audit and backfilled all missing prompts from this session transcript to restore full coverage.
+

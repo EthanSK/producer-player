@@ -215,5 +215,6 @@ npm run e2e:ci
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/CROSS_PLATFORM_MIGRATION.md`](docs/CROSS_PLATFORM_MIGRATION.md)
 - [`docs/E2E.md`](docs/E2E.md)
+- [`docs/PLAN_LOGGING_WORKFLOW.md`](docs/PLAN_LOGGING_WORKFLOW.md)
 - [`docs/PUBLIC_STATUS.md`](docs/PUBLIC_STATUS.md)
 - [`docs/RELEASING.md`](docs/RELEASING.md)

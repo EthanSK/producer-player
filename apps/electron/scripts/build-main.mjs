@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import ffmpegStatic from 'ffmpeg-static';
-import { cp, mkdir } from 'node:fs/promises';
+import { cp, mkdir, rm } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,9 +24,17 @@ await build({
   logLevel: 'info',
 });
 
-if (!ffmpegStatic) {
-  throw new Error('ffmpeg-static did not resolve to a binary path.');
-}
+await rm(binaryOutputDirectory, { recursive: true, force: true });
 
-await mkdir(binaryOutputDirectory, { recursive: true });
-await cp(ffmpegStatic, resolve(binaryOutputDirectory, basename(ffmpegStatic)));
+const shouldBundleFfmpeg = process.env.PRODUCER_PLAYER_SKIP_BUNDLED_FFMPEG !== 'true';
+
+if (!shouldBundleFfmpeg) {
+  console.info('[producer-player/electron] Skipping bundled ffmpeg binary for this build target.');
+} else {
+  if (!ffmpegStatic) {
+    throw new Error('ffmpeg-static did not resolve to a binary path.');
+  }
+
+  await mkdir(binaryOutputDirectory, { recursive: true });
+  await cp(ffmpegStatic, resolve(binaryOutputDirectory, basename(ffmpegStatic)));
+}

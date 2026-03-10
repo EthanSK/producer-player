@@ -27,14 +27,16 @@ What is true today:
 - The repository is public.
 - The desktop build path is wired up.
 - Local verification on Apple Silicon produces a macOS ZIP build (`Producer-Player-0.1.0-mac-arm64.zip`).
+- The repo now includes Mac App Store-oriented packaging scripts, entitlements, and sandbox-aware app code paths.
 
 What is **not** being claimed yet:
 
-- A signed macOS release
-- Apple notarization
+- A signed macOS release already accepted by Apple
+- Apple notarization for outside-the-store distribution
+- A completed Mac App Store submission / approval
 - A polished launch-ready public download channel
 
-That means the project is publicly visible and buildable, but it should **not** be presented as a finished signed macOS launch release yet.
+That means the project is publicly visible and buildable, and the App Store packaging path is more prepared than before, but it should **not** be presented as a finished signed public macOS launch release yet.
 
 ## Downloads
 
@@ -74,10 +76,15 @@ npm run e2e:ci
 ### Local desktop packages
 
 ```bash
-npm run release:desktop:mac
+npm run build:mac
+npm run build:mac:dir
+npm run build:mac:mas-dev
+npm run build:mac:mas
 npm run release:desktop:linux
 npm run release:desktop:win
 ```
+
+Mac App Store packaging notes live in [`docs/MAC_APP_STORE.md`](docs/MAC_APP_STORE.md).
 
 ## Repo layout
 

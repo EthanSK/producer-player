@@ -1,6 +1,6 @@
 # Producer Player — public status
 
-_Last updated: 2026-03-09_
+_Last updated: 2026-03-10_
 
 ## Public now
 
@@ -16,11 +16,12 @@ _Last updated: 2026-03-09_
 - The desktop packaging path is working.
 - Local verification on Apple Silicon produces `Producer-Player-0.1.0-mac-arm64.zip`.
 - GitHub Actions is configured to build unsigned desktop ZIP artifacts.
+- The repo now includes Mac App Store-oriented electron-builder targets, entitlements, and npm build scripts.
 
 ## Not public-ready yet
 
-- Signed macOS release
-- Apple notarization
+- Signed macOS release already accepted by Apple
+- Apple notarization for outside-the-store distribution
 - Final polished public download channel
 - Chosen open-source license
 

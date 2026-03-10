@@ -45,6 +45,20 @@ function dedupeIds(ids: string[]): string[] {
   return unique;
 }
 
+function formatCount(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function buildWatchingMessage(folderCount: number, detail?: string): string {
+  return detail
+    ? `Watching ${formatCount(folderCount, 'folder')}. ${detail}`
+    : `Watching ${formatCount(folderCount, 'folder')}.`;
+}
+
+function buildOrganizedVersionsMessage(movedCount: number): string {
+  return `Organized ${formatCount(movedCount, 'old version')}.`;
+}
+
 async function pathExists(absolutePath: string): Promise<boolean> {
   try {
     await fs.access(absolutePath);
@@ -236,8 +250,11 @@ export class FileLibraryService {
 
     const statusMessage =
       movedCount > 0
-        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
-        : `Watching ${this.linkedFolders.size} folder(s).`;
+        ? buildWatchingMessage(
+            this.linkedFolders.size,
+            buildOrganizedVersionsMessage(movedCount)
+          )
+        : buildWatchingMessage(this.linkedFolders.size);
 
     this.rebuildSnapshot('watching', statusMessage);
     return this.getSnapshot();
@@ -265,7 +282,7 @@ export class FileLibraryService {
       return this.getSnapshot();
     }
 
-    this.rebuildSnapshot('watching', `Watching ${this.linkedFolders.size} folder(s).`);
+    this.rebuildSnapshot('watching', buildWatchingMessage(this.linkedFolders.size));
     return this.getSnapshot();
   }
 
@@ -285,8 +302,11 @@ export class FileLibraryService {
 
     const statusMessage =
       movedCount > 0
-        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
-        : `Watching ${this.linkedFolders.size} folder(s).`;
+        ? buildWatchingMessage(
+            this.linkedFolders.size,
+            buildOrganizedVersionsMessage(movedCount)
+          )
+        : buildWatchingMessage(this.linkedFolders.size);
 
     this.rebuildSnapshot('watching', statusMessage);
     return this.getSnapshot();
@@ -308,8 +328,11 @@ export class FileLibraryService {
 
     const statusMessage =
       movedCount > 0
-        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
-        : `Watching ${this.linkedFolders.size} folder(s). No older versions needed organizing.`;
+        ? buildWatchingMessage(
+            this.linkedFolders.size,
+            buildOrganizedVersionsMessage(movedCount)
+          )
+        : buildWatchingMessage(this.linkedFolders.size, 'No older versions needed organizing.');
 
     this.rebuildSnapshot('watching', statusMessage);
     return this.getSnapshot();
@@ -327,7 +350,7 @@ export class FileLibraryService {
         matcherSettings: this.matcherSettings,
         statusMessage:
           this.linkedFolders.size > 0
-            ? `Watching ${this.linkedFolders.size} folder(s). Auto-organize is OFF.`
+            ? buildWatchingMessage(this.linkedFolders.size, 'Auto-organize is off.')
             : 'No folders linked yet.',
       };
 
@@ -354,8 +377,11 @@ export class FileLibraryService {
 
     const statusMessage =
       movedCount > 0
-        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
-        : `Watching ${this.linkedFolders.size} folder(s). Auto-organize is ON.`;
+        ? buildWatchingMessage(
+            this.linkedFolders.size,
+            buildOrganizedVersionsMessage(movedCount)
+          )
+        : buildWatchingMessage(this.linkedFolders.size, 'Auto-organize is on.');
 
     this.rebuildSnapshot('watching', statusMessage);
     return this.getSnapshot();
@@ -525,8 +551,11 @@ export class FileLibraryService {
 
     const statusMessage =
       movedCount > 0
-        ? `Watching ${this.linkedFolders.size} folder(s). Organized ${movedCount} old version(s).`
-        : `Watching ${this.linkedFolders.size} folder(s).`;
+        ? buildWatchingMessage(
+            this.linkedFolders.size,
+            buildOrganizedVersionsMessage(movedCount)
+          )
+        : buildWatchingMessage(this.linkedFolders.size);
 
     this.rebuildSnapshot('watching', statusMessage);
   }

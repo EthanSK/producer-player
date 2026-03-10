@@ -1446,3 +1446,49 @@ By the way, the problem still persists of if a song has already reached the end,
   - fully finished track → switch away/back → restart from zero
   - last-second / near-end track → switch away/back → restart from zero
 - Re-ran the wider playback regression suite to make sure normal resume, repeat, drag/reorder continuity, transport controls, and codec playback still behave correctly.
+
+---
+
+## Prod polish + debug-strip completion (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Tue 2026-03-10 00:26 GMT
+
+```text
+We don't need to show can play type at the bottom. What the fuck? That's like some debug information. Make sure this whole app's ready for prod.
+```
+
+### Coverage-audit correction folded into scope
+
+**Timestamp:** Tue 2026-03-10 00:27 GMT
+
+```text
+Coverage-audit correction: Ethan's request `3963` ('we don't need to say archived and old for every single version history') is NOT actually implemented yet even though PLAN says it is. Add this to your active prod-polish/debug-strip scope now and remove the repetitive `Archived in old/` per-row label from version history. Mention explicitly in final report that this was a real missed implementation and is now fixed.
+```
+
+### Assistant implementation summary (this run)
+
+- Removed the playback footer debug/internal UI entirely. The app no longer shows:
+  - `canPlayType`
+  - raw MIME/source details
+  - `prepared from ...` source-path text
+- Fixed the **real missed implementation** from request **3963**: the redundant `Archived in old/` wording is now gone from the user-facing playback/version-history flow, and regression coverage now checks that it stays gone.
+- Polished production-facing copy in the app itself:
+  - status label now reads as user-facing states (`Ready`, `Updating`, `Needs attention`) instead of raw internal status slugs
+  - folder/old-version counts now use clean singular/plural copy (`Watching 1 folder.` instead of `folder(s)`)
+  - album header now uses natural count copy (`1 track`, `2 tracks`)
+  - search empty state now distinguishes between no library content vs no matching results
+  - track-order helper copy now changes when search is active
+- Rewrote playback failure messaging to remove browser-internals / debug-ish jargon:
+  - no more user-facing Chromium-runtime / MIME / `canplay` wording
+  - missing-file errors now show the file name instead of dumping full absolute paths into the UI
+  - fallback guidance is phrased as user guidance instead of ffmpeg/debug instructions
+- Tightened sidebar folder-row wrapping so long linked-folder paths behave more cleanly beside the Finder / Unlink actions.
+- Added / updated focused regression coverage for:
+  - hidden playback debug footer
+  - archived-version UI without redundant `Archived in old/` labels
+  - AIFF prepared-playback behavior still working without exposing internal source info
+  - finished / near-end playhead reset behavior remaining correct
+- Manual visual verification artifact captured after the prod-polish pass:
+  - `apps/e2e/test-results/playback-runtime-playback--7d449-d-redundant-archived-labels/attachments/prod-ui-polish-a32a5a29f0440a7735ee9c39186ef0162b2e5c04.png`

@@ -20,11 +20,16 @@
     "dev:electron": "npm run dev -w @producer-player/electron",
     "build:packages": "npm run build -w @producer-player/contracts && npm run build -w @producer-player/domain",
     "build": "npm run build:packages && npm run build -w @producer-player/renderer && npm run build -w @producer-player/electron",
+    "build:mac": "node ./scripts/build-mac.mjs zip",
+    "build:mac:dir": "node ./scripts/build-mac.mjs dir",
+    "build:mac:mas-dev": "node ./scripts/build-mac.mjs mas-dev",
+    "build:mac:mas": "node ./scripts/build-mac.mjs mas",
+    "build:mac:app-store": "node ./scripts/build-mac.mjs mas",
     "typecheck": "npm run typecheck -w @producer-player/contracts && npm run typecheck -w @producer-player/domain && npm run typecheck -w @producer-player/renderer && npm run typecheck -w @producer-player/electron && npm run typecheck -w @producer-player/e2e",
     "e2e": "npm run build && npm run test -w @producer-player/e2e",
     "e2e:ci": "npm run build && npm run ci -w @producer-player/e2e",
     "clean": "rimraf \"apps/*/dist\" \"packages/*/dist\"",
-    "release:desktop:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && electron-builder --mac zip --publish never",
+    "release:desktop:mac": "npm run build:mac",
     "release:desktop:linux": "npm run build && electron-builder --linux zip --publish never",
     "release:desktop:win": "npm run build && electron-builder --win zip --publish never",
     "icon:build": "./scripts/generate-app-icon.sh",
@@ -51,8 +56,25 @@
       "target": [
         "zip"
       ],
+      "category": "public.app-category.music",
       "icon": "assets/icon/ProducerPlayer.icns",
       "artifactName": "Producer-Player-${version}-mac-${arch}.${ext}"
+    },
+    "mas": {
+      "type": "distribution",
+      "entitlements": "build/entitlements.mas.plist",
+      "entitlementsInherit": "build/entitlements.mas.inherit.plist",
+      "provisioningProfile": "${env.PRODUCER_PLAYER_PROVISIONING_PROFILE}",
+      "gatekeeperAssess": false,
+      "artifactName": "Producer-Player-${version}-mas-${arch}.${ext}"
+    },
+    "masDev": {
+      "type": "development",
+      "entitlements": "build/entitlements.mas.plist",
+      "entitlementsInherit": "build/entitlements.mas.inherit.plist",
+      "provisioningProfile": "${env.PRODUCER_PLAYER_PROVISIONING_PROFILE}",
+      "gatekeeperAssess": false,
+      "artifactName": "Producer-Player-${version}-mas-dev-${arch}.${ext}"
     },
     "linux": {
       "target": [

@@ -1240,3 +1240,38 @@ By the way, there is a bug. Only songs that appear in the top level folder shoul
 - Resolved the `PLAN.md` tail merge conflict by keeping both the playlist-export section and the later late-night asks.
 - Confirmed that most previously worrying items are now either completed, actively assigned, or were answered directly in chat.
 - **Still-missing assignment identified:** Ethan’s ordering-focused second-round icon refinement request (`3917`, `3925`) is the one clear item not backed by a fresh spawned/completed run yet.
+
+---
+
+## Mac App Store prep / macOS buildability implementation (sub-agent run)
+
+### Assistant implementation summary (this run)
+
+- Audited the current Mac App Store readiness state and confirmed the app already had partial sandbox-aware runtime support in `apps/electron/src/main.ts`:
+  - `process.mas` detection
+  - security-scoped bookmark handling
+  - dialog-based folder linking for sandbox mode
+  - manual path linking disabled in MAS mode
+  - AIFF transcoding disabled when sandboxed
+- Confirmed the repo was **not yet fully App Store-ready** because the packaging/config layer was missing.
+- Added new root npm scripts for macOS packaging:
+  - `build:mac`
+  - `build:mac:dir`
+  - `build:mac:mas-dev`
+  - `build:mac:mas`
+  - `build:mac:app-store`
+- Added `scripts/build-mac.mjs` to centralize macOS build flows and preflight checks.
+- Added electron-builder `mas` and `masDev` configuration in root `package.json`.
+- Added Mac App Store entitlements files:
+  - `build/entitlements.mas.plist`
+  - `build/entitlements.mas.inherit.plist`
+- Updated the Electron build step so MAS-targeted builds skip bundling the ffmpeg helper binary (`apps/electron/scripts/build-main.mjs`).
+- Added dedicated status / manual-steps documentation in `docs/MAC_APP_STORE.md`.
+- Updated README / release docs / public-status docs to reflect the new macOS build scripts and the honest App Store status.
+- Verified locally that `npm run build:mac:dir` succeeds on macOS after the new wiring.
+- Verified App Store-oriented script preflight messaging by confirming `npm run build:mac:mas-dev` fails fast with a clear error when `PRODUCER_PLAYER_PROVISIONING_PROFILE` is missing.
+
+### Current honest status after this run
+
+- **Done:** repo-level macOS/App Store packaging prep and npm script wiring.
+- **Not done yet:** actual Apple-signing / provisioning / App Store Connect submission, because those require Ethan’s Apple Developer account assets and provisioning profiles.

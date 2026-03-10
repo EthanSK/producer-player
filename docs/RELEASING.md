@@ -48,9 +48,35 @@ Then download artifacts from that run directly.
 - Use `.github/release.yml` to shape auto-generated GitHub release notes (optional).
 - Use `.github/RELEASE_NOTES_TEMPLATE.md` when writing/editing custom release notes.
 
+## Local macOS build scripts
+
+From the repo root:
+
+```bash
+npm run build:mac
+npm run build:mac:dir
+npm run build:mac:mas-dev
+npm run build:mac:mas
+```
+
+- `build:mac` → unsigned ZIP
+- `build:mac:dir` → unpacked mac app directory
+- `build:mac:mas-dev` → Mac App Store development build
+- `build:mac:mas` → Mac App Store distribution-oriented build
+
+For App Store-oriented builds, set:
+
+```bash
+export PRODUCER_PLAYER_PROVISIONING_PROFILE=/absolute/path/to/profile.provisionprofile
+```
+
+If electron-builder cannot choose the correct signing identity automatically, also set `CSC_NAME`.
+
+See [`docs/MAC_APP_STORE.md`](./MAC_APP_STORE.md) for the exact current status and manual Apple-account work that still remains.
+
 ## Optional signing configuration (not required for current unsigned flow)
 
-If you later enable signing/notarization, configure these GitHub repository secrets:
+If you later enable signing/notarization for outside-the-store distribution, configure these GitHub repository secrets:
 
 - `CSC_LINK` — macOS code-signing certificate (.p12), base64 or file URL format supported by electron-builder
 - `CSC_KEY_PASSWORD` — password for `CSC_LINK`
@@ -58,10 +84,10 @@ If you later enable signing/notarization, configure these GitHub repository secr
 - `APPLE_APP_SPECIFIC_PASSWORD` — app-specific password for notarization
 - `APPLE_TEAM_ID` — Apple Developer Team ID
 
-Unsigned fallback path (today): keep `CSC_IDENTITY_AUTO_DISCOVERY=false` in CI and run release workflow as-is.
+Unsigned fallback path (today): keep `CSC_IDENTITY_AUTO_DISCOVERY=false` in CI and run the existing unsigned release workflow as-is.
 
 ## Planned next packaging targets (not yet enabled)
 
-- Signed/notarized macOS DMG
+- Signed/notarized macOS DMG outside the App Store
 - Signed Windows installer (NSIS/MSIX)
 - Linux packages (AppImage/deb)

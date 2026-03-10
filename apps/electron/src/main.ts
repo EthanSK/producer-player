@@ -6,13 +6,15 @@ import { createReadStream, existsSync, promises as fs } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import type {
+  AudioFileAnalysis,
   LibrarySnapshot,
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
+  ReferenceTrackSelection,
   TransportCommand,
 } from '@producer-player/contracts';
-import { IPC_CHANNELS, parsePlaylistOrderExport } from '@producer-player/contracts';
+import { AUDIO_EXTENSIONS, IPC_CHANNELS, parsePlaylistOrderExport } from '@producer-player/contracts';
 import { FileLibraryService } from '@producer-player/domain';
 
 const DEFAULT_RENDERER_DEV_URL =
@@ -34,6 +36,9 @@ const IS_TEST_MODE =
 
 const TEST_PLAYLIST_EXPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_EXPORT_PATH ?? null;
 const TEST_PLAYLIST_IMPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_IMPORT_PATH ?? null;
+const TEST_REFERENCE_IMPORT_PATH =
+  process.env.PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH ?? null;
+const ANALYSIS_DELAY_MS = Number(process.env.PRODUCER_PLAYER_ANALYSIS_DELAY_MS ?? '0');
 
 const PLAYBACK_MIME_BY_EXTENSION: Record<string, string> = {
   wav: 'audio/wav',
@@ -569,6 +574,194 @@ function getBundledFfmpegPath(): string {
   return join(__dirname, FFMPEG_BINARY_DIRECTORY, binaryName);
 }
 
+function getBinaryCommandPath(binaryName: 'ffmpeg' | 'ffprobe'): string {
+  const envKey = binaryName === 'ffmpeg' ? 'PRODUCER_PLAYER_FFMPEG_PATH' : 'PRODUCER_PLAYER_FFPROBE_PATH';
+  const configuredPath = process.env[envKey];
+
+  if (typeof configuredPath === 'string' && configuredPath.length > 0) {
+    return configuredPath;
+  }
+
+  if (binaryName === 'ffmpeg') {
+    const bundledFfmpegPath = getBundledFfmpegPath();
+    if (existsSync(bundledFfmpegPath)) {
+      return bundledFfmpegPath;
+    }
+  }
+
+  return binaryName;
+}
+
+function parseMeasuredLevel(value: string | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.toLowerCase() === 'nan') {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolvePromise) => {
+    setTimeout(resolvePromise, milliseconds);
+  });
+}
+
+async function runProcessCapture(
+  command: string,
+  args: string[]
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (error) => {
+      rejectPromise(error);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolvePromise({ stdout, stderr });
+        return;
+      }
+
+      rejectPromise(
+        new Error(
+          `${command} exited with ${code}. ${stderr.trim() || stdout.trim() || 'No diagnostic output.'}`
+        )
+      );
+    });
+  });
+}
+
+async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
+  const resolvedPath = resolve(filePath);
+  const stats = await fs.stat(resolvedPath);
+
+  if (!stats.isFile()) {
+    throw new Error(`Cannot analyse a non-file path: ${resolvedPath}`);
+  }
+
+  if (ANALYSIS_DELAY_MS > 0) {
+    await delay(ANALYSIS_DELAY_MS);
+  }
+
+  const ffmpegCommand = getBinaryCommandPath('ffmpeg');
+  const ebur128Result = await runProcessCapture(ffmpegCommand, [
+    '-hide_banner',
+    '-loglevel',
+    'verbose',
+    '-nostats',
+    '-i',
+    resolvedPath,
+    '-filter_complex',
+    'ebur128=peak=true:framelog=verbose',
+    '-f',
+    'null',
+    '-',
+  ]);
+
+  const volumedetectResult = await runProcessCapture(ffmpegCommand, [
+    '-hide_banner',
+    '-nostats',
+    '-i',
+    resolvedPath,
+    '-af',
+    'volumedetect',
+    '-f',
+    'null',
+    '-',
+  ]);
+
+  const integratedMatch = ebur128Result.stderr.match(/\bI:\s*(-?\d+(?:\.\d+)?)\s+LUFS/);
+  const lraMatch = ebur128Result.stderr.match(/\bLRA:\s*(-?\d+(?:\.\d+)?)\s+LU/);
+  const truePeakMatch = ebur128Result.stderr.match(/True peak:[\s\S]*?Peak:\s*(-?\d+(?:\.\d+)?)\s+dBFS/);
+
+  const momentaryMatches = Array.from(
+    ebur128Result.stderr.matchAll(/\bM:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
+  )
+    .map((match) => parseMeasuredLevel(match[1]))
+    .filter((value): value is number => value !== null && value > -100);
+
+  const shortTermMatches = Array.from(
+    ebur128Result.stderr.matchAll(/\bS:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
+  )
+    .map((match) => parseMeasuredLevel(match[1]))
+    .filter((value): value is number => value !== null && value > -100);
+
+  const meanVolumeMatch = volumedetectResult.stderr.match(/mean_volume:\s*(-?\d+(?:\.\d+)?)\s+dB/);
+  const samplePeakMatch = volumedetectResult.stderr.match(/max_volume:\s*(-?\d+(?:\.\d+)?)\s+dB/);
+
+  return {
+    filePath: resolvedPath,
+    measuredWith: 'ffmpeg-ebur128-volumedetect',
+    integratedLufs: parseMeasuredLevel(integratedMatch?.[1]),
+    loudnessRangeLufs: parseMeasuredLevel(lraMatch?.[1]),
+    truePeakDbfs: parseMeasuredLevel(truePeakMatch?.[1]),
+    samplePeakDbfs: parseMeasuredLevel(samplePeakMatch?.[1]),
+    meanVolumeDbfs: parseMeasuredLevel(meanVolumeMatch?.[1]),
+    maxMomentaryLufs:
+      momentaryMatches.length > 0 ? Math.max(...momentaryMatches) : null,
+    maxShortTermLufs:
+      shortTermMatches.length > 0 ? Math.max(...shortTermMatches) : null,
+  };
+}
+
+async function pickReferenceTrack(): Promise<ReferenceTrackSelection | null> {
+  const testSelectionPath = TEST_REFERENCE_IMPORT_PATH;
+
+  let selectedPath: string | undefined;
+
+  if (testSelectionPath) {
+    selectedPath = resolve(testSelectionPath);
+  } else {
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Choose reference track',
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Audio files',
+          extensions: [...AUDIO_EXTENSIONS],
+        },
+      ],
+    };
+
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    selectedPath = result.filePaths[0];
+  }
+
+  if (!selectedPath) {
+    return null;
+  }
+
+  const playbackSource = await resolvePlaybackSource(selectedPath);
+  return {
+    filePath: selectedPath,
+    fileName: extname(selectedPath).length > 0 ? selectedPath.split(/[/\\]/).pop() ?? selectedPath : selectedPath,
+    playbackSource,
+  };
+}
+
 function createPlaybackCacheKey(
   filePath: string,
   stats: { size: number; mtimeMs: number }
@@ -933,9 +1126,9 @@ async function createMainWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
     title: 'Producer Player',
     width: 1380,
-    height: 860,
+    height: 940,
     minWidth: 1100,
-    minHeight: 720,
+    minHeight: 780,
     center: true,
     backgroundColor: '#0a0f14',
     autoHideMenuBar: true,
@@ -1238,6 +1431,14 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.RESOLVE_PLAYBACK_SOURCE, async (_event, filePath: string) => {
     return resolvePlaybackSource(filePath);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ANALYZE_AUDIO_FILE, async (_event, filePath: string) => {
+    return analyzeAudioFile(filePath);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PICK_REFERENCE_TRACK, async () => {
+    return pickReferenceTrack();
   });
 }
 

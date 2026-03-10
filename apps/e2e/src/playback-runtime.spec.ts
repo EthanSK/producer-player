@@ -599,13 +599,20 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
-  test('shows the mastering preview shell with expandable reference comparison workflow', async () => {
+  test('shows phase 2 mastering analysis with a stable panel and explicit reference-track workflow', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-mastering-preview-fixture-')
+    );
+    const referenceDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-mastering-reference-fixture-')
     );
     const userDataDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-mastering-preview-user-data-')
     );
+
+    const warmMasterPath = path.join(fixtureDirectory, 'Warm Master v1.wav');
+    const brightRefPath = path.join(fixtureDirectory, 'Bright Ref v1.wav');
+    const externalReferencePath = path.join(referenceDirectory, 'External Reference.wav');
 
     await runFfmpeg([
       '-y',
@@ -617,7 +624,7 @@ test.describe('playback runtime deep dive', () => {
       'volume=0.85',
       '-c:a',
       'pcm_s16le',
-      path.join(fixtureDirectory, 'Warm Master v1.wav'),
+      warmMasterPath,
     ]);
 
     await runFfmpeg([
@@ -630,10 +637,28 @@ test.describe('playback runtime deep dive', () => {
       'volume=0.35',
       '-c:a',
       'pcm_s16le',
-      path.join(fixtureDirectory, 'Bright Ref v1.wav'),
+      brightRefPath,
     ]);
 
-    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=2200:duration=6',
+      '-filter:a',
+      'volume=0.6',
+      '-c:a',
+      'pcm_s16le',
+      externalReferencePath,
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory, {
+      extraEnv: {
+        PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH: externalReferencePath,
+        PRODUCER_PLAYER_ANALYSIS_DELAY_MS: '900',
+      },
+    });
 
     try {
       await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
@@ -642,25 +667,146 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
       await page.getByTestId('main-list-row').filter({ hasText: 'Warm Master' }).first().click();
-      await expect(page.getByTestId('analysis-panel')).toContainText('Mastering Preview');
-      await expect(page.getByTestId('analysis-track-label')).toContainText('Warm Master v1.wav');
-      await expect(page.getByTestId('analysis-integrated-stat')).toContainText('dB');
-      await expect(page.getByTestId('analysis-tonal-balance')).toContainText('Low');
+      await expect(page.getByTestId('analysis-panel')).toContainText('Mastering + Reference');
+      await expect(page.getByTestId('analysis-status')).toContainText('Loading');
 
-      await page.getByTestId('analysis-store-reference-a').click();
-      await expect(page.getByTestId('analysis-reference-summary')).toContainText('Ref A');
+      const initialPanelHeight = await page.getByTestId('analysis-panel').evaluate((element) => {
+        return Math.round(element.getBoundingClientRect().height);
+      });
+
+      await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading');
+      await expect(page.getByTestId('analysis-integrated-stat')).toContainText('LUFS');
+      await expect(page.getByTestId('analysis-true-peak-stat')).toContainText('dBFS');
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText(
+        'Choose a real reference file'
+      );
 
       await page.getByTestId('main-list-row').filter({ hasText: 'Bright Ref' }).first().click();
       await expect(page.getByTestId('analysis-track-label')).toContainText('Bright Ref v1.wav');
-      await expect(page.getByTestId('analysis-integrated-stat')).toContainText('dB');
+      await expect(page.getByTestId('analysis-status')).toContainText('Loading');
+
+      const loadingPanelHeight = await page.getByTestId('analysis-panel').evaluate((element) => {
+        return Math.round(element.getBoundingClientRect().height);
+      });
+      expect(Math.abs(initialPanelHeight - loadingPanelHeight)).toBeLessThanOrEqual(6);
+
+      await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading');
+
+      await page.getByTestId('analysis-choose-reference').click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText(
+        'External Reference.wav'
+      );
 
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
-      await expect(page.getByTestId('analysis-reference-slot-a')).toContainText('Warm Master v1.wav');
-      await expect(page.getByTestId('analysis-active-reference')).toContainText(
-        'Ref A: Warm Master v1.wav'
+      await expect(page.getByTestId('analysis-reference-slot-a')).toContainText(
+        'External Reference.wav'
       );
       await expect(page.getByTestId('analysis-active-reference')).toContainText('delta');
+      await expect(page.getByTestId('analysis-active-reference')).toContainText(
+        'External Reference.wav'
+      );
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(referenceDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('shows platform normalization preview controls and captures proof screenshot', async () => {
+    const workspaceRoot = path.resolve(__dirname, '../../..');
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-normalization-preview-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-normalization-preview-user-data-')
+    );
+
+    const screenshotPath = path.join(
+      workspaceRoot,
+      'artifacts/manual-verification/2026-03-10/normalization-preview-proof.png'
+    );
+
+    await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=6',
+      '-filter:a',
+      'volume=0.2',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Normalization Probe v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('main-list-row').first().click();
+      await expect(page.getByTestId('analysis-normalization-panel')).toBeVisible();
+      await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading', {
+        timeout: 12_000,
+      });
+
+      await expect(page.getByTestId('analysis-platform-spotify')).toBeVisible();
+      await expect(page.getByTestId('analysis-platform-appleMusic')).toBeVisible();
+      await expect(page.getByTestId('analysis-platform-youtube')).toBeVisible();
+      await expect(page.getByTestId('analysis-platform-tidal')).toBeVisible();
+
+      await expect(page.getByTestId('analysis-platform-spotify')).toHaveAttribute('aria-pressed', 'true');
+
+      const appliedChangeOnSpotify =
+        (
+          await page
+            .getByTestId('analysis-normalization-change')
+            .locator('strong')
+            .first()
+            .textContent()
+        )?.trim() ?? '';
+
+      await page.getByTestId('analysis-platform-youtube').click();
+      await expect(page.getByTestId('analysis-platform-youtube')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByTestId('analysis-platform-spotify')).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.getByTestId('analysis-normalization-summary')).toContainText('YouTube selected');
+
+      const appliedChangeOnYoutube =
+        (
+          await page
+            .getByTestId('analysis-normalization-change')
+            .locator('strong')
+            .first()
+            .textContent()
+        )?.trim() ?? '';
+
+      expect(appliedChangeOnSpotify).not.toBe('');
+      expect(appliedChangeOnYoutube).toContain('dB');
+      expect(appliedChangeOnYoutube).not.toBe(appliedChangeOnSpotify);
+      await expect(page.getByTestId('analysis-normalization-projected')).toContainText('LUFS');
+
+      const normalizationToggle = page.getByTestId('analysis-normalization-toggle');
+      await expect(normalizationToggle).toBeEnabled();
+      await expect(normalizationToggle).toHaveText('Preview On');
+
+      await normalizationToggle.click();
+      await expect(normalizationToggle).toHaveText('Preview Off');
+      await expect(page.getByTestId('analysis-normalization-summary')).toContainText('preview off');
+      await expect(page.getByTestId('analysis-normalization-change')).toContainText(
+        'Bypassed until Preview On'
+      );
+
+      await page.screenshot({ path: screenshotPath });
+      await test.info().attach('normalization-preview-proof', {
+        path: screenshotPath,
+        contentType: 'image/png',
+      });
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });

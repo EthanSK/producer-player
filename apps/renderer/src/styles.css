@@ -298,6 +298,8 @@ input[type='range'] {
   padding: 10px;
   display: grid;
   gap: 10px;
+  min-height: 420px;
+  align-content: start;
   background: linear-gradient(180deg, rgba(92, 167, 255, 0.08), rgba(255, 255, 255, 0.02));
 }
 
@@ -316,7 +318,12 @@ input[type='range'] {
 
 .analysis-track-summary {
   display: grid;
-  gap: 2px;
+  gap: 4px;
+}
+
+.analysis-phase-note,
+.analysis-loading-line {
+  min-height: 16px;
 }
 
 .analysis-stat-grid,
@@ -326,7 +333,15 @@ input[type='range'] {
   gap: 8px;
 }
 
+.analysis-stat-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .analysis-detail-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.analysis-detail-grid.analysis-detail-grid-wide {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
@@ -337,6 +352,16 @@ input[type='range'] {
   background: rgba(9, 14, 19, 0.45);
   display: grid;
   gap: 6px;
+  min-height: 78px;
+  align-content: start;
+}
+
+.analysis-stat-card.compact {
+  min-height: 0;
+}
+
+.analysis-empty-card {
+  grid-column: 1 / -1;
 }
 
 .analysis-stat-label {
@@ -378,6 +403,112 @@ input[type='range'] {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.producer-reference-toolbar {
+  justify-content: space-between;
+  align-items: start;
+}
+
+.analysis-reference-inline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.analysis-normalization-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.analysis-normalization-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 10px;
+}
+
+.analysis-platform-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.analysis-platform-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-primary);
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.analysis-platform-button:hover {
+  border-color: rgba(92, 167, 255, 0.45);
+  background: rgba(92, 167, 255, 0.08);
+}
+
+.analysis-platform-button.selected {
+  border-color: var(--accent);
+  background: rgba(92, 167, 255, 0.12);
+}
+
+.analysis-platform-button:active {
+  transform: translateY(1px);
+}
+
+.analysis-platform-icon {
+  --platform-accent: var(--accent);
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--platform-accent);
+  background: color-mix(in srgb, var(--platform-accent) 18%, rgba(255, 255, 255, 0.02));
+  border: 1px solid color-mix(in srgb, var(--platform-accent) 35%, var(--border));
+  flex: 0 0 auto;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.analysis-platform-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.analysis-platform-icon .platform-icon-fill {
+  fill: currentColor;
+  stroke: none;
+}
+
+.analysis-platform-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.analysis-platform-copy strong,
+.analysis-platform-copy .muted {
+  overflow-wrap: anywhere;
+}
+
+.analysis-normalization-inline {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .analysis-reference-slot-actions {
@@ -712,19 +843,33 @@ input[type='range'] {
     grid-template-columns: 300px 1fr 320px;
   }
 
-  .analysis-detail-grid {
+  .analysis-detail-grid,
+  .analysis-detail-grid.analysis-detail-grid-wide,
+  .analysis-reference-inline,
+  .analysis-platform-grid,
+  .analysis-normalization-inline {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 980px) {
   .analysis-stat-grid,
+  .analysis-stat-grid.compact,
   .analysis-detail-grid,
-  .analysis-reference-slots {
+  .analysis-detail-grid.analysis-detail-grid-wide,
+  .analysis-reference-inline,
+  .analysis-reference-slots,
+  .analysis-platform-grid,
+  .analysis-normalization-inline {
     grid-template-columns: 1fr;
   }
 
   .analysis-overlay {
     padding: 12px;
+  }
+
+  .producer-reference-toolbar,
+  .analysis-normalization-header {
+    flex-direction: column;
   }
 }

@@ -1629,3 +1629,114 @@ Two new test files added:
 - Add a proper **detachable/new-window analysis surface** instead of the current in-app expanded overlay.
 - Build out **reference-track workflow depth** (persisted references, quick A/B switching, gain-match options, library-wide reference browsing/import).
 - Add richer **visualisation/metering** (waveform/spectrum history, more Ozone-inspired tonal-balance guidance, album-wide stats / sequencing context).
+
+---
+
+## Mastering/reference Phase 2 implementation (sub-agent run)
+
+### What Phase 1 was vs what Phase 2 makes real
+
+- **Phase 1** was intentionally scaffolding only:
+  - renderer-side loudness / peak / tonal estimates
+  - bottom-left panel placement + expanded overlay shell
+  - `Ref A / Ref B` placeholder reference-slot UX
+  - explicit copy that it was **not** mastering-grade yet
+- **Phase 2** turns this into a more producer-legible working surface:
+  - **FFmpeg-backed measured loudness stats** in the app for the selected track
+  - a **clear reference-track workflow** (choose external reference file, or promote the current linked track to the active reference)
+  - clearer copy that separates **measured** stats from **estimated** preview stats
+  - a **stable-height** bottom-left mastering panel so track selection does not cause layout jump
+  - a slightly **taller default app window** so the mastering surface and playback area fit together more comfortably
+
+### Exact Phase 2 scope implemented
+
+- Added a main-process analysis path using **FFmpeg `ebur128` + `volumedetect`** and surfaced these stats in the mastering panel + overlay:
+  - integrated LUFS
+  - loudness range (LRA)
+  - true peak
+  - sample peak
+  - max short-term loudness
+  - max momentary loudness
+  - mean volume
+- Kept the existing renderer-side tonal-balance / live short-term path, but now labels it honestly as a **fast preview estimate** rather than pretending it is the same thing as the measured loudness path.
+- Replaced the confusing `Ref A / Ref B` language in the compact workflow with an explicit **Reference track** flow:
+  - **Choose Reference File…** for a real external reference track
+  - **Use Current Track as Reference** for linked-library material already in the app
+  - **Clear Reference** to reset comparison state
+- Updated the expanded analysis overlay so the active reference is presented as a real track, with direct delta readouts for:
+  - integrated loudness
+  - true peak
+  - live short-term estimate
+  - coarse tonal tilt (low / mid / high deltas)
+- Raised the default main window height and gave the mastering panel a fixed minimum height to stop the “shrinks then grows again” behavior during loading.
+- Updated automated coverage to check the Phase 2 reference workflow and confirm the compact panel height remains effectively stable during a delayed analysis refresh.
+
+### Phase 3 exact recommended follow-up scope
+
+- Add **persisted reference-track library management** (saved references across launches, named collections, recents, project-scoped defaults).
+- Add a true **listen/compare workflow**:
+  - one-click reference audition / return-to-mix switching
+  - gain-matched reference playback
+  - optional loop region / synced start-position compare
+- Improve the loudness path from “FFmpeg measured and producer-useful” to **closer to mastering-meter parity**:
+  - better gating/weighting presentation
+  - clearer momentary / short-term timelines
+  - platform target presets and normalization preview surface
+- Split the current overlay into a proper **detached analysis window** and add stronger visual metering (history graph / tonal-balance guidance / album-wide sequencing stats).
+
+#### Ethan message (verbatim) — message_id 4069
+
+**Timestamp:** Tue 2026-03-10 01:49 GMT
+
+```text
+Also in another sub agent, you know the U Lean loudness meter. I basically want a version of that with Spotify, Apple Music, buttons, etcetera to hear how your thing would sound normalized on the platforms. Platforms. It should be there, right there in the small side pane version underneath all the little buttons. I'm not gonna lie, I think the window is gonna have to be a bit bigger to fit all this new stuff. Just add a bit. Make sure you like to test it and screenshot it, etcetera. It'll do something brand new sub agent. Yeah. Like, for firstly, investigate Eulene loudness meter, and then after that's done wait. Not Eulene. Am I retarded? No. Loudness meter. What's it what's it called? Loudness penalty analyzer. Oh, loudnesspenalty.com. Sorry. And you're sorry. I I ignored Eulene loudness meter. I'm retarded. Basically, it lets you preview how it will sound like on different platforms. So I want you I want you to add, like, YouTube, Spotify, Tidal, Apple, those icons. And you can click it and it will be selected UI and it will tell you how much it will be, like the number of decibels. It will be changed by just like how loudnesspenalty.com does. And it will preview it with the currently playing audio at that. Make sure that's properly tested and everything, long running sub agent. And then twenty minutes after that finishes no. Sorry. An hour after that finishes, you should spawn a new sub agent. Start a cron job, just spawn a new sub agent to test that and all the work so that when I wake up, it should all be done. And then also, just want a sub agent in that hour cron job to also test everything else. And then if that fails, you can get another sub agent to fix everything.
+```
+
+---
+
+## Recovery finalization + shipping pass (Tue 2026-03-10)
+
+### Salvage audit from stalled runs
+
+Recovered and kept from the two stalled sub-agent branches/work-in-progress:
+
+- Working **Phase 2 measured loudness + reference workflow** implementation across Electron + renderer + contracts.
+- Working **platform normalization preview** implementation (Spotify/Apple Music/YouTube/Tidal controls, per-platform delta/projection, and playback gain preview toggle).
+- Working e2e additions for both flows, including a screenshot proof capture path.
+- Existing `PLAN.md` recovery narrative from the stalled attempt, retained and clarified.
+
+Dropped/replaced from partial state:
+
+- Any ambiguous Phase-1-only copy that implied unfinished placeholders in the compact pane.
+- Any inconsistent loading-state behavior causing panel height jump.
+
+### Shipped in this recovery pass
+
+- Slightly taller default app window + higher minimum window height.
+- Stable-height mastering panel with explicit loading line (no shrink/jump during delayed analysis).
+- FFmpeg-based measured stats (integrated/LRA/true-peak/sample-peak/max short-term/max momentary/mean).
+- Explicit reference-track workflow in compact pane and overlay:
+  - Choose Reference File…
+  - Use Current Track as Reference
+  - Clear Reference
+- Platform normalization mini-pane directly under mastering controls:
+  - Spotify / Apple / YouTube / Tidal selection buttons with icons
+  - applied dB change readout
+  - projected LUFS readout
+  - headroom/limit explanation
+  - Preview On/Off toggle that affects current playback gain path
+- README screenshot refresh integration from `readme-real-shot-20260310-125539` (real app capture + simplified readme wording).
+
+### Validation run in shipping mode
+
+- `npm run typecheck` ✅
+- `npm run build` ✅
+- `npm run test -w @producer-player/e2e -- src/playback-runtime.spec.ts -g "phase 2 mastering analysis|platform normalization preview controls"` ✅ (2/2 passed)
+- Screenshot proof generated: `artifacts/manual-verification/2026-03-10/normalization-preview-proof.png`
+
+### Intentionally deferred (explicit)
+
+- Persisted multi-reference library management across launches (recents/saved sets/project defaults).
+- True one-click audition transport A/B (jump to ref and back with synced playhead/loop compare).
+- Detached/new-window analysis surface (overlay currently remains in-window).
+- More mastering-grade timeline/meters beyond current measured snapshot + estimated live overlays.

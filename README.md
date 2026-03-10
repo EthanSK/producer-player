@@ -1,51 +1,41 @@
-# Producer Player
+![Producer Player app screenshot (live app capture)](docs/assets/readme/app-hero.png)
 
-Producer Player is a desktop app for producers who export the same songs repeatedly and need one clean place to keep track of versions, audition older takes, and preserve album order.
+Producer Player is a desktop app for producers who keep exporting the same songs and need one place to manage versions without losing track of album order.
 
-![Illustrated preview of the Producer Player desktop app](docs/assets/readme/app-hero.png)
+The screenshot above is a real capture from the current app UI using local sample songs.
+
+## What it does
+
+- Groups repeated exports into one song (`Track v1`, `Track v2`, etc.)
+- Keeps track order stable while versions change over time
+- Archives older versions cleanly instead of losing them
+- Lets you cue current or older exports quickly
 
 ## Public links
 
 - Live page: <https://ethansk.github.io/producer-player/>
 - Repository: <https://github.com/EthanSK/producer-player>
 - Releases: <https://github.com/EthanSK/producer-player/releases>
-- Desktop build workflow: <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
+- Desktop workflow: <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
 - Security policy: [`SECURITY.md`](SECURITY.md)
 
-## What it does
+## Current status
 
-- Groups repeated exports into one logical song entry
-- Keeps track order stable while versions change over time
-- Surfaces archived versions in history instead of losing them
-- Lets you audition current and older exports quickly
+Right now:
 
-## Public readiness right now
+- The GitHub Pages landing page is live
+- The repository is public
+- Desktop build/release workflows are in place
+- Local Apple Silicon builds work (ZIP output)
+- Mac App Store packaging scaffolding is in the repo
 
-What is true today:
+Not claimed yet:
 
-- The GitHub Pages landing page is live.
-- The repository is public.
-- The desktop build path is wired up.
-- Local verification on Apple Silicon produces a macOS ZIP build (`Producer-Player-0.1.0-mac-arm64.zip`).
-- The repo now includes Mac App Store-oriented packaging scripts, entitlements, and sandbox-aware app code paths.
+- Signed/notarized public macOS release
+- App Store submission approval
+- Polished public download flow beyond test builds
 
-What is **not** being claimed yet:
-
-- A signed macOS release already accepted by Apple
-- Apple notarization for outside-the-store distribution
-- A completed Mac App Store submission / approval
-- A polished launch-ready public download channel
-
-That means the project is publicly visible and buildable, and the App Store packaging path is more prepared than before, but it should **not** be presented as a finished signed public macOS launch release yet.
-
-## Downloads
-
-The intended public download surface is the GitHub Releases page:
-
-- <https://github.com/EthanSK/producer-player/releases>
-
-Until signing and notarization are in place, any macOS ZIP build should be treated as a test build.
-If you open an unsigned macOS build, Gatekeeper friction is expected.
+If you download a current macOS ZIP, treat it as a test build.
 
 ## Local development
 
@@ -54,26 +44,16 @@ npm install
 npm run dev
 ```
 
-### Build
+## Build and test
 
 ```bash
 npm run build
-```
-
-### Typecheck
-
-```bash
 npm run typecheck
-```
-
-### End-to-end tests
-
-```bash
 npm run e2e
 npm run e2e:ci
 ```
 
-### Local desktop packages
+## Desktop packaging
 
 ```bash
 npm run build:mac
@@ -84,31 +64,19 @@ npm run release:desktop:linux
 npm run release:desktop:win
 ```
 
-Mac App Store packaging notes live in [`docs/MAC_APP_STORE.md`](docs/MAC_APP_STORE.md).
+Mac App Store packaging notes: [`docs/MAC_APP_STORE.md`](docs/MAC_APP_STORE.md)
 
 ## Repo layout
 
 - `apps/electron` — Electron main process and preload bridge
 - `apps/renderer` — React renderer UI
 - `packages/contracts` — shared IPC/types
-- `packages/domain` — folder scanning, grouping, and ordering logic
+- `packages/domain` — folder scanning/grouping/order logic
 - `apps/e2e` — Playwright desktop tests
 - `site/` — GitHub Pages landing page
 
-## Security and repo hygiene
+## License
 
-This repo now includes:
-
-- [`SECURITY.md`](SECURITY.md) for vulnerability reporting guidance
-- Dependabot configuration for npm and GitHub Actions updates
-- A CodeQL workflow for automated code scanning
-
-## License status
-
-No open-source license has been chosen yet.
-Until a license is added, the repository should be treated as **all rights reserved by default**.
+No open-source license is set yet.
+Until a license is added, this repo should be treated as **all rights reserved**.
 See [`docs/LICENSE_STATUS.md`](docs/LICENSE_STATUS.md).
-
-## Archived Swift prototype
-
-An older Swift prototype is still kept in `old-swift-project/` as historical archive material, but the public-facing app direction is the current Electron + TypeScript implementation.

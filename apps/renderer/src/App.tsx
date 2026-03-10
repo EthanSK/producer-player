@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+} from 'react';
 import type {
+  AudioFileAnalysis,
   LibrarySnapshot,
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
+  ReferenceTrackSelection,
   SongVersion,
   SongWithVersions,
   TransportCommand,
@@ -11,20 +21,29 @@ import type {
 import {
   analyzeTrackFromUrl,
   estimateShortTermLufs,
-  type TonalBalanceSnapshot,
   type TrackAnalysisResult,
 } from './audioAnalysis';
+import {
+  computePlatformNormalizationPreview,
+  gainDbToLinear,
+  getNormalizationPlatformProfile,
+  NORMALIZATION_PLATFORM_PROFILES,
+  type NormalizationPlatformId,
+} from './platformNormalization';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
-type ReferenceSlotId = 'A' | 'B';
 
-interface AnalysisReferenceSlot {
-  slotId: ReferenceSlotId;
-  versionId: string;
+type ReferenceTrackSource = 'linked-track' | 'external-file';
+
+interface LoadedReferenceTrack {
+  sourceType: ReferenceTrackSource;
+  filePath: string;
   fileName: string;
-  songTitle: string;
-  analysis: TrackAnalysisResult;
+  subtitle: string;
+  playbackSource: PlaybackSourceInfo;
+  previewAnalysis: TrackAnalysisResult;
+  measuredAnalysis: AudioFileAnalysis;
 }
 
 const EMPTY_SNAPSHOT: LibrarySnapshot = {
@@ -57,7 +76,39 @@ const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
 const DEFAULT_PLAYBACK_VOLUME = 1;
-const REFERENCE_SLOT_IDS: ReferenceSlotId[] = ['A', 'B'];
+
+function PlatformIcon({ platformId }: { platformId: NormalizationPlatformId }): JSX.Element {
+  switch (platformId) {
+    case 'spotify':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6.1 8.8c3.9-1.2 8.4-.8 11.8 1" />
+          <path d="M7.1 12c3.1-.8 6.8-.5 9.4.8" />
+          <path d="M8.2 15.1c2.3-.5 4.8-.3 6.7.6" />
+        </svg>
+      );
+    case 'appleMusic':
+      return <span aria-hidden="true">♫</span>;
+    case 'youtube':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <rect x="3.2" y="6.4" width="17.6" height="11.2" rx="3.6" ry="3.6" />
+          <path d="M10 9.2 15.4 12 10 14.8Z" className="platform-icon-fill" />
+        </svg>
+      );
+    case 'tidal':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 4.2 8.2 8 12 11.8 15.8 8Z" className="platform-icon-fill" />
+          <path d="M8 8.2 4.2 12 8 15.8 11.8 12Z" className="platform-icon-fill" />
+          <path d="M16 8.2 12.2 12 16 15.8 19.8 12Z" className="platform-icon-fill" />
+          <path d="M12 12.2 8.2 16 12 19.8 15.8 16Z" className="platform-icon-fill" />
+        </svg>
+      );
+    default:
+      return <span aria-hidden="true">♪</span>;
+  }
+}
 
 function reorderSongIds(
   songIds: string[],
@@ -184,14 +235,6 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatAnalysisLevel(level: number | null | undefined): string {
-  if (level === null || level === undefined || !Number.isFinite(level)) {
-    return '—';
-  }
-
-  return `${level.toFixed(1)} dB`;
-}
-
 function formatSignedLevel(level: number | null | undefined): string {
   if (level === null || level === undefined || !Number.isFinite(level)) {
     return '—';
@@ -206,6 +249,34 @@ function formatPercent(value: number): string {
   }
 
   return `${Math.round(value * 100)}%`;
+}
+
+function formatMeasuredStat(level: number | null | undefined, unit: string): string {
+  if (level === null || level === undefined || !Number.isFinite(level)) {
+    return '—';
+  }
+
+  return `${level.toFixed(1)} ${unit}`;
+}
+
+function buildAnalysisValue(
+  status: 'idle' | 'loading' | 'ready' | 'error',
+  value: string,
+  options: { loading?: string; empty?: string; error?: string } = {}
+): string {
+  if (status === 'loading') {
+    return options.loading ?? 'Loading…';
+  }
+
+  if (status === 'error') {
+    return options.error ?? 'Unavailable';
+  }
+
+  if (status === 'idle') {
+    return options.empty ?? '—';
+  }
+
+  return value;
 }
 
 function arraysEqual(left: string[], right: string[]): boolean {
@@ -321,16 +392,20 @@ export function App(): JSX.Element {
   const [playbackSourceReady, setPlaybackSourceReady] = useState(false);
   const [volume, setVolume] = useState(DEFAULT_PLAYBACK_VOLUME);
   const [analysis, setAnalysis] = useState<TrackAnalysisResult | null>(null);
+  const [measuredAnalysis, setMeasuredAnalysis] = useState<AudioFileAnalysis | null>(null);
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle'
   );
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
-  const [referenceSlots, setReferenceSlots] = useState<Record<ReferenceSlotId, AnalysisReferenceSlot | null>>({
-    A: null,
-    B: null,
-  });
-  const [activeReferenceSlotId, setActiveReferenceSlotId] = useState<ReferenceSlotId | null>(null);
+  const [referenceTrack, setReferenceTrack] = useState<LoadedReferenceTrack | null>(null);
+  const [referenceStatus, setReferenceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    'idle'
+  );
+  const [referenceError, setReferenceError] = useState<string | null>(null);
+  const [selectedNormalizationPlatformId, setSelectedNormalizationPlatformId] =
+    useState<NormalizationPlatformId>('spotify');
+  const [normalizationPreviewEnabled, setNormalizationPreviewEnabled] = useState(true);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
@@ -358,6 +433,32 @@ export function App(): JSX.Element {
     next: () => undefined,
     previous: () => undefined,
   });
+  const playbackAudioContextRef = useRef<AudioContext | null>(null);
+  const playbackGainNodeRef = useRef<GainNode | null>(null);
+
+  const applyPlaybackGain = useCallback(
+    (nextVolume: number, nextNormalizationGainDb: number) => {
+      const audio = audioRef.current;
+      const totalGainLinear = Math.max(
+        0,
+        nextVolume * gainDbToLinear(nextNormalizationGainDb)
+      );
+      const gainNode = playbackGainNodeRef.current;
+
+      if (gainNode) {
+        gainNode.gain.value = totalGainLinear;
+        if (audio) {
+          audio.volume = 1;
+        }
+        return;
+      }
+
+      if (audio) {
+        audio.volume = Math.max(0, Math.min(totalGainLinear, 1));
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     repeatModeRef.current = repeatMode;
@@ -377,21 +478,37 @@ export function App(): JSX.Element {
   }, [playbackSourceReady]);
 
   useEffect(() => {
-    if (!selectedPlaybackVersionId || !playbackSource?.url) {
+    const selectedVersion =
+      snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
+    const analysisFilePath = selectedVersion?.filePath ?? null;
+
+    if (!selectedPlaybackVersionId || !playbackSource?.url || !analysisFilePath) {
       setAnalysis(null);
+      setMeasuredAnalysis(null);
       setAnalysisStatus('idle');
       setAnalysisError(null);
       return;
     }
 
     const controller = new AbortController();
+    let cancelled = false;
+
     setAnalysis(null);
+    setMeasuredAnalysis(null);
     setAnalysisStatus('loading');
     setAnalysisError(null);
 
-    void analyzeTrackFromUrl(playbackSource.url, controller.signal)
-      .then((result) => {
-        setAnalysis(result);
+    void Promise.all([
+      analyzeTrackFromUrl(playbackSource.url, controller.signal),
+      window.producerPlayer.analyzeAudioFile(analysisFilePath),
+    ])
+      .then(([previewResult, measuredResult]) => {
+        if (cancelled) {
+          return;
+        }
+
+        setAnalysis(previewResult);
+        setMeasuredAnalysis(measuredResult);
         setAnalysisStatus('ready');
       })
       .catch((analysisIssue: unknown) => {
@@ -402,7 +519,12 @@ export function App(): JSX.Element {
           return;
         }
 
+        if (cancelled) {
+          return;
+        }
+
         setAnalysis(null);
+        setMeasuredAnalysis(null);
         setAnalysisStatus('error');
         setAnalysisError(
           analysisIssue instanceof Error
@@ -412,9 +534,10 @@ export function App(): JSX.Element {
       });
 
     return () => {
+      cancelled = true;
       controller.abort();
     };
-  }, [playbackSource?.url, selectedPlaybackVersionId]);
+  }, [playbackSource?.url, selectedPlaybackVersionId, snapshot.versions]);
 
   useEffect(() => {
     if (!analysisExpanded) {
@@ -581,8 +704,29 @@ export function App(): JSX.Element {
   useEffect(() => {
     const audio = new Audio();
     audio.preload = 'metadata';
-    audio.volume = DEFAULT_PLAYBACK_VOLUME;
+    audio.volume = 1;
     audioRef.current = audio;
+
+    const AudioContextConstructor = window.AudioContext;
+    if (AudioContextConstructor) {
+      try {
+        const playbackAudioContext = new AudioContextConstructor();
+        const playbackGainNode = playbackAudioContext.createGain();
+        const playbackSourceNode = playbackAudioContext.createMediaElementSource(audio);
+
+        playbackSourceNode.connect(playbackGainNode);
+        playbackGainNode.connect(playbackAudioContext.destination);
+        playbackGainNode.gain.value = DEFAULT_PLAYBACK_VOLUME;
+
+        playbackAudioContextRef.current = playbackAudioContext;
+        playbackGainNodeRef.current = playbackGainNode;
+      } catch {
+        playbackAudioContextRef.current = null;
+        playbackGainNodeRef.current = null;
+      }
+    }
+
+    applyPlaybackGain(DEFAULT_PLAYBACK_VOLUME, 0);
 
     const onTimeUpdate = () => {
       const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
@@ -620,17 +764,19 @@ export function App(): JSX.Element {
 
       playOnNextLoadRef.current = false;
 
-      void audio.play().catch((cause: unknown) => {
-        const message = cause instanceof Error ? cause.message : String(cause);
-        setPlaybackError(
-          `Playback couldn’t start: ${message}. ${buildPlaybackFallbackGuidance(
-            playbackSourceRef.current
-          )}`
-        );
-        logPlaybackEvent('play-rejected-after-canplay', {
-          message,
+      void resumePlaybackContextIfNeeded()
+        .then(() => audio.play())
+        .catch((cause: unknown) => {
+          const message = cause instanceof Error ? cause.message : String(cause);
+          setPlaybackError(
+            `Playback couldn’t start: ${message}. ${buildPlaybackFallbackGuidance(
+              playbackSourceRef.current
+            )}`
+          );
+          logPlaybackEvent('play-rejected-after-canplay', {
+            message,
+          });
         });
-      });
     };
 
     const onPlay = () => {
@@ -657,13 +803,15 @@ export function App(): JSX.Element {
 
       if (mode === 'one') {
         audio.currentTime = 0;
-        void audio.play().catch((cause: unknown) => {
-          const message = cause instanceof Error ? cause.message : String(cause);
-          setPlaybackError(`Repeat-one playback restart failed: ${message}.`);
-          logPlaybackEvent('repeat-one-restart-failed', {
-            message,
+        void resumePlaybackContextIfNeeded()
+          .then(() => audio.play())
+          .catch((cause: unknown) => {
+            const message = cause instanceof Error ? cause.message : String(cause);
+            setPlaybackError(`Repeat-one playback restart failed: ${message}.`);
+            logPlaybackEvent('repeat-one-restart-failed', {
+              message,
+            });
           });
-        });
         return;
       }
 
@@ -762,17 +910,17 @@ export function App(): JSX.Element {
       audio.removeEventListener('waiting', onWaiting);
       audio.removeEventListener('emptied', onEmptied);
       audio.removeEventListener('abort', onAbort);
+
+      playbackGainNodeRef.current?.disconnect();
+      playbackGainNodeRef.current = null;
+
+      const playbackAudioContext = playbackAudioContextRef.current;
+      playbackAudioContextRef.current = null;
+      if (playbackAudioContext) {
+        void playbackAudioContext.close().catch(() => undefined);
+      }
     };
-  }, []);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) {
-      return;
-    }
-
-    audio.volume = volume;
-  }, [volume]);
+  }, [applyPlaybackGain]);
 
   useEffect(() => {
     let mounted = true;
@@ -916,18 +1064,63 @@ export function App(): JSX.Element {
   const shortTermLufsEstimate = analysis
     ? estimateShortTermLufs(analysis, currentTimeSeconds)
     : null;
-  const activeReferenceSlot = activeReferenceSlotId ? referenceSlots[activeReferenceSlotId] : null;
+  const referenceShortTermEstimate = referenceTrack
+    ? estimateShortTermLufs(referenceTrack.previewAnalysis, 0)
+    : null;
+  const selectedNormalizationPlatform = getNormalizationPlatformProfile(
+    selectedNormalizationPlatformId
+  );
+  const normalizationPreview = computePlatformNormalizationPreview(
+    measuredAnalysis,
+    selectedNormalizationPlatform
+  );
+  const appliedNormalizationGainDb =
+    normalizationPreviewEnabled &&
+    normalizationPreview !== null &&
+    normalizationPreview.appliedGainDb !== null
+      ? normalizationPreview.appliedGainDb
+      : 0;
   const activeReferenceComparison =
-    analysis && activeReferenceSlot
+    analysis && measuredAnalysis && referenceTrack
       ? {
           shortTermDeltaDb:
-            estimateShortTermLufs(analysis, currentTimeSeconds) -
-            estimateShortTermLufs(activeReferenceSlot.analysis, 0),
+            shortTermLufsEstimate !== null && referenceShortTermEstimate !== null
+              ? shortTermLufsEstimate - referenceShortTermEstimate
+              : null,
           integratedDeltaDb:
-            analysis.integratedLufsEstimate - activeReferenceSlot.analysis.integratedLufsEstimate,
-          peakDeltaDb: analysis.peakDbfs - activeReferenceSlot.analysis.peakDbfs,
+            measuredAnalysis.integratedLufs !== null &&
+            referenceTrack.measuredAnalysis.integratedLufs !== null
+              ? measuredAnalysis.integratedLufs - referenceTrack.measuredAnalysis.integratedLufs
+              : null,
+          truePeakDeltaDb:
+            measuredAnalysis.truePeakDbfs !== null &&
+            referenceTrack.measuredAnalysis.truePeakDbfs !== null
+              ? measuredAnalysis.truePeakDbfs - referenceTrack.measuredAnalysis.truePeakDbfs
+              : null,
+          tonalDelta: {
+            low: analysis.tonalBalance.low - referenceTrack.previewAnalysis.tonalBalance.low,
+            mid: analysis.tonalBalance.mid - referenceTrack.previewAnalysis.tonalBalance.mid,
+            high: analysis.tonalBalance.high - referenceTrack.previewAnalysis.tonalBalance.high,
+          },
         }
       : null;
+
+  useEffect(() => {
+    applyPlaybackGain(volume, appliedNormalizationGainDb);
+  }, [appliedNormalizationGainDb, applyPlaybackGain, volume]);
+
+  async function resumePlaybackContextIfNeeded(): Promise<void> {
+    const playbackAudioContext = playbackAudioContextRef.current;
+    if (!playbackAudioContext || playbackAudioContext.state === 'running') {
+      return;
+    }
+
+    try {
+      await playbackAudioContext.resume();
+    } catch {
+      // Ignore context resume failures and fall back to direct element playback.
+    }
+  }
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1452,6 +1645,7 @@ export function App(): JSX.Element {
     if (audio && canResumeCurrentSelection) {
       if (audio.paused) {
         try {
+          await resumePlaybackContextIfNeeded();
           await audio.play();
           logPlaybackEvent('song-row-double-click-played-current-selection');
         } catch (cause: unknown) {
@@ -1625,6 +1819,7 @@ export function App(): JSX.Element {
       }
 
       try {
+        await resumePlaybackContextIfNeeded();
         await audio.play();
         logPlaybackEvent('play-requested-direct');
       } catch (cause: unknown) {
@@ -1688,38 +1883,206 @@ export function App(): JSX.Element {
   function handleVolumeChange(nextVolume: number): void {
     const clampedVolume = Math.max(0, Math.min(nextVolume, 1));
     setVolume(clampedVolume);
+    applyPlaybackGain(clampedVolume, appliedNormalizationGainDb);
+  }
 
-    const audio = audioRef.current;
-    if (audio) {
-      audio.volume = clampedVolume;
+  async function loadReferenceTrack(
+    sourceType: ReferenceTrackSource,
+    selection: Pick<LoadedReferenceTrack, 'filePath' | 'fileName' | 'subtitle' | 'playbackSource'>,
+    options: {
+      previewAnalysis?: TrackAnalysisResult;
+      measuredAnalysis?: AudioFileAnalysis;
+    } = {}
+  ): Promise<void> {
+    setReferenceStatus('loading');
+    setReferenceError(null);
+
+    try {
+      const previewAnalysis =
+        options.previewAnalysis ??
+        (await analyzeTrackFromUrl(selection.playbackSource.url));
+      const nextMeasuredAnalysis =
+        options.measuredAnalysis ??
+        (await window.producerPlayer.analyzeAudioFile(selection.filePath));
+
+      setReferenceTrack({
+        sourceType,
+        filePath: selection.filePath,
+        fileName: selection.fileName,
+        subtitle: selection.subtitle,
+        playbackSource: selection.playbackSource,
+        previewAnalysis,
+        measuredAnalysis: nextMeasuredAnalysis,
+      });
+      setReferenceStatus('ready');
+    } catch (cause: unknown) {
+      setReferenceStatus('error');
+      setReferenceError(
+        cause instanceof Error ? cause.message : 'Could not load the reference track.'
+      );
     }
   }
 
-  function handleStoreCurrentTrackAsReference(slotId: ReferenceSlotId): void {
-    if (!analysis || !selectedPlaybackVersion || !selectedSong) {
+  async function handleUseCurrentTrackAsReference(): Promise<void> {
+    if (!analysis || !measuredAnalysis || !selectedPlaybackVersion || !playbackSource) {
       return;
     }
 
-    setReferenceSlots((current) => ({
-      ...current,
-      [slotId]: {
-        slotId,
-        versionId: selectedPlaybackVersion.id,
+    await loadReferenceTrack(
+      'linked-track',
+      {
+        filePath: selectedPlaybackVersion.filePath,
         fileName: selectedPlaybackVersion.fileName,
-        songTitle: getSongDisplayFileName(selectedSong),
-        analysis,
+        subtitle: selectedSong ? getSongDisplayFileName(selectedSong) : 'Linked track',
+        playbackSource,
       },
-    }));
-    setActiveReferenceSlotId(slotId);
+      {
+        previewAnalysis: analysis,
+        measuredAnalysis,
+      }
+    );
   }
 
-  function handleClearReferenceSlot(slotId: ReferenceSlotId): void {
-    setReferenceSlots((current) => ({
-      ...current,
-      [slotId]: null,
-    }));
-    setActiveReferenceSlotId((current) => (current === slotId ? null : current));
+  async function handleChooseReferenceTrack(): Promise<void> {
+    setReferenceError(null);
+
+    const pickedReference: ReferenceTrackSelection | null =
+      await window.producerPlayer.pickReferenceTrack();
+    if (!pickedReference) {
+      return;
+    }
+
+    await loadReferenceTrack('external-file', {
+      filePath: pickedReference.filePath,
+      fileName: pickedReference.fileName,
+      subtitle: 'External reference file',
+      playbackSource: pickedReference.playbackSource,
+    });
   }
+
+  function handleClearReferenceTrack(): void {
+    setReferenceTrack(null);
+    setReferenceStatus('idle');
+    setReferenceError(null);
+  }
+
+  const measuredIntegratedText = buildAnalysisValue(
+    analysisStatus,
+    formatMeasuredStat(measuredAnalysis?.integratedLufs, 'LUFS'),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+    }
+  );
+  const measuredLraText = buildAnalysisValue(
+    analysisStatus,
+    formatMeasuredStat(measuredAnalysis?.loudnessRangeLufs, 'LU'),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+    }
+  );
+  const measuredTruePeakText = buildAnalysisValue(
+    analysisStatus,
+    formatMeasuredStat(measuredAnalysis?.truePeakDbfs, 'dBFS'),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+    }
+  );
+  const measuredMaxShortTermText = buildAnalysisValue(
+    analysisStatus,
+    formatMeasuredStat(measuredAnalysis?.maxShortTermLufs, 'LUFS'),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+    }
+  );
+  const measuredMaxMomentaryText = buildAnalysisValue(
+    analysisStatus,
+    formatMeasuredStat(measuredAnalysis?.maxMomentaryLufs, 'LUFS'),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+    }
+  );
+  const measuredSamplePeakText = buildAnalysisValue(
+    analysisStatus,
+    formatMeasuredStat(measuredAnalysis?.samplePeakDbfs, 'dBFS'),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+    }
+  );
+  const measuredMeanVolumeText = buildAnalysisValue(
+    analysisStatus,
+    formatMeasuredStat(measuredAnalysis?.meanVolumeDbfs, 'dBFS'),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+    }
+  );
+  const shortTermEstimateText = buildAnalysisValue(
+    analysisStatus,
+    formatMeasuredStat(shortTermLufsEstimate, 'LUFS est.'),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+    }
+  );
+  const tonalBalanceAvailable = analysisStatus === 'ready' && analysis !== null;
+  const referenceIntegratedText =
+    referenceStatus === 'ready' && referenceTrack
+      ? formatMeasuredStat(referenceTrack.measuredAnalysis.integratedLufs, 'LUFS')
+      : buildAnalysisValue(referenceStatus, '—', {
+          loading: 'Loading…',
+          error: 'Error',
+        });
+  const referenceTruePeakText =
+    referenceStatus === 'ready' && referenceTrack
+      ? formatMeasuredStat(referenceTrack.measuredAnalysis.truePeakDbfs, 'dBFS')
+      : buildAnalysisValue(referenceStatus, '—', {
+          loading: 'Loading…',
+          error: 'Error',
+        });
+  const normalizationChangeText = buildAnalysisValue(
+    analysisStatus,
+    formatSignedLevel(normalizationPreview?.appliedGainDb),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+      empty: '—',
+    }
+  );
+  const normalizationProjectedText = buildAnalysisValue(
+    analysisStatus,
+    formatMeasuredStat(normalizationPreview?.projectedIntegratedLufs, 'LUFS'),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+      empty: '—',
+    }
+  );
+  const normalizationCapText =
+    analysisStatus === 'ready' && normalizationPreview
+      ? normalizationPreview.headroomCapDb === null
+        ? 'No peak cap data'
+        : `${normalizationPreview.headroomCapDb >= 0 ? '+' : ''}${normalizationPreview.headroomCapDb.toFixed(1)} dB before ${selectedNormalizationPlatform.truePeakCeilingDbtp.toFixed(0)} dBTP`
+      : buildAnalysisValue(analysisStatus, '—', {
+          loading: 'Loading…',
+          error: 'Error',
+          empty: '—',
+        });
+  const normalizationSummaryText =
+    analysisStatus === 'loading'
+      ? 'Loading platform normalization preview…'
+      : analysisStatus === 'error'
+        ? 'Platform normalization preview unavailable.'
+        : normalizationPreview
+          ? `${selectedNormalizationPlatform.label} selected · ${
+              normalizationPreviewEnabled ? 'preview on' : 'preview off'
+            } · ${normalizationPreview.explanation}`
+          : 'Select a track to estimate platform normalization.';
 
   transportActionRef.current = {
     toggle: () => {
@@ -1870,8 +2233,11 @@ export function App(): JSX.Element {
         <section className="analysis-panel" data-testid="analysis-panel">
           <div className="analysis-panel-header">
             <div>
-              <h3>Mastering Preview</h3>
-              <p className="muted">Bottom-left analysis shell for quick mastering checks.</p>
+              <h3>Mastering + Reference</h3>
+              <p className="muted">
+                Phase 2: measured loudness stats, stable bottom-left panel, and a clearer
+                reference-track workflow.
+              </p>
             </div>
             <button
               type="button"
@@ -1892,13 +2258,19 @@ export function App(): JSX.Element {
                 <p className="muted">
                   {selectedSong ? getSongDisplayFileName(selectedSong) : 'Unknown track'}
                 </p>
+                <p className="muted analysis-phase-note">
+                  FFmpeg loudness = measured. Tonal balance + live short-term readout = fast
+                  preview estimates.
+                </p>
               </div>
 
-              {analysisStatus === 'loading' ? (
-                <p className="muted" data-testid="analysis-status">
-                  Analysing loudness and tonal balance…
-                </p>
-              ) : null}
+              <p className="muted analysis-loading-line" data-testid="analysis-status">
+                {analysisStatus === 'loading'
+                  ? 'Loading mastering analysis…'
+                  : analysisStatus === 'error'
+                    ? 'Analysis failed.'
+                    : 'Measured loudness stays visible here while you browse tracks.'}
+              </p>
 
               {analysisStatus === 'error' ? (
                 <p className="error" data-testid="analysis-error">
@@ -1906,72 +2278,219 @@ export function App(): JSX.Element {
                 </p>
               ) : null}
 
-              {analysis ? (
-                <>
-                  <div className="analysis-stat-grid">
-                    <div className="analysis-stat-card" data-testid="analysis-short-term-stat">
-                      <span className="analysis-stat-label">Short-term LUFS est.</span>
-                      <strong>{formatAnalysisLevel(shortTermLufsEstimate)}</strong>
-                    </div>
-                    <div className="analysis-stat-card" data-testid="analysis-integrated-stat">
-                      <span className="analysis-stat-label">Integrated LUFS est.</span>
-                      <strong>{formatAnalysisLevel(analysis.integratedLufsEstimate)}</strong>
-                    </div>
-                    <div className="analysis-stat-card" data-testid="analysis-peak-stat">
-                      <span className="analysis-stat-label">Peak</span>
-                      <strong>{formatAnalysisLevel(analysis.peakDbfs)}</strong>
-                    </div>
-                  </div>
+              <div className="analysis-stat-grid compact">
+                <div className="analysis-stat-card" data-testid="analysis-integrated-stat">
+                  <span className="analysis-stat-label">Integrated LUFS</span>
+                  <strong>{measuredIntegratedText}</strong>
+                </div>
+                <div className="analysis-stat-card" data-testid="analysis-lra-stat">
+                  <span className="analysis-stat-label">LRA</span>
+                  <strong>{measuredLraText}</strong>
+                </div>
+                <div className="analysis-stat-card" data-testid="analysis-true-peak-stat">
+                  <span className="analysis-stat-label">True Peak</span>
+                  <strong>{measuredTruePeakText}</strong>
+                </div>
+                <div className="analysis-stat-card" data-testid="analysis-max-short-term-stat">
+                  <span className="analysis-stat-label">Max short-term</span>
+                  <strong>{measuredMaxShortTermText}</strong>
+                </div>
+                <div className="analysis-stat-card" data-testid="analysis-max-momentary-stat">
+                  <span className="analysis-stat-label">Max momentary</span>
+                  <strong>{measuredMaxMomentaryText}</strong>
+                </div>
+                <div className="analysis-stat-card" data-testid="analysis-short-term-stat">
+                  <span className="analysis-stat-label">Live short-term</span>
+                  <strong>{shortTermEstimateText}</strong>
+                </div>
+              </div>
 
-                  <div className="analysis-tonal-balance" data-testid="analysis-tonal-balance">
-                    {(
-                      [
-                        ['Low', analysis.tonalBalance.low],
-                        ['Mid', analysis.tonalBalance.mid],
-                        ['High', analysis.tonalBalance.high],
-                      ] as Array<[string, number]>
-                    ).map(([label, value]) => (
-                      <div key={label} className="analysis-band-row" data-testid={`analysis-band-${label.toLowerCase()}`}>
-                        <span>{label}</span>
-                        <div className="analysis-band-meter" aria-hidden="true">
-                          <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
-                        </div>
-                        <strong>{formatPercent(value)}</strong>
-                      </div>
-                    ))}
-                  </div>
+              <div className="analysis-reference-toolbar producer-reference-toolbar">
+                <div>
+                  <strong>Reference track</strong>
+                  <p className="muted" data-testid="analysis-reference-summary">
+                    {referenceTrack
+                      ? `${referenceTrack.fileName} · ${
+                          referenceTrack.sourceType === 'external-file'
+                            ? 'external reference file'
+                            : 'linked track reference'
+                        }`
+                      : referenceStatus === 'loading'
+                        ? 'Loading selected reference track…'
+                        : 'Choose a real reference file or use the current linked track.'}
+                  </p>
+                </div>
+                <div className="analysis-reference-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleChooseReferenceTrack();
+                    }}
+                    data-testid="analysis-choose-reference"
+                    title="Choose an external reference track file to compare against the current export."
+                  >
+                    Choose Reference File…
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleUseCurrentTrackAsReference();
+                    }}
+                    data-testid="analysis-use-current-reference"
+                    disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion}
+                    title="Use the currently selected linked track as the active reference track."
+                  >
+                    Use Current Track as Reference
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={handleClearReferenceTrack}
+                    data-testid="analysis-clear-reference"
+                    disabled={!referenceTrack && referenceStatus !== 'error'}
+                    title="Clear the active reference track comparison."
+                  >
+                    Clear Reference
+                  </button>
+                </div>
+              </div>
 
-                  <div className="analysis-reference-toolbar">
-                    <div className="analysis-reference-actions">
-                      {REFERENCE_SLOT_IDS.map((slotId) => (
-                        <button
-                          key={slotId}
-                          type="button"
-                          onClick={() => handleStoreCurrentTrackAsReference(slotId)}
-                          data-testid={`analysis-store-reference-${slotId.toLowerCase()}`}
-                          title={`Store the current track analysis in reference slot ${slotId}.`}
-                        >
-                          Store as Ref {slotId}
-                        </button>
-                      ))}
-                    </div>
-
-                    {activeReferenceSlot ? (
-                      <p className="muted" data-testid="analysis-reference-summary">
-                        Comparing against Ref {activeReferenceSlot.slotId}: {activeReferenceSlot.fileName}
-                      </p>
-                    ) : (
-                      <p className="muted" data-testid="analysis-reference-summary">
-                        Save a track as Ref A/B to compare future exports quickly.
-                      </p>
-                    )}
-                  </div>
-                </>
+              {referenceError ? (
+                <p className="error" data-testid="analysis-reference-error">
+                  {referenceError}
+                </p>
               ) : null}
+
+              <div className="analysis-reference-inline" data-testid="analysis-active-reference-inline">
+                {referenceTrack && activeReferenceComparison ? (
+                  <>
+                    <div className="analysis-stat-card compact">
+                      <span className="analysis-stat-label">Ref integrated</span>
+                      <strong>{referenceIntegratedText}</strong>
+                    </div>
+                    <div className="analysis-stat-card compact">
+                      <span className="analysis-stat-label">Ref true peak</span>
+                      <strong>{referenceTruePeakText}</strong>
+                    </div>
+                    <div className="analysis-stat-card compact">
+                      <span className="analysis-stat-label">Integrated delta</span>
+                      <strong>{formatSignedLevel(activeReferenceComparison.integratedDeltaDb)}</strong>
+                    </div>
+                  </>
+                ) : (
+                  <div className="analysis-stat-card compact analysis-empty-card">
+                    <span className="analysis-stat-label">Reference comparison</span>
+                    <strong>No reference loaded</strong>
+                    <span className="muted">
+                      Phase 1 only had Ref A/B scaffolding. Phase 2 makes the workflow explicit.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <section
+                className="analysis-normalization-panel"
+                data-testid="analysis-normalization-panel"
+              >
+                <div className="analysis-normalization-header">
+                  <div>
+                    <strong>Platform normalization preview</strong>
+                    <p className="muted" data-testid="analysis-normalization-summary">
+                      {normalizationSummaryText}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={normalizationPreviewEnabled ? '' : 'ghost'}
+                    onClick={() => setNormalizationPreviewEnabled((current) => !current)}
+                    data-testid="analysis-normalization-toggle"
+                    disabled={analysisStatus !== 'ready' || !normalizationPreview}
+                    title="Toggle the selected platform loudness preview on the current playback."
+                  >
+                    Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
+                  </button>
+                </div>
+
+                <div className="analysis-platform-grid" role="group" aria-label="Platform normalization presets">
+                  {NORMALIZATION_PLATFORM_PROFILES.map((platform) => (
+                    <button
+                      key={platform.id}
+                      type="button"
+                      className={`analysis-platform-button${
+                        selectedNormalizationPlatformId === platform.id ? ' selected' : ''
+                      }`}
+                      onClick={() => setSelectedNormalizationPlatformId(platform.id)}
+                      data-testid={`analysis-platform-${platform.id}`}
+                      title={platform.description}
+                      aria-pressed={selectedNormalizationPlatformId === platform.id}
+                    >
+                      <span
+                        className="analysis-platform-icon"
+                        style={{ '--platform-accent': platform.accentColor } as CSSProperties}
+                      >
+                        <PlatformIcon platformId={platform.id} />
+                      </span>
+                      <span className="analysis-platform-copy">
+                        <strong>{platform.shortLabel}</strong>
+                        <span className="muted">{platform.targetLufs.toFixed(0)} LUFS</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="analysis-reference-inline analysis-normalization-inline">
+                  <div className="analysis-stat-card compact" data-testid="analysis-normalization-change">
+                    <span className="analysis-stat-label">Applied change</span>
+                    <strong>{normalizationChangeText}</strong>
+                    <span className="muted">
+                      {normalizationPreviewEnabled
+                        ? 'Active on current playback'
+                        : 'Bypassed until Preview On'}
+                    </span>
+                  </div>
+                  <div className="analysis-stat-card compact" data-testid="analysis-normalization-projected">
+                    <span className="analysis-stat-label">Projected loudness</span>
+                    <strong>{normalizationProjectedText}</strong>
+                    <span className="muted">Track-normalized estimate</span>
+                  </div>
+                  <div className="analysis-stat-card compact" data-testid="analysis-normalization-cap">
+                    <span className="analysis-stat-label">Peak / boost cap</span>
+                    <strong>{normalizationCapText}</strong>
+                    <span className="muted">
+                      {normalizationPreview?.limitedByHeadroom
+                        ? 'Boost limited by true peak headroom'
+                        : selectedNormalizationPlatform.policy === 'down-only'
+                          ? 'Down-only preview for this platform'
+                          : 'Headroom-aware preview'}
+                    </span>
+                  </div>
+                </div>
+              </section>
+
+              <div className="analysis-tonal-balance" data-testid="analysis-tonal-balance">
+                {(
+                  [
+                    ['Low', tonalBalanceAvailable ? analysis?.tonalBalance.low ?? 0 : 0],
+                    ['Mid', tonalBalanceAvailable ? analysis?.tonalBalance.mid ?? 0 : 0],
+                    ['High', tonalBalanceAvailable ? analysis?.tonalBalance.high ?? 0 : 0],
+                  ] as Array<[string, number]>
+                ).map(([label, value]) => (
+                  <div key={label} className="analysis-band-row" data-testid={`analysis-band-${label.toLowerCase()}`}>
+                    <span>{label}</span>
+                    <div className="analysis-band-meter" aria-hidden="true">
+                      <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
+                    </div>
+                    <strong>
+                      {analysisStatus === 'ready' && analysis ? formatPercent(value) : 'Loading…'}
+                    </strong>
+                  </div>
+                ))}
+              </div>
             </>
           ) : (
             <p className="muted" data-testid="analysis-empty-state">
-              Select a track to preview loudness, peak, tonal balance, and reference slots.
+              Select a track to view measured loudness, tonal balance preview, and reference-track
+              comparison.
             </p>
           )}
         </section>
@@ -2347,9 +2866,10 @@ export function App(): JSX.Element {
           <div className="analysis-overlay-card">
             <div className="analysis-overlay-header">
               <div>
-                <h2>Mastering Analysis Preview</h2>
+                <h2>Mastering Analysis</h2>
                 <p className="muted">
-                  Phase 1 shell: quick loudness/peak estimates, tonal balance, and reference slots.
+                  Phase 1 was only a preview shell. Phase 2 makes loudness measurement more real
+                  with FFmpeg stats and a clearer reference-track flow.
                 </p>
               </div>
               <button
@@ -2362,7 +2882,7 @@ export function App(): JSX.Element {
               </button>
             </div>
 
-            {selectedPlaybackVersion && analysis ? (
+            {selectedPlaybackVersion ? (
               <div className="analysis-overlay-grid">
                 <section className="analysis-overlay-section">
                   <h3>Current Track</h3>
@@ -2373,40 +2893,58 @@ export function App(): JSX.Element {
                     {selectedSong ? getSongDisplayFileName(selectedSong) : 'Unknown track'}
                   </p>
                   <p className="muted">
-                    These are playback-side estimates for fast comparison, not final mastering-meter replacements yet.
+                    FFmpeg provides measured integrated LUFS / LRA / true peak / peak summaries.
+                    Tonal balance and the live short-term readout are still fast in-app estimates,
+                    so this is producer-useful now but not a full mastering-meter replacement yet.
                   </p>
                 </section>
 
                 <section className="analysis-overlay-section">
-                  <h3>Loudness + Peak</h3>
-                  <div className="analysis-detail-grid">
+                  <h3>Measured loudness + peaks</h3>
+                  <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card">
-                      <span className="analysis-stat-label">Short-term LUFS est.</span>
-                      <strong>{formatAnalysisLevel(shortTermLufsEstimate)}</strong>
+                      <span className="analysis-stat-label">Integrated LUFS</span>
+                      <strong>{measuredIntegratedText}</strong>
                     </div>
                     <div className="analysis-stat-card">
-                      <span className="analysis-stat-label">Integrated LUFS est.</span>
-                      <strong>{formatAnalysisLevel(analysis.integratedLufsEstimate)}</strong>
+                      <span className="analysis-stat-label">LRA</span>
+                      <strong>{measuredLraText}</strong>
                     </div>
                     <div className="analysis-stat-card">
-                      <span className="analysis-stat-label">Peak</span>
-                      <strong>{formatAnalysisLevel(analysis.peakDbfs)}</strong>
+                      <span className="analysis-stat-label">True Peak</span>
+                      <strong>{measuredTruePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card">
-                      <span className="analysis-stat-label">Duration</span>
-                      <strong>{formatTime(analysis.durationSeconds)}</strong>
+                      <span className="analysis-stat-label">Sample peak</span>
+                      <strong>{measuredSamplePeakText}</strong>
+                    </div>
+                    <div className="analysis-stat-card">
+                      <span className="analysis-stat-label">Max short-term</span>
+                      <strong>{measuredMaxShortTermText}</strong>
+                    </div>
+                    <div className="analysis-stat-card">
+                      <span className="analysis-stat-label">Max momentary</span>
+                      <strong>{measuredMaxMomentaryText}</strong>
+                    </div>
+                    <div className="analysis-stat-card">
+                      <span className="analysis-stat-label">Mean volume</span>
+                      <strong>{measuredMeanVolumeText}</strong>
+                    </div>
+                    <div className="analysis-stat-card">
+                      <span className="analysis-stat-label">Live short-term</span>
+                      <strong>{shortTermEstimateText}</strong>
                     </div>
                   </div>
                 </section>
 
                 <section className="analysis-overlay-section">
-                  <h3>Tonal Balance</h3>
+                  <h3>Estimated tonal balance</h3>
                   <div className="analysis-tonal-balance detailed">
                     {(
                       [
-                        ['Low', analysis.tonalBalance.low],
-                        ['Mid', analysis.tonalBalance.mid],
-                        ['High', analysis.tonalBalance.high],
+                        ['Low', analysis?.tonalBalance.low ?? 0],
+                        ['Mid', analysis?.tonalBalance.mid ?? 0],
+                        ['High', analysis?.tonalBalance.high ?? 0],
                       ] as Array<[string, number]>
                     ).map(([label, value]) => (
                       <div key={label} className="analysis-band-row">
@@ -2414,104 +2952,119 @@ export function App(): JSX.Element {
                         <div className="analysis-band-meter" aria-hidden="true">
                           <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
                         </div>
-                        <strong>{formatPercent(value)}</strong>
+                        <strong>
+                          {analysisStatus === 'ready' && analysis ? formatPercent(value) : 'Loading…'}
+                        </strong>
                       </div>
                     ))}
                   </div>
                 </section>
 
                 <section className="analysis-overlay-section">
-                  <h3>Reference Slots</h3>
-                  <div className="analysis-reference-slots">
-                    {REFERENCE_SLOT_IDS.map((slotId) => {
-                      const slot = referenceSlots[slotId];
-                      const isActive = activeReferenceSlotId === slotId;
-                      const referenceShortTerm = slot
-                        ? estimateShortTermLufs(slot.analysis, 0)
-                        : null;
-
-                      return (
-                        <div
-                          key={slotId}
-                          className={`analysis-reference-slot ${isActive ? 'active' : ''}`}
-                          data-testid={`analysis-reference-slot-${slotId.toLowerCase()}`}
-                        >
-                          <div className="analysis-reference-slot-header">
-                            <strong>Ref {slotId}</strong>
-                            <div className="analysis-reference-slot-actions">
-                              <button
-                                type="button"
-                                className={isActive ? 'selected' : ''}
-                                onClick={() => setActiveReferenceSlotId(slot ? slotId : null)}
-                                disabled={!slot}
-                              >
-                                Compare
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleStoreCurrentTrackAsReference(slotId)}
-                              >
-                                Store current
-                              </button>
-                              <button
-                                type="button"
-                                className="ghost"
-                                onClick={() => handleClearReferenceSlot(slotId)}
-                                disabled={!slot}
-                              >
-                                Clear
-                              </button>
-                            </div>
-                          </div>
-
-                          {slot ? (
-                            <>
-                              <p>
-                                <strong>{slot.fileName}</strong>
-                              </p>
-                              <p className="muted">{slot.songTitle}</p>
-                              <div className="analysis-reference-metrics">
-                                <span>Short: {formatAnalysisLevel(referenceShortTerm)}</span>
-                                <span>Integrated: {formatAnalysisLevel(slot.analysis.integratedLufsEstimate)}</span>
-                                <span>Peak: {formatAnalysisLevel(slot.analysis.peakDbfs)}</span>
-                              </div>
-                            </>
-                          ) : (
-                            <p className="muted">Nothing stored yet.</p>
-                          )}
-                        </div>
-                      );
-                    })}
+                  <h3>Reference track workflow</h3>
+                  <p className="muted">
+                    Choose a real external reference file or reuse the current linked track. The
+                    loaded reference becomes the active comparison target immediately.
+                  </p>
+                  <div className="analysis-reference-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleChooseReferenceTrack();
+                      }}
+                      data-testid="analysis-choose-reference-overlay"
+                    >
+                      Choose Reference File…
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleUseCurrentTrackAsReference();
+                      }}
+                      disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion}
+                    >
+                      Use Current Track as Reference
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={handleClearReferenceTrack}
+                      disabled={!referenceTrack && referenceStatus !== 'error'}
+                    >
+                      Clear Reference
+                    </button>
                   </div>
+
+                  <div className="analysis-reference-slot active" data-testid="analysis-reference-slot-a">
+                    {referenceTrack ? (
+                      <>
+                        <div className="analysis-reference-slot-header">
+                          <strong>Active reference track</strong>
+                          <span className="muted">
+                            {referenceTrack.sourceType === 'external-file'
+                              ? 'External file'
+                              : 'Linked track'}
+                          </span>
+                        </div>
+                        <p>
+                          <strong>{referenceTrack.fileName}</strong>
+                        </p>
+                        <p className="muted">{referenceTrack.subtitle}</p>
+                        <div className="analysis-reference-metrics">
+                          <span>Integrated: {referenceIntegratedText}</span>
+                          <span>True peak: {referenceTruePeakText}</span>
+                          <span>
+                            Short-term: {formatMeasuredStat(referenceShortTermEstimate, 'LUFS est.')}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="muted">
+                        No reference loaded yet. Phase 1 only had Ref A/B placeholders here.
+                      </p>
+                    )}
+                  </div>
+
+                  {referenceError ? <p className="error">{referenceError}</p> : null}
                 </section>
 
                 <section className="analysis-overlay-section analysis-comparison-panel">
-                  <h3>Current vs active reference</h3>
-                  {activeReferenceSlot && activeReferenceComparison ? (
+                  <h3>Current export vs reference track</h3>
+                  {referenceTrack && activeReferenceComparison ? (
                     <div data-testid="analysis-active-reference">
                       <p>
-                        <strong>
-                          Ref {activeReferenceSlot.slotId}: {activeReferenceSlot.fileName}
-                        </strong>
+                        <strong>{referenceTrack.fileName}</strong>
                       </p>
-                      <div className="analysis-detail-grid">
-                        <div className="analysis-stat-card">
-                          <span className="analysis-stat-label">Short-term delta</span>
-                          <strong>{formatSignedLevel(activeReferenceComparison.shortTermDeltaDb)}</strong>
-                        </div>
+                      <div className="analysis-detail-grid analysis-detail-grid-wide">
                         <div className="analysis-stat-card">
                           <span className="analysis-stat-label">Integrated delta</span>
                           <strong>{formatSignedLevel(activeReferenceComparison.integratedDeltaDb)}</strong>
                         </div>
                         <div className="analysis-stat-card">
-                          <span className="analysis-stat-label">Peak delta</span>
-                          <strong>{formatSignedLevel(activeReferenceComparison.peakDeltaDb)}</strong>
+                          <span className="analysis-stat-label">True peak delta</span>
+                          <strong>{formatSignedLevel(activeReferenceComparison.truePeakDeltaDb)}</strong>
+                        </div>
+                        <div className="analysis-stat-card">
+                          <span className="analysis-stat-label">Live short-term delta</span>
+                          <strong>{formatSignedLevel(activeReferenceComparison.shortTermDeltaDb)}</strong>
+                        </div>
+                        <div className="analysis-stat-card">
+                          <span className="analysis-stat-label">Low tilt delta</span>
+                          <strong>{formatSignedLevel(activeReferenceComparison.tonalDelta.low * 100)}</strong>
+                        </div>
+                        <div className="analysis-stat-card">
+                          <span className="analysis-stat-label">Mid tilt delta</span>
+                          <strong>{formatSignedLevel(activeReferenceComparison.tonalDelta.mid * 100)}</strong>
+                        </div>
+                        <div className="analysis-stat-card">
+                          <span className="analysis-stat-label">High tilt delta</span>
+                          <strong>{formatSignedLevel(activeReferenceComparison.tonalDelta.high * 100)}</strong>
                         </div>
                       </div>
                     </div>
                   ) : (
                     <p className="muted" data-testid="analysis-active-reference">
-                      Choose Ref A or Ref B to compare this export against a stored reference snapshot.
+                      Load a reference track to see direct deltas for loudness, peaks, and tonal tilt.
                     </p>
                   )}
                 </section>

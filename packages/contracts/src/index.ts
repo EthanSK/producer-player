@@ -48,6 +48,24 @@ export interface PlaybackSourceInfo {
   originalFilePath: string | null;
 }
 
+export interface AudioFileAnalysis {
+  filePath: string;
+  measuredWith: 'ffmpeg-ebur128-volumedetect';
+  integratedLufs: number | null;
+  loudnessRangeLufs: number | null;
+  truePeakDbfs: number | null;
+  samplePeakDbfs: number | null;
+  meanVolumeDbfs: number | null;
+  maxMomentaryLufs: number | null;
+  maxShortTermLufs: number | null;
+}
+
+export interface ReferenceTrackSelection {
+  filePath: string;
+  fileName: string;
+  playbackSource: PlaybackSourceInfo;
+}
+
 export interface LogicalSong {
   id: string;
   folderId: string;
@@ -125,6 +143,8 @@ export const IPC_CHANNELS = {
   OPEN_FOLDER: 'producer-player:open-folder',
   TO_FILE_URL: 'producer-player:to-file-url',
   RESOLVE_PLAYBACK_SOURCE: 'producer-player:resolve-playback-source',
+  ANALYZE_AUDIO_FILE: 'producer-player:analyze-audio-file',
+  PICK_REFERENCE_TRACK: 'producer-player:pick-reference-track',
   SNAPSHOT_UPDATED: 'producer-player:snapshot-updated',
   TRANSPORT_COMMAND: 'producer-player:transport-command',
 } as const;
@@ -149,6 +169,8 @@ export interface ProducerPlayerBridge {
   openFolder(folderPath: string): Promise<void>;
   toFileUrl(filePath: string): Promise<string>;
   resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo>;
+  analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis>;
+  pickReferenceTrack(): Promise<ReferenceTrackSelection | null>;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
   onTransportCommand(listener: TransportCommandListener): () => void;
 }

@@ -69,6 +69,14 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.RESOLVE_PLAYBACK_SOURCE, filePath);
   },
 
+  async analyzeAudioFile(filePath: string) {
+    return ipcRenderer.invoke(IPC_CHANNELS.ANALYZE_AUDIO_FILE, filePath);
+  },
+
+  async pickReferenceTrack() {
+    return ipcRenderer.invoke(IPC_CHANNELS.PICK_REFERENCE_TRACK);
+  },
+
   onSnapshotUpdated(listener: SnapshotListener) {
     const wrappedListener = (_event: unknown, snapshot: unknown) => {
       listener(snapshot as Parameters<SnapshotListener>[0]);

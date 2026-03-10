@@ -38,7 +38,9 @@ const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
 };
 
 const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
-const PLAYHEAD_END_RESET_THRESHOLD_SECONDS = 0.8;
+const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
+const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
+const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
 const DEFAULT_PLAYBACK_VOLUME = 1;
 
 function reorderSongIds(
@@ -174,6 +176,58 @@ function getSongDisplayFileName(song: SongWithVersions): string {
   return getActiveSongVersion(song)?.fileName ?? song.title;
 }
 
+function getPlayheadEndResetThresholdSeconds(durationSeconds: number | undefined): number {
+  if (
+    !Number.isFinite(durationSeconds) ||
+    typeof durationSeconds !== 'number' ||
+    durationSeconds <= 0
+  ) {
+    return PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS;
+  }
+
+  return Math.min(
+    PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS,
+    Math.max(
+      PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS,
+      durationSeconds * PLAYHEAD_END_RESET_DURATION_RATIO
+    )
+  );
+}
+
+function isPlayheadAtOrNearEnd(
+  seconds: number,
+  durationSeconds: number | undefined
+): boolean {
+  if (
+    !Number.isFinite(seconds) ||
+    seconds < 0 ||
+    !Number.isFinite(durationSeconds) ||
+    typeof durationSeconds !== 'number' ||
+    durationSeconds <= 0
+  ) {
+    return false;
+  }
+
+  const remainingSeconds = Math.max(durationSeconds - seconds, 0);
+  return remainingSeconds <= getPlayheadEndResetThresholdSeconds(durationSeconds);
+}
+
+function normalizeRememberedPlayheadSeconds(
+  seconds: number,
+  durationSeconds: number | undefined
+): number | null {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return null;
+  }
+
+  if (isPlayheadAtOrNearEnd(seconds, durationSeconds)) {
+    return null;
+  }
+
+  const normalizedSeconds = Math.max(0, Math.min(seconds, durationSeconds ?? seconds));
+  return normalizedSeconds <= 0.01 ? null : normalizedSeconds;
+}
+
 export function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>(EMPTY_SNAPSHOT);
   const [environment, setEnvironment] =
@@ -249,30 +303,26 @@ export function App(): JSX.Element {
   function rememberSongPlayhead(
     songId: string | null,
     seconds: number,
-    options: { durationSeconds?: number; forceResetAtEnd?: boolean } = {}
+    options: { durationSeconds?: number } = {}
   ): void {
-    if (!songId || !Number.isFinite(seconds) || seconds < 0) {
+    if (!songId) {
       return;
     }
 
-    const duration = options.durationSeconds;
-    const isNearEnd =
-      Number.isFinite(duration) &&
-      typeof duration === 'number' &&
-      duration > 0 &&
-      seconds >= Math.max(duration - PLAYHEAD_END_RESET_THRESHOLD_SECONDS, 0);
+    const normalizedSeconds = normalizeRememberedPlayheadSeconds(
+      seconds,
+      options.durationSeconds
+    );
 
-    const nextSeconds =
-      options.forceResetAtEnd && isNearEnd ? 0 : Math.max(0, Math.min(seconds, duration ?? seconds));
-
-    if (nextSeconds <= 0.01) {
+    if (normalizedSeconds === null) {
       playbackPositionBySongIdRef.current.delete(songId);
-    } else {
-      playbackPositionBySongIdRef.current.set(songId, nextSeconds);
+      return;
     }
+
+    playbackPositionBySongIdRef.current.set(songId, normalizedSeconds);
   }
 
-  function rememberCurrentSongPlayhead(options: { forceResetAtEnd?: boolean } = {}): void {
+  function rememberCurrentSongPlayhead(): void {
     const audio = audioRef.current;
     if (!audio) {
       return;
@@ -280,7 +330,6 @@ export function App(): JSX.Element {
 
     rememberSongPlayhead(lastLoadedSongIdRef.current, audio.currentTime, {
       durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
-      forceResetAtEnd: options.forceResetAtEnd,
     });
   }
 
@@ -298,26 +347,29 @@ export function App(): JSX.Element {
       return;
     }
 
-    const duration = Number.isFinite(audio.duration) ? audio.duration : null;
-    const clampedRestoreTime =
-      duration && duration > 0
-        ? Math.min(Math.max(pendingRestoreTime, 0), Math.max(duration - 0.05, 0))
-        : Math.max(pendingRestoreTime, 0);
+    const duration = Number.isFinite(audio.duration) ? audio.duration : undefined;
+    const normalizedRestoreTime = normalizeRememberedPlayheadSeconds(
+      pendingRestoreTime,
+      duration
+    );
 
-    if (clampedRestoreTime <= 0) {
+    if (normalizedRestoreTime === null) {
+      rememberSongPlayhead(lastLoadedSongIdRef.current, pendingRestoreTime, {
+        durationSeconds: duration,
+      });
       pendingRestoreTimeRef.current = null;
       return;
     }
 
     try {
-      audio.currentTime = clampedRestoreTime;
-      setCurrentTimeSeconds(clampedRestoreTime);
-      rememberSongPlayhead(lastLoadedSongIdRef.current, clampedRestoreTime, {
-        durationSeconds: duration ?? undefined,
+      audio.currentTime = normalizedRestoreTime;
+      setCurrentTimeSeconds(normalizedRestoreTime);
+      rememberSongPlayhead(lastLoadedSongIdRef.current, normalizedRestoreTime, {
+        durationSeconds: duration,
       });
 
       logPlaybackEvent('playhead-restored', {
-        restoredSeconds: clampedRestoreTime,
+        restoredSeconds: normalizedRestoreTime,
       });
     } catch {
       // Ignore transient seek errors while metadata is still settling.
@@ -403,10 +455,9 @@ export function App(): JSX.Element {
       const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
       setCurrentTimeSeconds(currentTime);
 
-      const activeSongId = lastLoadedSongIdRef.current;
-      if (activeSongId && currentTime >= 0) {
-        playbackPositionBySongIdRef.current.set(activeSongId, currentTime);
-      }
+      rememberSongPlayhead(lastLoadedSongIdRef.current, currentTime, {
+        durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
+      });
     };
 
     const onLoadedMetadata = () => {
@@ -465,7 +516,7 @@ export function App(): JSX.Element {
 
     const onEnded = () => {
       const mode = repeatModeRef.current;
-      rememberCurrentSongPlayhead({ forceResetAtEnd: true });
+      rememberCurrentSongPlayhead();
 
       logPlaybackEvent('ended', {
         repeatMode: mode,

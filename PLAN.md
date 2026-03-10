@@ -1415,3 +1415,34 @@ Also, like the QHalo app icon. Let's use that.
   - `docs/APP_ICON.md`
   - `docs/assets/icon/ordering-refinement-round2-2026-03-10/README.md`
 - Included the previously generated round-2 icon refinement assets + generator script in the repo state so the chosen icon’s source/provenance is tracked cleanly.
+
+---
+
+## Near-end / finished-track playhead restore bug — final fix pass (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Tue 2026-03-10 00:22 GMT
+
+```text
+By the way, the problem still persists of if a song has already reached the end, then I go to another song. Then I try and go back to the original song. It just keeps playing from the end. It doesn't restart start back to zero. I thought I already explained this to you, but I guess I didn't explain it well enough or you didn't fix it or you tried to and it failed, but it's really bad. We need to 100% make sure that doesn't happen. And then dedicated sub agent.
+```
+
+### Assistant implementation summary (this run)
+
+- Reproduced the bug on latest `main` with a dedicated Electron Playwright scenario before changing code:
+  - let a short track finish
+  - switch to another track
+  - switch back
+  - press play again
+  - confirmed the transport immediately fell back to a dead-end/end-state instead of restarting cleanly
+- Root-caused the failure to multiple playhead-save paths in the renderer that still wrote raw end-of-track times back into the in-memory song-position map, overriding the previous attempted reset-at-end behavior.
+- Centralized near-end normalization in the renderer so remembered playheads are deleted/reset instead of restored when they are effectively at the dead end of the song.
+- Hardened restore-time behavior too, so even if a stale near-end timestamp somehow survives, the restore path refuses to seek back to that dead-end position.
+- Updated the near-end reset rule to be duration-aware:
+  - reset if remaining time is within `min(5s, max(1s, 5% of duration))`
+  - so short tracks use a **1 second** near-end window, while longer tracks can use up to **5 seconds**
+- Added explicit regression coverage for both Ethan-described cases:
+  - fully finished track → switch away/back → restart from zero
+  - last-second / near-end track → switch away/back → restart from zero
+- Re-ran the wider playback regression suite to make sure normal resume, repeat, drag/reorder continuity, transport controls, and codec playback still behave correctly.

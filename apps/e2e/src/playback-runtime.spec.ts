@@ -817,6 +817,144 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
+  test('finished tracks restart from zero after switching away and back', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playhead-finished-reset-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playhead-finished-reset-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=360:duration=1.3',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Reset Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=460:duration=1.3',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Reset Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Reset Alpha' }).first().click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await expect
+        .poll(async () => (await page.getByTestId('player-play-toggle').getAttribute('aria-label')) ?? '', {
+          timeout: 6_000,
+        })
+        .toBe('Play');
+
+      expect(Number(await page.getByTestId('player-scrubber').inputValue())).toBeGreaterThan(1.15);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Reset Beta' }).first().click();
+      await page.getByTestId('main-list-row').filter({ hasText: 'Reset Alpha' }).first().click();
+      await page.getByTestId('player-play-toggle').click();
+
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await page.waitForTimeout(450);
+
+      const restartedSeconds = Number(await page.getByTestId('player-scrubber').inputValue());
+      expect(restartedSeconds).toBeGreaterThan(0.05);
+      expect(restartedSeconds).toBeLessThan(0.9);
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('near-end tracks in the last second restart from zero after switching away and back', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playhead-near-end-reset-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playhead-near-end-reset-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=330:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Near End Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=530:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Near End Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Near End Alpha' }).first().click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('player-scrubber').evaluate((element) => {
+        const input = element as HTMLInputElement;
+        input.value = '5.4';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      await page.waitForTimeout(250);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Near End Beta' }).first().click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Near End Beta');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Near End Alpha' }).first().click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Near End Alpha');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.waitForTimeout(700);
+
+      const restartedSeconds = Number(await page.getByTestId('player-scrubber').inputValue());
+      expect(restartedSeconds).toBeGreaterThan(0.05);
+      expect(restartedSeconds).toBeLessThan(1.1);
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('restores per-song playhead position within a session, but not after restarting the app', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-playhead-restore-fixture-')

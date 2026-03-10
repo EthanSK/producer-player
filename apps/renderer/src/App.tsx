@@ -8,9 +8,24 @@ import type {
   SongWithVersions,
   TransportCommand,
 } from '@producer-player/contracts';
+import {
+  analyzeTrackFromUrl,
+  estimateShortTermLufs,
+  type TonalBalanceSnapshot,
+  type TrackAnalysisResult,
+} from './audioAnalysis';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
+type ReferenceSlotId = 'A' | 'B';
+
+interface AnalysisReferenceSlot {
+  slotId: ReferenceSlotId;
+  versionId: string;
+  fileName: string;
+  songTitle: string;
+  analysis: TrackAnalysisResult;
+}
 
 const EMPTY_SNAPSHOT: LibrarySnapshot = {
   linkedFolders: [],
@@ -42,6 +57,7 @@ const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
 const DEFAULT_PLAYBACK_VOLUME = 1;
+const REFERENCE_SLOT_IDS: ReferenceSlotId[] = ['A', 'B'];
 
 function reorderSongIds(
   songIds: string[],
@@ -168,6 +184,30 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatAnalysisLevel(level: number | null | undefined): string {
+  if (level === null || level === undefined || !Number.isFinite(level)) {
+    return '—';
+  }
+
+  return `${level.toFixed(1)} dB`;
+}
+
+function formatSignedLevel(level: number | null | undefined): string {
+  if (level === null || level === undefined || !Number.isFinite(level)) {
+    return '—';
+  }
+
+  return `${level >= 0 ? '+' : ''}${level.toFixed(1)} dB`;
+}
+
+function formatPercent(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '0%';
+  }
+
+  return `${Math.round(value * 100)}%`;
+}
+
 function arraysEqual(left: string[], right: string[]): boolean {
   if (left.length !== right.length) {
     return false;
@@ -280,6 +320,17 @@ export function App(): JSX.Element {
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [playbackSourceReady, setPlaybackSourceReady] = useState(false);
   const [volume, setVolume] = useState(DEFAULT_PLAYBACK_VOLUME);
+  const [analysis, setAnalysis] = useState<TrackAnalysisResult | null>(null);
+  const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    'idle'
+  );
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisExpanded, setAnalysisExpanded] = useState(false);
+  const [referenceSlots, setReferenceSlots] = useState<Record<ReferenceSlotId, AnalysisReferenceSlot | null>>({
+    A: null,
+    B: null,
+  });
+  const [activeReferenceSlotId, setActiveReferenceSlotId] = useState<ReferenceSlotId | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
@@ -324,6 +375,63 @@ export function App(): JSX.Element {
   useEffect(() => {
     playbackSourceReadyRef.current = playbackSourceReady;
   }, [playbackSourceReady]);
+
+  useEffect(() => {
+    if (!selectedPlaybackVersionId || !playbackSource?.url) {
+      setAnalysis(null);
+      setAnalysisStatus('idle');
+      setAnalysisError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setAnalysis(null);
+    setAnalysisStatus('loading');
+    setAnalysisError(null);
+
+    void analyzeTrackFromUrl(playbackSource.url, controller.signal)
+      .then((result) => {
+        setAnalysis(result);
+        setAnalysisStatus('ready');
+      })
+      .catch((analysisIssue: unknown) => {
+        if (
+          analysisIssue instanceof DOMException &&
+          analysisIssue.name === 'AbortError'
+        ) {
+          return;
+        }
+
+        setAnalysis(null);
+        setAnalysisStatus('error');
+        setAnalysisError(
+          analysisIssue instanceof Error
+            ? analysisIssue.message
+            : 'Could not analyse this track preview.'
+        );
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [playbackSource?.url, selectedPlaybackVersionId]);
+
+  useEffect(() => {
+    if (!analysisExpanded) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setAnalysisExpanded(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [analysisExpanded]);
 
   function rememberSongPlayhead(
     songId: string | null,
@@ -805,6 +913,21 @@ export function App(): JSX.Element {
     snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
   const selectedPlaybackFilePath = selectedPlaybackVersion?.filePath ?? null;
   const selectedPlaybackSongId = selectedPlaybackVersion?.songId ?? null;
+  const shortTermLufsEstimate = analysis
+    ? estimateShortTermLufs(analysis, currentTimeSeconds)
+    : null;
+  const activeReferenceSlot = activeReferenceSlotId ? referenceSlots[activeReferenceSlotId] : null;
+  const activeReferenceComparison =
+    analysis && activeReferenceSlot
+      ? {
+          shortTermDeltaDb:
+            estimateShortTermLufs(analysis, currentTimeSeconds) -
+            estimateShortTermLufs(activeReferenceSlot.analysis, 0),
+          integratedDeltaDb:
+            analysis.integratedLufsEstimate - activeReferenceSlot.analysis.integratedLufsEstimate,
+          peakDeltaDb: analysis.peakDbfs - activeReferenceSlot.analysis.peakDbfs,
+        }
+      : null;
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1572,6 +1695,32 @@ export function App(): JSX.Element {
     }
   }
 
+  function handleStoreCurrentTrackAsReference(slotId: ReferenceSlotId): void {
+    if (!analysis || !selectedPlaybackVersion || !selectedSong) {
+      return;
+    }
+
+    setReferenceSlots((current) => ({
+      ...current,
+      [slotId]: {
+        slotId,
+        versionId: selectedPlaybackVersion.id,
+        fileName: selectedPlaybackVersion.fileName,
+        songTitle: getSongDisplayFileName(selectedSong),
+        analysis,
+      },
+    }));
+    setActiveReferenceSlotId(slotId);
+  }
+
+  function handleClearReferenceSlot(slotId: ReferenceSlotId): void {
+    setReferenceSlots((current) => ({
+      ...current,
+      [slotId]: null,
+    }));
+    setActiveReferenceSlotId((current) => (current === slotId ? null : current));
+  }
+
   transportActionRef.current = {
     toggle: () => {
       void handleTogglePlayback();
@@ -1717,6 +1866,115 @@ export function App(): JSX.Element {
             <li className="empty-state">No folders linked yet.</li>
           )}
         </ul>
+
+        <section className="analysis-panel" data-testid="analysis-panel">
+          <div className="analysis-panel-header">
+            <div>
+              <h3>Mastering Preview</h3>
+              <p className="muted">Bottom-left analysis shell for quick mastering checks.</p>
+            </div>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setAnalysisExpanded(true)}
+              data-testid="analysis-expand-button"
+              title="Open the expanded mastering analysis panel."
+              disabled={!selectedPlaybackVersion}
+            >
+              <span aria-hidden="true">⤢</span>
+            </button>
+          </div>
+
+          {selectedPlaybackVersion ? (
+            <>
+              <div className="analysis-track-summary">
+                <strong data-testid="analysis-track-label">{selectedPlaybackVersion.fileName}</strong>
+                <p className="muted">
+                  {selectedSong ? getSongDisplayFileName(selectedSong) : 'Unknown track'}
+                </p>
+              </div>
+
+              {analysisStatus === 'loading' ? (
+                <p className="muted" data-testid="analysis-status">
+                  Analysing loudness and tonal balance…
+                </p>
+              ) : null}
+
+              {analysisStatus === 'error' ? (
+                <p className="error" data-testid="analysis-error">
+                  {analysisError ?? 'Could not analyse this track preview.'}
+                </p>
+              ) : null}
+
+              {analysis ? (
+                <>
+                  <div className="analysis-stat-grid">
+                    <div className="analysis-stat-card" data-testid="analysis-short-term-stat">
+                      <span className="analysis-stat-label">Short-term LUFS est.</span>
+                      <strong>{formatAnalysisLevel(shortTermLufsEstimate)}</strong>
+                    </div>
+                    <div className="analysis-stat-card" data-testid="analysis-integrated-stat">
+                      <span className="analysis-stat-label">Integrated LUFS est.</span>
+                      <strong>{formatAnalysisLevel(analysis.integratedLufsEstimate)}</strong>
+                    </div>
+                    <div className="analysis-stat-card" data-testid="analysis-peak-stat">
+                      <span className="analysis-stat-label">Peak</span>
+                      <strong>{formatAnalysisLevel(analysis.peakDbfs)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="analysis-tonal-balance" data-testid="analysis-tonal-balance">
+                    {(
+                      [
+                        ['Low', analysis.tonalBalance.low],
+                        ['Mid', analysis.tonalBalance.mid],
+                        ['High', analysis.tonalBalance.high],
+                      ] as Array<[string, number]>
+                    ).map(([label, value]) => (
+                      <div key={label} className="analysis-band-row" data-testid={`analysis-band-${label.toLowerCase()}`}>
+                        <span>{label}</span>
+                        <div className="analysis-band-meter" aria-hidden="true">
+                          <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
+                        </div>
+                        <strong>{formatPercent(value)}</strong>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="analysis-reference-toolbar">
+                    <div className="analysis-reference-actions">
+                      {REFERENCE_SLOT_IDS.map((slotId) => (
+                        <button
+                          key={slotId}
+                          type="button"
+                          onClick={() => handleStoreCurrentTrackAsReference(slotId)}
+                          data-testid={`analysis-store-reference-${slotId.toLowerCase()}`}
+                          title={`Store the current track analysis in reference slot ${slotId}.`}
+                        >
+                          Store as Ref {slotId}
+                        </button>
+                      ))}
+                    </div>
+
+                    {activeReferenceSlot ? (
+                      <p className="muted" data-testid="analysis-reference-summary">
+                        Comparing against Ref {activeReferenceSlot.slotId}: {activeReferenceSlot.fileName}
+                      </p>
+                    ) : (
+                      <p className="muted" data-testid="analysis-reference-summary">
+                        Save a track as Ref A/B to compare future exports quickly.
+                      </p>
+                    )}
+                  </div>
+                </>
+              ) : null}
+            </>
+          ) : (
+            <p className="muted" data-testid="analysis-empty-state">
+              Select a track to preview loudness, peak, tonal balance, and reference slots.
+            </p>
+          )}
+        </section>
       </aside>
 
       <main className="panel panel-main">
@@ -2077,6 +2335,193 @@ export function App(): JSX.Element {
           </section>
         </div>
       </aside>
+
+      {analysisExpanded ? (
+        <div
+          className="analysis-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mastering analysis"
+          data-testid="analysis-modal"
+        >
+          <div className="analysis-overlay-card">
+            <div className="analysis-overlay-header">
+              <div>
+                <h2>Mastering Analysis Preview</h2>
+                <p className="muted">
+                  Phase 1 shell: quick loudness/peak estimates, tonal balance, and reference slots.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setAnalysisExpanded(false)}
+                data-testid="analysis-close-button"
+              >
+                Close
+              </button>
+            </div>
+
+            {selectedPlaybackVersion && analysis ? (
+              <div className="analysis-overlay-grid">
+                <section className="analysis-overlay-section">
+                  <h3>Current Track</h3>
+                  <p>
+                    <strong>{selectedPlaybackVersion.fileName}</strong>
+                  </p>
+                  <p className="muted">
+                    {selectedSong ? getSongDisplayFileName(selectedSong) : 'Unknown track'}
+                  </p>
+                  <p className="muted">
+                    These are playback-side estimates for fast comparison, not final mastering-meter replacements yet.
+                  </p>
+                </section>
+
+                <section className="analysis-overlay-section">
+                  <h3>Loudness + Peak</h3>
+                  <div className="analysis-detail-grid">
+                    <div className="analysis-stat-card">
+                      <span className="analysis-stat-label">Short-term LUFS est.</span>
+                      <strong>{formatAnalysisLevel(shortTermLufsEstimate)}</strong>
+                    </div>
+                    <div className="analysis-stat-card">
+                      <span className="analysis-stat-label">Integrated LUFS est.</span>
+                      <strong>{formatAnalysisLevel(analysis.integratedLufsEstimate)}</strong>
+                    </div>
+                    <div className="analysis-stat-card">
+                      <span className="analysis-stat-label">Peak</span>
+                      <strong>{formatAnalysisLevel(analysis.peakDbfs)}</strong>
+                    </div>
+                    <div className="analysis-stat-card">
+                      <span className="analysis-stat-label">Duration</span>
+                      <strong>{formatTime(analysis.durationSeconds)}</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="analysis-overlay-section">
+                  <h3>Tonal Balance</h3>
+                  <div className="analysis-tonal-balance detailed">
+                    {(
+                      [
+                        ['Low', analysis.tonalBalance.low],
+                        ['Mid', analysis.tonalBalance.mid],
+                        ['High', analysis.tonalBalance.high],
+                      ] as Array<[string, number]>
+                    ).map(([label, value]) => (
+                      <div key={label} className="analysis-band-row">
+                        <span>{label}</span>
+                        <div className="analysis-band-meter" aria-hidden="true">
+                          <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
+                        </div>
+                        <strong>{formatPercent(value)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="analysis-overlay-section">
+                  <h3>Reference Slots</h3>
+                  <div className="analysis-reference-slots">
+                    {REFERENCE_SLOT_IDS.map((slotId) => {
+                      const slot = referenceSlots[slotId];
+                      const isActive = activeReferenceSlotId === slotId;
+                      const referenceShortTerm = slot
+                        ? estimateShortTermLufs(slot.analysis, 0)
+                        : null;
+
+                      return (
+                        <div
+                          key={slotId}
+                          className={`analysis-reference-slot ${isActive ? 'active' : ''}`}
+                          data-testid={`analysis-reference-slot-${slotId.toLowerCase()}`}
+                        >
+                          <div className="analysis-reference-slot-header">
+                            <strong>Ref {slotId}</strong>
+                            <div className="analysis-reference-slot-actions">
+                              <button
+                                type="button"
+                                className={isActive ? 'selected' : ''}
+                                onClick={() => setActiveReferenceSlotId(slot ? slotId : null)}
+                                disabled={!slot}
+                              >
+                                Compare
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleStoreCurrentTrackAsReference(slotId)}
+                              >
+                                Store current
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => handleClearReferenceSlot(slotId)}
+                                disabled={!slot}
+                              >
+                                Clear
+                              </button>
+                            </div>
+                          </div>
+
+                          {slot ? (
+                            <>
+                              <p>
+                                <strong>{slot.fileName}</strong>
+                              </p>
+                              <p className="muted">{slot.songTitle}</p>
+                              <div className="analysis-reference-metrics">
+                                <span>Short: {formatAnalysisLevel(referenceShortTerm)}</span>
+                                <span>Integrated: {formatAnalysisLevel(slot.analysis.integratedLufsEstimate)}</span>
+                                <span>Peak: {formatAnalysisLevel(slot.analysis.peakDbfs)}</span>
+                              </div>
+                            </>
+                          ) : (
+                            <p className="muted">Nothing stored yet.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="analysis-overlay-section analysis-comparison-panel">
+                  <h3>Current vs active reference</h3>
+                  {activeReferenceSlot && activeReferenceComparison ? (
+                    <div data-testid="analysis-active-reference">
+                      <p>
+                        <strong>
+                          Ref {activeReferenceSlot.slotId}: {activeReferenceSlot.fileName}
+                        </strong>
+                      </p>
+                      <div className="analysis-detail-grid">
+                        <div className="analysis-stat-card">
+                          <span className="analysis-stat-label">Short-term delta</span>
+                          <strong>{formatSignedLevel(activeReferenceComparison.shortTermDeltaDb)}</strong>
+                        </div>
+                        <div className="analysis-stat-card">
+                          <span className="analysis-stat-label">Integrated delta</span>
+                          <strong>{formatSignedLevel(activeReferenceComparison.integratedDeltaDb)}</strong>
+                        </div>
+                        <div className="analysis-stat-card">
+                          <span className="analysis-stat-label">Peak delta</span>
+                          <strong>{formatSignedLevel(activeReferenceComparison.peakDeltaDb)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="muted" data-testid="analysis-active-reference">
+                      Choose Ref A or Ref B to compare this export against a stored reference snapshot.
+                    </p>
+                  )}
+                </section>
+              </div>
+            ) : (
+              <p className="muted">Select a track and wait for analysis to finish.</p>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

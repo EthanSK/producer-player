@@ -1597,3 +1597,35 @@ Two new test files added:
 - `apps/e2e/src/library-linking.spec.ts` — fixed pre-existing `track(s)` → `tracks`/`track` assertion
 - `apps/e2e/src/break-test.spec.ts` — new (10 basic edge case tests)
 - `apps/e2e/src/break-test-advanced.spec.ts` — new (18 advanced edge case tests)
+
+---
+
+## Mastering/reference Phase 1 implementation (sub-agent run)
+
+### Scope chosen for Phase 1
+
+- Implement the safest/highest-value first slice of Ethan’s mastering/reference request as a **foundational UI + analysis shell**, not a full mastering suite.
+- Phase 1 specifically includes:
+  - a new **bottom-left “Mastering Preview” panel** in the left sidebar
+  - **playback-side analysis estimates** for:
+    - short-term LUFS estimate
+    - integrated LUFS estimate
+    - peak level
+    - coarse tonal-balance split (low / mid / high)
+  - an **expanded full-window analysis panel shell** inside the app
+  - **reference-slot scaffolding** (`Ref A` / `Ref B`) so the current track analysis can be stored and compared against later exports
+  - explicit UI copy that these are **preview estimates**, not final mastering-meter parity yet
+
+### Phase 1 implementation summary
+
+- Added renderer-side audio analysis scaffolding that decodes the selected playback source, derives loudness/peak estimates, and computes a coarse tonal-balance snapshot.
+- Mounted the compact mastering panel at the bottom-left of the main UI, matching Ethan’s requested placement direction.
+- Added an expand control that opens a dedicated analysis surface with the same stats plus reference-slot management and current-vs-reference delta readouts.
+- Added Playwright coverage for the new mastering/reference shell workflow and captured a manual verification screenshot at `artifacts/manual-verification/mastering-preview-phase1.png`.
+
+### Remaining follow-ups for later sub-agents
+
+- Replace the current preview math with a more rigorous **mastering-grade loudness pipeline** (momentary / short-term / integrated LUFS, true-peak, gating, better weighting).
+- Add a proper **detachable/new-window analysis surface** instead of the current in-app expanded overlay.
+- Build out **reference-track workflow depth** (persisted references, quick A/B switching, gain-match options, library-wide reference browsing/import).
+- Add richer **visualisation/metering** (waveform/spectrum history, more Ozone-inspired tonal-balance guidance, album-wide stats / sequencing context).

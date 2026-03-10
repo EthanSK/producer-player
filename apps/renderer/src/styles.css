@@ -291,6 +291,175 @@ input[type='range'] {
   flex: 1;
 }
 
+.analysis-panel {
+  margin: 0 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+  background: linear-gradient(180deg, rgba(92, 167, 255, 0.08), rgba(255, 255, 255, 0.02));
+}
+
+.analysis-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.analysis-panel-header h3,
+.analysis-overlay-header h2,
+.analysis-overlay-section h3 {
+  margin: 0;
+}
+
+.analysis-track-summary {
+  display: grid;
+  gap: 2px;
+}
+
+.analysis-stat-grid,
+.analysis-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.analysis-detail-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.analysis-stat-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(9, 14, 19, 0.45);
+  display: grid;
+  gap: 6px;
+}
+
+.analysis-stat-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.analysis-tonal-balance {
+  display: grid;
+  gap: 8px;
+}
+
+.analysis-band-row {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.analysis-band-meter {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.analysis-band-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(95, 210, 143, 0.65), rgba(92, 167, 255, 0.95));
+}
+
+.analysis-reference-toolbar,
+.analysis-reference-actions,
+.analysis-reference-slot-actions,
+.analysis-reference-metrics {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.analysis-reference-slot-actions {
+  justify-content: flex-end;
+}
+
+.analysis-reference-metrics {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.analysis-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 9, 15, 0.88);
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  padding: 24px;
+  z-index: 10;
+}
+
+.analysis-overlay-card {
+  width: min(1200px, 100%);
+  height: 100%;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 20px;
+  overflow: auto;
+  display: grid;
+  gap: 18px;
+}
+
+.analysis-overlay-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.analysis-overlay-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.analysis-overlay-section {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.analysis-reference-slots {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.analysis-reference-slot {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  background: rgba(9, 14, 19, 0.45);
+}
+
+.analysis-reference-slot.active,
+.analysis-comparison-panel {
+  border-color: var(--accent);
+}
+
+.analysis-reference-slot-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: start;
+}
+
 .folder-row {
   display: flex;
   justify-content: space-between;
@@ -541,5 +710,21 @@ input[type='range'] {
 @media (max-width: 1360px) {
   .app-shell {
     grid-template-columns: 300px 1fr 320px;
+  }
+
+  .analysis-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .analysis-stat-grid,
+  .analysis-detail-grid,
+  .analysis-reference-slots {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-overlay {
+    padding: 12px;
   }
 }

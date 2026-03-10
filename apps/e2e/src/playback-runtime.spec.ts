@@ -599,6 +599,75 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
+  test('shows the mastering preview shell with expandable reference comparison workflow', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-mastering-preview-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-mastering-preview-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=140:duration=6',
+      '-filter:a',
+      'volume=0.85',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Warm Master v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=5200:duration=6',
+      '-filter:a',
+      'volume=0.35',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Bright Ref v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Warm Master' }).first().click();
+      await expect(page.getByTestId('analysis-panel')).toContainText('Mastering Preview');
+      await expect(page.getByTestId('analysis-track-label')).toContainText('Warm Master v1.wav');
+      await expect(page.getByTestId('analysis-integrated-stat')).toContainText('dB');
+      await expect(page.getByTestId('analysis-tonal-balance')).toContainText('Low');
+
+      await page.getByTestId('analysis-store-reference-a').click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('Ref A');
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Bright Ref' }).first().click();
+      await expect(page.getByTestId('analysis-track-label')).toContainText('Bright Ref v1.wav');
+      await expect(page.getByTestId('analysis-integrated-stat')).toContainText('dB');
+
+      await page.getByTestId('analysis-expand-button').click();
+      await expect(page.getByTestId('analysis-modal')).toBeVisible();
+      await expect(page.getByTestId('analysis-reference-slot-a')).toContainText('Warm Master v1.wav');
+      await expect(page.getByTestId('analysis-active-reference')).toContainText(
+        'Ref A: Warm Master v1.wav'
+      );
+      await expect(page.getByTestId('analysis-active-reference')).toContainText('delta');
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('plays multiple AIFF variants by preparing them into local WAV cache', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-aiff-variants-fixture-')

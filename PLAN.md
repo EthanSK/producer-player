@@ -1039,15 +1039,15 @@ In another sub agent, I need you to completely get rid of all the videos from th
 
 ## Playlist export/import ordering feature (sub-agent run)
 
-### Ethan message (verbatim)
+### Ethan message (verbatim) — message_id 3909
 
-**Timestamp:** Mon 2026-03-09 22:29 GMT
+**Timestamp:** Mon 2026-03-09 22:28 GMT
 
 ```text
 Also, in another sub a new feature called export playlist and order. Actually, it should be icon buttons and export and import icon button, just small ones with tool tips on hover to let you export the current selection and ordering to JSON with all the metadata and import it with that same type. That'd be useful.
 ```
 
-### Additional Ethan message (verbatim)
+### Additional Ethan message (verbatim) — message_id 3910
 
 **Timestamp:** Mon 2026-03-09 22:29 GMT
 
@@ -1055,7 +1055,7 @@ Also, in another sub a new feature called export playlist and order. Actually, i
 And, of course, make sure that gets pushed to the end.
 ```
 
-### Assistant implementation summary (this run)
+### Assistant implementation summary (completed sub-agent: `producer-player-export-import-playlist-order`)
 
 - Added compact export/import icon buttons to the Album header beside the existing Rescan/Organize controls.
 - Wired the buttons through Electron IPC + preload bridge so the app can save/load playlist-order JSON files through native dialogs (with test-path injection for E2E coverage).
@@ -1064,3 +1064,179 @@ And, of course, make sure that gets pushed to the end.
 - Import restores the saved ordering by song id with normalized-title fallback matching, then restores the saved selected song + playback version when possible.
 - Added Playwright Electron E2E coverage for successful export/import round-tripping plus invalid-JSON error handling.
 - Manually verified the built app shows the new compact icon buttons in the Album header, exports the JSON payload, and preserves the selected playback version metadata (`Alpha v1.wav`) in the exported document.
+- Commit: `3880853895c1e8b3d01318ad55345bcc21a329e1`
+
+---
+
+## Late icon / playback follow-up asks (chat coverage continuation)
+
+### Ethan message (verbatim) — message_id 3888
+
+**Timestamp:** Mon 2026-03-09 22:19 GMT
+
+```text
+Also, I want the I want to have a volume slider in the app near the play area. I'm gonna give you some more feedback. I'm gonna do all this in a sub agent to fix it. To see 5.4, I make sure we set the this chat model to 5.4. Also, send me what the app icon looks like over Telegram.
+```
+
+### Ethan message (verbatim) — message_id 3900
+
+**Timestamp:** Mon 2026-03-09 22:22 GMT
+
+```text
+By the way, there's no EQ or anything being applied to the playback. Right? It's playing in its most raw form.
+```
+
+### Ethan message (verbatim) — message_id 3917
+
+**Timestamp:** Mon 2026-03-09 22:31 GMT
+
+```text
+Desktop. I don't like any of the app icons you sent. I want something that implies ordering of songs. Like, maybe the first one, but bit better.
+```
+
+### Ethan message (verbatim) — message_id 3925
+
+**Timestamp:** Mon 2026-03-09 22:57 GMT
+
+```text
+You're gonna give me the icon then when we're done. New icon. Options based on what I asked for.
+```
+
+### Tracking note
+
+- First-round icon options were completed by sub-agent `producer-player-icon-multi-designs-gpt54` and saved as shareable PNGs/composite sheet.
+- The volume-slider ask from `3888` was later re-steered into the active playback batch with the exact placement requirement: next to the repeat button in the playback area.
+- Raw/no-EQ playback concern from `3900` is also explicitly bundled into the active playback batch.
+- **Coverage gap identified in this audit:** the ordering-focused **second icon round** requested in `3917` and reiterated in `3925` is **not clearly represented by a fresh spawned/completed run** in the transcript/sub-agent list. Treat this as still unassigned until a dedicated icon-refinement run is launched.
+
+---
+
+## Playback bug batch + mastering/reference feature expansion
+
+### Ethan message (verbatim) — message_id 3928
+
+**Timestamp:** Mon 2026-03-09 23:56 GMT
+
+```text
+Okay. There are some issues you've been seeing in the sub agent. The version history in the inspector, I cannot scroll up and down. When I double click a song, it should play. Also, please make sure there's no sound normalization going on or anything. Also, maybe find a good in another new sub agent, find a good library for, like, visualizing the music playing. Maybe in the inspector at the very top have EQ and loudness units, short, integrated, and long. Actually, do don't do this in the inspector. Have it in the bottom left corner, so in the left sidebar at the bottom, and a button to expand it in a new window to show everything full screen. Basically, showing all the useful stats. You figure it out first, do some research as to what stats we should show as useful for mastering outputs, like getting the album ready for production. L f L UFS, EQ, the things inspired by Ozone, like, tonal balance control, that would be useful. Maybe even references in a sub sub agent. Look into that. Add them in of of audio song references, and you can compare them and quickly switch, like, reference to plug in, but, like, integrate that all in this app. Spawn one sub agent per unit of work you think you should you can this can be a huge task. Lots and it has been a long time on it. This is like a whole new feature, actually. So, yeah, all the things I told you, all the problems and all this new stuff, loads of sub agents, all working in harmony, beautiful harmony.
+```
+
+### Ethan message (verbatim) — message_id 3929
+
+**Timestamp:** Mon 2026-03-09 23:57 GMT
+
+```text
+And then send me some updates from before as well when you're done with that. What's still actively running? What's finished? What can you clean up? What can you do, etcetera?
+```
+
+### Ethan message (verbatim) — message_id 3930
+
+**Timestamp:** Mon 2026-03-09 23:58 GMT
+
+```text
+Also in another sub agent, there's another bug. You know, the thing that restores the play time. Well, like, when I go between songs and come back, it keeps playing from the same point. Well, it should when it gets to the end, it kinda gets stuck there. If it's near the end, if it's in the like, proportion of the song, Like, last five seconds or so. Yeah. Okay. Actually, It just gets stuck. That's just a bug. It's just it never resets back to the start. Yeah. If it's in the last second, then just count that as, like, start from the start. Do that in another sub agent.
+```
+
+### Ethan message (verbatim) — message_id 3934
+
+**Timestamp:** Mon 2026-03-09 23:59 GMT
+
+```text
+Also, the play positions shouldn't save between app boots. They should be just local in memory. I'm not sure if that's a thing. It seems like it saved from last time. I'm not sure, though.
+```
+
+### Ethan message (verbatim) — message_id 3937
+
+**Timestamp:** Tue 2026-03-10 00:00 GMT
+
+```text
+Also in another sub agent, what happened to the volume slider I asked for from ages ago? You didn't add a volume slider next to the repeat button in the play area playback area.
+```
+
+### Tracking note
+
+- Active sub-agent: `producer-player-playback-ux-bugs-batch` (current run observed during this audit: `b28172e3-6f76-4333-a657-a1d912f2fcaa`).
+- That run now explicitly covers:
+  - version-history scrolling
+  - double-click song to play
+  - no normalization / raw playback verification
+  - session-only playhead memory (not across app boots)
+  - volume slider next to repeat
+  - fold-in of the old-folder leakage regression below
+- Dedicated sub-agent `producer-player-playhead-end-reset-bug` was started for `3930`, but it completed only as triage / handoff and the actual fix scope was folded back into the main playback batch.
+- Research sub-agent `producer-player-mastering-reference-research` completed an initial pass on LUFS / EQ / reference / mastering-surface ideas.
+- `3929` was a workflow/status ask; it was answered in chat and does not require a separate code run.
+
+---
+
+## Mac App Store / buildability restart + orchestration follow-up
+
+### Ethan message (verbatim) — message_id 3943
+
+**Timestamp:** Tue 2026-03-10 00:03 GMT
+
+```text
+Also in another sub agent, check about the Mac app store status, see if it's done. If not, get the app ready, buildable. You know, add some NPM scripts for me to build it for Mac OS.
+```
+
+### Ethan message (verbatim) — message_id 3946
+
+**Timestamp:** Tue 2026-03-10 00:05 GMT
+
+```text
+You should have a bunch of sub agents right now. Which ones do you have?
+```
+
+### Ethan message (verbatim) — message_id 3948
+
+**Timestamp:** Tue 2026-03-10 00:06 GMT
+
+```text
+By the way, does the window size is it expected to stay between restarts of the app, like, resizing?
+```
+
+### Ethan message (verbatim) — message_id 3949
+
+**Timestamp:** Tue 2026-03-10 00:07 GMT
+
+```text
+Prune the stale foul one. Keep the Restart the Producer Play Mac App Store if you haven't done a similar one already. Also, I feel like half of what I said you didn't spawn a sub agent for. Are you sure you got every single thing I said? You didn't miss it. Go back and check. Make sure everything is there. And in the new sub agent, make sure everything I said is there.
+```
+
+### Tracking note
+
+- Per `3949`, the stale `create-fal-skill-for-openclaw` run and the stale old `producer-player-mac-app-store-prep` run were pruned/killed.
+- Fresh run now active: `producer-player-mac-app-store-prep-restart` (`46a63bbb-742e-42a7-9fe9-818e9fb57e49`).
+- Fresh run also launched for this transcript/PLAN coverage audit: `producer-player-chat-plan-coverage-audit-v2`.
+- `3946` was answered in chat via a current sub-agent status snapshot.
+- `3948` was answered directly in chat after code inspection; no dedicated sub-agent was spawned for that question.
+
+---
+
+## Old-folder leakage / matching regression
+
+### Ethan message (verbatim) — message_id 3957
+
+**Timestamp:** Tue 2026-03-10 00:08 GMT
+
+```text
+By the way, there is a bug. Only songs that appear in the top level folder should be showing in the album list. Not old songs. Right now, I see an old song. Oh, okay. A song that's in old that doesn't have a corresponding name to a track that's in the top level. By the way, hope we're not doing fuzzy searching here. I hope we got rid of it for the matching. But I have a so bend the knees, plural s is right. But then there's a bend the knee, which is clearly a typo, it's also in the old folder. So because it's in the old folder, it shouldn't be there. Anything in the old folder should only show up in version history. Okay? Fix that as sub agent.
+```
+
+### Tracking note
+
+- This ask was initially unassigned at the moment Ethan complained, but during this audit window it was explicitly re-steered into active sub-agent `producer-player-playback-ux-bugs-batch`.
+- Required playback-batch coverage now includes:
+  - only top-level songs in the main album list
+  - `old/`-only content appears only in version history
+  - explicitly inspect/fix any remaining fuzzy-matching path
+  - add regression coverage for the `bend the knees` vs `bend the knee` typo case
+
+---
+
+## Coverage audit v2 result (this run)
+
+- Re-audited the full main-session transcript against `PLAN.md` and the current sub-agent list.
+- Resolved the `PLAN.md` tail merge conflict by keeping both the playlist-export section and the later late-night asks.
+- Confirmed that most previously worrying items are now either completed, actively assigned, or were answered directly in chat.
+- **Still-missing assignment identified:** Ethan’s ordering-focused second-round icon refinement request (`3917`, `3925`) is the one clear item not backed by a fresh spawned/completed run yet.

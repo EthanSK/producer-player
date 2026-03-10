@@ -386,7 +386,7 @@ test.describe('Producer Player desktop shell', () => {
 
       await expect(firstLaunch.page.getByTestId('linked-folder-item')).toHaveCount(2);
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
-      await expect(firstLaunch.page.locator('.panel-header .muted').first()).toHaveText('2 track(s)');
+      await expect(firstLaunch.page.locator('.panel-header .muted').first()).toHaveText('2 tracks');
       await expect(firstLaunch.page.getByTestId('main-list')).toContainText('Alpha v1.wav');
       await expect(firstLaunch.page.getByTestId('main-list')).toContainText('Outro v1.wav');
       await expect(firstLaunch.page.getByTestId('main-list')).not.toContainText('Beta v1.wav');
@@ -397,7 +397,7 @@ test.describe('Producer Player desktop shell', () => {
         .click();
 
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
-      await expect(firstLaunch.page.locator('.panel-header .muted').first()).toHaveText('1 track(s)');
+      await expect(firstLaunch.page.locator('.panel-header .muted').first()).toHaveText('1 track');
       await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta v1.wav');
       await expect(firstLaunch.page.getByTestId('main-list')).not.toContainText('Alpha v1.wav');
 

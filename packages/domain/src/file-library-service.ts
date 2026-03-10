@@ -231,6 +231,16 @@ export class FileLibraryService {
       throw new Error(`Path is not a folder: ${resolvedPath}`);
     }
 
+    // Reject root-level and top-level system directories to prevent the chokidar watcher
+    // from scanning and watching enormous directory trees, which causes an effective hang.
+    const pathDepth = resolvedPath.split(path.sep).filter(Boolean).length;
+    if (pathDepth < 2) {
+      this.setStatus('error', `Cannot link a root or top-level system folder: ${resolvedPath}`);
+      throw new Error(
+        `Cannot link a root or top-level system folder. Please choose a folder at least two levels deep, such as ~/Music/MyAlbum.`
+      );
+    }
+
     const folder: LinkedFolder = {
       id: stableId(resolvedPath),
       name: path.basename(resolvedPath) || resolvedPath,

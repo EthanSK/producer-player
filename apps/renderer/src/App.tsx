@@ -91,9 +91,21 @@ function describeMediaErrorCode(code: number | undefined): string {
 }
 
 function buildPlaybackFallbackGuidance(source: PlaybackSourceInfo | null): string {
-  const extension = source?.extension ? `.${source.extension}` : 'this file format';
+  const extension = source?.extension ? `.${source.extension}` : 'this file';
+  return `Try exporting it again as WAV, MP3, or AAC (.m4a), then rescan the folder. ${extension} may not be ready for playback yet.`;
+}
 
-  return `If ${extension} cannot be decoded by this Chromium runtime, convert to WAV/MP3/AAC-M4A (for example: ffmpeg -i input${extension === 'this file format' ? '' : extension} -c:a pcm_s16le output.wav).`;
+function getPathTail(value: string | null | undefined): string {
+  if (!value) {
+    return 'this file';
+  }
+
+  const segments = value.split(/[/\\]/).filter(Boolean);
+  return segments[segments.length - 1] ?? value;
+}
+
+function buildMissingFileMessage(filePath: string | null | undefined): string {
+  return `Couldn’t find ${getPathTail(filePath)} on disk. Rescan or relink the folder.`;
 }
 
 function formatDate(value: string | null): string {
@@ -118,6 +130,23 @@ function formatTime(seconds: number): string {
   const minutes = Math.floor(rounded / 60);
   const remainingSeconds = rounded % 60;
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+function formatTrackCount(count: number): string {
+  return `${count} track${count === 1 ? '' : 's'}`;
+}
+
+function formatLibraryStatusLabel(status: LibrarySnapshot['status']): string {
+  switch (status) {
+    case 'watching':
+      return 'Ready';
+    case 'scanning':
+      return 'Updating';
+    case 'error':
+      return 'Needs attention';
+    default:
+      return 'Waiting for a folder';
+  }
 }
 
 function sortVersions(versions: SongVersion[]): SongVersion[] {
@@ -151,10 +180,6 @@ function arraysEqual(left: string[], right: string[]): boolean {
   }
 
   return true;
-}
-
-function isArchivedVersion(version: SongVersion): boolean {
-  return /[\\/]old[\\/]/i.test(version.filePath);
 }
 
 function getActiveSongVersion(song: SongWithVersions): SongVersion | null {
@@ -426,13 +451,13 @@ export function App(): JSX.Element {
 
       playOnNextLoadRef.current = false;
 
-      const extensionText = source?.extension ? `.${source.extension}` : 'unknown format';
+      const extensionText = source?.extension ? `.${source.extension}` : 'This file';
       const supportText =
         playbackSourceSupportRef.current === 'no'
-          ? `${extensionText} is not reported as playable by this Chromium runtime.`
-          : `The source never reached canplay within ${PLAYBACK_LOAD_TIMEOUT_MS}ms.`;
+          ? `${extensionText} is not ready for playback in Producer Player yet.`
+          : 'Producer Player could not get the track ready to play in time.';
 
-      const message = `Playback could not start (${context}). ${supportText} ${buildPlaybackFallbackGuidance(
+      const message = `Playback couldn’t start. ${supportText} ${buildPlaybackFallbackGuidance(
         source
       )}`;
 
@@ -490,7 +515,7 @@ export function App(): JSX.Element {
       void audio.play().catch((cause: unknown) => {
         const message = cause instanceof Error ? cause.message : String(cause);
         setPlaybackError(
-          `Playback start failed after canplay: ${message}. ${buildPlaybackFallbackGuidance(
+          `Playback couldn’t start: ${message}. ${buildPlaybackFallbackGuidance(
             playbackSourceRef.current
           )}`
         );
@@ -566,10 +591,10 @@ export function App(): JSX.Element {
       const detail = code ? `${codeLabel} (code ${code})` : codeLabel;
       const compatibilityHint =
         code === 4 || playbackSourceSupportRef.current === 'no'
-          ? `${source?.extension ? `.${source.extension}` : 'This format'} appears unsupported or blocked in this Chromium runtime.`
-          : 'Chromium could not decode or load the selected source.';
+          ? `${source?.extension ? `.${source.extension}` : 'This format'} is not supported for playback yet.`
+          : 'Producer Player could not decode the selected file.';
 
-      const message = `Playback failed: ${detail}. ${compatibilityHint} ${buildPlaybackFallbackGuidance(
+      const message = `Playback failed. ${compatibilityHint} ${buildPlaybackFallbackGuidance(
         source
       )}`;
 
@@ -834,7 +859,7 @@ export function App(): JSX.Element {
         setPlaybackSource(source);
 
         if (!source.exists) {
-          const message = `Selected file is missing on disk: ${source.filePath}. Rescan or relink the folder.`;
+          const message = buildMissingFileMessage(source.filePath);
           setPlaybackError(message);
           logPlaybackEvent('source-missing', {
             message,
@@ -892,9 +917,16 @@ export function App(): JSX.Element {
     };
   }, [selectedPlaybackFilePath, selectedPlaybackSongId, selectedPlaybackVersionId]);
 
-  const canReorderSongs = searchText.trim().length === 0;
+  const isSearching = searchText.trim().length > 0;
+  const canReorderSongs = !isSearching;
   const canExportPlaylistOrder = songs.length > 0;
   const canImportPlaylistOrder = snapshot.linkedFolders.length > 0;
+  const listHintText = isSearching
+    ? 'Search is filtering the list — clear it to reorder tracks.'
+    : 'Drag tracks to reorder — track positions are preserved.';
+  const emptyStateText = isSearching
+    ? 'No matching tracks or versions.'
+    : 'No tracks found in linked folders.';
 
   const playbackQueue = useMemo(() => {
     const queue: SongVersion[] = [];
@@ -1302,7 +1334,7 @@ export function App(): JSX.Element {
         } catch (cause: unknown) {
           const message = cause instanceof Error ? cause.message : String(cause);
           setPlaybackError(
-            `Playback start failed: ${message}. ${buildPlaybackFallbackGuidance(
+            `Playback couldn’t start: ${message}. ${buildPlaybackFallbackGuidance(
               playbackSourceRef.current
             )}`
           );
@@ -1437,7 +1469,7 @@ export function App(): JSX.Element {
 
     const source = playbackSourceRef.current;
     if (source && !source.exists) {
-      setPlaybackError(`Selected file is missing on disk: ${source.filePath}. Rescan or relink the folder.`);
+      setPlaybackError(buildMissingFileMessage(source.filePath));
       logPlaybackEvent('play-blocked-missing-source', {
         filePath: source.filePath,
       });
@@ -1460,7 +1492,7 @@ export function App(): JSX.Element {
 
         if (playbackSourceSupportRef.current === 'no') {
           setPlaybackError(
-            `This source is not reported as playable by this Chromium runtime (${source?.mimeType ?? 'unknown MIME'}). ${buildPlaybackFallbackGuidance(
+            `This format is not supported for playback yet. ${buildPlaybackFallbackGuidance(
               source
             )}`
           );
@@ -1474,7 +1506,7 @@ export function App(): JSX.Element {
         logPlaybackEvent('play-requested-direct');
       } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
-        setPlaybackError(`Playback start failed: ${message}. ${buildPlaybackFallbackGuidance(source)}`);
+        setPlaybackError(`Playback couldn’t start: ${message}. ${buildPlaybackFallbackGuidance(source)}`);
         logPlaybackEvent('play-rejected', {
           message,
         });
@@ -1616,7 +1648,7 @@ export function App(): JSX.Element {
         <section className="sidebar-status" data-testid="status-card">
           <h3>Status</h3>
           <p>
-            <strong>{snapshot.status}</strong> — {snapshot.statusMessage}
+            <strong>{formatLibraryStatusLabel(snapshot.status)}</strong> — {snapshot.statusMessage}
           </p>
           <p className="muted">Last scan: {formatDate(snapshot.scannedAt)}</p>
 
@@ -1691,7 +1723,7 @@ export function App(): JSX.Element {
         <header className="panel-header">
           <div className="panel-title">
             <h2>Album</h2>
-            <p className="muted">{songs.length} track(s)</p>
+            <p className="muted">{formatTrackCount(songs.length)}</p>
           </div>
           <div className="actions">
             <button
@@ -1768,7 +1800,7 @@ export function App(): JSX.Element {
           data-testid="track-order-hint"
           title="Drag and drop tracks to reorder them. Producer Player keeps this order between sessions."
         >
-          Drag tracks to reorder — track positions are preserved.
+          {listHintText}
         </p>
 
         <ul
@@ -1875,9 +1907,7 @@ export function App(): JSX.Element {
               </li>
             );
           })}
-          {songs.length === 0 && (
-            <li className="empty-state">No tracks found in linked folders.</li>
-          )}
+          {songs.length === 0 && <li className="empty-state">{emptyStateText}</li>}
         </ul>
 
         {selectedPlaybackVersion && (
@@ -1885,16 +1915,7 @@ export function App(): JSX.Element {
             <div className="player-dock-top">
               <div>
                 <strong data-testid="player-track-name">{selectedPlaybackVersion.fileName}</strong>
-                <p className="muted">
-                  {selectedSong ? getSongDisplayFileName(selectedSong) : 'Unknown track'}
-                  {isArchivedVersion(selectedPlaybackVersion) ? ' · Archived in old/' : ''}
-                </p>
-                <p className="muted" data-testid="playback-source-meta">
-                  Source: {playbackSource?.mimeType ?? 'unknown MIME'} · canPlayType: {playbackSourceSupport}
-                  {playbackSource?.sourceStrategy === 'transcoded-cache'
-                    ? ` · prepared from ${playbackSource.originalFilePath ?? 'source file'}`
-                    : ''}
-                </p>
+                <p className="muted">{selectedSong?.title ?? 'Selected track'}</p>
               </div>
               <button
                 type="button"

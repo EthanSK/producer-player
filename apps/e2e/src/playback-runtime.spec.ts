@@ -207,7 +207,6 @@ test.describe('playback runtime deep dive', () => {
     const matrix: Array<{
       format: string;
       status: 'playing' | 'error';
-      meta: string;
       error: string;
     }> = [];
 
@@ -253,8 +252,7 @@ test.describe('playback runtime deep dive', () => {
           .first()
           .click();
 
-        const meta =
-          (await page.getByTestId('playback-source-meta').textContent())?.trim() ?? '';
+        await expect(page.getByTestId('playback-source-meta')).toHaveCount(0);
 
         await page.getByTestId('player-play-toggle').click();
 
@@ -300,7 +298,6 @@ test.describe('playback runtime deep dive', () => {
         matrix.push({
           format,
           status,
-          meta,
           error: errorText,
         });
       }
@@ -535,6 +532,73 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
+  test('player UI hides debug playback details and redundant archived labels', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-prod-ui-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-prod-ui-user-data-')
+    );
+
+    const oldDirectory = path.join(fixtureDirectory, 'old');
+    await fs.mkdir(oldDirectory, { recursive: true });
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=480:duration=4',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Archive Check v2.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=360:duration=4',
+      '-c:a',
+      'pcm_s16le',
+      path.join(oldDirectory, 'Archive Check v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Archive Check' }).first().click();
+      await expect(page.getByTestId('inspector-version-row')).toHaveCount(2);
+      await expect(page.getByTestId('playback-source-meta')).toHaveCount(0);
+      await expect(page.getByText('Archived in old/')).toHaveCount(0);
+
+      await page
+        .getByTestId('inspector-version-row')
+        .filter({ hasText: 'Archive Check v1.wav' })
+        .getByRole('button', { name: 'Cue' })
+        .click();
+
+      await expect(page.getByTestId('player-track-name')).toContainText('Archive Check v1.wav');
+      await expect(page.getByTestId('playback-source-meta')).toHaveCount(0);
+      await expect(page.getByText('Archived in old/')).toHaveCount(0);
+
+      const screenshotPath = path.join(userDataDirectory, 'prod-ui-polish.png');
+      await page.screenshot({ path: screenshotPath });
+      await test.info().attach('prod-ui-polish', {
+        path: screenshotPath,
+        contentType: 'image/png',
+      });
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('plays multiple AIFF variants by preparing them into local WAV cache', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-aiff-variants-fixture-')
@@ -582,11 +646,17 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('main-list-row')).toHaveCount(3);
 
       for (const variant of variants) {
+        const variantPath = path.join(fixtureDirectory, variant.outputName);
+
         await page.getByTestId('main-list-row').filter({ hasText: variant.label }).first().click();
 
-        const meta =
-          (await page.getByTestId('playback-source-meta').textContent())?.trim() ?? '';
-        expect(meta).toContain('prepared from');
+        const preparedSource = await page.evaluate(async (targetPath) => {
+          return (window as any).producerPlayer.resolvePlaybackSource(targetPath);
+        }, variantPath);
+
+        expect(preparedSource.sourceStrategy).toBe('transcoded-cache');
+        expect(preparedSource.originalFilePath).toBe(variantPath);
+        await expect(page.getByTestId('playback-source-meta')).toHaveCount(0);
 
         await page.getByTestId('player-play-toggle').click();
         await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');

@@ -313,12 +313,20 @@ input[type='range'] {
 
 .folder-row-content {
   min-width: 0;
+  flex: 1;
+}
+
+.folder-row-content strong,
+.folder-row-content .muted {
+  overflow-wrap: anywhere;
 }
 
 .folder-row-actions {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex-shrink: 0;
+  align-items: flex-end;
 }
 
 .filter-row {

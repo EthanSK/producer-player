@@ -33,6 +33,49 @@ async function runFfmpeg(args: string[]): Promise<void> {
   });
 }
 
+async function runFfmpegCapture(args: string[]): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const ffmpeg = spawn('ffmpeg', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    let stderr = '';
+
+    ffmpeg.stdout.on('data', (chunk: Buffer) => {
+      stdoutChunks.push(chunk);
+    });
+
+    ffmpeg.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdoutChunks));
+        return;
+      }
+
+      reject(new Error(`ffmpeg exited with ${code}: ${stderr}`));
+    });
+  });
+}
+
+async function decodeAudioToPcmS16le(filePath: string): Promise<Buffer> {
+  return runFfmpegCapture([
+    '-v',
+    'error',
+    '-i',
+    filePath,
+    '-vn',
+    '-f',
+    's16le',
+    '-acodec',
+    'pcm_s16le',
+    '-',
+  ]);
+}
+
 function sha256Hex(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
 }
@@ -194,6 +237,14 @@ test.describe('playback runtime deep dive', () => {
       expect(aiffSourceProbe.mimeType).toBe('audio/wav');
       expect(aiffSourceProbe.sourceStrategy).toBe('transcoded-cache');
       expect(aiffSourceProbe.originalFilePath).toBe(fixturePathsByFormat.aiff);
+
+      const originalAiffPcmHash = sha256Hex(
+        await decodeAudioToPcmS16le(fixturePathsByFormat.aiff)
+      );
+      const transcodedAiffPcmHash = sha256Hex(
+        await decodeAudioToPcmS16le(aiffSourceProbe.filePath)
+      );
+      expect(transcodedAiffPcmHash).toBe(originalAiffPcmHash);
 
       for (const format of ['wav', 'mp3', 'm4a', 'flac', 'aiff']) {
         await page
@@ -371,14 +422,111 @@ test.describe('playback runtime deep dive', () => {
       await page.getByTestId('main-list-row').filter({ hasText: 'Flow Alpha' }).first().click();
       await expect(page.getByTestId('inspector-version-row')).toHaveCount(2);
 
-      await page
-        .getByTestId('inspector-version-row')
-        .filter({ hasText: 'Archived in old/' })
-        .first()
-        .click();
+      await page.getByTestId('inspector-version-row').nth(1).click();
 
       await page.getByTestId('player-play-toggle').click();
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('inspector version history scrolls, double-clicking a song starts playback, and the volume slider sits beside repeat', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playback-ux-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playback-ux-user-data-')
+    );
+
+    for (let version = 1; version <= 18; version += 1) {
+      await runFfmpeg([
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        `sine=frequency=${320 + version * 10}:duration=4`,
+        '-c:a',
+        'pcm_s16le',
+        path.join(fixtureDirectory, `Scroll Track v${version}.wav`),
+      ]);
+    }
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=640:duration=4',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Companion Track v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const scrollTrackRow = page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Scroll Track' })
+        .first();
+
+      await scrollTrackRow.click();
+      await expect(page.getByTestId('inspector-version-row')).toHaveCount(18);
+
+      const scrollMetricsBefore = await page.getByTestId('inspector-scroll-region').evaluate((element) => {
+        const target = element as HTMLDivElement;
+        return {
+          clientHeight: target.clientHeight,
+          scrollHeight: target.scrollHeight,
+          scrollTop: target.scrollTop,
+        };
+      });
+
+      expect(scrollMetricsBefore.scrollHeight).toBeGreaterThan(scrollMetricsBefore.clientHeight);
+      expect(scrollMetricsBefore.scrollTop).toBe(0);
+
+      await page.getByTestId('inspector-scroll-region').evaluate((element) => {
+        const target = element as HTMLDivElement;
+        target.scrollTop = target.scrollHeight;
+      });
+
+      await expect
+        .poll(async () => {
+          return page.getByTestId('inspector-scroll-region').evaluate((element) => {
+            return (element as HTMLDivElement).scrollTop;
+          });
+        })
+        .toBeGreaterThan(0);
+
+      const volumeControlIsAdjacentToRepeat = await page.evaluate(() => {
+        const repeatButton = document.querySelector('[data-testid="player-repeat"]');
+        const volumeControl = document.querySelector('[data-testid="player-volume-control"]');
+        return !!repeatButton && repeatButton.nextElementSibling === volumeControl;
+      });
+
+      expect(volumeControlIsAdjacentToRepeat).toBe(true);
+
+      await scrollTrackRow.dblclick();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('player-volume-slider').evaluate((element) => {
+        const input = element as HTMLInputElement;
+        input.value = '25';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      await expect(page.getByTestId('player-volume-slider')).toHaveValue('25');
+      await expect(page.getByTestId('player-volume-control')).toContainText('Vol 25%');
       await expect(page.getByTestId('playback-error')).toHaveCount(0);
     } finally {
       await electronApp.close();
@@ -669,7 +817,7 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
-  test('restores per-song playhead position when returning to a previously played song', async () => {
+  test('restores per-song playhead position within a session, but not after restarting the app', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-playhead-restore-fixture-')
     );
@@ -699,47 +847,100 @@ test.describe('playback runtime deep dive', () => {
       path.join(fixtureDirectory, 'Restore Beta v1.wav'),
     ]);
 
-    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+    const firstLaunch = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
 
-      await page.getByTestId('main-list-row').filter({ hasText: 'Restore Alpha' }).first().click();
-      await page.getByTestId('player-play-toggle').click();
-      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await firstLaunch.page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Restore Alpha' })
+        .first()
+        .click();
+      await firstLaunch.page.getByTestId('player-play-toggle').click();
+      await expect(firstLaunch.page.getByTestId('player-play-toggle')).toHaveAttribute(
+        'aria-label',
+        'Pause'
+      );
 
-      await page.waitForTimeout(900);
+      await firstLaunch.page.waitForTimeout(900);
 
-      await page.getByTestId('player-scrubber').evaluate((element) => {
+      await firstLaunch.page.getByTestId('player-scrubber').evaluate((element) => {
         const input = element as HTMLInputElement;
         input.value = '5.2';
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
       });
 
-      await page.waitForTimeout(250);
+      await firstLaunch.page.waitForTimeout(250);
 
-      await page.getByTestId('main-list-row').filter({ hasText: 'Restore Beta' }).first().click();
-      await expect(page.getByTestId('player-track-name')).toContainText('Restore Beta');
-      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await firstLaunch.page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Restore Beta' })
+        .first()
+        .click();
+      await expect(firstLaunch.page.getByTestId('player-track-name')).toContainText('Restore Beta');
+      await expect(firstLaunch.page.getByTestId('player-play-toggle')).toHaveAttribute(
+        'aria-label',
+        'Pause'
+      );
 
-      await page.waitForTimeout(550);
+      await firstLaunch.page.waitForTimeout(550);
 
-      await page.getByTestId('main-list-row').filter({ hasText: 'Restore Alpha' }).first().click();
-      await expect(page.getByTestId('player-track-name')).toContainText('Restore Alpha');
-      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await firstLaunch.page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Restore Alpha' })
+        .first()
+        .click();
+      await expect(firstLaunch.page.getByTestId('player-track-name')).toContainText('Restore Alpha');
+      await expect(firstLaunch.page.getByTestId('player-play-toggle')).toHaveAttribute(
+        'aria-label',
+        'Pause'
+      );
 
       await expect
-        .poll(async () => Number(await page.getByTestId('player-scrubber').inputValue()), {
+        .poll(async () => Number(await firstLaunch.page.getByTestId('player-scrubber').inputValue()), {
           timeout: 4_000,
         })
         .toBeGreaterThan(4.7);
 
-      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+      await expect(firstLaunch.page.getByTestId('playback-error')).toHaveCount(0);
     } finally {
-      await electronApp.close();
+      await firstLaunch.electronApp.close();
+    }
+
+    const secondLaunch = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      if ((await secondLaunch.page.getByTestId('main-list-row').count()) === 0) {
+        await secondLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+        await secondLaunch.page.getByTestId('link-folder-path-button').click();
+      }
+
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await secondLaunch.page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Restore Alpha' })
+        .first()
+        .click();
+      await secondLaunch.page.getByTestId('player-play-toggle').click();
+      await expect(secondLaunch.page.getByTestId('player-play-toggle')).toHaveAttribute(
+        'aria-label',
+        'Pause'
+      );
+
+      await expect
+        .poll(async () => Number(await secondLaunch.page.getByTestId('player-scrubber').inputValue()), {
+          timeout: 2_500,
+        })
+        .toBeLessThan(1.5);
+
+      await expect(secondLaunch.page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await secondLaunch.electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });
       await fs.rm(userDataDirectory, { recursive: true, force: true });
     }

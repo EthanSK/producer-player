@@ -38,54 +38,8 @@ const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
 };
 
 const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
-const SONG_PLAYHEAD_STORAGE_KEY = 'producer-player-song-playheads-v1';
 const PLAYHEAD_END_RESET_THRESHOLD_SECONDS = 0.8;
-
-function readPersistedSongPlayheads(): Map<string, number> {
-  if (typeof window === 'undefined') {
-    return new Map();
-  }
-
-  try {
-    const raw = window.localStorage.getItem(SONG_PLAYHEAD_STORAGE_KEY);
-    if (!raw) {
-      return new Map();
-    }
-
-    const parsed = JSON.parse(raw) as Record<string, number>;
-
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      return new Map();
-    }
-
-    const entries = Object.entries(parsed).filter(
-      (entry): entry is [string, number] =>
-        typeof entry[0] === 'string' && Number.isFinite(entry[1]) && entry[1] > 0
-    );
-
-    return new Map(entries);
-  } catch {
-    return new Map();
-  }
-}
-
-function persistSongPlayheads(playheads: Map<string, number>): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const payload = Object.fromEntries(
-    Array.from(playheads.entries()).filter(([, seconds]) =>
-      Number.isFinite(seconds) && seconds > 0
-    )
-  );
-
-  try {
-    window.localStorage.setItem(SONG_PLAYHEAD_STORAGE_KEY, JSON.stringify(payload));
-  } catch {
-    // Ignore persistence failures (private mode/full storage).
-  }
-}
+const DEFAULT_PLAYBACK_VOLUME = 1;
 
 function reorderSongIds(
   songIds: string[],
@@ -212,6 +166,10 @@ function getActiveSongVersion(song: SongWithVersions): SongVersion | null {
   return sortVersions(song.versions)[0] ?? null;
 }
 
+function getPreferredPlaybackVersionId(song: SongWithVersions): string | null {
+  return getActiveSongVersion(song)?.id ?? null;
+}
+
 function getSongDisplayFileName(song: SongWithVersions): string {
   return getActiveSongVersion(song)?.fileName ?? song.title;
 }
@@ -242,6 +200,7 @@ export function App(): JSX.Element {
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [playbackSourceReady, setPlaybackSourceReady] = useState(false);
+  const [volume, setVolume] = useState(DEFAULT_PLAYBACK_VOLUME);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
@@ -253,7 +212,7 @@ export function App(): JSX.Element {
   const playbackSourceSupportRef = useRef<'unknown' | 'maybe' | 'probably' | 'no'>('unknown');
   const playbackSourceReadyRef = useRef(false);
   const lastLoadedSongIdRef = useRef<string | null>(null);
-  const playbackPositionBySongIdRef = useRef<Map<string, number>>(readPersistedSongPlayheads());
+  const playbackPositionBySongIdRef = useRef<Map<string, number>>(new Map());
   const pendingRestoreTimeRef = useRef<number | null>(null);
   const dragTargetRef = useRef<{ songId: string; position: DragOverPosition } | null>(null);
   const moveInQueueRef = useRef<(
@@ -287,12 +246,6 @@ export function App(): JSX.Element {
     playbackSourceReadyRef.current = playbackSourceReady;
   }, [playbackSourceReady]);
 
-  useEffect(() => {
-    return () => {
-      persistSongPlayheads(playbackPositionBySongIdRef.current);
-    };
-  }, []);
-
   function rememberSongPlayhead(
     songId: string | null,
     seconds: number,
@@ -317,8 +270,6 @@ export function App(): JSX.Element {
     } else {
       playbackPositionBySongIdRef.current.set(songId, nextSeconds);
     }
-
-    persistSongPlayheads(playbackPositionBySongIdRef.current);
   }
 
   function rememberCurrentSongPlayhead(options: { forceResetAtEnd?: boolean } = {}): void {
@@ -445,6 +396,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     const audio = new Audio();
     audio.preload = 'metadata';
+    audio.volume = DEFAULT_PLAYBACK_VOLUME;
     audioRef.current = audio;
 
     const onTimeUpdate = () => {
@@ -630,6 +582,15 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    audio.volume = volume;
+  }, [volume]);
+
+  useEffect(() => {
     let mounted = true;
 
     Promise.all([
@@ -761,10 +722,7 @@ export function App(): JSX.Element {
       return;
     }
 
-    const nextPlaybackVersionId =
-      selectedSong.activeVersionId ?? sortVersions(selectedSong.versions)[0]?.id ?? null;
-
-    setSelectedPlaybackVersionId(nextPlaybackVersionId);
+    setSelectedPlaybackVersionId(getPreferredPlaybackVersionId(selectedSong));
   }, [selectedPlaybackVersionId, selectedSong]);
 
   const selectedPlaybackVersion =
@@ -1256,6 +1214,59 @@ export function App(): JSX.Element {
     }
   }
 
+  async function handleSongRowPlay(songId: string): Promise<void> {
+    const song = songs.find((candidate) => candidate.id === songId);
+    if (!song) {
+      handleSongRowSelect(songId);
+      return;
+    }
+
+    const nextPlaybackVersionId = getPreferredPlaybackVersionId(song);
+
+    if (songId !== selectedSongId) {
+      rememberCurrentSongPlayhead();
+    }
+
+    setPlaybackError(null);
+    setSelectedSongId(songId);
+
+    if (!nextPlaybackVersionId) {
+      return;
+    }
+
+    setSelectedPlaybackVersionId(nextPlaybackVersionId);
+
+    const audio = audioRef.current;
+    const canResumeCurrentSelection =
+      songId === selectedSongId &&
+      nextPlaybackVersionId === selectedPlaybackVersionId &&
+      lastLoadedSongIdRef.current === songId &&
+      playbackSourceReadyRef.current;
+
+    if (audio && canResumeCurrentSelection) {
+      if (audio.paused) {
+        try {
+          await audio.play();
+          logPlaybackEvent('song-row-double-click-played-current-selection');
+        } catch (cause: unknown) {
+          const message = cause instanceof Error ? cause.message : String(cause);
+          setPlaybackError(
+            `Playback start failed: ${message}. ${buildPlaybackFallbackGuidance(
+              playbackSourceRef.current
+            )}`
+          );
+          logPlaybackEvent('song-row-double-click-play-failed', {
+            message,
+          });
+        }
+      }
+      return;
+    }
+
+    playOnNextLoadRef.current = true;
+    schedulePlaybackLoadTimeout('song-row-double-click');
+  }
+
   function updateDragOverPosition(
     event: DragEvent<HTMLElement>,
     hoveredSongId: string
@@ -1466,6 +1477,16 @@ export function App(): JSX.Element {
 
       return 'off';
     });
+  }
+
+  function handleVolumeChange(nextVolume: number): void {
+    const clampedVolume = Math.max(0, Math.min(nextVolume, 1));
+    setVolume(clampedVolume);
+
+    const audio = audioRef.current;
+    if (audio) {
+      audio.volume = clampedVolume;
+    }
   }
 
   transportActionRef.current = {
@@ -1765,6 +1786,9 @@ export function App(): JSX.Element {
                     dragSongId === song.id ? 'drag-source' : ''
                   }`}
                   onClick={() => handleSongRowSelect(song.id)}
+                  onDoubleClick={() => {
+                    void handleSongRowPlay(song.id);
+                  }}
                   data-testid="main-list-row"
                   data-song-id={song.id}
                   draggable={canReorderSongs}
@@ -1871,6 +1895,24 @@ export function App(): JSX.Element {
               >
                 Repeat: {REPEAT_MODE_LABEL[repeatMode]}
               </button>
+              <label
+                className="player-volume-control"
+                data-testid="player-volume-control"
+                title="Adjust playback volume for this app session."
+              >
+                <span className="muted">Vol {Math.round(volume * 100)}%</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.round(volume * 100)}
+                  onInput={(event) => handleVolumeChange(Number(event.currentTarget.value) / 100)}
+                  onChange={(event) => handleVolumeChange(Number(event.currentTarget.value) / 100)}
+                  data-testid="player-volume-slider"
+                  aria-label="Playback volume"
+                />
+              </label>
             </div>
 
             <div className="player-scrubber-row">
@@ -1903,67 +1945,65 @@ export function App(): JSX.Element {
           <h2>Inspector</h2>
         </header>
 
-        {selectedSong ? (
+        <div className="panel-right-scroll" data-testid="inspector-scroll-region">
+          {selectedSong ? (
+            <section className="inspector-card">
+              <h3 data-testid="inspector-song-title">{getSongDisplayFileName(selectedSong)}</h3>
+              <p className="muted">Latest export: {formatDate(selectedSong.latestExportAt)}</p>
+            </section>
+          ) : (
+            <section className="inspector-card empty-state">
+              Select a track to inspect versions.
+            </section>
+          )}
+
           <section className="inspector-card">
-            <h3 data-testid="inspector-song-title">{getSongDisplayFileName(selectedSong)}</h3>
-            <p className="muted">Latest export: {formatDate(selectedSong.latestExportAt)}</p>
+            <h3>Version History</h3>
+            <ul className="version-list">
+              {inspectorVersions.map((version) => (
+                <li
+                  key={version.id}
+                  className="version-row"
+                  data-testid="inspector-version-row"
+                >
+                  <div>
+                    <strong>{version.fileName}</strong>
+                    <p className="muted">{formatDate(version.modifiedAt)}</p>
+                    <p className="muted">{formatFileSize(version.sizeBytes)}</p>
+                  </div>
+                  <div className="version-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (shouldAutoplayOnTransport()) {
+                          playOnNextLoadRef.current = true;
+                          schedulePlaybackLoadTimeout('version-cue-autoplay');
+                        }
+
+                        setSelectedPlaybackVersionId(version.id);
+                      }}
+                      title="Cue this version into the player."
+                    >
+                      Cue
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void window.producerPlayer.revealFile(version.filePath);
+                      }}
+                      title="Open this version in Finder."
+                    >
+                      Open in Finder
+                    </button>
+                  </div>
+                </li>
+              ))}
+              {inspectorVersions.length === 0 && (
+                <li className="empty-state">No versions available.</li>
+              )}
+            </ul>
           </section>
-        ) : (
-          <section className="inspector-card empty-state">
-            Select a track to inspect versions.
-          </section>
-        )}
-
-        <section className="inspector-card">
-          <h3>Version History</h3>
-          <ul className="version-list">
-            {inspectorVersions.map((version) => (
-              <li
-                key={version.id}
-                className="version-row"
-                data-testid="inspector-version-row"
-              >
-                <div>
-                  <strong>{version.fileName}</strong>
-                  <p className="muted">{formatDate(version.modifiedAt)}</p>
-                  <p className="muted">{formatFileSize(version.sizeBytes)}</p>
-                  {isArchivedVersion(version) ? (
-                    <p className="muted archived-label">Archived in old/</p>
-                  ) : null}
-                </div>
-                <div className="version-actions">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (shouldAutoplayOnTransport()) {
-                        playOnNextLoadRef.current = true;
-                        schedulePlaybackLoadTimeout('version-cue-autoplay');
-                      }
-
-                      setSelectedPlaybackVersionId(version.id);
-                    }}
-                    title="Cue this version into the player."
-                  >
-                    Cue
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void window.producerPlayer.revealFile(version.filePath);
-                    }}
-                    title="Open this version in Finder."
-                  >
-                    Open in Finder
-                  </button>
-                </div>
-              </li>
-            ))}
-            {inspectorVersions.length === 0 && (
-              <li className="empty-state">No versions available.</li>
-            )}
-          </ul>
-        </section>
-
+        </div>
       </aside>
     </div>
   );

@@ -156,9 +156,8 @@ test.describe('Producer Player desktop shell', () => {
         })
         .toBe(true);
 
-      // Version history includes archived old/ files.
+      // Version history still includes archived old/ files, but the row copy is less noisy.
       await expect(page.getByTestId('inspector-version-row')).toHaveCount(2);
-      await expect(page.getByText('Archived in old/')).toHaveCount(1);
       await expect(page.getByTestId('inspector-song-title')).toContainText('Midnight Echo');
     } finally {
       await electronApp.close();

@@ -1389,3 +1389,29 @@ In ten minutes, spawn a cron job that's try retranscribes the past 10 voice mess
 ```text
 Also, thing, we don't need to say archived and old for every single version history. It'll always be archived and old.
 ```
+
+---
+
+## Queue Halo app icon selection + application (sub-agent run)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Tue 2026-03-10 00:23 GMT
+
+```text
+Also, like the QHalo app icon. Let's use that.
+```
+
+### Assistant implementation summary (this run)
+
+- Applied the **Queue Halo** round-2 icon as the real shipped Producer Player app icon.
+- Replaced the shipped source SVG at `assets/icon/source/producer-player-icon.svg` with the selected Queue Halo source.
+- Regenerated the full app-icon asset pipeline via `npm run icon:build`, updating:
+  - PNG exports in `assets/icon/png/`
+  - macOS iconset in `assets/icon/ProducerPlayer.iconset/`
+  - macOS `.icns` bundle at `assets/icon/ProducerPlayer.icns`
+  - preview image at `docs/assets/icon/producer-player-icon-preview.png`
+- Updated icon documentation to reflect that **Queue Halo** is now the selected / shipped icon:
+  - `docs/APP_ICON.md`
+  - `docs/assets/icon/ordering-refinement-round2-2026-03-10/README.md`
+- Included the previously generated round-2 icon refinement assets + generator script in the repo state so the chosen icon’s source/provenance is tracked cleanly.

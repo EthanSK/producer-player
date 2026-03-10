@@ -1,0 +1,63 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+    
+    <defs>
+      <linearGradient id="04_track_ladder_pro-bg" x1="90" y1="50" x2="940" y2="980" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#06101C"/>
+        <stop offset="0.54" stop-color="#0F2847"/>
+        <stop offset="1" stop-color="#1D5588"/>
+      </linearGradient>
+      <radialGradient id="04_track_ladder_pro-glow" cx="0" cy="0" r="1" gradientTransform="translate(760 220) rotate(135) scale(560)">
+        <stop stop-color="#7DE4FF" stop-opacity="0.34"/>
+        <stop offset="1" stop-color="#7DE4FF" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="04_track_ladder_pro-ring" x1="250" y1="230" x2="780" y2="780" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#7DE4FF"/>
+        <stop offset="1" stop-color="#3C95FF"/>
+      </linearGradient>
+      <linearGradient id="04_track_ladder_pro-track" x1="220" y1="260" x2="800" y2="700" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#99EEFF" stop-opacity="0.92"/>
+        <stop offset="1" stop-color="#3C95FF" stop-opacity="0.88"/>
+      </linearGradient>
+      <filter id="04_track_ladder_pro-blur" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="18"/>
+      </filter>
+      <filter id="04_track_ladder_pro-softblur" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="9"/>
+      </filter>
+      <filter id="04_track_ladder_pro-shadow" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#020913" flood-opacity="0.45"/>
+      </filter>
+    </defs>
+    
+    
+    <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#04_track_ladder_pro-bg)"/>
+    <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#04_track_ladder_pro-glow)"/>
+    <rect x="48" y="48" width="928" height="928" rx="204" fill="none" stroke="#8FDFFF" stroke-opacity="0.10" stroke-width="2"/>
+    
+    
+    <path d="M210 292V624" stroke="#86E7FF" stroke-opacity="0.34" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="210" cy="292" r="12" fill="#7DE4FF"/>
+    <circle cx="210" cy="458" r="12" fill="#7DE4FF"/>
+    <circle cx="210" cy="624" r="12" fill="#7DE4FF"/>
+    <rect x="236" y="248" width="574" height="90" rx="44" fill="#D4F3FF" fill-opacity="0.12"/>
+
+    <circle cx="282" cy="293.0" r="24.0" fill="#7DE4FF" fill-opacity="0.97"/>
+    <text x="282" y="304.9" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="34.0" font-weight="800" fill="#071B31">1</text>
+    
+<path d="M336 293.0H730.0" stroke="url(#04_track_ladder_pro-track)" stroke-width="16" stroke-linecap="round" stroke-opacity="0.78"/>
+    <rect x="236" y="414" width="574" height="90" rx="44" fill="#D4F3FF" fill-opacity="0.18"/>
+
+    <circle cx="282" cy="459.0" r="24.0" fill="#7DE4FF" fill-opacity="0.97"/>
+    <text x="282" y="470.9" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="34.0" font-weight="800" fill="#071B31">2</text>
+    
+<path d="M336 459.0H730.0" stroke="url(#04_track_ladder_pro-track)" stroke-width="16" stroke-linecap="round" stroke-opacity="0.95"/>
+<path d="M716.0 425.0L788.0 459.0L716.0 493.0Z" fill="url(#04_track_ladder_pro-ring)" fill-opacity="0.88"/>
+    <rect x="236" y="580" width="574" height="90" rx="44" fill="#D4F3FF" fill-opacity="0.12"/>
+
+    <circle cx="282" cy="625.0" r="24.0" fill="#7DE4FF" fill-opacity="0.97"/>
+    <text x="282" y="636.9" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="34.0" font-weight="800" fill="#071B31">3</text>
+    
+<path d="M336 625.0H643.3199999999999" stroke="url(#04_track_ladder_pro-track)" stroke-width="16" stroke-linecap="round" stroke-opacity="0.78"/>
+    
+    </svg>
+    

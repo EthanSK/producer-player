@@ -1,0 +1,69 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+    
+    <defs>
+      <linearGradient id="01_sequence_orbit_pro-bg" x1="90" y1="50" x2="940" y2="980" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#06101C"/>
+        <stop offset="0.54" stop-color="#0F2847"/>
+        <stop offset="1" stop-color="#1D5588"/>
+      </linearGradient>
+      <radialGradient id="01_sequence_orbit_pro-glow" cx="0" cy="0" r="1" gradientTransform="translate(760 220) rotate(135) scale(560)">
+        <stop stop-color="#7DE4FF" stop-opacity="0.34"/>
+        <stop offset="1" stop-color="#7DE4FF" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="01_sequence_orbit_pro-ring" x1="250" y1="230" x2="780" y2="780" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#7DE4FF"/>
+        <stop offset="1" stop-color="#3C95FF"/>
+      </linearGradient>
+      <linearGradient id="01_sequence_orbit_pro-track" x1="220" y1="260" x2="800" y2="700" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#99EEFF" stop-opacity="0.92"/>
+        <stop offset="1" stop-color="#3C95FF" stop-opacity="0.88"/>
+      </linearGradient>
+      <filter id="01_sequence_orbit_pro-blur" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="18"/>
+      </filter>
+      <filter id="01_sequence_orbit_pro-softblur" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="9"/>
+      </filter>
+      <filter id="01_sequence_orbit_pro-shadow" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#020913" flood-opacity="0.45"/>
+      </filter>
+    </defs>
+    
+    
+    <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#01_sequence_orbit_pro-bg)"/>
+    <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#01_sequence_orbit_pro-glow)"/>
+    <rect x="48" y="48" width="928" height="928" rx="204" fill="none" stroke="#8FDFFF" stroke-opacity="0.10" stroke-width="2"/>
+    
+    
+    <rect x="186" y="258" width="548" height="90" rx="44" fill="#D4F3FF" fill-opacity="0.12"/>
+
+    <circle cx="232" cy="303.0" r="24.0" fill="#7DE4FF" fill-opacity="0.97"/>
+    <text x="232" y="314.9" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="34.0" font-weight="800" fill="#071B31">1</text>
+    
+<path d="M286 303.0H654.0" stroke="url(#01_sequence_orbit_pro-track)" stroke-width="16" stroke-linecap="round" stroke-opacity="0.78"/>
+    <rect x="186" y="388" width="580" height="90" rx="44" fill="#D4F3FF" fill-opacity="0.18"/>
+
+    <circle cx="232" cy="433.0" r="24.0" fill="#7DE4FF" fill-opacity="0.97"/>
+    <text x="232" y="444.9" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="34.0" font-weight="800" fill="#071B31">2</text>
+    
+<path d="M286 433.0H686.0" stroke="url(#01_sequence_orbit_pro-track)" stroke-width="16" stroke-linecap="round" stroke-opacity="0.95"/>
+<path d="M672.0 399.0L744.0 433.0L672.0 467.0Z" fill="url(#01_sequence_orbit_pro-ring)" fill-opacity="0.88"/>
+    <rect x="186" y="518" width="516" height="90" rx="44" fill="#D4F3FF" fill-opacity="0.12"/>
+
+    <circle cx="232" cy="563.0" r="24.0" fill="#7DE4FF" fill-opacity="0.97"/>
+    <text x="232" y="574.9" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="34.0" font-weight="800" fill="#071B31">3</text>
+    
+<path d="M286 563.0H561.52" stroke="url(#01_sequence_orbit_pro-track)" stroke-width="16" stroke-linecap="round" stroke-opacity="0.78"/>
+    <path d="M726 434H806" stroke="url(#01_sequence_orbit_pro-track)" stroke-width="18" stroke-linecap="round" opacity="0.72"/>
+    <circle cx="760" cy="434" r="168.95999999999998" stroke="#73DBFF" stroke-opacity="0.14" stroke-width="23.04"/>
+<circle cx="760" cy="434" r="132.48" stroke="url(#01_sequence_orbit_pro-ring)" stroke-opacity="0.42" stroke-width="9.6"/>
+<circle cx="760" cy="434" r="92.16" fill="#0A1C33" stroke="#1D4D7C" stroke-width="7.68"/>
+<circle cx="760" cy="434" r="188.15999999999997" stroke="#8AE8FF" stroke-opacity="0.08" stroke-width="5.76" stroke-dasharray="17.28 28.799999999999997"/>
+<circle cx="760.0" cy="265.0" r="9.6" fill="#7DE4FF"/>
+<circle cx="929.0" cy="434.0" r="9.6" fill="#7DE4FF"/>
+<circle cx="760.0" cy="603.0" r="9.6" fill="#7DE4FF"/>
+<circle cx="591.0" cy="434.0" r="9.6" fill="#7DE4FF"/>
+<path d="M726.9 370.6C726.9 358.6 739.9 352.6 756.9 361.6L819.8 434.0C837.8 444.0 837.8 424.0 819.8 434.0L756.9 506.4C739.9 515.4 726.9 509.4 726.9 497.4Z" fill="url(#01_sequence_orbit_pro-ring)"/>
+    
+    </svg>
+    

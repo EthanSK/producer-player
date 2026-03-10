@@ -1,0 +1,65 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+    
+    <defs>
+      <linearGradient id="03_playlist_spine-bg" x1="90" y1="50" x2="940" y2="980" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#06101C"/>
+        <stop offset="0.54" stop-color="#0F2847"/>
+        <stop offset="1" stop-color="#1D5588"/>
+      </linearGradient>
+      <radialGradient id="03_playlist_spine-glow" cx="0" cy="0" r="1" gradientTransform="translate(760 220) rotate(135) scale(560)">
+        <stop stop-color="#7DE4FF" stop-opacity="0.34"/>
+        <stop offset="1" stop-color="#7DE4FF" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="03_playlist_spine-ring" x1="250" y1="230" x2="780" y2="780" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#7DE4FF"/>
+        <stop offset="1" stop-color="#3C95FF"/>
+      </linearGradient>
+      <linearGradient id="03_playlist_spine-track" x1="220" y1="260" x2="800" y2="700" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#99EEFF" stop-opacity="0.92"/>
+        <stop offset="1" stop-color="#3C95FF" stop-opacity="0.88"/>
+      </linearGradient>
+      <filter id="03_playlist_spine-blur" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="18"/>
+      </filter>
+      <filter id="03_playlist_spine-softblur" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="9"/>
+      </filter>
+      <filter id="03_playlist_spine-shadow" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#020913" flood-opacity="0.45"/>
+      </filter>
+    </defs>
+    
+    
+    <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#03_playlist_spine-bg)"/>
+    <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#03_playlist_spine-glow)"/>
+    <rect x="48" y="48" width="928" height="928" rx="204" fill="none" stroke="#8FDFFF" stroke-opacity="0.10" stroke-width="2"/>
+    
+    
+    <path d="M240 304H414L492 414H636L710 520H804" fill="none" stroke="url(#03_playlist_spine-track)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M240 304V720H560" fill="none" stroke="#86E7FF" stroke-opacity="0.28" stroke-width="8" stroke-linecap="round"/>
+    
+    <circle cx="240" cy="304" r="24.0" fill="#7DE4FF" fill-opacity="0.97"/>
+    <text x="240" y="315.9" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="34.0" font-weight="800" fill="#071B31">1</text>
+    
+    
+    <circle cx="492" cy="414" r="24.0" fill="#7DE4FF" fill-opacity="0.97"/>
+    <text x="492" y="425.9" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="34.0" font-weight="800" fill="#071B31">2</text>
+    
+    
+    <circle cx="710" cy="520" r="24.0" fill="#7DE4FF" fill-opacity="0.97"/>
+    <text x="710" y="531.9" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="34.0" font-weight="800" fill="#071B31">3</text>
+    
+    <rect x="222" y="610" width="382" height="96" rx="42" fill="#D4F3FF" fill-opacity="0.11"/>
+    <path d="M300 658H528" stroke="url(#03_playlist_spine-track)" stroke-width="16" stroke-linecap="round" opacity="0.78"/>
+    <circle cx="762" cy="520" r="144.32" stroke="#73DBFF" stroke-opacity="0.14" stroke-width="19.68"/>
+<circle cx="762" cy="520" r="113.16" stroke="url(#03_playlist_spine-ring)" stroke-opacity="0.42" stroke-width="8.2"/>
+<circle cx="762" cy="520" r="78.72" fill="#0A1C33" stroke="#1D4D7C" stroke-width="6.56"/>
+<circle cx="762" cy="520" r="160.72" stroke="#8AE8FF" stroke-opacity="0.08" stroke-width="4.92" stroke-dasharray="14.76 24.599999999999998"/>
+<circle cx="762.0" cy="375.7" r="8.2" fill="#7DE4FF"/>
+<circle cx="906.3" cy="520.0" r="8.2" fill="#7DE4FF"/>
+<circle cx="762.0" cy="664.3" r="8.2" fill="#7DE4FF"/>
+<circle cx="617.7" cy="520.0" r="8.2" fill="#7DE4FF"/>
+<path d="M733.7 465.9C733.7 453.9 746.7 447.9 763.7 456.9L813.1 520.0C831.1 530.0 831.1 510.0 813.1 520.0L763.7 583.1C746.7 592.1 733.7 586.1 733.7 574.1Z" fill="url(#03_playlist_spine-ring)"/>
+    
+    </svg>
+    

@@ -221,6 +221,52 @@ test('unlink + relink starts from fresh ordering state instead of stale reordere
   }
 });
 
+test('old-only tracks never become album songs, and old/ typos do not fuzzy-match into top-level songs', async () => {
+  const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-old-only-');
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Bend the Knees v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        relativePath: 'old/Bend the Knees v1.wav',
+        modifiedAtMs: Date.parse('2025-12-01T00:00:00.000Z'),
+      },
+      {
+        relativePath: 'old/Bend the Knee v1.wav',
+        modifiedAtMs: Date.parse('2025-11-01T00:00:00.000Z'),
+      },
+      {
+        relativePath: 'old/Orphan Song v1.wav',
+        modifiedAtMs: Date.parse('2025-10-01T00:00:00.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: false }, async (service) => {
+      const snapshot = await service.linkFolder(fixtureDirectory);
+
+      assert.deepEqual(snapshot.songs.map((song) => song.title), ['Bend The Knees']);
+      assert.equal(snapshot.versions.length, 2);
+      assert.deepEqual(
+        snapshot.songs[0].versions.map((version) => version.fileName).sort(),
+        ['Bend the Knees v1.wav', 'Bend the Knees v2.wav']
+      );
+      assert.equal(
+        snapshot.songs.some((song) => song.normalizedTitle === 'bend the knee'),
+        false
+      );
+      assert.equal(
+        snapshot.songs.some((song) => song.normalizedTitle === 'orphan song'),
+        false
+      );
+    });
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
 test('mixed v-suffix naming variants (space/no-space/underscore/hyphen) stay grouped as one song', async () => {
   const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-vsuffix-');
 

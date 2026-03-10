@@ -1275,3 +1275,117 @@ By the way, there is a bug. Only songs that appear in the top level folder shoul
 
 - **Done:** repo-level macOS/App Store packaging prep and npm script wiring.
 - **Not done yet:** actual Apple-signing / provisioning / App Store Connect submission, because those require Ethan’s Apple Developer account assets and provisioning profiles.
+
+---
+
+## Icon ordering refinement options — follow-up round completed (sub-agent run)
+
+### Ethan message (verbatim) — message_id 3917
+
+**Timestamp:** Mon 2026-03-09 22:31 GMT
+
+```text
+Desktop. I don't like any of the app icons you sent. I want something that implies ordering of songs. Like, maybe the first one, but bit better.
+```
+
+### Ethan message (verbatim) — message_id 3925
+
+**Timestamp:** Mon 2026-03-09 22:57 GMT
+
+```text
+You're gonna give me the icon then when we're done. New icon. Options based on what I asked for.
+```
+
+### Ethan message (verbatim) — icon-design sub-agent instruction context
+
+**Timestamp:** Tue 2026-03-10 00:14 GMT
+
+```text
+Okay. In this sub agent, I want you to create multiple designs. I want it to kinda be something like AI, I don't know, producer. Actually, just come up with a bunch of ideas, make the designs first, send them over.
+```
+
+### Assistant implementation summary (this run)
+
+- Created a fresh ordering-focused icon refinement set that stays closer to the original **Neural Playhead** direction while making playlist / sequence ordering much more explicit.
+- Generated **four** review options as real 1024px PNG previews plus matching SVG sources:
+  - `Sequence Orbit Pro`
+  - `Queue Halo`
+  - `Playlist Spine`
+  - `Track Ladder Pro`
+- Saved the deliverables in a tracked public-docs path instead of ignored `/artifacts` so the files are easy to reuse/send later:
+  - `docs/assets/icon/ordering-refinement-round2-2026-03-10/01-sequence-orbit-pro.png`
+  - `docs/assets/icon/ordering-refinement-round2-2026-03-10/02-queue-halo.png`
+  - `docs/assets/icon/ordering-refinement-round2-2026-03-10/03-playlist-spine.png`
+  - `docs/assets/icon/ordering-refinement-round2-2026-03-10/04-track-ladder-pro.png`
+  - `docs/assets/icon/ordering-refinement-round2-2026-03-10/ordering-round2-composite-sheet.png`
+- Added a companion note file summarizing the direction and the best shareable paths:
+  - `docs/assets/icon/ordering-refinement-round2-2026-03-10/README.md`
+- Added a small generation helper so the refinement set can be regenerated locally:
+  - `scripts/generate-ordering-icon-refinements.py`
+- **Did not replace the shipped app icon** (`assets/icon/*`) in this run.
+
+### Best current picks from this round
+
+1. **Sequence Orbit Pro** — strongest match to Ethan’s feedback (“maybe the first one, but better”); keeps the circular playhead DNA and adds obvious 1/2/3 ordering.
+2. **Queue Halo** — best if he wants something a bit more premium / layered while still reading as ordered tracks feeding playback.
+3. **Track Ladder Pro** — clearest literal ordering metaphor if he wants the most immediately readable icon.
+
+### Git / push note
+
+- A commit/push was **not** done in this run because the repo already had multiple unrelated in-progress working-tree changes from other active Producer Player workstreams; mixing this icon review batch into that state would have been noisy/risky.
+- The icon review assets are saved locally and ready to be staged/committed once the main branch worktree is in a safer state.
+
+---
+
+## Playback UX + old-folder regression fix implementation (sub-agent run)
+
+### Ethan message (verbatim) — message_id 3960
+
+**Timestamp:** Tue 2026-03-10 00:13 GMT
+
+```text
+Also, thing, we don't need to say archived and old for every single version history. It'll always be archived and old.
+```
+
+### Assistant implementation summary (this run)
+
+- Fixed the Inspector so its body is actually scrollable again via a dedicated scroll region (`panel-right-scroll`) instead of trapping content inside a non-scrolling right panel.
+- Added song-row double-click playback: double-clicking a track now immediately starts playback (or resumes the already-loaded current selection) instead of only selecting the row.
+- Added the previously-missed playback volume slider **next to the Repeat button** in the transport row, with live session-scoped volume updates and visible percentage readout.
+- Removed cross-boot playhead persistence: per-song resume positions are now held in memory only for the current app session, while within-session restore still works.
+- Kept the end-of-track near-finish reset behavior intact while folding the session-only playhead behavior into the same playback path cleanup.
+- Verified the normal playback path remains raw/no-hidden-DSP:
+  - renderer playback still uses a plain `HTMLAudioElement` (no EQ chain / no normalization path / no `AudioContext` processing graph)
+  - direct-playable files still stream byte-for-byte through the custom media protocol
+  - AIFF compatibility fallback still uses ffmpeg only for container/codec preparation to WAV (`-c:a pcm_s16le`) with no loudness/EQ/filter flags
+  - new regression coverage compares decoded PCM from original AIFF vs prepared WAV to prove sample-equivalent preparation without added DSP
+- Fixed the old-folder leakage bug at the song-model layer so only songs anchored by a top-level export appear in the album list.
+- Old-only files no longer create album rows, and old-folder typo variants (for example `bend the knee` vs top-level `bend the knees`) no longer leak into the album list through this path.
+- Removed the repetitive per-row `Archived in old/` label from version history entries to reduce noise, while still keeping archived versions present in the history itself.
+- Added/updated regression coverage across domain + Electron Playwright tests for:
+  - inspector scrollability
+  - double-click playback
+  - volume slider placement/value updates
+  - within-session playhead restore but not across app restart
+  - raw playback / no-normalization AIFF preparation proof
+  - old-only tracks never appearing in the album list
+  - old typo variants not fuzzy-grouping into the main list
+  - version history still showing archived versions without the redundant repeated label
+- Manual verification artifact captured for the playback controls / volume slider placement:
+  - `artifacts/manual-verification/2026-03-10/playback-volume-slider-proof.png`
+
+#### Ethan message (verbatim) — message_id 3958
+
+**Timestamp:** Tue 2026-03-10 00:09 GMT
+
+```text
+In ten minutes, spawn a cron job that's try retranscribes the past 10 voice messages I sent and makes sure every single new request or change I've asked about producer player has been implemented. I want you to spawn a new sub agent to check after that that everything has been implemented. Don't don't be shy with the sub agents.
+```
+
+#### Ethan message (verbatim) — message_id 3963
+
+**Timestamp:** Tue 2026-03-10 00:13 GMT
+
+```text
+Also, thing, we don't need to say archived and old for every single version history. It'll always be archived and old.
+```

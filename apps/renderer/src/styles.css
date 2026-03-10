@@ -427,6 +427,26 @@ input[type='range'] {
   gap: 8px;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
+}
+
+.player-volume-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.player-volume-control input {
+  width: 120px;
+}
+
+.player-volume-control .muted {
+  margin: 0;
+  white-space: nowrap;
 }
 
 .player-scrubber-row {
@@ -437,6 +457,13 @@ input[type='range'] {
 }
 
 .panel-right {
+  overflow-y: hidden;
+}
+
+.panel-right-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding-bottom: 12px;
 }
 
@@ -472,10 +499,6 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.archived-label {
-  color: #f5cb8a;
 }
 
 .checkbox-row {

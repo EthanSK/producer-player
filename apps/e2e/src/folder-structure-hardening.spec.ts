@@ -98,6 +98,64 @@ test.describe('folder structure hardening', () => {
     }
   });
 
+  test('old-only tracks never leak into the album list, and old/ typos do not fuzzy-match a top-level song', async () => {
+    const directories = await createE2ETestDirectories('producer-player-e2e-old-only');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      {
+        relativePath: 'Bend the Knees v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        relativePath: 'old/Bend the Knees v1.wav',
+        modifiedAtMs: Date.parse('2025-12-01T00:00:00.000Z'),
+      },
+      {
+        relativePath: 'old/Bend the Knee v1.wav',
+        modifiedAtMs: Date.parse('2025-11-01T00:00:00.000Z'),
+      },
+      {
+        relativePath: 'old/Orphan Song v1.wav',
+        modifiedAtMs: Date.parse('2025-10-01T00:00:00.000Z'),
+      },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await setAutoOrganize(page, false);
+
+      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(page.getByTestId('main-list-row').filter({ hasText: 'Bend the Knees' })).toHaveCount(1);
+
+      const albumRows = await page.getByTestId('main-list-row').evaluateAll((elements) => {
+        return elements.map((element) => element.textContent ?? '');
+      });
+
+      expect(albumRows.some((text) => text.includes('Bend the Knee v1.wav'))).toBe(false);
+      expect(albumRows.some((text) => text.includes('Orphan Song'))).toBe(false);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Bend the Knees' }).first().click();
+      await expect(page.getByTestId('inspector-version-row')).toHaveCount(2);
+      await expect(page.getByTestId('inspector-version-row').filter({ hasText: 'Bend the Knees v1.wav' })).toHaveCount(1);
+      await expect(page.getByTestId('inspector-version-row').filter({ hasText: 'Bend the Knee v1.wav' })).toHaveCount(0);
+      await expect(page.getByTestId('inspector-version-row').filter({ hasText: 'Orphan Song v1.wav' })).toHaveCount(0);
+
+      await page.getByTestId('search-input').fill('bend the knee v1');
+      await expect(page.getByTestId('main-list-row')).toHaveCount(0);
+
+      await page.getByTestId('search-input').fill('bend the knees');
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(page.getByTestId('main-list-row').first()).toContainText('Bend the Knees');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('keeps custom order after organize/rescan and preserves it after unlink + relink via sidecar', async () => {
     const directories = await createE2ETestDirectories('producer-player-e2e-relink');
 

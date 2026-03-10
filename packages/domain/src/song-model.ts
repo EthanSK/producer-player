@@ -77,6 +77,10 @@ function titleFromNormalized(normalized: string): string {
     .join(' ');
 }
 
+function isArchivedFilePath(filePath: string): boolean {
+  return /(?:^|[\\/])old(?:[\\/]|$)/i.test(filePath);
+}
+
 export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions[] {
   const songMap = new Map<
     string,
@@ -86,16 +90,15 @@ export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions
     }
   >();
 
-  for (const file of files) {
+  function addFileAsVersion(file: ScannedAudioFile, options: { allowSongCreation: boolean }): void {
     const extension = getAudioExtension(file.filePath);
     if (!extension) {
-      continue;
+      return;
     }
 
     const fileName = path.basename(file.filePath);
     const stem = path.basename(file.filePath, path.extname(file.filePath));
     const normalizedTitle = normalizeSongStem(stem);
-
     const songId = stableId(file.folderId, normalizedTitle);
     const versionId = stableId(
       file.filePath,
@@ -104,6 +107,10 @@ export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions
     );
 
     const entry = songMap.get(songId);
+
+    if (!entry && !options.allowSongCreation) {
+      return;
+    }
 
     const version: SongVersion = {
       id: versionId,
@@ -130,10 +137,26 @@ export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions
         },
         versions: [version],
       });
-      continue;
+      return;
     }
 
     entry.versions.push(version);
+  }
+
+  for (const file of files) {
+    if (isArchivedFilePath(file.filePath)) {
+      continue;
+    }
+
+    addFileAsVersion(file, { allowSongCreation: true });
+  }
+
+  for (const file of files) {
+    if (!isArchivedFilePath(file.filePath)) {
+      continue;
+    }
+
+    addFileAsVersion(file, { allowSongCreation: false });
   }
 
   const songs: SongWithVersions[] = [];

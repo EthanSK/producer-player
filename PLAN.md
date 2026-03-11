@@ -1740,3 +1740,56 @@ Dropped/replaced from partial state:
 - True one-click audition transport A/B (jump to ref and back with synced playhead/loop compare).
 - Detached/new-window analysis surface (overlay currently remains in-window).
 - More mastering-grade timeline/meters beyond current measured snapshot + estimated live overlays.
+
+---
+
+## Platform normalization preview verification pass (Wed 2026-03-11, sub-agent)
+
+### Scope executed
+
+- Verified the shipped **Spotify / Apple Music / YouTube / Tidal normalization preview** behavior in this isolated worktree.
+- Treated this as a concrete verification/debug pass (implementation wiring + pragmatic runtime check), not a summary pass.
+
+### What is wired today (code inspection)
+
+- Platform profiles + policies are implemented in `apps/renderer/src/platformNormalization.ts`:
+  - Spotify: target `-14 LUFS`, peak-limited upward
+  - Apple Music: target `-16 LUFS`, peak-limited upward
+  - YouTube: target `-14 LUFS`, down-only
+  - Tidal: target `-14 LUFS`, down-only
+- Preview math path:
+  - `computePlatformNormalizationPreview()` computes `rawGainDb`, `appliedGainDb`, projected LUFS, headroom cap, and explanatory text.
+- Renderer wiring in `apps/renderer/src/App.tsx`:
+  - Selected platform state + preview on/off state are persisted in React state.
+  - UI renders platform buttons, summary line, applied change card, projected LUFS card, and peak/boost-cap card.
+  - Playback path uses `appliedNormalizationGainDb` and routes it into `applyPlaybackGain(volume, appliedNormalizationGainDb)`.
+  - Preview off explicitly bypasses platform gain by forcing applied normalization gain to `0 dB`.
+
+### Pragmatic validation run
+
+- Dependency bootstrap for this fresh worktree:
+  - `npm install` ✅
+- Build validation:
+  - `npm run build` ✅
+- Targeted e2e validation:
+  - `npm run test -w @producer-player/e2e -- src/playback-runtime.spec.ts -g "platform normalization preview controls and captures proof screenshot"` ✅
+  - Result: `1 passed`
+- Proof artifact confirmed:
+  - `artifacts/manual-verification/2026-03-10/normalization-preview-proof.png`
+
+### Verification outcomes
+
+- Platform buttons are present and selectable for all four targets.
+- Preview on/off behavior is functional and reflected in the summary copy.
+- dB delta/readout is present and differs by platform selection (Spotify vs YouTube in test flow).
+- Projected LUFS readout is present.
+- Peak/headroom cap information is present in the compact pane.
+- Playback gain application path is wired end-to-end:
+  - selected platform preview gain feeds the runtime playback gain function,
+  - disabling preview bypasses that gain path (`0 dB` applied).
+
+### Issues found / fixes applied
+
+- No blocking regression found in the shipped normalization preview path during this pass.
+- No code-level fix was required for this scope.
+

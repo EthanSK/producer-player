@@ -1514,6 +1514,92 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
+  test('previous restarts current track first, then goes to previous track on the next press', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-previous-track-behavior-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-previous-track-behavior-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=300:duration=8',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Back Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=520:duration=8',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Back Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    const readScrubberValue = async (): Promise<number> => {
+      return Number.parseFloat(await page.getByTestId('player-scrubber').inputValue());
+    };
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const firstTrackName =
+        ((await page.getByTestId('main-list-row').nth(0).locator('strong').textContent()) ?? '').trim();
+      const secondTrackName =
+        ((await page.getByTestId('main-list-row').nth(1).locator('strong').textContent()) ?? '').trim();
+
+      await page.getByTestId('main-list-row').nth(1).click();
+      await expect(page.getByTestId('player-track-name')).toContainText(secondTrackName);
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await expect
+        .poll(
+          async () =>
+            Number.parseFloat((await page.getByTestId('player-scrubber').getAttribute('max')) ?? '0')
+        )
+        .toBeGreaterThan(7);
+
+      await expect.poll(readScrubberValue, { timeout: 12_000 }).toBeGreaterThan(2.3);
+
+      await page.getByTestId('player-prev').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(secondTrackName);
+      await expect.poll(readScrubberValue).toBeLessThan(0.25);
+
+      await page.getByTestId('player-prev').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await expect.poll(readScrubberValue, { timeout: 8_000 }).toBeGreaterThan(1);
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+
+      await page.getByTestId('player-prev').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
+      await expect.poll(readScrubberValue).toBeLessThan(0.25);
+
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('responds to main-process transport command events (media-key command path)', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-transport-events-fixture-')
@@ -1568,6 +1654,17 @@ test.describe('playback runtime deep dive', () => {
       });
 
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('player-scrubber').evaluate((element) => {
+        const scrubber = element as HTMLInputElement;
+        scrubber.value = '0.4';
+        scrubber.dispatchEvent(new Event('input', { bubbles: true }));
+        scrubber.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      await expect
+        .poll(async () => Number.parseFloat(await page.getByTestId('player-scrubber').inputValue()))
+        .toBeLessThan(1);
 
       await electronApp.evaluate(({ BrowserWindow }) => {
         const window = BrowserWindow.getAllWindows()[0];

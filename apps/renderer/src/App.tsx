@@ -75,6 +75,7 @@ const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
 const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
+const PREVIOUS_TRACK_RESTART_THRESHOLD_SECONDS = 2;
 const DEFAULT_PLAYBACK_VOLUME = 1;
 
 function PlatformIcon({ platformId }: { platformId: NormalizationPlatformId }): JSX.Element {
@@ -1853,10 +1854,35 @@ export function App(): JSX.Element {
   }
 
   function handlePreviousTrack(): void {
-    void moveInQueueRef.current(-1, {
+    const audio = audioRef.current;
+    const currentTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+
+    if (currentTime > PREVIOUS_TRACK_RESTART_THRESHOLD_SECONDS) {
+      handleSeek(0);
+      logPlaybackEvent('transport-previous-restart-current-track', {
+        currentTimeSeconds: currentTime,
+      });
+      return;
+    }
+
+    const movedToPrevious = moveInQueueRef.current(-1, {
       wrap: repeatMode === 'all',
       autoplay: shouldAutoplayOnTransport(),
     });
+
+    if (movedToPrevious) {
+      logPlaybackEvent('transport-previous-move-queue', {
+        currentTimeSeconds: currentTime,
+      });
+      return;
+    }
+
+    if (audio && currentTime > 0.01) {
+      handleSeek(0);
+      logPlaybackEvent('transport-previous-restart-fallback', {
+        currentTimeSeconds: currentTime,
+      });
+    }
   }
 
   function handleNextTrack(): void {
@@ -2711,7 +2737,7 @@ export function App(): JSX.Element {
                 type="button"
                 data-testid="player-prev"
                 onClick={handlePreviousTrack}
-                title="Jump to previous track in the current queue."
+                title="Restart current track when past 0:02; otherwise go to previous track."
               >
                 ◀◀
               </button>

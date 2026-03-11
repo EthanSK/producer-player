@@ -1740,3 +1740,169 @@ Dropped/replaced from partial state:
 - True one-click audition transport A/B (jump to ref and back with synced playhead/loop compare).
 - Detached/new-window analysis surface (overlay currently remains in-window).
 - More mastering-grade timeline/meters beyond current measured snapshot + estimated live overlays.
+
+---
+
+## Song-row title/metadata separation pass (Wed 2026-03-11)
+
+### Ethan message (verbatim intent)
+
+**Timestamp:** Wed 2026-03-11 00:57 GMT
+
+```text
+Also in another sub agent, move the list title of each song. Move the version and the file format to the other side. It shouldn't be part of the title itself. Maybe in, like, a different font as well to show that it's been passed.
+```
+
+### Shipped UI change
+
+- Main track-list rows now render the **primary title as song title only** (`song.title`), rather than active filename.
+- Added right-side metadata treatment for the active version:
+  - `vN · FORMAT` (for example `v2 · WAV`) when a trailing version tag exists
+  - `FORMAT` (for example `MP3`) when no version tag is present
+- Metadata is now intentionally secondary and visually distinct:
+  - compact monospace badge
+  - uppercase/letter-spacing treatment
+  - softer color + bordered pill background
+  - right-aligned opposite the title block
+- Existing secondary row behavior is preserved:
+  - normal mode still shows version-count context
+  - search mode still shows matched-version filenames
+
+### Supporting test updates
+
+- Updated e2e assertions that previously expected raw filenames in list-row titles.
+- Added metadata-pill assertions via `data-testid="main-list-row-metadata"` in the linked-folder switching flow.
+- Updated advanced break-test expectations to align with title-only row rendering and metadata separation.
+
+### Validation run (pragmatic)
+
+- `npm install` ✅
+- `npm run build:packages` ✅
+- `npm run typecheck -w @producer-player/renderer` ✅
+- `npm run typecheck -w @producer-player/e2e` ✅
+- `npm run build -w @producer-player/renderer` ✅
+- `npm run test -w @producer-player/domain` ✅ (6/6 passing)
+- Attempted targeted Playwright checks for updated row behavior, but those runs timed out in this worktree during e2e execution window (no crash/regression surfaced in renderer/domain validation).
+
+## Previous/back transport behavior update (Wed 2026-03-11)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Wed 2026-03-11 01:32 GMT
+
+```text
+By the way, had another feature. When I'm playing a song, the back button should go to the beginning of the song on the first click and then the previous song, etcetera, on the next click. I think that's how most media players do it.
+```
+
+### Assistant implementation summary (this run)
+
+- Updated transport previous/back behavior in the renderer so it now follows common media-player expectations:
+  - If current playhead is past **0:02**, pressing previous restarts the current track at `0:00`.
+  - If current playhead is at/near the start (≤0:02), pressing previous goes to the previous track in the current queue.
+- Added sensible edge-case fallback:
+  - If there is no previous track available (for example first track with repeat-all off), pressing previous rewinds the current track to `0:00` instead of doing a confusing no-op.
+  - Paused playback path is handled consistently via the same logic.
+- Updated previous-button tooltip copy to match the real behavior so UX stays unsurprising.
+- Added playback logging events for previous/restart branches to aid debugging.
+
+### Validation (pragmatic)
+
+- `npm run build` ✅
+- `npm run typecheck` ✅
+- `npm run test -w @producer-player/e2e -- src/playback-runtime.spec.ts -g "previous restarts current track first, then goes to previous track on the next press"` ✅ (1/1)
+- `npm run test -w @producer-player/e2e -- src/playback-runtime.spec.ts -g "responds to main-process transport command events"` ✅ (1/1)
+
+### Files changed in this run
+
+- `apps/renderer/src/App.tsx`
+- `apps/e2e/src/playback-runtime.spec.ts`
+- `PLAN.md`
+
+## Two-hour catch-up / salvage checklist pass (Wed 2026-03-11)
+
+### Ethan catch-up instruction (verbatim)
+
+```text
+Also, have you are you all the server agents running now? Why haven't you pushed anything? I want want the six hours to check. It'll just be a backup in case it didn't run now. I want everything I said to run, especially go back and check the things that failed, make sure every single thing is implemented, build a list of every single virtual thing I said for the past, like, two hours.
+```
+
+### Salvage audit completed
+
+Reviewed and salvaged from the already-started branches/worktrees instead of redoing blindly:
+
+- `origin/main` / local history for the shipped normalization + mastering baseline (`e07be4b9090cafeb72f5324cfe6f99b81ae0d161`).
+- Cherry-picked song-row metadata separation from `c17533676a7c9e268a63b5482d3de9c4940b5f0f`.
+- Cherry-picked previous/back behavior from `3e7864e8f9224f91183e5b5457317649983f2257`.
+- Manually salvaged support/feedback wiring + GitHub issue templates from `producer-player-support-links-20260311-003507`.
+- Re-audited earlier album-duration / rating-slider / mastering-retry worktrees and did **not** trust bogus no-op dumps; implemented the still-missing work directly here.
+
+### Checklist status (last ~2 hours of Producer Player asks)
+
+1. **Mastering/reference quick A/B toggle between mix and reference** — **IMPLEMENTED**
+   - Added Mix / Reference quick audition buttons in the bottom-left mastering panel and in the expanded mastering view.
+   - External reference files and linked-track references both switch the player source without losing the selected mix track context.
+
+2. **Mastering/reference panel stays bottom-left, roughly bottom-third, scrollable; do NOT move it right** — **IMPLEMENTED**
+   - Kept the panel in the left column.
+   - Made it scrollable with a bounded bottom-left height instead of letting it jump or force a right-side move.
+
+3. **Folder-info / Add Folder subsection grouping; related file-name control in same subsection; divider underneath** — **IMPLEMENTED**
+   - Grouped Add Folder, path-link input, and filename guidance into one folder-tools section.
+   - Added a divider beneath that grouped subsection before status/folder content.
+
+4. **Remove visible “Phase 2” / dev / prototype copy; simplify jargon-heavy labels** — **IMPLEMENTED**
+   - Removed public-facing Phase 1/2 scaffolding language from mastering UI.
+   - Reworded labels/copy such as `LRA` → `Dynamics range`, `Live short-term` → `Current loudness`, and related comparison labels.
+
+5. **Investigate custom VST/AU monitoring-chain support** — **DEFERRED (honest blocker)**
+   - Current playback path is Electron + HTML audio + lightweight gain staging.
+   - Real VST/AU monitoring-chain support would require a native plugin-host/render graph (or a dedicated audio engine bridge) that can instantiate and safely run third-party plugins in real time.
+   - That is larger architecture work, not a truthful quick patch, so it is deferred rather than faked.
+
+6. **Add bottom-right Support & Feedback links under inspector + GitHub issue templates** — **IMPLEMENTED**
+   - Added Support & Feedback card under the inspector.
+   - Added GitHub bug-report and feature-request issue templates.
+   - Added trusted external-link IPC so the desktop app opens only Producer Player GitHub URLs.
+
+7. **Verify/fix platform normalization preview and ensure default is OFF** — **IMPLEMENTED**
+   - Re-verified Spotify / Apple Music / YouTube / Tidal preview controls.
+   - Preview now defaults to OFF and must be intentionally enabled.
+
+8. **Song rows: title only on main side; version + format metadata opposite side, styled secondary** — **IMPLEMENTED**
+   - Salvaged and kept the song-row metadata separation work.
+
+9. **Album header: show total album duration in minutes/seconds** — **IMPLEMENTED**
+   - Added album-duration summary to the header.
+   - Duration resolves from known metadata when available and otherwise probes active track sources so the header still fills in for real folders.
+
+10. **Previous/back button behavior: first click restarts current song, next click goes previous** — **IMPLEMENTED**
+    - Salvaged and kept the transport behavior fix.
+
+11. **Song-row rating slider: 1–10, snapped/discrete, compact, persisted if feasible** — **IMPLEMENTED**
+    - Added a compact discrete 1–10 row slider.
+    - Ratings persist in renderer local storage and survive relaunch in the same app profile.
+
+### Files touched in this catch-up pass
+
+- `apps/renderer/src/App.tsx`
+- `apps/renderer/src/styles.css`
+- `apps/electron/src/main.ts`
+- `apps/electron/src/preload.ts`
+- `packages/contracts/src/index.ts`
+- `apps/e2e/src/playback-runtime.spec.ts`
+- `.github/ISSUE_TEMPLATE/bug_report.yml`
+- `.github/ISSUE_TEMPLATE/feature_request.yml`
+- `PLAN.md`
+
+### Validation for this catch-up pass
+
+- `npm install` ✅
+- `npm run build -w @producer-player/contracts` ✅
+- `npm run typecheck -w @producer-player/domain` ✅
+- `npm run typecheck -w @producer-player/renderer` ✅
+- `npm run build -w @producer-player/domain` ✅
+- `npm run typecheck -w @producer-player/electron` ✅
+- `npm run typecheck -w @producer-player/e2e` ✅
+- `npm run build` ✅
+- `npm run test -w @producer-player/e2e -- src/playback-runtime.spec.ts -g "mastering analysis|platform normalization preview controls|previous restarts current track first|album duration, support links, and persists song-row ratings"` ✅ (4/4 passed)
+

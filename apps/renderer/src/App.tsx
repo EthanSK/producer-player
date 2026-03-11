@@ -75,7 +75,13 @@ const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
 const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
+const PREVIOUS_TRACK_RESTART_THRESHOLD_SECONDS = 2;
 const DEFAULT_PLAYBACK_VOLUME = 1;
+const DEFAULT_SONG_RATING = 5;
+const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
+const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
+const BUG_REPORT_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=bug_report.yml`;
+const FEATURE_REQUEST_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=feature_request.yml`;
 
 function PlatformIcon({ platformId }: { platformId: NormalizationPlatformId }): JSX.Element {
   switch (platformId) {
@@ -312,6 +318,107 @@ function getSongDisplayFileName(song: SongWithVersions): string {
   return getActiveSongVersion(song)?.fileName ?? song.title;
 }
 
+function getVersionTagFromFileName(fileName: string): string | null {
+  const stem = fileName.replace(/\.[^.]+$/, '');
+  const match = stem.match(/(?:^|[\s_-])(v\d+)(?:[\s_-]*archived[\s_-]*\d+)?$/i);
+  if (!match) {
+    return null;
+  }
+
+  const versionTag = (match[1] ?? '').trim();
+  return versionTag ? versionTag.toLowerCase() : null;
+}
+
+function getSongRowMetadataLabel(song: SongWithVersions): string {
+  const activeVersion = getActiveSongVersion(song);
+  if (!activeVersion) {
+    return '—';
+  }
+
+  const versionTag = getVersionTagFromFileName(activeVersion.fileName);
+  const formatTag = activeVersion.extension.toUpperCase();
+
+  if (versionTag) {
+    return `${versionTag} · ${formatTag}`;
+  }
+
+  return formatTag;
+}
+
+function readStoredSongRatings(): Record<string, number> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SONG_RATINGS_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const entries = Object.entries(parsed).filter(
+      ([songId, rating]) =>
+        songId.length > 0 &&
+        typeof rating === 'number' &&
+        Number.isFinite(rating) &&
+        rating >= 1 &&
+        rating <= 10
+    );
+
+    return Object.fromEntries(entries) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+function persistSongRatings(ratings: Record<string, number>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(SONG_RATINGS_STORAGE_KEY, JSON.stringify(ratings));
+}
+
+function formatAlbumDuration(totalSeconds: number | null): string {
+  if (totalSeconds === null || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+    return 'Album length unavailable';
+  }
+
+  const roundedSeconds = Math.max(0, Math.round(totalSeconds));
+  const minutes = Math.floor(roundedSeconds / 60);
+  const seconds = roundedSeconds % 60;
+  return `Album length ${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getDurationSecondsFromVersion(version: SongVersion, resolvedSeconds?: number): number | null {
+  if (typeof resolvedSeconds === 'number' && Number.isFinite(resolvedSeconds) && resolvedSeconds > 0) {
+    return resolvedSeconds;
+  }
+
+  if (typeof version.durationMs === 'number' && Number.isFinite(version.durationMs) && version.durationMs > 0) {
+    return version.durationMs / 1000;
+  }
+
+  return null;
+}
+
+function getReferencePlaybackKey(referenceTrack: LoadedReferenceTrack | null): string | null {
+  if (!referenceTrack) {
+    return null;
+  }
+
+  return `reference:${referenceTrack.filePath}`;
+}
+
+function getNormalizedSliderRating(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_SONG_RATING;
+  }
+
+  return Math.max(1, Math.min(10, Math.round(value)));
+}
+
 function getPlayheadEndResetThresholdSeconds(durationSeconds: number | undefined): number {
   if (
     !Number.isFinite(durationSeconds) ||
@@ -383,6 +490,8 @@ export function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [playbackSource, setPlaybackSource] = useState<PlaybackSourceInfo | null>(null);
+  const [mixPlaybackSource, setMixPlaybackSource] = useState<PlaybackSourceInfo | null>(null);
+  const [playbackPreviewMode, setPlaybackPreviewMode] = useState<'mix' | 'reference'>('mix');
   const [playbackSourceSupport, setPlaybackSourceSupport] = useState<'unknown' | 'maybe' | 'probably' | 'no'>(
     'unknown'
   );
@@ -391,6 +500,10 @@ export function App(): JSX.Element {
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [playbackSourceReady, setPlaybackSourceReady] = useState(false);
   const [volume, setVolume] = useState(DEFAULT_PLAYBACK_VOLUME);
+  const [songRatings, setSongRatings] = useState<Record<string, number>>(() => readStoredSongRatings());
+  const [resolvedAlbumDurationSecondsByVersionId, setResolvedAlbumDurationSecondsByVersionId] = useState<
+    Record<string, number>
+  >({});
   const [analysis, setAnalysis] = useState<TrackAnalysisResult | null>(null);
   const [measuredAnalysis, setMeasuredAnalysis] = useState<AudioFileAnalysis | null>(null);
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
@@ -405,7 +518,7 @@ export function App(): JSX.Element {
   const [referenceError, setReferenceError] = useState<string | null>(null);
   const [selectedNormalizationPlatformId, setSelectedNormalizationPlatformId] =
     useState<NormalizationPlatformId>('spotify');
-  const [normalizationPreviewEnabled, setNormalizationPreviewEnabled] = useState(true);
+  const [normalizationPreviewEnabled, setNormalizationPreviewEnabled] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
@@ -482,7 +595,7 @@ export function App(): JSX.Element {
       snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
     const analysisFilePath = selectedVersion?.filePath ?? null;
 
-    if (!selectedPlaybackVersionId || !playbackSource?.url || !analysisFilePath) {
+    if (!selectedPlaybackVersionId || !mixPlaybackSource?.url || !analysisFilePath) {
       setAnalysis(null);
       setMeasuredAnalysis(null);
       setAnalysisStatus('idle');
@@ -499,7 +612,7 @@ export function App(): JSX.Element {
     setAnalysisError(null);
 
     void Promise.all([
-      analyzeTrackFromUrl(playbackSource.url, controller.signal),
+      analyzeTrackFromUrl(mixPlaybackSource.url, controller.signal),
       window.producerPlayer.analyzeAudioFile(analysisFilePath),
     ])
       .then(([previewResult, measuredResult]) => {
@@ -537,7 +650,7 @@ export function App(): JSX.Element {
       cancelled = true;
       controller.abort();
     };
-  }, [playbackSource?.url, selectedPlaybackVersionId, snapshot.versions]);
+  }, [mixPlaybackSource?.url, selectedPlaybackVersionId, snapshot.versions]);
 
   useEffect(() => {
     if (!analysisExpanded) {
@@ -555,6 +668,16 @@ export function App(): JSX.Element {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [analysisExpanded]);
+
+  useEffect(() => {
+    persistSongRatings(songRatings);
+  }, [songRatings]);
+
+  useEffect(() => {
+    if (!referenceTrack && playbackPreviewMode === 'reference') {
+      setPlaybackPreviewMode('mix');
+    }
+  }, [playbackPreviewMode, referenceTrack]);
 
   function rememberSongPlayhead(
     songId: string | null,
@@ -1061,6 +1184,25 @@ export function App(): JSX.Element {
     snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
   const selectedPlaybackFilePath = selectedPlaybackVersion?.filePath ?? null;
   const selectedPlaybackSongId = selectedPlaybackVersion?.songId ?? null;
+  const referencePlaybackKey = getReferencePlaybackKey(referenceTrack);
+  const activePlaybackKey =
+    playbackPreviewMode === 'reference' && referenceTrack && referencePlaybackKey
+      ? referencePlaybackKey
+      : selectedPlaybackSongId;
+  const activePlaybackFilePath =
+    playbackPreviewMode === 'reference' && referenceTrack
+      ? referenceTrack.filePath
+      : selectedPlaybackFilePath;
+  const activePlaybackLabel =
+    playbackPreviewMode === 'reference' && referenceTrack
+      ? {
+          fileName: referenceTrack.fileName,
+          subtitle: `${referenceTrack.subtitle} · reference`,
+        }
+      : {
+          fileName: selectedPlaybackVersion?.fileName ?? 'Selected track',
+          subtitle: selectedSong?.title ?? 'Selected track',
+        };
   const shortTermLufsEstimate = analysis
     ? estimateShortTermLufs(analysis, currentTimeSeconds)
     : null;
@@ -1123,47 +1265,14 @@ export function App(): JSX.Element {
   }
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) {
+    if (!selectedPlaybackVersionId || !selectedPlaybackFilePath) {
+      setMixPlaybackSource(null);
       return;
     }
-
-    rememberSongPlayhead(lastLoadedSongIdRef.current, audio.currentTime, {
-      durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
-    });
 
     let cancelled = false;
     const requestId = sourceRequestIdRef.current + 1;
     sourceRequestIdRef.current = requestId;
-
-    clearPlaybackLoadTimeout();
-    setPlaybackError(null);
-    setCurrentTimeSeconds(0);
-    setDurationSeconds(0);
-    setPlaybackSourceReady(false);
-    setPlaybackSourceSupport('unknown');
-
-    if (!selectedPlaybackVersionId || !selectedPlaybackFilePath || !selectedPlaybackSongId) {
-      pendingRestoreTimeRef.current = null;
-      lastLoadedSongIdRef.current = null;
-      playOnNextLoadRef.current = false;
-      setPlaybackSource(null);
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
-      logPlaybackEvent('source-cleared', {
-        reason: 'no-selected-version',
-      });
-      return;
-    }
-
-    const rememberedPosition =
-      playbackPositionBySongIdRef.current.get(selectedPlaybackSongId) ?? null;
-
-    pendingRestoreTimeRef.current =
-      rememberedPosition !== null && Number.isFinite(rememberedPosition) && rememberedPosition > 0
-        ? rememberedPosition
-        : null;
 
     window.producerPlayer
       .resolvePlaybackSource(selectedPlaybackFilePath)
@@ -1172,47 +1281,7 @@ export function App(): JSX.Element {
           return;
         }
 
-        setPlaybackSource(source);
-
-        if (!source.exists) {
-          const message = buildMissingFileMessage(source.filePath);
-          setPlaybackError(message);
-          logPlaybackEvent('source-missing', {
-            message,
-          });
-          return;
-        }
-
-        if (!audio.paused) {
-          playOnNextLoadRef.current = true;
-        }
-
-        audio.pause();
-        lastLoadedSongIdRef.current = selectedPlaybackSongId;
-        audio.removeAttribute('src');
-        audio.src = source.url;
-
-        const supportHintRaw = source.mimeType
-          ? audio.canPlayType(source.mimeType)
-          : '';
-
-        const supportHint =
-          supportHintRaw === 'probably' || supportHintRaw === 'maybe'
-            ? supportHintRaw
-            : 'no';
-
-        setPlaybackSourceSupport(supportHint);
-
-        logPlaybackEvent('source-selected', {
-          requestId,
-          filePath: source.filePath,
-          url: source.url,
-          mimeType: source.mimeType,
-          supportHint,
-          pendingRestoreTimeSeconds: pendingRestoreTimeRef.current,
-        });
-
-        audio.load();
+        setMixPlaybackSource(source);
       })
       .catch((cause: unknown) => {
         if (cancelled || requestId !== sourceRequestIdRef.current) {
@@ -1221,7 +1290,7 @@ export function App(): JSX.Element {
 
         const message = cause instanceof Error ? cause.message : String(cause);
         setPlaybackError(message);
-        setPlaybackSource(null);
+        setMixPlaybackSource(null);
         logPlaybackEvent('source-resolve-failed', {
           requestId,
           message,
@@ -1231,7 +1300,96 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [selectedPlaybackFilePath, selectedPlaybackSongId, selectedPlaybackVersionId]);
+  }, [selectedPlaybackFilePath, selectedPlaybackVersionId]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    rememberSongPlayhead(lastLoadedSongIdRef.current, audio.currentTime, {
+      durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
+    });
+
+    const activeSource =
+      playbackPreviewMode === 'reference' ? referenceTrack?.playbackSource ?? null : mixPlaybackSource;
+    const activeSourceKey =
+      playbackPreviewMode === 'reference' ? referencePlaybackKey : selectedPlaybackSongId;
+    const clearReason =
+      playbackPreviewMode === 'reference' ? 'no-reference-preview' : 'no-selected-version';
+
+    clearPlaybackLoadTimeout();
+    setPlaybackError(null);
+    setCurrentTimeSeconds(0);
+    setDurationSeconds(0);
+    setPlaybackSourceReady(false);
+    setPlaybackSourceSupport('unknown');
+
+    if (!activeSource || !activeSourceKey || !activePlaybackFilePath) {
+      pendingRestoreTimeRef.current = null;
+      lastLoadedSongIdRef.current = null;
+      playOnNextLoadRef.current = false;
+      setPlaybackSource(null);
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      logPlaybackEvent('source-cleared', {
+        reason: clearReason,
+      });
+      return;
+    }
+
+    const rememberedPosition = playbackPositionBySongIdRef.current.get(activeSourceKey) ?? null;
+    pendingRestoreTimeRef.current =
+      rememberedPosition !== null && Number.isFinite(rememberedPosition) && rememberedPosition > 0
+        ? rememberedPosition
+        : null;
+
+    setPlaybackSource(activeSource);
+
+    if (!activeSource.exists) {
+      const message = buildMissingFileMessage(activeSource.filePath);
+      setPlaybackError(message);
+      logPlaybackEvent('source-missing', {
+        message,
+      });
+      return;
+    }
+
+    if (!audio.paused) {
+      playOnNextLoadRef.current = true;
+    }
+
+    audio.pause();
+    lastLoadedSongIdRef.current = activeSourceKey;
+    audio.removeAttribute('src');
+    audio.src = activeSource.url;
+
+    const supportHintRaw = activeSource.mimeType ? audio.canPlayType(activeSource.mimeType) : '';
+    const supportHint =
+      supportHintRaw === 'probably' || supportHintRaw === 'maybe' ? supportHintRaw : 'no';
+
+    setPlaybackSourceSupport(supportHint);
+
+    logPlaybackEvent('source-selected', {
+      mode: playbackPreviewMode,
+      filePath: activeSource.filePath,
+      url: activeSource.url,
+      mimeType: activeSource.mimeType,
+      supportHint,
+      pendingRestoreTimeSeconds: pendingRestoreTimeRef.current,
+    });
+
+    audio.load();
+  }, [
+    activePlaybackFilePath,
+    mixPlaybackSource,
+    playbackPreviewMode,
+    referencePlaybackKey,
+    referenceTrack,
+    selectedPlaybackSongId,
+  ]);
 
   const isSearching = searchText.trim().length > 0;
   const canReorderSongs = !isSearching;
@@ -1256,6 +1414,113 @@ export function App(): JSX.Element {
 
     return queue;
   }, [songs]);
+
+  useEffect(() => {
+    const versionsNeedingDuration = playbackQueue.filter(
+      (version) => getDurationSecondsFromVersion(version, resolvedAlbumDurationSecondsByVersionId[version.id]) === null
+    );
+
+    if (versionsNeedingDuration.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const probeDurationFromUrl = (url: string): Promise<number | null> => {
+      return new Promise((resolve) => {
+        const probe = new Audio();
+        probe.preload = 'metadata';
+
+        const cleanup = () => {
+          probe.pause();
+          probe.removeAttribute('src');
+          probe.load();
+        };
+
+        probe.addEventListener(
+          'loadedmetadata',
+          () => {
+            const nextDuration = Number.isFinite(probe.duration) && probe.duration > 0 ? probe.duration : null;
+            cleanup();
+            resolve(nextDuration);
+          },
+          { once: true }
+        );
+
+        probe.addEventListener(
+          'error',
+          () => {
+            cleanup();
+            resolve(null);
+          },
+          { once: true }
+        );
+
+        probe.src = url;
+        probe.load();
+      });
+    };
+
+    void (async () => {
+      const resolvedEntries: Array<[string, number]> = [];
+
+      for (const version of versionsNeedingDuration) {
+        try {
+          const source = await window.producerPlayer.resolvePlaybackSource(version.filePath);
+          const resolvedSeconds = await probeDurationFromUrl(source.url);
+
+          if (cancelled || resolvedSeconds === null) {
+            continue;
+          }
+
+          resolvedEntries.push([version.id, resolvedSeconds]);
+        } catch {
+          continue;
+        }
+      }
+
+      if (cancelled || resolvedEntries.length === 0) {
+        return;
+      }
+
+      setResolvedAlbumDurationSecondsByVersionId((current) => {
+        const next = { ...current };
+        for (const [versionId, seconds] of resolvedEntries) {
+          next[versionId] = seconds;
+        }
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [playbackQueue, resolvedAlbumDurationSecondsByVersionId]);
+
+  const albumDurationSeconds = useMemo(() => {
+    let totalSeconds = 0;
+    let resolvedCount = 0;
+
+    for (const version of playbackQueue) {
+      const durationSeconds = getDurationSecondsFromVersion(
+        version,
+        resolvedAlbumDurationSecondsByVersionId[version.id]
+      );
+
+      if (durationSeconds === null) {
+        continue;
+      }
+
+      totalSeconds += durationSeconds;
+      resolvedCount += 1;
+    }
+
+    if (playbackQueue.length === 0 || resolvedCount === 0) {
+      return null;
+    }
+
+    return totalSeconds;
+  }, [playbackQueue, resolvedAlbumDurationSecondsByVersionId]);
 
   const currentQueueIndex = useMemo(() => {
     if (!selectedPlaybackVersionId) {
@@ -1853,10 +2118,35 @@ export function App(): JSX.Element {
   }
 
   function handlePreviousTrack(): void {
-    void moveInQueueRef.current(-1, {
+    const audio = audioRef.current;
+    const currentTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+
+    if (currentTime > PREVIOUS_TRACK_RESTART_THRESHOLD_SECONDS) {
+      handleSeek(0);
+      logPlaybackEvent('transport-previous-restart-current-track', {
+        currentTimeSeconds: currentTime,
+      });
+      return;
+    }
+
+    const movedToPrevious = moveInQueueRef.current(-1, {
       wrap: repeatMode === 'all',
       autoplay: shouldAutoplayOnTransport(),
     });
+
+    if (movedToPrevious) {
+      logPlaybackEvent('transport-previous-move-queue', {
+        currentTimeSeconds: currentTime,
+      });
+      return;
+    }
+
+    if (audio && currentTime > 0.01) {
+      handleSeek(0);
+      logPlaybackEvent('transport-previous-restart-fallback', {
+        currentTimeSeconds: currentTime,
+      });
+    }
   }
 
   function handleNextTrack(): void {
@@ -1924,17 +2214,22 @@ export function App(): JSX.Element {
   }
 
   async function handleUseCurrentTrackAsReference(): Promise<void> {
-    if (!analysis || !measuredAnalysis || !selectedPlaybackVersion || !playbackSource) {
+    if (!analysis || !measuredAnalysis || !selectedPlaybackVersion) {
       return;
     }
+
+    const currentTrackPlaybackSource =
+      mixPlaybackSource && mixPlaybackSource.filePath === selectedPlaybackVersion.filePath
+        ? mixPlaybackSource
+        : await window.producerPlayer.resolvePlaybackSource(selectedPlaybackVersion.filePath);
 
     await loadReferenceTrack(
       'linked-track',
       {
         filePath: selectedPlaybackVersion.filePath,
         fileName: selectedPlaybackVersion.fileName,
-        subtitle: selectedSong ? getSongDisplayFileName(selectedSong) : 'Linked track',
-        playbackSource,
+        subtitle: selectedSong ? selectedSong.title : 'Linked track',
+        playbackSource: currentTrackPlaybackSource,
       },
       {
         previewAnalysis: analysis,
@@ -1964,6 +2259,27 @@ export function App(): JSX.Element {
     setReferenceTrack(null);
     setReferenceStatus('idle');
     setReferenceError(null);
+  }
+
+  function handleReferencePreviewModeChange(nextMode: 'mix' | 'reference'): void {
+    if (nextMode === 'reference' && !referenceTrack) {
+      return;
+    }
+
+    setPlaybackPreviewMode(nextMode);
+  }
+
+  function handleOpenSupportLink(url: string): void {
+    void runVoidTask(() => window.producerPlayer.openExternalUrl(url));
+  }
+
+  function handleSongRatingChange(songId: string, nextRatingValue: number): void {
+    const nextRating = getNormalizedSliderRating(nextRatingValue);
+
+    setSongRatings((current) => ({
+      ...current,
+      [songId]: nextRating,
+    }));
   }
 
   const measuredIntegratedText = buildAnalysisValue(
@@ -2095,67 +2411,73 @@ export function App(): JSX.Element {
   return (
     <div className="app-shell" data-testid="app-shell">
       <aside className="panel panel-left">
-        <section className="folder-add-cta">
-          <button
-            type="button"
-            className="add-folder-primary"
-            onClick={() => {
-              void handleOpenFolderDialog();
-            }}
-            data-testid="link-folder-dialog-button"
-            title="Choose a folder to watch for exported audio files."
-          >
-            Add Folder…
-          </button>
-          <p className="muted">Link folders to keep album order and version history in sync.</p>
-          {environment.isMacAppStoreSandboxed ? (
-            <p
-              className="muted"
-              data-testid="path-linker-disabled-message"
-              title="In Mac App Store sandbox builds, folder access must come from Add Folder so the app can request a security-scoped bookmark."
-            >
-              Mac App Store build: use Add Folder… so Producer Player can retain sandbox access.
-            </p>
-          ) : null}
-        </section>
-
-        {environment.isTestMode && environment.canLinkFolderByPath ? (
-          <div className="path-linker">
-            <input
-              data-testid="link-folder-path-input"
-              value={folderPathInput}
-              onChange={(event) => setFolderPathInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  handleLinkFolderPath();
-                }
-              }}
-              placeholder="Paste folder path"
-              title="Paste a local folder path and press Enter or Link Path."
-            />
+        <section className="folder-tools-card" data-testid="folder-tools-card">
+          <section className="folder-add-cta">
             <button
               type="button"
-              onClick={handleLinkFolderPath}
-              data-testid="link-folder-path-button"
-              title="Link the folder path typed in the input field."
+              className="add-folder-primary"
+              onClick={() => {
+                void handleOpenFolderDialog();
+              }}
+              data-testid="link-folder-dialog-button"
+              title="Choose a folder to watch for exported audio files."
             >
-              Link Path
+              Add Folder…
             </button>
-          </div>
-        ) : null}
+            <p className="muted">Link folders to keep album order and version history in sync.</p>
+            {environment.isMacAppStoreSandboxed ? (
+              <p
+                className="muted"
+                data-testid="path-linker-disabled-message"
+                title="In Mac App Store sandbox builds, folder access must come from Add Folder so the app can request a security-scoped bookmark."
+              >
+                Mac App Store build: use Add Folder… so Producer Player can retain sandbox access.
+              </p>
+            ) : null}
+          </section>
 
-        <section
-          className="naming-guide"
-          data-testid="naming-guide"
-          title="File names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
-        >
-          <p className="naming-guide-copy">
-            <span className="naming-guide-icon" aria-hidden="true">
-              💡
-            </span>
-            <span>File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.</span>
-          </p>
+          {environment.isTestMode && environment.canLinkFolderByPath ? (
+            <div className="path-linker">
+              <input
+                data-testid="link-folder-path-input"
+                value={folderPathInput}
+                onChange={(event) => setFolderPathInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    handleLinkFolderPath();
+                  }
+                }}
+                placeholder="Paste folder path"
+                title="Paste a local folder path and press Enter or Link Path."
+              />
+              <button
+                type="button"
+                onClick={handleLinkFolderPath}
+                data-testid="link-folder-path-button"
+                title="Link the folder path typed in the input field."
+              >
+                Link Path
+              </button>
+            </div>
+          ) : null}
+
+          <section
+            className="naming-guide"
+            data-testid="naming-guide"
+            title="File names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
+          >
+            <p className="naming-guide-copy">
+              <span className="naming-guide-icon" aria-hidden="true">
+                💡
+              </span>
+              <span>
+                File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.
+              </span>
+            </p>
+          </section>
         </section>
+
+        <div className="sidebar-section-divider" aria-hidden="true" />
 
         <section className="sidebar-status" data-testid="status-card">
           <h3>Status</h3>
@@ -2235,8 +2557,8 @@ export function App(): JSX.Element {
             <div>
               <h3>Mastering + Reference</h3>
               <p className="muted">
-                Phase 2: measured loudness stats, stable bottom-left panel, and a clearer
-                reference-track workflow.
+                Check loudness, tone, platform preview, and reference balance without leaving the
+                track list.
               </p>
             </div>
             <button
@@ -2255,12 +2577,10 @@ export function App(): JSX.Element {
             <>
               <div className="analysis-track-summary">
                 <strong data-testid="analysis-track-label">{selectedPlaybackVersion.fileName}</strong>
-                <p className="muted">
-                  {selectedSong ? getSongDisplayFileName(selectedSong) : 'Unknown track'}
-                </p>
+                <p className="muted">{selectedSong ? selectedSong.title : 'Unknown track'}</p>
                 <p className="muted analysis-phase-note">
-                  FFmpeg loudness = measured. Tonal balance + live short-term readout = fast
-                  preview estimates.
+                  Measured loudness comes from the file. Tone balance and current loudness update
+                  live during playback.
                 </p>
               </div>
 
@@ -2284,7 +2604,7 @@ export function App(): JSX.Element {
                   <strong>{measuredIntegratedText}</strong>
                 </div>
                 <div className="analysis-stat-card" data-testid="analysis-lra-stat">
-                  <span className="analysis-stat-label">LRA</span>
+                  <span className="analysis-stat-label">Dynamics range</span>
                   <strong>{measuredLraText}</strong>
                 </div>
                 <div className="analysis-stat-card" data-testid="analysis-true-peak-stat">
@@ -2292,15 +2612,15 @@ export function App(): JSX.Element {
                   <strong>{measuredTruePeakText}</strong>
                 </div>
                 <div className="analysis-stat-card" data-testid="analysis-max-short-term-stat">
-                  <span className="analysis-stat-label">Max short-term</span>
+                  <span className="analysis-stat-label">Peak short-term</span>
                   <strong>{measuredMaxShortTermText}</strong>
                 </div>
                 <div className="analysis-stat-card" data-testid="analysis-max-momentary-stat">
-                  <span className="analysis-stat-label">Max momentary</span>
+                  <span className="analysis-stat-label">Peak momentary</span>
                   <strong>{measuredMaxMomentaryText}</strong>
                 </div>
                 <div className="analysis-stat-card" data-testid="analysis-short-term-stat">
-                  <span className="analysis-stat-label">Live short-term</span>
+                  <span className="analysis-stat-label">Current loudness</span>
                   <strong>{shortTermEstimateText}</strong>
                 </div>
               </div>
@@ -2312,12 +2632,12 @@ export function App(): JSX.Element {
                     {referenceTrack
                       ? `${referenceTrack.fileName} · ${
                           referenceTrack.sourceType === 'external-file'
-                            ? 'external reference file'
+                            ? 'reference file'
                             : 'linked track reference'
                         }`
                       : referenceStatus === 'loading'
                         ? 'Loading selected reference track…'
-                        : 'Choose a real reference file or use the current linked track.'}
+                        : 'Choose a reference file or set the current track as your reference.'}
                   </p>
                 </div>
                 <div className="analysis-reference-actions">
@@ -2340,7 +2660,7 @@ export function App(): JSX.Element {
                     disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion}
                     title="Use the currently selected linked track as the active reference track."
                   >
-                    Use Current Track as Reference
+                    Set Current Track as Reference
                   </button>
                   <button
                     type="button"
@@ -2355,6 +2675,36 @@ export function App(): JSX.Element {
                 </div>
               </div>
 
+              <div className="analysis-ab-toggle" data-testid="analysis-ab-toggle">
+                <span className="analysis-ab-label">Quick A/B</span>
+                <div className="analysis-ab-actions" role="group" aria-label="Quick A/B audition">
+                  <button
+                    type="button"
+                    className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
+                    onClick={() => handleReferencePreviewModeChange('mix')}
+                    data-testid="analysis-ab-mix"
+                  >
+                    Mix
+                  </button>
+                  <button
+                    type="button"
+                    className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
+                    onClick={() => handleReferencePreviewModeChange('reference')}
+                    data-testid="analysis-ab-reference"
+                    disabled={!referenceTrack}
+                  >
+                    Reference
+                  </button>
+                </div>
+                <p className="muted">
+                  {referenceTrack
+                    ? playbackPreviewMode === 'reference'
+                      ? `Auditioning ${referenceTrack.fileName}`
+                      : `Ready to switch to ${referenceTrack.fileName}`
+                    : 'Load a reference to audition the mix and reference from the same panel.'}
+                </p>
+              </div>
+
               {referenceError ? (
                 <p className="error" data-testid="analysis-reference-error">
                   {referenceError}
@@ -2365,15 +2715,15 @@ export function App(): JSX.Element {
                 {referenceTrack && activeReferenceComparison ? (
                   <>
                     <div className="analysis-stat-card compact">
-                      <span className="analysis-stat-label">Ref integrated</span>
+                      <span className="analysis-stat-label">Reference loudness</span>
                       <strong>{referenceIntegratedText}</strong>
                     </div>
                     <div className="analysis-stat-card compact">
-                      <span className="analysis-stat-label">Ref true peak</span>
+                      <span className="analysis-stat-label">Reference true peak</span>
                       <strong>{referenceTruePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card compact">
-                      <span className="analysis-stat-label">Integrated delta</span>
+                      <span className="analysis-stat-label">Loudness difference</span>
                       <strong>{formatSignedLevel(activeReferenceComparison.integratedDeltaDb)}</strong>
                     </div>
                   </>
@@ -2382,7 +2732,7 @@ export function App(): JSX.Element {
                     <span className="analysis-stat-label">Reference comparison</span>
                     <strong>No reference loaded</strong>
                     <span className="muted">
-                      Phase 1 only had Ref A/B scaffolding. Phase 2 makes the workflow explicit.
+                      Load a reference to compare loudness, peaks, and tonal balance.
                     </span>
                   </div>
                 )}
@@ -2501,6 +2851,9 @@ export function App(): JSX.Element {
           <div className="panel-title">
             <h2>Album</h2>
             <p className="muted">{formatTrackCount(songs.length)}</p>
+            <p className="muted album-duration-label" data-testid="album-duration-label">
+              {formatAlbumDuration(albumDurationSeconds)}
+            </p>
           </div>
           <div className="actions">
             <button
@@ -2619,6 +2972,8 @@ export function App(): JSX.Element {
                     : ''
                 }`
               : `${song.versions.length} version(s)`;
+            const songRowMetadataLabel = getSongRowMetadataLabel(song);
+            const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
 
             return (
               <li
@@ -2665,7 +3020,6 @@ export function App(): JSX.Element {
                     event.dataTransfer.effectAllowed = 'move';
                     event.dataTransfer.setData('text/plain', song.id);
                   }}
-
                   onDragEnd={() => {
                     clearDragState();
                   }}
@@ -2675,12 +3029,38 @@ export function App(): JSX.Element {
                       : 'Select track. Clear search to enable drag-and-drop ordering.'
                   }
                 >
-                  <div>
-                    <strong>{getSongDisplayFileName(song)}</strong>
+                  <div className="main-list-row-primary">
+                    <strong className="main-list-row-title">{song.title}</strong>
                     <p className="muted">{secondaryRowText}</p>
                   </div>
-                  <span className="muted">{formatDate(song.latestExportAt)}</span>
+                  <div className="main-list-row-meta-group">
+                    <span className="main-list-row-metadata" data-testid="main-list-row-metadata">
+                      {songRowMetadataLabel}
+                    </span>
+                    <span className="muted">{formatDate(song.latestExportAt)}</span>
+                  </div>
                 </button>
+                <label className="song-rating-control" data-testid="song-rating-control">
+                  <span className="song-rating-value">{songRatingValue}/10</span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    step={1}
+                    value={songRatingValue}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onInput={(event) => {
+                      handleSongRatingChange(song.id, Number(event.currentTarget.value));
+                    }}
+                    onChange={(event) => {
+                      handleSongRatingChange(song.id, Number(event.currentTarget.value));
+                    }}
+                    data-testid="song-rating-slider"
+                    aria-label={`${song.title} rating`}
+                  />
+                </label>
               </li>
             );
           })}
@@ -2691,14 +3071,16 @@ export function App(): JSX.Element {
           <section className="player-dock" data-testid="player-dock">
             <div className="player-dock-top">
               <div>
-                <strong data-testid="player-track-name">{selectedPlaybackVersion.fileName}</strong>
-                <p className="muted">{selectedSong?.title ?? 'Selected track'}</p>
+                <strong data-testid="player-track-name">{activePlaybackLabel.fileName}</strong>
+                <p className="muted">{activePlaybackLabel.subtitle}</p>
               </div>
               <button
                 type="button"
                 className="ghost"
                 onClick={() => {
-                  void window.producerPlayer.revealFile(selectedPlaybackVersion.filePath);
+                  if (activePlaybackFilePath) {
+                    void window.producerPlayer.revealFile(activePlaybackFilePath);
+                  }
                 }}
                 title="Open this version in Finder."
               >
@@ -2711,7 +3093,7 @@ export function App(): JSX.Element {
                 type="button"
                 data-testid="player-prev"
                 onClick={handlePreviousTrack}
-                title="Jump to previous track in the current queue."
+                title="Restart current track when past 0:02; otherwise go to previous track."
               >
                 ◀◀
               </button>
@@ -2852,6 +3234,31 @@ export function App(): JSX.Element {
               )}
             </ul>
           </section>
+
+          <section className="inspector-card support-feedback-card" data-testid="support-feedback-card">
+            <h3>Support &amp; Feedback</h3>
+            <p className="muted">
+              Send bugs and workflow requests straight into the GitHub issue queue.
+            </p>
+            <div className="support-feedback-links">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => handleOpenSupportLink(BUG_REPORT_URL)}
+                data-testid="support-feedback-bug"
+              >
+                Report a Bug
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => handleOpenSupportLink(FEATURE_REQUEST_URL)}
+                data-testid="support-feedback-feature"
+              >
+                Request a Feature
+              </button>
+            </div>
+          </section>
         </div>
       </aside>
 
@@ -2868,8 +3275,7 @@ export function App(): JSX.Element {
               <div>
                 <h2>Mastering Analysis</h2>
                 <p className="muted">
-                  Phase 1 was only a preview shell. Phase 2 makes loudness measurement more real
-                  with FFmpeg stats and a clearer reference-track flow.
+                  Check loudness, peaks, tone, and reference balance for the selected track.
                 </p>
               </div>
               <button
@@ -2889,13 +3295,10 @@ export function App(): JSX.Element {
                   <p>
                     <strong>{selectedPlaybackVersion.fileName}</strong>
                   </p>
+                  <p className="muted">{selectedSong ? selectedSong.title : 'Unknown track'}</p>
                   <p className="muted">
-                    {selectedSong ? getSongDisplayFileName(selectedSong) : 'Unknown track'}
-                  </p>
-                  <p className="muted">
-                    FFmpeg provides measured integrated LUFS / LRA / true peak / peak summaries.
-                    Tonal balance and the live short-term readout are still fast in-app estimates,
-                    so this is producer-useful now but not a full mastering-meter replacement yet.
+                    Measured loudness comes from the file. Tone balance and current loudness update
+                    live during playback.
                   </p>
                 </section>
 
@@ -2907,7 +3310,7 @@ export function App(): JSX.Element {
                       <strong>{measuredIntegratedText}</strong>
                     </div>
                     <div className="analysis-stat-card">
-                      <span className="analysis-stat-label">LRA</span>
+                      <span className="analysis-stat-label">Dynamics range</span>
                       <strong>{measuredLraText}</strong>
                     </div>
                     <div className="analysis-stat-card">
@@ -2919,11 +3322,11 @@ export function App(): JSX.Element {
                       <strong>{measuredSamplePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card">
-                      <span className="analysis-stat-label">Max short-term</span>
+                      <span className="analysis-stat-label">Peak short-term</span>
                       <strong>{measuredMaxShortTermText}</strong>
                     </div>
                     <div className="analysis-stat-card">
-                      <span className="analysis-stat-label">Max momentary</span>
+                      <span className="analysis-stat-label">Peak momentary</span>
                       <strong>{measuredMaxMomentaryText}</strong>
                     </div>
                     <div className="analysis-stat-card">
@@ -2931,7 +3334,7 @@ export function App(): JSX.Element {
                       <strong>{measuredMeanVolumeText}</strong>
                     </div>
                     <div className="analysis-stat-card">
-                      <span className="analysis-stat-label">Live short-term</span>
+                      <span className="analysis-stat-label">Current loudness</span>
                       <strong>{shortTermEstimateText}</strong>
                     </div>
                   </div>
@@ -2963,8 +3366,8 @@ export function App(): JSX.Element {
                 <section className="analysis-overlay-section">
                   <h3>Reference track workflow</h3>
                   <p className="muted">
-                    Choose a real external reference file or reuse the current linked track. The
-                    loaded reference becomes the active comparison target immediately.
+                    Load a reference file or set the current track as the reference, then audition
+                    the mix and reference from the same panel.
                   </p>
                   <div className="analysis-reference-actions">
                     <button
@@ -2983,7 +3386,7 @@ export function App(): JSX.Element {
                       }}
                       disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion}
                     >
-                      Use Current Track as Reference
+                      Set Current Track as Reference
                     </button>
                     <button
                       type="button"
@@ -2993,6 +3396,27 @@ export function App(): JSX.Element {
                     >
                       Clear Reference
                     </button>
+                  </div>
+
+                  <div className="analysis-ab-toggle">
+                    <span className="analysis-ab-label">Quick A/B</span>
+                    <div className="analysis-ab-actions" role="group" aria-label="Quick A/B audition">
+                      <button
+                        type="button"
+                        className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
+                        onClick={() => handleReferencePreviewModeChange('mix')}
+                      >
+                        Mix
+                      </button>
+                      <button
+                        type="button"
+                        className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
+                        onClick={() => handleReferencePreviewModeChange('reference')}
+                        disabled={!referenceTrack}
+                      >
+                        Reference
+                      </button>
+                    </div>
                   </div>
 
                   <div className="analysis-reference-slot active" data-testid="analysis-reference-slot-a">
@@ -3011,16 +3435,16 @@ export function App(): JSX.Element {
                         </p>
                         <p className="muted">{referenceTrack.subtitle}</p>
                         <div className="analysis-reference-metrics">
-                          <span>Integrated: {referenceIntegratedText}</span>
+                          <span>Loudness: {referenceIntegratedText}</span>
                           <span>True peak: {referenceTruePeakText}</span>
                           <span>
-                            Short-term: {formatMeasuredStat(referenceShortTermEstimate, 'LUFS est.')}
+                            Current loudness: {formatMeasuredStat(referenceShortTermEstimate, 'LUFS est.')}
                           </span>
                         </div>
                       </>
                     ) : (
                       <p className="muted">
-                        No reference loaded yet. Phase 1 only had Ref A/B placeholders here.
+                        No reference loaded yet. Load one to compare loudness, peaks, and tone.
                       </p>
                     )}
                   </div>
@@ -3037,7 +3461,7 @@ export function App(): JSX.Element {
                       </p>
                       <div className="analysis-detail-grid analysis-detail-grid-wide">
                         <div className="analysis-stat-card">
-                          <span className="analysis-stat-label">Integrated delta</span>
+                          <span className="analysis-stat-label">Loudness difference</span>
                           <strong>{formatSignedLevel(activeReferenceComparison.integratedDeltaDb)}</strong>
                         </div>
                         <div className="analysis-stat-card">
@@ -3045,7 +3469,7 @@ export function App(): JSX.Element {
                           <strong>{formatSignedLevel(activeReferenceComparison.truePeakDeltaDb)}</strong>
                         </div>
                         <div className="analysis-stat-card">
-                          <span className="analysis-stat-label">Live short-term delta</span>
+                          <span className="analysis-stat-label">Current loudness difference</span>
                           <strong>{formatSignedLevel(activeReferenceComparison.shortTermDeltaDb)}</strong>
                         </div>
                         <div className="analysis-stat-card">

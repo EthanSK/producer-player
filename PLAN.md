@@ -1740,3 +1740,39 @@ Dropped/replaced from partial state:
 - True one-click audition transport A/B (jump to ref and back with synced playhead/loop compare).
 - Detached/new-window analysis surface (overlay currently remains in-window).
 - More mastering-grade timeline/meters beyond current measured snapshot + estimated live overlays.
+
+---
+
+## Previous/back transport behavior update (Wed 2026-03-11)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Wed 2026-03-11 01:32 GMT
+
+```text
+By the way, had another feature. When I'm playing a song, the back button should go to the beginning of the song on the first click and then the previous song, etcetera, on the next click. I think that's how most media players do it.
+```
+
+### Assistant implementation summary (this run)
+
+- Updated transport previous/back behavior in the renderer so it now follows common media-player expectations:
+  - If current playhead is past **0:02**, pressing previous restarts the current track at `0:00`.
+  - If current playhead is at/near the start (≤0:02), pressing previous goes to the previous track in the current queue.
+- Added sensible edge-case fallback:
+  - If there is no previous track available (for example first track with repeat-all off), pressing previous rewinds the current track to `0:00` instead of doing a confusing no-op.
+  - Paused playback path is handled consistently via the same logic.
+- Updated previous-button tooltip copy to match the real behavior so UX stays unsurprising.
+- Added playback logging events for previous/restart branches to aid debugging.
+
+### Validation (pragmatic)
+
+- `npm run build` ✅
+- `npm run typecheck` ✅
+- `npm run test -w @producer-player/e2e -- src/playback-runtime.spec.ts -g "previous restarts current track first, then goes to previous track on the next press"` ✅ (1/1)
+- `npm run test -w @producer-player/e2e -- src/playback-runtime.spec.ts -g "responds to main-process transport command events"` ✅ (1/1)
+
+### Files changed in this run
+
+- `apps/renderer/src/App.tsx`
+- `apps/e2e/src/playback-runtime.spec.ts`
+- `PLAN.md`

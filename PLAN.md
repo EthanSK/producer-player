@@ -1906,3 +1906,73 @@ Reviewed and salvaged from the already-started branches/worktrees instead of red
 - `npm run build` ✅
 - `npm run test -w @producer-player/e2e -- src/playback-runtime.spec.ts -g "mastering analysis|platform normalization preview controls|previous restarts current track first|album duration, support links, and persists song-row ratings"` ✅ (4/4 passed)
 
+---
+
+## Transcript-to-product parity audit — Mar 10–11, 2026 (Wed 2026-03-11)
+
+Source of truth used for this pass:
+
+- `PLAN.md`
+- `/Users/ethansk/.openclaw/agents/main/sessions/903f7c8d-6372-4d28-b6d4-df6499e4f3f5.jsonl`
+- `/Users/ethansk/.openclaw/agents/main/sessions/cdd69993-1764-435d-a7aa-3838e60cd49d.jsonl`
+
+### Full checklist of Producer Player asks (Mar 10–11)
+
+Legend: **PRESENT** = already on this branch, **ADDED NOW** = implemented in this audit, **DEFERRED** = honest blocker, **OPERATIONAL** = non-repo accounting item.
+
+1. **Inspector version-history scroll works** — **PRESENT**
+2. **Double-click a song row plays immediately** — **PRESENT**
+3. **No hidden normalization / raw playback (AIFF prep is container/codec-only)** — **PRESENT**
+4. **Playhead restore: within-session OK; should NOT persist across app boots** — **PRESENT**
+5. **End/near-end playhead bug: finished track must restart at 0 when revisiting** — **PRESENT**
+6. **Transport: volume slider next to Repeat** — **PRESENT**
+7. **Old-folder leakage regression: `old/`-only files never appear in album list; only in version history** — **PRESENT**
+8. **Remove repetitive per-version `Archived in old/` labeling** — **PRESENT**
+9. **Mac App Store readiness + macOS build scripts** — **PRESENT** (repo prep done; submission/signing is still blocked)
+10. **Icon: ordering-focused refinement set created** — **PRESENT**
+11. **Icon: apply “Queue Halo” as shipped app icon** — **PRESENT**
+12. **Prod polish: remove debug footer (e.g. `canPlayType`), de-jargon messages/copy** — **PRESENT**
+13. **Break-test Playwright edge cases + fix root (`\"/\"`) folder hang** — **PRESENT**
+14. **Mastering preview panel bottom-left + expand view** — **PRESENT**
+15. **Mastering measured stats via FFmpeg + clearer labels** — **PRESENT**
+16. **Reference workflow: choose external reference; use current track as reference; clear reference** — **PRESENT**
+17. **Quick audition A/B: Mix vs Reference playback switching** — **PRESENT**
+18. **Platform normalization preview (Spotify/Apple/YouTube/Tidal), dB delta + projected LUFS + preview toggle** — **PRESENT**
+19. **Normalization preview default must be OFF** — **PRESENT**
+20. **Song row UI: title-only on left; version+format metadata pill on right** — **PRESENT**
+21. **Previous/back button: first press restarts track, next press goes previous** — **PRESENT**
+22. **Album header: show total album duration** — **PRESENT**
+23. **Song-row rating control: compact discrete 1–10, persisted** — **PRESENT**
+24. **Folder tools grouping + divider under Add Folder / naming guidance** — **PRESENT**
+25. **Remove visible “Phase N” / prototype language; simplify mastering jargon** — **PRESENT**
+26. **Investigate custom VST/AU monitoring-chain support** — **DEFERRED** (requires a real native plugin-host/audio-engine bridge; not a truthful quick patch)
+27. **Support & Feedback links under inspector + GitHub issue templates** — **PRESENT**
+28. **Mastering regression: integrated LUFS stuck at `-70` sentinel; expand E2E across formats + normalization presets** — **ADDED NOW**
+29. **Operational ask: “cron job” to retranscribe past voice messages and re-audit coverage** — **OPERATIONAL** (tracked/accounted; not implemented as repo code)
+30. **Operational ask: spawn follow-up sub-agents after long runs to re-test + fix failures** — **OPERATIONAL**
+31. **Operational ask: confirm everything pushed; account for failed sub-agents** — **OPERATIONAL**
+
+### What changed in this audit (repo)
+
+Integrated LUFS parsing fix + regression coverage:
+
+- **Fix:** Parse final `I:` / `LRA:` values from FFmpeg `ebur128` output instead of the first match (which can be `-70` early/sentinel output).
+- **Test:** Added `measures integrated LUFS correctly across supported formats and sweeps normalization presets` to prevent regression.
+
+Files changed by this audit:
+
+- `apps/electron/src/main.ts`
+- `apps/e2e/src/playback-runtime.spec.ts`
+
+### Validation for this audit
+
+- `npm run typecheck -w @producer-player/electron` ✅
+- `npm run typecheck -w @producer-player/e2e` ✅
+- `npm run build` ✅
+- `npm run test -w @producer-player/e2e -- src/playback-runtime.spec.ts -g "measures integrated LUFS correctly across supported formats and sweeps normalization presets|platform normalization preview controls"` ✅ (2/2 passed on host)
+- Initial Codex-sandbox limitations were real (`kill EPERM` for Playwright Electron management and sandbox git-lock limits), but they were resolved by finishing validation/commit/push from a normal host shell session.
+
+### Failed sub-agent accounting (Mar 10–11)
+
+- **Run `a5093662-0888-4cba-8bfb-c6581892a78e` (`producer-player-two-hour-catchup-ship-pass`)**: did not complete cleanly and produced no commit/push; this branch (`two-hour-catchup-20260311-015709`) supersedes it and is the audited shipping state.
+- Multiple “stalled / partial” worktrees described earlier in this log (mastering/normalization retries, album-duration/rating-slider attempts) were explicitly **salvaged/cherry-picked** or **re-implemented** into the shipped commits instead of trusting no-op reports (see “Two-hour catch-up / salvage checklist pass” above).

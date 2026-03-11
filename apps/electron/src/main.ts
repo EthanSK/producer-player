@@ -692,8 +692,12 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
     '-',
   ]);
 
-  const integratedMatch = ebur128Result.stderr.match(/\bI:\s*(-?\d+(?:\.\d+)?)\s+LUFS/);
-  const lraMatch = ebur128Result.stderr.match(/\bLRA:\s*(-?\d+(?:\.\d+)?)\s+LU/);
+  const integratedMatches = Array.from(
+    ebur128Result.stderr.matchAll(/\bI:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LUFS/gi)
+  );
+  const lraMatches = Array.from(
+    ebur128Result.stderr.matchAll(/\bLRA:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LU/gi)
+  );
   const truePeakMatch = ebur128Result.stderr.match(/True peak:[\s\S]*?Peak:\s*(-?\d+(?:\.\d+)?)\s+dBFS/);
 
   const momentaryMatches = Array.from(
@@ -714,8 +718,12 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
   return {
     filePath: resolvedPath,
     measuredWith: 'ffmpeg-ebur128-volumedetect',
-    integratedLufs: parseMeasuredLevel(integratedMatch?.[1]),
-    loudnessRangeLufs: parseMeasuredLevel(lraMatch?.[1]),
+    integratedLufs: parseMeasuredLevel(
+      integratedMatches.length > 0 ? integratedMatches[integratedMatches.length - 1][1] : undefined
+    ),
+    loudnessRangeLufs: parseMeasuredLevel(
+      lraMatches.length > 0 ? lraMatches[lraMatches.length - 1][1] : undefined
+    ),
     truePeakDbfs: parseMeasuredLevel(truePeakMatch?.[1]),
     samplePeakDbfs: parseMeasuredLevel(samplePeakMatch?.[1]),
     meanVolumeDbfs: parseMeasuredLevel(meanVolumeMatch?.[1]),

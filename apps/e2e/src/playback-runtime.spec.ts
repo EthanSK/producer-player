@@ -719,6 +719,175 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
+  test('measures integrated LUFS correctly across supported formats and sweeps normalization presets', async () => {
+    const workspaceRoot = path.resolve(__dirname, '../../..');
+    const fixtureDirectory = path.join(
+      workspaceRoot,
+      'artifacts/e2e-fixtures',
+      `mastering-format-sweep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    );
+    await fs.mkdir(fixtureDirectory, { recursive: true });
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-mastering-format-sweep-user-data-')
+    );
+
+    const analysisFixtureBase = path.join(fixtureDirectory, 'Format Sweep v1');
+
+    const formatFixtures: Array<{ label: string; extension: string; outputPath: string; encodeArgs: string[] }> =
+      [
+        {
+          label: 'wav',
+          extension: 'wav',
+          outputPath: `${analysisFixtureBase}.wav`,
+          encodeArgs: ['-c:a', 'pcm_s16le'],
+        },
+        {
+          label: 'aiff',
+          extension: 'aiff',
+          outputPath: `${analysisFixtureBase}.aiff`,
+          encodeArgs: ['-c:a', 'pcm_s16le'],
+        },
+        {
+          label: 'flac',
+          extension: 'flac',
+          outputPath: `${analysisFixtureBase}.flac`,
+          encodeArgs: ['-c:a', 'flac'],
+        },
+        {
+          label: 'mp3',
+          extension: 'mp3',
+          outputPath: `${analysisFixtureBase}.mp3`,
+          encodeArgs: ['-c:a', 'libmp3lame', '-q:a', '2'],
+        },
+        {
+          label: 'm4a',
+          extension: 'm4a',
+          outputPath: `${analysisFixtureBase}.m4a`,
+          encodeArgs: ['-c:a', 'aac', '-b:a', '192k'],
+        },
+      ];
+
+    for (const fixture of formatFixtures) {
+      await runFfmpeg([
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=440:duration=6',
+        '-filter:a',
+        'volume=0.2',
+        ...fixture.encodeArgs,
+        fixture.outputPath,
+      ]);
+    }
+
+    const proofPath = path.join(
+      workspaceRoot,
+      'artifacts/manual-verification/2026-03-11/mastering-lufs-format-sweep.json'
+    );
+    await fs.mkdir(path.dirname(proofPath), { recursive: true });
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await page.getByTestId('main-list-row').first().click();
+
+      await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading', {
+        timeout: 12_000,
+      });
+
+      const integratedText = (await page
+        .getByTestId('analysis-integrated-stat')
+        .locator('strong')
+        .textContent())?.trim();
+      expect(integratedText).toBeTruthy();
+      expect(integratedText).not.toContain('-70');
+
+      const measurements: Record<string, unknown> = {};
+      const snapshot = await page.evaluate(async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const api = (window as any).producerPlayer;
+        return api.getLibrarySnapshot();
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const songVersions = ((snapshot as any)?.songs?.[0]?.versions ?? []) as Array<{ filePath: string }>;
+      expect(songVersions).toHaveLength(formatFixtures.length);
+
+      for (const fixture of formatFixtures) {
+        const version = songVersions.find((candidate) => candidate.filePath.endsWith(`.${fixture.extension}`));
+        expect(version, `missing linked version for .${fixture.extension}`).toBeTruthy();
+
+        const analysis = await page.evaluate(async (filePath) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const api = (window as any).producerPlayer;
+          return api.analyzeAudioFile(filePath);
+        }, version!.filePath);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const integratedLufs = (analysis as any)?.integratedLufs as number | null | undefined;
+
+        measurements[fixture.label] = {
+          filePath: version!.filePath,
+          analysis,
+        };
+
+        expect(integratedLufs).not.toBeNull();
+        expect(typeof integratedLufs).toBe('number');
+        expect(integratedLufs as number).toBeGreaterThan(-65);
+        expect(integratedLufs as number).toBeLessThan(0);
+        expect(integratedLufs as number).not.toBe(-70);
+      }
+
+      await page.getByTestId('analysis-platform-spotify').click();
+      await expect(page.getByTestId('analysis-platform-spotify')).toHaveAttribute('aria-pressed', 'true');
+      await page.getByTestId('analysis-platform-appleMusic').click();
+      await expect(page.getByTestId('analysis-platform-appleMusic')).toHaveAttribute('aria-pressed', 'true');
+      await page.getByTestId('analysis-platform-youtube').click();
+      await expect(page.getByTestId('analysis-platform-youtube')).toHaveAttribute('aria-pressed', 'true');
+      await page.getByTestId('analysis-platform-tidal').click();
+      await expect(page.getByTestId('analysis-platform-tidal')).toHaveAttribute('aria-pressed', 'true');
+
+      const normalizationToggle = page.getByTestId('analysis-normalization-toggle');
+      await expect(normalizationToggle).toHaveText('Preview Off');
+      await normalizationToggle.click();
+      await expect(normalizationToggle).toHaveText('Preview On');
+      await normalizationToggle.click();
+      await expect(normalizationToggle).toHaveText('Preview Off');
+
+      await fs.writeFile(
+        proofPath,
+        JSON.stringify(
+          {
+            generatedAt: new Date().toISOString(),
+            fixtures: formatFixtures.map((fixture) => ({
+              label: fixture.label,
+              extension: fixture.extension,
+              outputPath: fixture.outputPath,
+            })),
+            measurements,
+          },
+          null,
+          2
+        ),
+        'utf8'
+      );
+
+      await test.info().attach('mastering-lufs-format-sweep', {
+        path: proofPath,
+        contentType: 'application/json',
+      });
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('shows platform normalization preview controls and captures proof screenshot', async () => {
     const workspaceRoot = path.resolve(__dirname, '../../..');
     const fixtureDirectory = await fs.mkdtemp(

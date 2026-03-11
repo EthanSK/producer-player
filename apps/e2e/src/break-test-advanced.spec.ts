@@ -60,14 +60,18 @@ test.describe('Producer Player advanced break tests', () => {
       // KNOWN BEHAVIOR: all 3 files appear, including the 2 without version suffixes
       await expect(page.getByTestId('main-list-row')).toHaveCount(3);
       await expect(page.getByTestId('app-shell')).toBeVisible();
-      // WithSuffix v1.wav displays the filename directly
-      await expect(
-        page.getByTestId('main-list-row').filter({ hasText: 'WithSuffix v1.wav' })
-      ).toHaveCount(1);
+
+      const withSuffixRow = page
+        .getByTestId('main-list-row')
+        .filter({ hasText: /With\s*Suffix|Withsuffix/i });
+      await expect(withSuffixRow).toHaveCount(1);
+      await expect(withSuffixRow.first().getByTestId('main-list-row-metadata')).toHaveText(
+        /v1\s*·\s*wav/i
+      );
+
       // No-suffix files also appear - document this behavior gap with the naming guide
-      await expect(
-        page.getByTestId('main-list-row').filter({ hasText: 'NoSuffix.wav' })
-      ).toHaveCount(1);
+      await expect(page.getByTestId('main-list')).toContainText('Nosuffix');
+      await expect(page.getByTestId('main-list')).toContainText('Nosuffixeither');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);

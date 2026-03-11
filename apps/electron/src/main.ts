@@ -145,6 +145,7 @@ interface PersistedState {
   linkedFolderBookmarks: Record<string, string>;
   autoMoveOld: boolean;
   songOrder: string[];
+  songRatings: Record<string, number>;
   updatedAt: string;
 }
 
@@ -163,11 +164,12 @@ interface FolderOrderSidecar {
 
 function createFallbackState(): PersistedState {
   return {
-    version: 3,
+    version: 4,
     linkedFolderPaths: [],
     linkedFolderBookmarks: {},
     autoMoveOld: true,
     songOrder: [],
+    songRatings: {},
     updatedAt: new Date(0).toISOString(),
   };
 }
@@ -190,6 +192,41 @@ function parseStringRecord(value: unknown): Record<string, string> {
   );
 
   return Object.fromEntries(entries);
+}
+
+function normalizeSongRating(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 5;
+  }
+
+  const rounded = Math.round(value);
+  if (rounded < 1) {
+    return 1;
+  }
+
+  if (rounded > 10) {
+    return 10;
+  }
+
+  return rounded;
+}
+
+function parseSongRatingsRecord(value: unknown): Record<string, number> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const ratings: Record<string, number> = {};
+
+  for (const [songId, rating] of Object.entries(value)) {
+    if (typeof songId !== 'string' || songId.length === 0) {
+      continue;
+    }
+
+    ratings[songId] = normalizeSongRating(rating);
+  }
+
+  return ratings;
 }
 
 function dedupeStrings(values: string[]): string[] {
@@ -262,6 +299,7 @@ function parsePersistedState(raw: string): PersistedState {
     autoMoveOld:
       typeof parsed.autoMoveOld === 'boolean' ? parsed.autoMoveOld : fallback.autoMoveOld,
     songOrder: dedupeStrings(parseStringArray(parsed.songOrder)),
+    songRatings: parseSongRatingsRecord(parsed.songRatings),
     updatedAt:
       typeof parsed.updatedAt === 'string' && parsed.updatedAt.length > 0
         ? parsed.updatedAt
@@ -289,7 +327,7 @@ async function readPersistedState(): Promise<PersistedStateLoadResult> {
       if (candidatePath !== primaryStatePath) {
         await writeJsonAtomic(primaryStatePath, {
           ...parsed,
-          version: 3,
+          version: 4,
           updatedAt: new Date().toISOString(),
         }).catch(() => undefined);
       }
@@ -538,11 +576,14 @@ async function restoreSongOrderFromSidecars(
 
 async function writePersistedState(snapshot: LibrarySnapshot): Promise<void> {
   const payload: PersistedState = {
-    version: 3,
+    version: 4,
     linkedFolderPaths: snapshot.linkedFolders.map((folder) => resolve(folder.path)),
     linkedFolderBookmarks: buildPersistedBookmarksForSnapshot(snapshot),
     autoMoveOld: snapshot.matcherSettings.autoMoveOld,
     songOrder: snapshot.songs.map((song) => song.id),
+    songRatings: Object.fromEntries(
+      snapshot.songs.map((song) => [song.id, normalizeSongRating(song.rating)])
+    ),
     updatedAt: new Date().toISOString(),
   };
 
@@ -1207,6 +1248,7 @@ async function ensureLibraryService(): Promise<FileLibraryService> {
   const service = new FileLibraryService({
     autoMoveOld: persistedState.state.autoMoveOld,
     songOrder: persistedState.state.songOrder,
+    songRatings: persistedState.state.songRatings,
   });
 
   for (const folderPath of persistedState.state.linkedFolderPaths) {
@@ -1328,6 +1370,13 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.REORDER_SONGS, async (_event, songIds: string[]) => {
     return service.reorderSongs(Array.isArray(songIds) ? songIds : []);
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SET_SONG_RATING,
+    async (_event, songId: string, rating: number) => {
+      return service.setSongRating(songId, rating);
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.EXPORT_PLAYLIST_ORDER,

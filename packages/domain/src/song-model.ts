@@ -134,6 +134,7 @@ export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions
           normalizedTitle,
           activeVersionId: null,
           latestExportAt: null,
+          rating: 5,
         },
         versions: [version],
       });

@@ -1564,6 +1564,10 @@ export function App(): JSX.Element {
     await runSnapshotTask(() => window.producerPlayer.setAutoMoveOld(enabled));
   }
 
+  async function handleSongRatingChange(songId: string, rating: number): Promise<void> {
+    await runSnapshotTask(() => window.producerPlayer.setSongRating(songId, rating));
+  }
+
   function buildSongOrderAfterDrop(
     draggedSongId: string,
     targetSongId: string,
@@ -2619,6 +2623,7 @@ export function App(): JSX.Element {
                     : ''
                 }`
               : `${song.versions.length} version(s)`;
+            const normalizedSongRating = Math.min(10, Math.max(1, Math.round(song.rating)));
 
             return (
               <li
@@ -2681,6 +2686,26 @@ export function App(): JSX.Element {
                   </div>
                   <span className="muted">{formatDate(song.latestExportAt)}</span>
                 </button>
+                <label
+                  className="song-rating-control"
+                  title="Rate this track from 1 to 10. Slider snaps to whole-number values."
+                >
+                  <span className="muted">Rating</span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    step={1}
+                    value={normalizedSongRating}
+                    data-testid="song-rating-slider"
+                    data-song-id={song.id}
+                    aria-label={`Rate ${getSongDisplayFileName(song)} from 1 to 10`}
+                    onChange={(event) => {
+                      void handleSongRatingChange(song.id, Number(event.currentTarget.value));
+                    }}
+                  />
+                  <strong className="song-rating-value">{normalizedSongRating}/10</strong>
+                </label>
               </li>
             );
           })}

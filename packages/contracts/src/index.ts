@@ -73,6 +73,7 @@ export interface LogicalSong {
   normalizedTitle: string;
   activeVersionId: string | null;
   latestExportAt: string | null;
+  rating: number;
 }
 
 export interface SongWithVersions extends LogicalSong {
@@ -137,6 +138,7 @@ export const IPC_CHANNELS = {
   ORGANIZE_OLD_VERSIONS: 'producer-player:organize-old-versions',
   SET_AUTO_MOVE_OLD: 'producer-player:set-auto-move-old',
   REORDER_SONGS: 'producer-player:reorder-songs',
+  SET_SONG_RATING: 'producer-player:set-song-rating',
   EXPORT_PLAYLIST_ORDER: 'producer-player:export-playlist-order',
   IMPORT_PLAYLIST_ORDER: 'producer-player:import-playlist-order',
   OPEN_IN_FINDER: 'producer-player:open-in-finder',
@@ -163,6 +165,7 @@ export interface ProducerPlayerBridge {
   organizeOldVersions(): Promise<LibrarySnapshot>;
   setAutoMoveOld(enabled: boolean): Promise<LibrarySnapshot>;
   reorderSongs(songIds: string[]): Promise<LibrarySnapshot>;
+  setSongRating(songId: string, rating: number): Promise<LibrarySnapshot>;
   exportPlaylistOrder(payload: PlaylistOrderExportV1): Promise<{ filePath: string | null }>;
   importPlaylistOrder(): Promise<PlaylistOrderExportV1 | null>;
   revealFile(filePath: string): Promise<void>;
@@ -199,6 +202,23 @@ function parseNullableString(value: unknown): string | null {
     return null;
   }
   return parseString(value);
+}
+
+function parseSongRating(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 5;
+  }
+
+  const normalized = Math.round(value);
+  if (normalized < 1) {
+    return 1;
+  }
+
+  if (normalized > 10) {
+    return 10;
+  }
+
+  return normalized;
 }
 
 function parseLinkedFolder(value: unknown): LinkedFolder | null {
@@ -294,6 +314,7 @@ function parseSongWithVersions(value: unknown): SongWithVersions | null {
   const normalizedTitle = parseString(value.normalizedTitle);
   const activeVersionId = parseNullableString(value.activeVersionId);
   const latestExportAt = parseNullableString(value.latestExportAt);
+  const rating = parseSongRating(value.rating);
 
   const versionsRaw = Array.isArray(value.versions) ? value.versions : [];
   const versions = versionsRaw
@@ -311,6 +332,7 @@ function parseSongWithVersions(value: unknown): SongWithVersions | null {
     normalizedTitle,
     activeVersionId: activeVersionId ?? null,
     latestExportAt: latestExportAt ?? null,
+    rating,
     versions,
   };
 }

@@ -45,6 +45,10 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.REORDER_SONGS, songIds);
   },
 
+  async setSongRating(songId: string, rating: number) {
+    return ipcRenderer.invoke(IPC_CHANNELS.SET_SONG_RATING, songId, rating);
+  },
+
   async exportPlaylistOrder(payload: PlaylistOrderExportV1) {
     return ipcRenderer.invoke(IPC_CHANNELS.EXPORT_PLAYLIST_ORDER, payload);
   },

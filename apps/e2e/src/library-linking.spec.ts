@@ -449,6 +449,81 @@ test.describe('Producer Player desktop shell', () => {
     }
   });
 
+  test('song row rating slider snaps to 1-10 and persists across relaunch', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-rating-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-rating-user-data-')
+    );
+
+    await writeTestWav(path.join(fixtureDirectory, 'Rating Alpha v1.wav'), {
+      frequencyHz: 410,
+    });
+    await writeTestWav(path.join(fixtureDirectory, 'Rating Beta v1.wav'), {
+      frequencyHz: 510,
+    });
+
+    let firstLaunch: LaunchedApp | null = null;
+    let ratedSongId = '';
+
+    try {
+      firstLaunch = await launchProducerPlayer(userDataDirectory);
+
+      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const alphaRow = firstLaunch.page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Rating Alpha' })
+        .first();
+
+      ratedSongId = (await alphaRow.getAttribute('data-song-id')) ?? '';
+      expect(ratedSongId.length).toBeGreaterThan(0);
+
+      const alphaSlider = firstLaunch.page.locator(
+        `[data-testid="song-rating-slider"][data-song-id="${ratedSongId}"]`
+      );
+
+      await alphaSlider.fill('9');
+      await expect(alphaSlider).toHaveValue('9');
+    } finally {
+      await firstLaunch?.electronApp.close();
+    }
+
+    const statePath = path.join(userDataDirectory, STATE_FILE_NAME);
+    const stateRaw = await fs.readFile(statePath, 'utf8');
+    const persistedState = JSON.parse(stateRaw) as {
+      songRatings?: Record<string, number>;
+    };
+
+    expect((persistedState.songRatings ?? {})[ratedSongId]).toBe(9);
+
+    let secondLaunch: LaunchedApp | null = null;
+
+    try {
+      secondLaunch = await launchProducerPlayer(userDataDirectory);
+
+      if ((await secondLaunch.page.getByTestId('main-list-row').count()) === 0) {
+        await secondLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+        await secondLaunch.page.getByTestId('link-folder-path-button').click();
+      }
+
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const persistedSlider = secondLaunch.page.locator(
+        `[data-testid="song-rating-slider"][data-song-id="${ratedSongId}"]`
+      );
+      await expect(persistedSlider).toHaveValue('9');
+    } finally {
+      await secondLaunch?.electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('plays valid test audio and supports producer transport controls', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-fixture-')

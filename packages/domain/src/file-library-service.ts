@@ -19,6 +19,7 @@ type SnapshotSubscriber = (snapshot: LibrarySnapshot) => void;
 interface FileLibraryServiceOptions {
   autoMoveOld?: boolean;
   songOrder?: string[];
+  songRatings?: Record<string, number>;
 }
 
 function stableId(input: string): string {
@@ -43,6 +44,41 @@ function dedupeIds(ids: string[]): string[] {
   }
 
   return unique;
+}
+
+function normalizeSongRating(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 5;
+  }
+
+  const rounded = Math.round(value);
+  if (rounded < 1) {
+    return 1;
+  }
+
+  if (rounded > 10) {
+    return 10;
+  }
+
+  return rounded;
+}
+
+function normalizeSongRatingsMap(input: Record<string, number> | null | undefined): Record<string, number> {
+  if (!input || typeof input !== 'object') {
+    return {};
+  }
+
+  const normalized: Record<string, number> = {};
+
+  for (const [songId, rating] of Object.entries(input)) {
+    if (songId.length === 0) {
+      continue;
+    }
+
+    normalized[songId] = normalizeSongRating(rating);
+  }
+
+  return normalized;
 }
 
 function formatCount(count: number, singular: string, plural = `${singular}s`): string {
@@ -153,6 +189,7 @@ export class FileLibraryService {
   private readonly subscribers = new Set<SnapshotSubscriber>();
   private matcherSettings: MatcherSettings;
   private songOrder: string[];
+  private songRatings: Record<string, number>;
 
   private snapshot: LibrarySnapshot = {
     linkedFolders: [],
@@ -173,6 +210,7 @@ export class FileLibraryService {
     };
 
     this.songOrder = dedupeIds(options.songOrder ?? []);
+    this.songRatings = normalizeSongRatingsMap(options.songRatings);
 
     this.snapshot = {
       ...this.snapshot,
@@ -288,6 +326,7 @@ export class FileLibraryService {
 
     if (this.linkedFolders.size === 0) {
       this.songOrder = [];
+      this.songRatings = {};
       this.rebuildSnapshot('idle', 'No folders linked yet.');
       return this.getSnapshot();
     }
@@ -427,6 +466,23 @@ export class FileLibraryService {
     return this.getSnapshot();
   }
 
+  async setSongRating(songId: string, rating: number): Promise<LibrarySnapshot> {
+    const existingSong = this.snapshot.songs.find((song) => song.id === songId);
+    if (!existingSong) {
+      return this.getSnapshot();
+    }
+
+    const normalizedRating = normalizeSongRating(rating);
+    if (existingSong.rating === normalizedRating) {
+      return this.getSnapshot();
+    }
+
+    this.songRatings[songId] = normalizedRating;
+
+    this.rebuildSnapshot(this.snapshot.status, this.snapshot.statusMessage);
+    return this.getSnapshot();
+  }
+
   async dispose(): Promise<void> {
     for (const timer of this.folderScanTimers.values()) {
       clearTimeout(timer);
@@ -440,6 +496,7 @@ export class FileLibraryService {
     this.folderWatchers.clear();
     this.linkedFolders.clear();
     this.folderFiles.clear();
+    this.songRatings = {};
     this.subscribers.clear();
   }
 
@@ -695,6 +752,23 @@ export class FileLibraryService {
     });
   }
 
+  private applySongRatings(songs: SongWithVersions[]): SongWithVersions[] {
+    const nextRatings: Record<string, number> = {};
+
+    const ratedSongs = songs.map((song) => {
+      const rating = normalizeSongRating(this.songRatings[song.id]);
+      nextRatings[song.id] = rating;
+
+      return {
+        ...song,
+        rating,
+      };
+    });
+
+    this.songRatings = nextRatings;
+    return ratedSongs;
+  }
+
   private rebuildSnapshot(status: LibrarySnapshot['status'], statusMessage: string): void {
     const folderList = Array.from(this.linkedFolders.values()).sort((a, b) =>
       a.name.localeCompare(b.name)
@@ -702,7 +776,8 @@ export class FileLibraryService {
 
     const files = this.collectTrackedFiles();
     const unorderedSongs = buildSongsFromFiles(files);
-    const songs = this.applySongOrder(unorderedSongs);
+    const orderedSongs = this.applySongOrder(unorderedSongs);
+    const songs = this.applySongRatings(orderedSongs);
     const versions = songs.flatMap((song) => song.versions);
 
     const fileCountByFolder = new Map<string, number>();

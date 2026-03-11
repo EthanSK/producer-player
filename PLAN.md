@@ -1740,3 +1740,41 @@ Dropped/replaced from partial state:
 - True one-click audition transport A/B (jump to ref and back with synced playhead/loop compare).
 - Detached/new-window analysis surface (overlay currently remains in-window).
 - More mastering-grade timeline/meters beyond current measured snapshot + estimated live overlays.
+
+## Song-row rating slider request (sub-agent run, Wed 2026-03-11)
+
+### Ethan message (verbatim)
+
+**Timestamp:** Wed 2026-03-11 (from task context)
+
+```text
+Also, next to each song actually, underneath each one, next to the versions, have a little slide away you can rate each one on a scale of one to 10. Just to yeah. Have it, like, snap between the values just for your reminder's sake.
+```
+
+### Follow-up context (verbatim)
+
+**Timestamp:** Wed 2026-03-11 10:57 GMT
+
+```text
+How about now? Can you restart all the sub agents then that never made it from yesterday? Up until now, I think OpenAI should be fixed now. I think the circle is down.
+```
+
+### Implementation completed in this run
+
+- Added a compact per-song **rating slider** in each Album list row, directly under the row content (alongside the versions metadata area).
+- Slider is **1–10** with `step=1`, so it snaps to discrete whole-number values.
+- Added an in-row numeric badge (`x/10`) for quick glance scoring.
+- Implemented persistence through the existing app-state pipeline:
+  - new IPC path for rating writes
+  - domain service `setSongRating()`
+  - ratings included in snapshots
+  - ratings written to and restored from persisted Electron state.
+- Added targeted E2E coverage to verify snapping + cross-relaunch persistence.
+
+### Validation in this run
+
+- `npm run build` ✅
+- `npm run typecheck` ✅
+- `npm run test -w @producer-player/domain` ✅
+- `npm run test -w @producer-player/e2e -- src/library-linking.spec.ts -g "song row rating slider snaps to 1-10 and persists across relaunch"` ✅
+

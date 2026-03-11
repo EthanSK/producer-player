@@ -312,6 +312,33 @@ function getSongDisplayFileName(song: SongWithVersions): string {
   return getActiveSongVersion(song)?.fileName ?? song.title;
 }
 
+function getVersionTagFromFileName(fileName: string): string | null {
+  const stem = fileName.replace(/\.[^.]+$/, '');
+  const match = stem.match(/(?:^|[\s_-])(v\d+)(?:[\s_-]*archived[\s_-]*\d+)?$/i);
+  if (!match) {
+    return null;
+  }
+
+  const versionTag = (match[1] ?? '').trim();
+  return versionTag ? versionTag.toLowerCase() : null;
+}
+
+function getSongRowMetadataLabel(song: SongWithVersions): string {
+  const activeVersion = getActiveSongVersion(song);
+  if (!activeVersion) {
+    return '—';
+  }
+
+  const versionTag = getVersionTagFromFileName(activeVersion.fileName);
+  const formatTag = activeVersion.extension.toUpperCase();
+
+  if (versionTag) {
+    return `${versionTag} · ${formatTag}`;
+  }
+
+  return formatTag;
+}
+
 function getPlayheadEndResetThresholdSeconds(durationSeconds: number | undefined): number {
   if (
     !Number.isFinite(durationSeconds) ||
@@ -2619,6 +2646,7 @@ export function App(): JSX.Element {
                     : ''
                 }`
               : `${song.versions.length} version(s)`;
+            const songRowMetadataLabel = getSongRowMetadataLabel(song);
 
             return (
               <li
@@ -2675,11 +2703,16 @@ export function App(): JSX.Element {
                       : 'Select track. Clear search to enable drag-and-drop ordering.'
                   }
                 >
-                  <div>
-                    <strong>{getSongDisplayFileName(song)}</strong>
+                  <div className="main-list-row-primary">
+                    <strong className="main-list-row-title">{song.title}</strong>
                     <p className="muted">{secondaryRowText}</p>
                   </div>
-                  <span className="muted">{formatDate(song.latestExportAt)}</span>
+                  <div className="main-list-row-meta-group">
+                    <span className="main-list-row-metadata" data-testid="main-list-row-metadata">
+                      {songRowMetadataLabel}
+                    </span>
+                    <span className="muted">{formatDate(song.latestExportAt)}</span>
+                  </div>
                 </button>
               </li>
             );

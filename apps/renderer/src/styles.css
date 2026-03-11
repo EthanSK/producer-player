@@ -200,9 +200,16 @@ input[type='range'] {
   padding: 0;
 }
 
+.folder-tools-card {
+  margin: 10px 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
 .folder-add-cta {
   padding: 14px;
-  border-bottom: 1px solid var(--border);
   display: grid;
   justify-items: center;
   text-align: center;
@@ -230,11 +237,11 @@ input[type='range'] {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
-  border-bottom: 1px dashed rgba(92, 167, 255, 0.35);
+  border-top: 1px dashed rgba(92, 167, 255, 0.2);
 }
 
 .naming-guide {
-  margin: 8px 10px;
+  margin: 0 10px 10px;
   border: 1px solid rgba(95, 210, 143, 0.75);
   border-radius: 10px;
   padding: 10px;
@@ -258,6 +265,12 @@ input[type='range'] {
   display: inline-flex;
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+.sidebar-section-divider {
+  height: 1px;
+  margin: 8px 10px;
+  background: linear-gradient(90deg, transparent, rgba(92, 167, 255, 0.35), transparent);
 }
 
 .sidebar-status {
@@ -298,7 +311,10 @@ input[type='range'] {
   padding: 10px;
   display: grid;
   gap: 10px;
-  min-height: 420px;
+  min-height: 280px;
+  height: clamp(280px, 34vh, 420px);
+  max-height: 420px;
+  overflow-y: auto;
   align-content: start;
   background: linear-gradient(180deg, rgba(92, 167, 255, 0.08), rgba(255, 255, 255, 0.02));
 }
@@ -408,6 +424,29 @@ input[type='range'] {
 .producer-reference-toolbar {
   justify-content: space-between;
   align-items: start;
+}
+
+.analysis-ab-toggle {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(92, 167, 255, 0.24);
+  background: rgba(92, 167, 255, 0.06);
+}
+
+.analysis-ab-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9ab6d3;
+}
+
+.analysis-ab-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .analysis-reference-inline {
@@ -668,7 +707,7 @@ input[type='range'] {
 
 .main-list-item {
   display: grid;
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: 28px minmax(0, 1fr) 96px;
   align-items: stretch;
   gap: 6px;
   position: relative;
@@ -713,6 +752,60 @@ input[type='range'] {
   align-items: center;
   padding: 8px 10px;
   min-height: 72px;
+}
+
+.main-list-row-primary {
+  min-width: 0;
+  flex: 1;
+}
+
+.main-list-row-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main-list-row-meta-group {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.main-list-row-metadata {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9ab6d3;
+  border: 1px solid rgba(154, 182, 211, 0.36);
+  border-radius: 999px;
+  background: rgba(92, 167, 255, 0.12);
+  padding: 2px 8px;
+}
+
+.song-rating-control {
+  display: grid;
+  align-content: center;
+  justify-items: stretch;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.song-rating-value {
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  color: #9ab6d3;
+}
+
+.song-rating-control input[type='range'] {
+  accent-color: #f6b443;
 }
 
 .player-dock {
@@ -773,6 +866,15 @@ input[type='range'] {
   min-height: 0;
   overflow-y: auto;
   padding-bottom: 12px;
+}
+
+.support-feedback-card {
+  margin-bottom: 10px;
+}
+
+.support-feedback-links {
+  display: grid;
+  gap: 8px;
 }
 
 .inspector-card {

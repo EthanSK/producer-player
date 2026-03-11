@@ -599,7 +599,7 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
-  test('shows phase 2 mastering analysis with a stable panel and explicit reference-track workflow', async () => {
+  test('shows mastering analysis with a stable panel and explicit reference-track workflow', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-mastering-preview-fixture-')
     );
@@ -678,7 +678,7 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('analysis-integrated-stat')).toContainText('LUFS');
       await expect(page.getByTestId('analysis-true-peak-stat')).toContainText('dBFS');
       await expect(page.getByTestId('analysis-reference-summary')).toContainText(
-        'Choose a real reference file'
+        'Choose a reference file'
       );
 
       await page.getByTestId('main-list-row').filter({ hasText: 'Bright Ref' }).first().click();
@@ -697,12 +697,17 @@ test.describe('playback runtime deep dive', () => {
         'External Reference.wav'
       );
 
+      await page.getByTestId('analysis-ab-reference').click();
+      await expect(page.getByTestId('player-track-name')).toContainText('External Reference.wav');
+      await page.getByTestId('analysis-ab-mix').click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Bright Ref v1.wav');
+
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
       await expect(page.getByTestId('analysis-reference-slot-a')).toContainText(
         'External Reference.wav'
       );
-      await expect(page.getByTestId('analysis-active-reference')).toContainText('delta');
+      await expect(page.getByTestId('analysis-active-reference')).toContainText('difference');
       await expect(page.getByTestId('analysis-active-reference')).toContainText(
         'External Reference.wav'
       );
@@ -793,13 +798,17 @@ test.describe('playback runtime deep dive', () => {
 
       const normalizationToggle = page.getByTestId('analysis-normalization-toggle');
       await expect(normalizationToggle).toBeEnabled();
-      await expect(normalizationToggle).toHaveText('Preview On');
-
-      await normalizationToggle.click();
       await expect(normalizationToggle).toHaveText('Preview Off');
       await expect(page.getByTestId('analysis-normalization-summary')).toContainText('preview off');
       await expect(page.getByTestId('analysis-normalization-change')).toContainText(
         'Bypassed until Preview On'
+      );
+
+      await normalizationToggle.click();
+      await expect(normalizationToggle).toHaveText('Preview On');
+      await expect(page.getByTestId('analysis-normalization-summary')).toContainText('preview on');
+      await expect(page.getByTestId('analysis-normalization-change')).toContainText(
+        'Active on current playback'
       );
 
       await page.screenshot({ path: screenshotPath });
@@ -809,6 +818,75 @@ test.describe('playback runtime deep dive', () => {
       });
     } finally {
       await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('shows album duration, support links, and persists song-row ratings', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-ratings-duration-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-ratings-duration-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=330:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=660:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Beta v1.wav'),
+    ]);
+
+    let firstLaunch: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+    let secondLaunch: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+
+    try {
+      firstLaunch = await launchProducerPlayer(userDataDirectory);
+      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+      await expect(firstLaunch.page.getByTestId('album-duration-label')).toContainText('0:12');
+      await expect(firstLaunch.page.getByTestId('support-feedback-card')).toBeVisible();
+      await expect(firstLaunch.page.getByTestId('support-feedback-bug')).toBeVisible();
+      await expect(firstLaunch.page.getByTestId('support-feedback-feature')).toBeVisible();
+
+      await firstLaunch.page
+        .getByTestId('song-rating-slider')
+        .first()
+        .evaluate((element) => {
+          const input = element as HTMLInputElement;
+          input.value = '9';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      await expect(firstLaunch.page.getByTestId('song-rating-control').first()).toContainText('9/10');
+      await firstLaunch.electronApp.close();
+      firstLaunch = null;
+
+      secondLaunch = await launchProducerPlayer(userDataDirectory);
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
+      await expect(secondLaunch.page.getByTestId('album-duration-label')).toContainText('0:12');
+      await expect(secondLaunch.page.getByTestId('song-rating-control').first()).toContainText('9/10');
+    } finally {
+      await firstLaunch?.electronApp.close();
+      await secondLaunch?.electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });
       await fs.rm(userDataDirectory, { recursive: true, force: true });
     }
@@ -1514,6 +1592,92 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
+  test('previous restarts current track first, then goes to previous track on the next press', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-previous-track-behavior-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-previous-track-behavior-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=300:duration=8',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Back Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=520:duration=8',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Back Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    const readScrubberValue = async (): Promise<number> => {
+      return Number.parseFloat(await page.getByTestId('player-scrubber').inputValue());
+    };
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const firstTrackName =
+        ((await page.getByTestId('main-list-row').nth(0).locator('strong').textContent()) ?? '').trim();
+      const secondTrackName =
+        ((await page.getByTestId('main-list-row').nth(1).locator('strong').textContent()) ?? '').trim();
+
+      await page.getByTestId('main-list-row').nth(1).click();
+      await expect(page.getByTestId('player-track-name')).toContainText(secondTrackName);
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await expect
+        .poll(
+          async () =>
+            Number.parseFloat((await page.getByTestId('player-scrubber').getAttribute('max')) ?? '0')
+        )
+        .toBeGreaterThan(7);
+
+      await expect.poll(readScrubberValue, { timeout: 12_000 }).toBeGreaterThan(2.3);
+
+      await page.getByTestId('player-prev').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(secondTrackName);
+      await expect.poll(readScrubberValue).toBeLessThan(0.25);
+
+      await page.getByTestId('player-prev').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await expect.poll(readScrubberValue, { timeout: 8_000 }).toBeGreaterThan(1);
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+
+      await page.getByTestId('player-prev').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
+      await expect.poll(readScrubberValue).toBeLessThan(0.25);
+
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('responds to main-process transport command events (media-key command path)', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-transport-events-fixture-')
@@ -1568,6 +1732,17 @@ test.describe('playback runtime deep dive', () => {
       });
 
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('player-scrubber').evaluate((element) => {
+        const scrubber = element as HTMLInputElement;
+        scrubber.value = '0.4';
+        scrubber.dispatchEvent(new Event('input', { bubbles: true }));
+        scrubber.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      await expect
+        .poll(async () => Number.parseFloat(await page.getByTestId('player-scrubber').inputValue()))
+        .toBeLessThan(1);
 
       await electronApp.evaluate(({ BrowserWindow }) => {
         const window = BrowserWindow.getAllWindows()[0];

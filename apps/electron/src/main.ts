@@ -39,6 +39,8 @@ const TEST_PLAYLIST_IMPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_IMPOR
 const TEST_REFERENCE_IMPORT_PATH =
   process.env.PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH ?? null;
 const ANALYSIS_DELAY_MS = Number(process.env.PRODUCER_PLAYER_ANALYSIS_DELAY_MS ?? '0');
+const PUBLIC_REPOSITORY_ORIGIN = 'https://github.com';
+const PUBLIC_REPOSITORY_PATH = '/EthanSK/producer-player';
 
 const PLAYBACK_MIME_BY_EXTENSION: Record<string, string> = {
   wav: 'audio/wav',
@@ -1100,6 +1102,25 @@ function validateRendererDevUrl(url: string): void {
   }
 }
 
+function parseTrustedRepositoryUrl(url: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid support URL: ${url}`);
+  }
+
+  const matchesRepositoryPath =
+    parsed.pathname === PUBLIC_REPOSITORY_PATH ||
+    parsed.pathname.startsWith(`${PUBLIC_REPOSITORY_PATH}/`);
+
+  if (parsed.origin !== PUBLIC_REPOSITORY_ORIGIN || !matchesRepositoryPath) {
+    throw new Error('Only Producer Player GitHub links are allowed.');
+  }
+
+  return parsed;
+}
+
 function buildEnvironmentInfo(): ProducerPlayerEnvironment {
   return {
     isMacAppStoreSandboxed: IS_MAC_APP_STORE_SANDBOX,
@@ -1423,6 +1444,11 @@ function registerIpcHandlers(service: FileLibraryService): void {
     if (error) {
       throw new Error(error);
     }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL_URL, async (_event, url: string) => {
+    const trustedUrl = parseTrustedRepositoryUrl(url);
+    await shell.openExternal(trustedUrl.toString());
   });
 
   ipcMain.handle(IPC_CHANNELS.TO_FILE_URL, async (_event, filePath: string) => {

@@ -1,0 +1,42 @@
+name: Feature request
+description: Share an idea to make Producer Player better.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Producer Player.
+        Please keep this request focused on one feature so it can be reviewed quickly.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the pain point or workflow gap.
+      placeholder: "Example: I can't quickly compare loudness between different reference tracks."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should happen in Producer Player?
+      placeholder: "Add a quick A/B compare mode with matched loudness between track and reference."
+    validations:
+      required: true
+
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Who benefits and when?
+      description: Briefly describe the user workflow and impact.
+      placeholder: "Mix engineers doing final checks before export."
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context (optional)
+      description: Links, screenshots, references, or similar tools.

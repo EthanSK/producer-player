@@ -61,6 +61,10 @@ const bridge: ProducerPlayerBridge = {
     await ipcRenderer.invoke(IPC_CHANNELS.OPEN_FOLDER, folderPath);
   },
 
+  async openExternalUrl(url: string) {
+    await ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL_URL, url);
+  },
+
   async toFileUrl(filePath: string) {
     return ipcRenderer.invoke(IPC_CHANNELS.TO_FILE_URL, filePath);
   },

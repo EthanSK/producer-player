@@ -715,6 +715,41 @@ input[type='range'] {
   min-height: 72px;
 }
 
+.main-list-row-primary {
+  min-width: 0;
+  flex: 1;
+}
+
+.main-list-row-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main-list-row-meta-group {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.main-list-row-metadata {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9ab6d3;
+  border: 1px solid rgba(154, 182, 211, 0.36);
+  border-radius: 999px;
+  background: rgba(92, 167, 255, 0.12);
+  padding: 2px 8px;
+}
+
 .player-dock {
   border-top: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(15, 23, 38, 0.9), rgba(12, 18, 31, 0.95));

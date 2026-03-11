@@ -1740,3 +1740,46 @@ Dropped/replaced from partial state:
 - True one-click audition transport A/B (jump to ref and back with synced playhead/loop compare).
 - Detached/new-window analysis surface (overlay currently remains in-window).
 - More mastering-grade timeline/meters beyond current measured snapshot + estimated live overlays.
+
+---
+
+## Song-row title/metadata separation pass (Wed 2026-03-11)
+
+### Ethan message (verbatim intent)
+
+**Timestamp:** Wed 2026-03-11 00:57 GMT
+
+```text
+Also in another sub agent, move the list title of each song. Move the version and the file format to the other side. It shouldn't be part of the title itself. Maybe in, like, a different font as well to show that it's been passed.
+```
+
+### Shipped UI change
+
+- Main track-list rows now render the **primary title as song title only** (`song.title`), rather than active filename.
+- Added right-side metadata treatment for the active version:
+  - `vN · FORMAT` (for example `v2 · WAV`) when a trailing version tag exists
+  - `FORMAT` (for example `MP3`) when no version tag is present
+- Metadata is now intentionally secondary and visually distinct:
+  - compact monospace badge
+  - uppercase/letter-spacing treatment
+  - softer color + bordered pill background
+  - right-aligned opposite the title block
+- Existing secondary row behavior is preserved:
+  - normal mode still shows version-count context
+  - search mode still shows matched-version filenames
+
+### Supporting test updates
+
+- Updated e2e assertions that previously expected raw filenames in list-row titles.
+- Added metadata-pill assertions via `data-testid="main-list-row-metadata"` in the linked-folder switching flow.
+- Updated advanced break-test expectations to align with title-only row rendering and metadata separation.
+
+### Validation run (pragmatic)
+
+- `npm install` ✅
+- `npm run build:packages` ✅
+- `npm run typecheck -w @producer-player/renderer` ✅
+- `npm run typecheck -w @producer-player/e2e` ✅
+- `npm run build -w @producer-player/renderer` ✅
+- `npm run test -w @producer-player/domain` ✅ (6/6 passing)
+- Attempted targeted Playwright checks for updated row behavior, but those runs timed out in this worktree during e2e execution window (no crash/regression surfaced in renderer/domain validation).

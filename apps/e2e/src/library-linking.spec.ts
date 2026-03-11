@@ -387,9 +387,12 @@ test.describe('Producer Player desktop shell', () => {
       await expect(firstLaunch.page.getByTestId('linked-folder-item')).toHaveCount(2);
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(firstLaunch.page.locator('.panel-header .muted').first()).toHaveText('2 tracks');
-      await expect(firstLaunch.page.getByTestId('main-list')).toContainText('Alpha v1.wav');
-      await expect(firstLaunch.page.getByTestId('main-list')).toContainText('Outro v1.wav');
-      await expect(firstLaunch.page.getByTestId('main-list')).not.toContainText('Beta v1.wav');
+      await expect(firstLaunch.page.getByTestId('main-list')).toContainText('Alpha');
+      await expect(firstLaunch.page.getByTestId('main-list')).toContainText('Outro');
+      await expect(firstLaunch.page.getByTestId('main-list')).not.toContainText('Beta');
+      await expect(
+        firstLaunch.page.getByTestId('main-list-row').first().getByTestId('main-list-row-metadata')
+      ).toHaveText(/v1\s*·\s*wav/i);
 
       await firstLaunch.page
         .getByTestId('linked-folder-item')
@@ -398,15 +401,21 @@ test.describe('Producer Player desktop shell', () => {
 
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
       await expect(firstLaunch.page.locator('.panel-header .muted').first()).toHaveText('1 track');
-      await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta v1.wav');
-      await expect(firstLaunch.page.getByTestId('main-list')).not.toContainText('Alpha v1.wav');
+      await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta');
+      await expect(
+        firstLaunch.page.getByTestId('main-list-row').first().getByTestId('main-list-row-metadata')
+      ).toHaveText(/v1\s*·\s*wav/i);
+      await expect(firstLaunch.page.getByTestId('main-list')).not.toContainText('Alpha');
 
       await firstLaunch.page.getByTestId('main-list-row').first().click();
       await expect(firstLaunch.page.getByTestId('inspector-song-title')).toContainText('Beta');
 
       await firstLaunch.page.getByTestId('rescan-button').click();
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
-      await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta v1.wav');
+      await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta');
+      await expect(
+        firstLaunch.page.getByTestId('main-list-row').first().getByTestId('main-list-row-metadata')
+      ).toHaveText(/v1\s*·\s*wav/i);
     } finally {
       await firstLaunch?.electronApp.close();
     }
@@ -425,7 +434,10 @@ test.describe('Producer Player desktop shell', () => {
         .click();
 
       await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
-      await expect(secondLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta v1.wav');
+      await expect(secondLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta');
+      await expect(
+        secondLaunch.page.getByTestId('main-list-row').first().getByTestId('main-list-row-metadata')
+      ).toHaveText(/v1\s*·\s*wav/i);
 
       secondLaunch.page.once('dialog', async (dialog) => {
         await dialog.accept();
@@ -439,9 +451,9 @@ test.describe('Producer Player desktop shell', () => {
 
       await expect(secondLaunch.page.getByTestId('linked-folder-item')).toHaveCount(1);
       await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
-      await expect(secondLaunch.page.getByTestId('main-list')).toContainText('Alpha v1.wav');
-      await expect(secondLaunch.page.getByTestId('main-list')).toContainText('Outro v1.wav');
-      await expect(secondLaunch.page.getByTestId('main-list')).not.toContainText('Beta v1.wav');
+      await expect(secondLaunch.page.getByTestId('main-list')).toContainText('Alpha');
+      await expect(secondLaunch.page.getByTestId('main-list')).toContainText('Outro');
+      await expect(secondLaunch.page.getByTestId('main-list')).not.toContainText('Beta');
     } finally {
       await secondLaunch?.electronApp.close();
       await fs.rm(fixtureRoot, { recursive: true, force: true });

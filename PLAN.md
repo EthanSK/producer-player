@@ -1976,3 +1976,14 @@ Files changed by this audit:
 
 - **Run `a5093662-0888-4cba-8bfb-c6581892a78e` (`producer-player-two-hour-catchup-ship-pass`)**: did not complete cleanly and produced no commit/push; this branch (`two-hour-catchup-20260311-015709`) supersedes it and is the audited shipping state.
 - Multiple “stalled / partial” worktrees described earlier in this log (mastering/normalization retries, album-duration/rating-slider attempts) were explicitly **salvaged/cherry-picked** or **re-implemented** into the shipped commits instead of trusting no-op reports (see “Two-hour catch-up / salvage checklist pass” above).
+
+### Triple-check follow-up — Thu 2026-03-12
+
+- **Prior audit correctness:** The Mar 10–11 checklist above still matches what’s on `two-hour-catchup-20260311-015709`. All **in-scope product items** marked **PRESENT** remain present on the branch.
+- **Newly found misses:** None.
+- **Added now:** No product/code changes were needed in this pass (only this follow-up note).
+- **Honest blockers remain:** Custom **VST/AU monitoring-chain support** is still **DEFERRED** (architecture-sized native plugin-host + audio-engine work; not a truthful quick patch).
+- **Validation (this pass):**
+  - Attempted to rerun Playwright Electron E2E in this sandbox, but it fails with `kill EPERM` while Playwright tries to terminate Electron (tests abort before assertions).
+  - Ran compilation validation instead: `npm run typecheck -w @producer-player/electron` ✅, `npm run typecheck -w @producer-player/renderer` ✅, `npm run build` ✅.
+- **Push status:** This follow-up note is **not committed/pushed yet** from this Codex sandbox (git cannot create the linked-worktree `index.lock`). Commit/push from a normal host shell session to ship it.

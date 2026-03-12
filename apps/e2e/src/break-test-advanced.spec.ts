@@ -70,8 +70,8 @@ test.describe('Producer Player advanced break tests', () => {
       );
 
       // No-suffix files also appear - document this behavior gap with the naming guide
-      await expect(page.getByTestId('main-list')).toContainText('Nosuffix');
-      await expect(page.getByTestId('main-list')).toContainText('Nosuffixeither');
+      await expect(page.getByTestId('main-list')).toContainText('NoSuffix');
+      await expect(page.getByTestId('main-list')).toContainText('NoSuffixEither');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);

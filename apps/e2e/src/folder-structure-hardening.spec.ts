@@ -98,6 +98,35 @@ test.describe('folder structure hardening', () => {
     }
   });
 
+  test('main list title keeps source casing while metadata bubble keeps version and format tags', async () => {
+    const directories = await createE2ETestDirectories('producer-player-e2e-title-casing');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      {
+        relativePath: 'iLoVeNYDemoMix v7.WAV',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await setAutoOrganize(page, false);
+
+      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      const row = page.getByTestId('main-list-row').first();
+      await expect(row.getByTestId('main-list-row-title')).toHaveText('iLoVeNYDemoMix');
+      await expect(row.getByTestId('main-list-row-metadata')).toHaveText('v7 · WAV');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('old-only tracks never leak into the album list, and old/ typos do not fuzzy-match a top-level song', async () => {
     const directories = await createE2ETestDirectories('producer-player-e2e-old-only');
 

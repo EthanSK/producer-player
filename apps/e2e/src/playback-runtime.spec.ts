@@ -11,6 +11,11 @@ function hasFfmpeg(): boolean {
   return check.status === 0;
 }
 
+function hasFfprobe(): boolean {
+  const check = spawnSync('ffprobe', ['-version'], { stdio: 'ignore' });
+  return check.status === 0;
+}
+
 async function runFfmpeg(args: string[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const ffmpeg = spawn('ffmpeg', args, {
@@ -57,6 +62,54 @@ async function runFfmpegCapture(args: string[]): Promise<Buffer> {
       }
 
       reject(new Error(`ffmpeg exited with ${code}: ${stderr}`));
+    });
+  });
+}
+
+async function probeAudioCodecName(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const ffprobe = spawn(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-select_streams',
+        'a:0',
+        '-show_entries',
+        'stream=codec_name',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        filePath,
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }
+    );
+
+    let stdout = '';
+    let stderr = '';
+
+    ffprobe.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    ffprobe.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    ffprobe.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffprobe exited with ${code}: ${stderr}`));
+        return;
+      }
+
+      const codecName = stdout.trim().split(/\s+/)[0] ?? '';
+      if (codecName.length === 0) {
+        reject(new Error(`ffprobe returned no codec for ${filePath}.`));
+        return;
+      }
+
+      resolve(codecName);
     });
   });
 }
@@ -1062,6 +1115,8 @@ test.describe('playback runtime deep dive', () => {
   });
 
   test('plays multiple AIFF variants by preparing them into local WAV cache', async () => {
+    test.skip(!hasFfprobe(), 'ffprobe is required for codec verification in AIFF preparation tests.');
+
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-aiff-variants-fixture-')
     );
@@ -1074,18 +1129,21 @@ test.describe('playback runtime deep dive', () => {
         label: 'Aiff 16',
         outputName: 'Variant Aiff 16 v1.aiff',
         codecArgs: ['-c:a', 'pcm_s16be'],
+        expectedPreparedCodec: 'pcm_s16le',
       },
       {
         label: 'Aiff 24',
         outputName: 'Variant Aiff 24 v1.aiff',
         codecArgs: ['-c:a', 'pcm_s24be'],
+        expectedPreparedCodec: 'pcm_s24le',
       },
       {
         label: 'Aif 16',
         outputName: 'Variant Aif 16 v1.aif',
         codecArgs: ['-c:a', 'pcm_s16be'],
+        expectedPreparedCodec: 'pcm_s16le',
       },
-    ];
+    ] as const;
 
     for (const variant of variants) {
       await runFfmpeg([
@@ -1118,6 +1176,10 @@ test.describe('playback runtime deep dive', () => {
 
         expect(preparedSource.sourceStrategy).toBe('transcoded-cache');
         expect(preparedSource.originalFilePath).toBe(variantPath);
+
+        const preparedCodecName = await probeAudioCodecName(preparedSource.filePath);
+        expect(preparedCodecName).toBe(variant.expectedPreparedCodec);
+
         await expect(page.getByTestId('playback-source-meta')).toHaveCount(0);
 
         await page.getByTestId('player-play-toggle').click();

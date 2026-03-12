@@ -318,6 +318,23 @@ function getSongDisplayFileName(song: SongWithVersions): string {
   return getActiveSongVersion(song)?.fileName ?? song.title;
 }
 
+function getSongDisplayTitle(song: SongWithVersions): string {
+  const activeVersion = getActiveSongVersion(song);
+  if (!activeVersion) {
+    return song.title;
+  }
+
+  const stem = activeVersion.fileName.replace(/\.[^.]+$/, '');
+  const match = stem.match(/^(.*?)(?:[\s_-]?v\d+)(?:[\s_-]*archived[\s_-]*\d+)?$/i);
+  const title = (match?.[1] ?? stem).trim();
+
+  if (title.length > 0) {
+    return title;
+  }
+
+  return stem.trim() || song.title;
+}
+
 function getVersionTagFromFileName(fileName: string): string | null {
   const stem = fileName.replace(/\.[^.]+$/, '');
   const match = stem.match(/(?:^|[\s_-])(v\d+)(?:[\s_-]*archived[\s_-]*\d+)?$/i);
@@ -2971,6 +2988,7 @@ export function App(): JSX.Element {
                     : ''
                 }`
               : `${song.versions.length} version(s)`;
+            const songRowTitle = getSongDisplayTitle(song);
             const songRowMetadataLabel = getSongRowMetadataLabel(song);
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
 
@@ -3029,7 +3047,9 @@ export function App(): JSX.Element {
                   }
                 >
                   <div className="main-list-row-primary">
-                    <strong className="main-list-row-title">{song.title}</strong>
+                    <strong className="main-list-row-title" data-testid="main-list-row-title">
+                      {songRowTitle}
+                    </strong>
                     <p className="muted">{secondaryRowText}</p>
                   </div>
                   <div className="main-list-row-meta-group">
@@ -3057,7 +3077,7 @@ export function App(): JSX.Element {
                       handleSongRatingChange(song.id, Number(event.currentTarget.value));
                     }}
                     data-testid="song-rating-slider"
-                    aria-label={`${song.title} rating`}
+                    aria-label={`${songRowTitle} rating`}
                   />
                 </label>
               </li>

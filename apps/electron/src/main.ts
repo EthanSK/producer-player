@@ -789,6 +789,148 @@ function shouldTranscodeForPlayback(extension: string): boolean {
   return AIFF_LIKE_EXTENSIONS.has(extension.toLowerCase());
 }
 
+type PlaybackTranscodeCodec =
+  | 'pcm_s16le'
+  | 'pcm_s24le'
+  | 'pcm_s32le'
+  | 'pcm_f32le'
+  | 'pcm_f64le';
+
+interface PlaybackProbeStream {
+  codec_name?: unknown;
+  sample_fmt?: unknown;
+  bits_per_raw_sample?: unknown;
+  bits_per_sample?: unknown;
+}
+
+function parseInteger(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.trunc(parsed);
+    }
+  }
+
+  return null;
+}
+
+function choosePlaybackTranscodeCodec(input: {
+  codecName: string | null;
+  sampleFormat: string | null;
+  bitDepth: number | null;
+}): PlaybackTranscodeCodec {
+  const codecName = input.codecName?.toLowerCase() ?? '';
+  const sampleFormat = input.sampleFormat?.toLowerCase().replace(/p$/, '') ?? '';
+
+  if (sampleFormat === 'dbl') {
+    return 'pcm_f64le';
+  }
+
+  if (sampleFormat === 'flt') {
+    return 'pcm_f32le';
+  }
+
+  if (sampleFormat === 's16') {
+    return 'pcm_s16le';
+  }
+
+  if (sampleFormat === 's32') {
+    if (input.bitDepth !== null && input.bitDepth <= 24) {
+      return input.bitDepth <= 16 ? 'pcm_s16le' : 'pcm_s24le';
+    }
+
+    return 'pcm_s32le';
+  }
+
+  if (sampleFormat === 'u8' || sampleFormat === 's8') {
+    return 'pcm_s16le';
+  }
+
+  if (codecName.includes('pcm_f64')) {
+    return 'pcm_f64le';
+  }
+
+  if (codecName.includes('pcm_f32')) {
+    return 'pcm_f32le';
+  }
+
+  if (codecName.includes('pcm_s16') || codecName.includes('pcm_u8') || codecName.includes('pcm_s8')) {
+    return 'pcm_s16le';
+  }
+
+  if (codecName.includes('pcm_s24')) {
+    return 'pcm_s24le';
+  }
+
+  if (codecName.includes('pcm_s32')) {
+    if (input.bitDepth !== null && input.bitDepth <= 24) {
+      return input.bitDepth <= 16 ? 'pcm_s16le' : 'pcm_s24le';
+    }
+
+    return 'pcm_s32le';
+  }
+
+  if (input.bitDepth !== null) {
+    if (input.bitDepth <= 16) {
+      return 'pcm_s16le';
+    }
+
+    if (input.bitDepth <= 24) {
+      return 'pcm_s24le';
+    }
+
+    return 'pcm_s32le';
+  }
+
+  return 'pcm_s24le';
+}
+
+async function resolvePlaybackTranscodeCodec(sourcePath: string): Promise<PlaybackTranscodeCodec> {
+  const ffprobeCommand = getBinaryCommandPath('ffprobe');
+
+  try {
+    const probeResult = await runProcessCapture(ffprobeCommand, [
+      '-v',
+      'error',
+      '-select_streams',
+      'a:0',
+      '-show_entries',
+      'stream=codec_name,sample_fmt,bits_per_raw_sample,bits_per_sample',
+      '-of',
+      'json',
+      sourcePath,
+    ]);
+
+    const parsed = JSON.parse(probeResult.stdout) as { streams?: PlaybackProbeStream[] };
+    const stream = Array.isArray(parsed.streams) ? parsed.streams[0] : undefined;
+
+    if (!stream) {
+      return 'pcm_s24le';
+    }
+
+    const codecName = typeof stream.codec_name === 'string' ? stream.codec_name : null;
+    const sampleFormat = typeof stream.sample_fmt === 'string' ? stream.sample_fmt : null;
+    const bitDepth =
+      parseInteger(stream.bits_per_raw_sample) ?? parseInteger(stream.bits_per_sample);
+
+    return choosePlaybackTranscodeCodec({
+      codecName,
+      sampleFormat,
+      bitDepth,
+    });
+  } catch (error: unknown) {
+    console.warn('[producer-player:playback] could not probe AIFF format; defaulting to pcm_s24le', {
+      sourcePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 'pcm_s24le';
+  }
+}
+
 async function transcodeAudioForPlayback(
   sourcePath: string,
   outputPath: string
@@ -799,6 +941,8 @@ async function transcodeAudioForPlayback(
     throw new Error(`Bundled ffmpeg binary is missing: ${ffmpegPath}`);
   }
 
+  const targetCodec = await resolvePlaybackTranscodeCodec(sourcePath);
+
   await fs.mkdir(dirname(outputPath), { recursive: true });
 
   const temporaryOutputPath = `${outputPath}.tmp-${process.pid}-${Date.now()}.wav`;
@@ -807,7 +951,19 @@ async function transcodeAudioForPlayback(
     await new Promise<void>((resolvePromise, rejectPromise) => {
       const ffmpeg = spawn(
         ffmpegPath,
-        ['-v', 'error', '-y', '-i', sourcePath, '-vn', '-c:a', 'pcm_s16le', temporaryOutputPath],
+        [
+          '-v',
+          'error',
+          '-y',
+          '-i',
+          sourcePath,
+          '-vn',
+          '-map',
+          '0:a:0',
+          '-c:a',
+          targetCodec,
+          temporaryOutputPath,
+        ],
         {
           stdio: ['ignore', 'pipe', 'pipe'],
         }
@@ -830,7 +986,7 @@ async function transcodeAudioForPlayback(
 
         rejectPromise(
           new Error(
-            `ffmpeg failed while preparing playback for ${sourcePath} (exit ${code}): ${stderr.trim()}`
+            `ffmpeg failed while preparing playback for ${sourcePath} (codec ${targetCodec}, exit ${code}): ${stderr.trim()}`
           )
         );
       });

@@ -2424,7 +2424,6 @@ export function App(): JSX.Element {
             >
               Add Folder…
             </button>
-            <p className="muted">Link folders to keep album order and version history in sync.</p>
             {environment.isMacAppStoreSandboxed ? (
               <p
                 className="muted"

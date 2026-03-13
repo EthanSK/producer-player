@@ -508,6 +508,9 @@ export function App(): JSX.Element {
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [playbackSource, setPlaybackSource] = useState<PlaybackSourceInfo | null>(null);
   const [mixPlaybackSource, setMixPlaybackSource] = useState<PlaybackSourceInfo | null>(null);
+  const [mixPlaybackSourceSelectedFilePath, setMixPlaybackSourceSelectedFilePath] = useState<
+    string | null
+  >(null);
   const [playbackPreviewMode, setPlaybackPreviewMode] = useState<'mix' | 'reference'>('mix');
   const [playbackSourceSupport, setPlaybackSourceSupport] = useState<'unknown' | 'maybe' | 'probably' | 'no'>(
     'unknown'
@@ -1201,7 +1204,20 @@ export function App(): JSX.Element {
     snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
   const selectedPlaybackFilePath = selectedPlaybackVersion?.filePath ?? null;
   const selectedPlaybackSongId = selectedPlaybackVersion?.songId ?? null;
+  const activeMixPlaybackSource =
+    selectedPlaybackFilePath &&
+    mixPlaybackSourceSelectedFilePath === selectedPlaybackFilePath
+      ? mixPlaybackSource
+      : null;
   const referencePlaybackKey = getReferencePlaybackKey(referenceTrack);
+  const desiredPlaybackSource =
+    playbackPreviewMode === 'reference'
+      ? referenceTrack?.playbackSource ?? null
+      : activeMixPlaybackSource;
+  const desiredPlaybackKey =
+    playbackPreviewMode === 'reference' ? referencePlaybackKey : selectedPlaybackSongId;
+  const desiredPlaybackFilePath =
+    playbackPreviewMode === 'reference' ? referenceTrack?.filePath ?? null : selectedPlaybackFilePath;
   const activePlaybackKey =
     playbackPreviewMode === 'reference' && referenceTrack && referencePlaybackKey
       ? referencePlaybackKey
@@ -1284,6 +1300,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (!selectedPlaybackVersionId || !selectedPlaybackFilePath) {
       setMixPlaybackSource(null);
+      setMixPlaybackSourceSelectedFilePath(null);
       return;
     }
 
@@ -1291,14 +1308,19 @@ export function App(): JSX.Element {
     const requestId = sourceRequestIdRef.current + 1;
     sourceRequestIdRef.current = requestId;
 
+    const requestedFilePath = selectedPlaybackFilePath;
+    setMixPlaybackSource(null);
+    setMixPlaybackSourceSelectedFilePath(requestedFilePath);
+
     window.producerPlayer
-      .resolvePlaybackSource(selectedPlaybackFilePath)
+      .resolvePlaybackSource(requestedFilePath)
       .then((source) => {
         if (cancelled || requestId !== sourceRequestIdRef.current) {
           return;
         }
 
         setMixPlaybackSource(source);
+        setMixPlaybackSourceSelectedFilePath(requestedFilePath);
       })
       .catch((cause: unknown) => {
         if (cancelled || requestId !== sourceRequestIdRef.current) {
@@ -1308,6 +1330,7 @@ export function App(): JSX.Element {
         const message = cause instanceof Error ? cause.message : String(cause);
         setPlaybackError(message);
         setMixPlaybackSource(null);
+        setMixPlaybackSourceSelectedFilePath(requestedFilePath);
         logPlaybackEvent('source-resolve-failed', {
           requestId,
           message,
@@ -1329,25 +1352,24 @@ export function App(): JSX.Element {
       durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
     });
 
-    const activeSource =
-      playbackPreviewMode === 'reference' ? referenceTrack?.playbackSource ?? null : mixPlaybackSource;
-    const activeSourceKey =
-      playbackPreviewMode === 'reference' ? referencePlaybackKey : selectedPlaybackSongId;
+    const activeSource = desiredPlaybackSource;
+    const activeSourceKey = desiredPlaybackKey;
+    const activePlaybackFilePath = desiredPlaybackFilePath;
     const clearReason =
       playbackPreviewMode === 'reference' ? 'no-reference-preview' : 'no-selected-version';
 
     clearPlaybackLoadTimeout();
     setPlaybackError(null);
-    setCurrentTimeSeconds(0);
-    setDurationSeconds(0);
-    setPlaybackSourceReady(false);
-    setPlaybackSourceSupport('unknown');
 
-    if (!activeSource || !activeSourceKey || !activePlaybackFilePath) {
+    if (!activeSourceKey || !activePlaybackFilePath) {
       pendingRestoreTimeRef.current = null;
       lastLoadedSongIdRef.current = null;
       playOnNextLoadRef.current = false;
       setPlaybackSource(null);
+      setCurrentTimeSeconds(0);
+      setDurationSeconds(0);
+      setPlaybackSourceReady(false);
+      setPlaybackSourceSupport('unknown');
       audio.pause();
       audio.removeAttribute('src');
       audio.load();
@@ -1356,6 +1378,37 @@ export function App(): JSX.Element {
       });
       return;
     }
+
+    if (!activeSource) {
+      pendingRestoreTimeRef.current = null;
+      lastLoadedSongIdRef.current = null;
+      setPlaybackSource(null);
+      setCurrentTimeSeconds(0);
+      setDurationSeconds(0);
+      setPlaybackSourceReady(false);
+      setPlaybackSourceSupport('unknown');
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      logPlaybackEvent('source-cleared', {
+        reason: clearReason,
+      });
+      return;
+    }
+
+    const alreadyLoaded =
+      lastLoadedSongIdRef.current === activeSourceKey &&
+      playbackSourceRef.current?.url === activeSource.url &&
+      playbackSourceRef.current?.filePath === activeSource.filePath;
+
+    if (alreadyLoaded) {
+      return;
+    }
+
+    setCurrentTimeSeconds(0);
+    setDurationSeconds(0);
+    setPlaybackSourceReady(false);
+    setPlaybackSourceSupport('unknown');
 
     const rememberedPosition = playbackPositionBySongIdRef.current.get(activeSourceKey) ?? null;
     pendingRestoreTimeRef.current =
@@ -1400,12 +1453,10 @@ export function App(): JSX.Element {
 
     audio.load();
   }, [
-    activePlaybackFilePath,
-    mixPlaybackSource,
+    desiredPlaybackFilePath,
+    desiredPlaybackKey,
+    desiredPlaybackSource,
     playbackPreviewMode,
-    referencePlaybackKey,
-    referenceTrack,
-    selectedPlaybackSongId,
   ]);
 
   const isSearching = searchText.trim().length > 0;
@@ -2572,17 +2623,14 @@ export function App(): JSX.Element {
           <div className="analysis-panel-header">
             <div>
               <h3>Mastering + Reference</h3>
-              <p className="muted">
-                Check loudness, tone, platform preview, and reference balance without leaving the
-                track list.
-              </p>
+              <p className="muted">LUFS · peaks · tone · refs · normalization</p>
             </div>
             <button
               type="button"
               className="icon-button"
               onClick={() => setAnalysisExpanded(true)}
               data-testid="analysis-expand-button"
-              title="Open the expanded mastering analysis panel."
+              title="Open the expanded mastering analysis."
               disabled={!selectedPlaybackVersion}
             >
               <span aria-hidden="true">⤢</span>
@@ -2594,10 +2642,6 @@ export function App(): JSX.Element {
               <div className="analysis-track-summary">
                 <strong data-testid="analysis-track-label">{selectedPlaybackVersion.fileName}</strong>
                 <p className="muted">{selectedSong ? selectedSong.title : 'Unknown track'}</p>
-                <p className="muted analysis-phase-note">
-                  Measured loudness comes from the file. Tone balance and current loudness update
-                  live during playback.
-                </p>
               </div>
 
               <p className="muted analysis-loading-line" data-testid="analysis-status">
@@ -2605,7 +2649,7 @@ export function App(): JSX.Element {
                   ? 'Loading mastering analysis…'
                   : analysisStatus === 'error'
                     ? 'Analysis failed.'
-                    : 'Measured loudness stays visible here while you browse tracks.'}
+                    : 'Ready.'}
               </p>
 
               {analysisStatus === 'error' ? (
@@ -2643,17 +2687,15 @@ export function App(): JSX.Element {
 
               <div className="analysis-reference-toolbar producer-reference-toolbar">
                 <div>
-                  <strong>Reference track</strong>
+                  <strong>Reference</strong>
                   <p className="muted" data-testid="analysis-reference-summary">
                     {referenceTrack
                       ? `${referenceTrack.fileName} · ${
-                          referenceTrack.sourceType === 'external-file'
-                            ? 'reference file'
-                            : 'linked track reference'
+                          referenceTrack.sourceType === 'external-file' ? 'external' : 'linked'
                         }`
                       : referenceStatus === 'loading'
-                        ? 'Loading selected reference track…'
-                        : 'Choose a reference file or set the current track as your reference.'}
+                        ? 'Loading…'
+                        : 'No reference'}
                   </p>
                 </div>
                 <div className="analysis-reference-actions">
@@ -2663,9 +2705,9 @@ export function App(): JSX.Element {
                       void handleChooseReferenceTrack();
                     }}
                     data-testid="analysis-choose-reference"
-                    title="Choose an external reference track file to compare against the current export."
+                    title="Choose an external reference file."
                   >
-                    Choose Reference File…
+                    Choose File…
                   </button>
                   <button
                     type="button"
@@ -2674,9 +2716,9 @@ export function App(): JSX.Element {
                     }}
                     data-testid="analysis-use-current-reference"
                     disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion}
-                    title="Use the currently selected linked track as the active reference track."
+                    title="Use the current track as the reference."
                   >
-                    Set Current Track as Reference
+                    Use Current
                   </button>
                   <button
                     type="button"
@@ -2684,9 +2726,9 @@ export function App(): JSX.Element {
                     onClick={handleClearReferenceTrack}
                     data-testid="analysis-clear-reference"
                     disabled={!referenceTrack && referenceStatus !== 'error'}
-                    title="Clear the active reference track comparison."
+                    title="Clear the reference."
                   >
-                    Clear Reference
+                    Clear
                   </button>
                 </div>
               </div>
@@ -2748,7 +2790,7 @@ export function App(): JSX.Element {
                     <span className="analysis-stat-label">Reference comparison</span>
                     <strong>No reference loaded</strong>
                     <span className="muted">
-                      Load a reference to compare loudness, peaks, and tonal balance.
+                      Choose a reference file or set the current track.
                     </span>
                   </div>
                 )}
@@ -2855,8 +2897,7 @@ export function App(): JSX.Element {
             </>
           ) : (
             <p className="muted" data-testid="analysis-empty-state">
-              Select a track to view measured loudness, tonal balance preview, and reference-track
-              comparison.
+              Select a track to see analysis + A/B.
             </p>
           )}
         </section>
@@ -3293,9 +3334,7 @@ export function App(): JSX.Element {
             <div className="analysis-overlay-header">
               <div>
                 <h2>Mastering Analysis</h2>
-                <p className="muted">
-                  Check loudness, peaks, tone, and reference balance for the selected track.
-                </p>
+                <p className="muted">LUFS · peaks · tone · refs · normalization</p>
               </div>
               <button
                 type="button"
@@ -3315,10 +3354,6 @@ export function App(): JSX.Element {
                     <strong>{selectedPlaybackVersion.fileName}</strong>
                   </p>
                   <p className="muted">{selectedSong ? selectedSong.title : 'Unknown track'}</p>
-                  <p className="muted">
-                    Measured loudness comes from the file. Tone balance and current loudness update
-                    live during playback.
-                  </p>
                 </section>
 
                 <section className="analysis-overlay-section">
@@ -3463,7 +3498,7 @@ export function App(): JSX.Element {
                       </>
                     ) : (
                       <p className="muted">
-                        No reference loaded yet. Load one to compare loudness, peaks, and tone.
+                        No reference loaded.
                       </p>
                     )}
                   </div>
@@ -3507,7 +3542,7 @@ export function App(): JSX.Element {
                     </div>
                   ) : (
                     <p className="muted" data-testid="analysis-active-reference">
-                      Load a reference track to see direct deltas for loudness, peaks, and tonal tilt.
+                      Load a reference to see deltas.
                     </p>
                   )}
                 </section>

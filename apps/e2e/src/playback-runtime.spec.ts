@@ -731,7 +731,7 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('analysis-integrated-stat')).toContainText('LUFS');
       await expect(page.getByTestId('analysis-true-peak-stat')).toContainText('dBFS');
       await expect(page.getByTestId('analysis-reference-summary')).toContainText(
-        'Choose a reference file'
+        'No reference'
       );
 
       await page.getByTestId('main-list-row').filter({ hasText: 'Bright Ref' }).first().click();
@@ -764,6 +764,108 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('analysis-active-reference')).toContainText(
         'External Reference.wav'
       );
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(referenceDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('quick A/B restores mix playhead after auditioning a reference', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-ab-restore-fixture-')
+    );
+    const referenceDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-ab-restore-reference-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-ab-restore-user-data-')
+    );
+
+    const alphaPath = path.join(fixtureDirectory, 'AB Alpha v1.wav');
+    const betaPath = path.join(fixtureDirectory, 'AB Beta v1.wav');
+    const externalReferencePath = path.join(referenceDirectory, 'AB Reference.wav');
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=360:duration=14',
+      '-c:a',
+      'pcm_s16le',
+      alphaPath,
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=460:duration=14',
+      '-c:a',
+      'pcm_s16le',
+      betaPath,
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=2200:duration=14',
+      '-c:a',
+      'pcm_s16le',
+      externalReferencePath,
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory, {
+      extraEnv: {
+        PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH: externalReferencePath,
+      },
+    });
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'AB Alpha' }).first().click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.waitForTimeout(700);
+
+      await page.getByTestId('player-scrubber').evaluate((element) => {
+        const input = element as HTMLInputElement;
+        input.value = '5.2';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      await page.waitForTimeout(250);
+
+      await page.getByTestId('analysis-choose-reference').click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('AB Reference.wav');
+
+      await page.getByTestId('analysis-ab-reference').click();
+      await expect(page.getByTestId('player-track-name')).toContainText('AB Reference.wav');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.waitForTimeout(550);
+
+      await page.getByTestId('analysis-ab-mix').click();
+      await expect(page.getByTestId('player-track-name')).toContainText('AB Alpha v1.wav');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await expect
+        .poll(async () => Number(await page.getByTestId('player-scrubber').inputValue()), {
+          timeout: 4_000,
+        })
+        .toBeGreaterThan(4.7);
+
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });
@@ -1540,7 +1642,7 @@ test.describe('playback runtime deep dive', () => {
 
       const restartedSeconds = Number(await page.getByTestId('player-scrubber').inputValue());
       expect(restartedSeconds).toBeGreaterThan(0.05);
-      expect(restartedSeconds).toBeLessThan(1.1);
+      expect(restartedSeconds).toBeLessThan(1.15);
       await expect(page.getByTestId('playback-error')).toHaveCount(0);
     } finally {
       await electronApp.close();

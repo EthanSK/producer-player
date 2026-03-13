@@ -25,7 +25,7 @@ Right now:
 
 - The GitHub Pages landing page is live
 - The repository is public
-- Desktop build/release workflows are in place
+- Desktop workflow builds on each push to `main`/`master` and updates a rolling snapshot release
 - Local Apple Silicon builds work (ZIP output)
 - Mac App Store packaging scaffolding is in the repo
 

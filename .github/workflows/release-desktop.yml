@@ -80,7 +80,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    name: Publish release assets
+    name: Publish tagged release assets
     if: startsWith(github.ref, 'refs/tags/')
     needs: build-desktop
     runs-on: ubuntu-latest
@@ -103,5 +103,49 @@ jobs:
         with:
           generate_release_notes: false
           body_path: .github/RELEASE_NOTES_TEMPLATE.md
+          files: |
+            release-assets/*
+
+  publish-branch-snapshot:
+    name: Publish rolling branch snapshot assets
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    needs: build-desktop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*-${{ github.ref_name }}
+          merge-multiple: true
+          path: release-assets
+
+      - name: Show assets
+        run: ls -lah release-assets
+
+      - name: Compute snapshot release metadata
+        id: snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "tag=desktop-${GITHUB_REF_NAME}-latest" >> "$GITHUB_OUTPUT"
+          echo "name=Desktop snapshot (${GITHUB_REF_NAME})" >> "$GITHUB_OUTPUT"
+
+      - name: Attach assets to rolling snapshot release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.snapshot.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.snapshot.outputs.name }}
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+          overwrite_files: true
+          body: |
+            Automated unsigned desktop snapshot for `${{ github.ref_name }}`.
+            Commit: `${{ github.sha }}`
+            Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           files: |
             release-assets/*

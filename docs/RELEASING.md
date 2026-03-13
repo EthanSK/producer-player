@@ -3,7 +3,8 @@
 This repo now ships downloadable prebuilt desktop artifacts via:
 
 - `.github/workflows/release-desktop.yml`
-- GitHub Releases on `v*` tags
+- Rolling pre-release snapshots on pushes to `main` / `master`
+- Versioned GitHub Releases on `v*` tags
 
 ## What the workflow currently publishes
 
@@ -13,6 +14,11 @@ Unsigned desktop artifacts for immediate testability:
 - `Producer-Player-<version>-linux-<arch>.zip`
 - `Producer-Player-<version>-win-<arch>.zip`
 - matching checksum files: `*.zip.sha256`
+
+Release behavior by trigger:
+
+- Push to `main`/`master` → builds all desktop targets, uploads run artifacts, and updates a rolling prerelease tag (`desktop-main-latest` or `desktop-master-latest`).
+- Push tag `v*` → builds all desktop targets and publishes a versioned GitHub Release for that tag.
 
 > Current default is intentionally unsigned/not notarized.
 
@@ -40,7 +46,7 @@ Use **Run workflow** on:
 
 - <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
 
-Then download artifacts from that run directly.
+If run on `main`/`master`, it also refreshes the rolling snapshot prerelease. On other branches, download artifacts from that run directly.
 
 ## Release notes/changelog guidance
 

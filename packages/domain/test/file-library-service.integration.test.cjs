@@ -267,7 +267,7 @@ test('old-only tracks never become album songs, and old/ typos do not fuzzy-matc
   }
 });
 
-test('mixed v-suffix naming variants (space/no-space/underscore/hyphen) stay grouped as one song', async () => {
+test('mixed v-suffix naming variants stay grouped, while no-suffix files are ignored', async () => {
   const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-vsuffix-');
 
   try {
@@ -292,20 +292,24 @@ test('mixed v-suffix naming variants (space/no-space/underscore/hyphen) stay gro
         relativePath: 'Pulse Final.wav',
         modifiedAtMs: Date.parse('2026-01-01T00:00:05.000Z'),
       },
+      {
+        relativePath: 'v5.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:06.000Z'),
+      },
     ]);
 
     await withService({ autoMoveOld: false }, async (service) => {
       const snapshot = await service.linkFolder(fixtureDirectory);
 
       const pulseSong = snapshot.songs.find((song) => song.normalizedTitle === 'pulse');
-      const pulseFinalSong = snapshot.songs.find(
-        (song) => song.normalizedTitle === 'pulse final'
-      );
 
+      assert.equal(snapshot.songs.length, 1);
       assert(pulseSong);
       assert.equal(pulseSong.versions.length, 4);
-      assert(pulseFinalSong);
-      assert.equal(pulseFinalSong.versions.length, 1);
+      assert.equal(
+        snapshot.songs.some((song) => song.normalizedTitle === 'pulse final'),
+        false
+      );
     });
   } finally {
     await cleanupDirectory(fixtureDirectory);

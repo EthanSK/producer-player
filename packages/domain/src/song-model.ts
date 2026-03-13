@@ -38,17 +38,26 @@ function normalizeWhitespace(input: string): string {
   return input.replace(/\s+/g, ' ').trim();
 }
 
-function stripTrailingVersionSuffix(stem: string): string {
+function matchVersionedStem(stem: string): string | null {
   // Supports both "Leaky v5" and "Leakyv5" (and _v5 / -v5), including
   // deterministic archive suffixes such as "Leaky v5-archived-2".
   const match = stem.match(/^(.*?)(?:[\s_-]?v\d+)(?:[\s_-]*archived[\s_-]*\d+)?$/i);
 
   if (!match) {
-    return stem;
+    return null;
   }
 
   const base = normalizeWhitespace(match[1] ?? '');
-  return base.length > 0 ? base : stem;
+  return base.length > 0 ? base : null;
+}
+
+function hasSupportedVersionSuffix(stem: string): boolean {
+  return matchVersionedStem(stem) !== null;
+}
+
+function stripTrailingVersionSuffix(stem: string): string {
+  const base = matchVersionedStem(stem);
+  return base ?? stem;
 }
 
 export function normalizeSongStem(stem: string): string {
@@ -98,6 +107,11 @@ export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions
 
     const fileName = path.basename(file.filePath);
     const stem = path.basename(file.filePath, path.extname(file.filePath));
+
+    if (!hasSupportedVersionSuffix(stem)) {
+      return;
+    }
+
     const normalizedTitle = normalizeSongStem(stem);
     const songId = stableId(file.folderId, normalizedTitle);
     const versionId = stableId(

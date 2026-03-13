@@ -39,9 +39,7 @@ function writeMinimalWav(filePath: string): Promise<void> {
 }
 
 test.describe('Producer Player advanced break tests', () => {
-  test('files without version suffix still appear in the track list (documents behavior)', async () => {
-    // The naming guide says "File names must end with v1, v2, v3" but the app does NOT filter out
-    // files without version suffixes — they appear as songs. This test documents actual behavior.
+  test('files without version suffix are ignored from the track list', async () => {
     const dirs = await createE2ETestDirectories('break-nosuffix');
 
     await writeFixtureFiles(dirs.fixtureDirectory, [
@@ -56,9 +54,7 @@ test.describe('Producer Player advanced break tests', () => {
       await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
       await page.getByTestId('link-folder-path-button').click();
 
-      // Wait for all 3 files to appear - they appear even without version suffixes
-      // KNOWN BEHAVIOR: all 3 files appear, including the 2 without version suffixes
-      await expect(page.getByTestId('main-list-row')).toHaveCount(3);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await expect(page.getByTestId('app-shell')).toBeVisible();
 
       const withSuffixRow = page
@@ -69,9 +65,8 @@ test.describe('Producer Player advanced break tests', () => {
         /v1\s*·\s*wav/i
       );
 
-      // No-suffix files also appear - document this behavior gap with the naming guide
-      await expect(page.getByTestId('main-list')).toContainText('NoSuffix');
-      await expect(page.getByTestId('main-list')).toContainText('NoSuffixEither');
+      await expect(page.getByTestId('main-list')).not.toContainText('NoSuffix');
+      await expect(page.getByTestId('main-list')).not.toContainText('NoSuffixEither');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);

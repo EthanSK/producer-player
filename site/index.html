@@ -52,6 +52,42 @@
       }
     </script>
 
+    <script>
+      (function () {
+        if (!('serviceWorker' in navigator)) {
+          return;
+        }
+
+        window.addEventListener('load', function () {
+          navigator.serviceWorker
+            .getRegistrations()
+            .then(function (registrations) {
+              return Promise.all(
+                registrations.map(function (registration) {
+                  return registration.unregister();
+                })
+              );
+            })
+            .then(function () {
+              if (!('caches' in window)) {
+                return;
+              }
+
+              return caches.keys().then(function (cacheKeys) {
+                return Promise.all(
+                  cacheKeys.map(function (cacheKey) {
+                    return caches.delete(cacheKey);
+                  })
+                );
+              });
+            })
+            .catch(function (error) {
+              console.warn('[Producer Player] Service worker cleanup failed.', error);
+            });
+        });
+      })();
+    </script>
+
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>

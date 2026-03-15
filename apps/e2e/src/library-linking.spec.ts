@@ -273,10 +273,10 @@ test.describe('Producer Player desktop shell', () => {
 
       await firstRow.getByTestId('song-checklist-button').click();
       await expect(firstLaunch.page.getByTestId('song-checklist-modal')).toBeVisible();
-      await expect(firstLaunch.page.getByTestId('song-checklist-items')).toBeVisible();
 
       await firstLaunch.page.getByTestId('song-checklist-input').fill('Fade ending');
       await firstLaunch.page.keyboard.press('Enter');
+      await expect(firstLaunch.page.getByTestId('song-checklist-items')).toBeVisible();
       await firstLaunch.page.getByTestId('song-checklist-input').fill('Check vocal ride');
       await firstLaunch.page.getByTestId('song-checklist-add').click();
 

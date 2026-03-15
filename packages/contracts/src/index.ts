@@ -58,6 +58,7 @@ export interface AudioFileAnalysis {
   meanVolumeDbfs: number | null;
   maxMomentaryLufs: number | null;
   maxShortTermLufs: number | null;
+  sampleRateHz: number | null;
 }
 
 export interface ReferenceTrackSelection {

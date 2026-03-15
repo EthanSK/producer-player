@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, protocol, shell } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, promises as fs } from 'node:fs';
-import { dirname, extname, join, resolve } from 'node:path';
+import { dirname, extname, join, parse, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import type {
   AudioFileAnalysis,
@@ -12,6 +12,8 @@ import type {
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
   ReferenceTrackSelection,
+  SongVersion,
+  SongWithVersions,
   TransportCommand,
 } from '@producer-player/contracts';
 import { AUDIO_EXTENSIONS, IPC_CHANNELS, parsePlaylistOrderExport } from '@producer-player/contracts';
@@ -36,6 +38,8 @@ const IS_TEST_MODE =
 
 const TEST_PLAYLIST_EXPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_EXPORT_PATH ?? null;
 const TEST_PLAYLIST_IMPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_IMPORT_PATH ?? null;
+const TEST_LATEST_ORDERED_EXPORT_DIRECTORY =
+  process.env.PRODUCER_PLAYER_E2E_LATEST_ORDERED_EXPORT_DIRECTORY ?? null;
 const TEST_REFERENCE_IMPORT_PATH =
   process.env.PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH ?? null;
 const ANALYSIS_DELAY_MS = Number(process.env.PRODUCER_PLAYER_ANALYSIS_DELAY_MS ?? '0');
@@ -208,6 +212,143 @@ function dedupeStrings(values: string[]): string[] {
   }
 
   return deduped;
+}
+
+const TRACK_ORDER_PREFIX_PATTERN = /^\s*\d{1,4}\s*(?:[-_.):\]]\s*)+/;
+
+interface LatestOrderedExportEntry {
+  sourcePath: string;
+  outputFileName: string;
+  songTitle: string;
+}
+
+function slugifyFileSegment(value: string): string {
+  const slug = value
+    .replace(/[^a-z0-9-_]+/gi, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+
+  return slug.length > 0 ? slug : 'playlist';
+}
+
+function formatFileSystemTimestamp(date: Date): string {
+  const year = String(date.getFullYear());
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+
+  return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+}
+
+function sortSongVersionsByRecency(versions: SongVersion[]): SongVersion[] {
+  return [...versions].sort((left, right) => {
+    const modifiedAtDelta =
+      new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime();
+
+    if (modifiedAtDelta !== 0) {
+      return modifiedAtDelta;
+    }
+
+    return left.filePath.localeCompare(right.filePath);
+  });
+}
+
+function getNewestRelevantSongVersion(song: SongWithVersions): SongVersion | null {
+  if (song.activeVersionId) {
+    const activeVersion = song.versions.find((version) => version.id === song.activeVersionId);
+    if (activeVersion) {
+      return activeVersion;
+    }
+  }
+
+  return sortSongVersionsByRecency(song.versions)[0] ?? null;
+}
+
+function stripLeadingTrackOrderPrefix(stem: string): string {
+  const stripped = stem.replace(TRACK_ORDER_PREFIX_PATTERN, '');
+  return stripped.length > 0 ? stripped : stem;
+}
+
+function buildOrderedTrackExportFileName(
+  originalFileName: string,
+  trackNumber: number,
+  totalTrackCount: number
+): string {
+  const parsed = parse(originalFileName);
+  const stemWithoutPrefix = stripLeadingTrackOrderPrefix(parsed.name);
+  const safeStem = stemWithoutPrefix.length > 0 ? stemWithoutPrefix : parsed.name || 'Track';
+  const prefixWidth = Math.max(2, String(totalTrackCount).length);
+  const trackPrefix = String(trackNumber).padStart(prefixWidth, '0');
+
+  return `${trackPrefix} - ${safeStem}${parsed.ext}`;
+}
+
+function buildLatestOrderedExportFolderName(
+  selectedFolderName: string | null | undefined
+): string {
+  const folderSlug = selectedFolderName ? slugifyFileSegment(selectedFolderName) : 'playlist';
+  const timestamp = formatFileSystemTimestamp(new Date());
+
+  return `producer-player-${folderSlug}-latest-ordered-${timestamp}`;
+}
+
+function buildLatestOrderedExportEntries(
+  payload: PlaylistOrderExportV1
+): LatestOrderedExportEntry[] {
+  const songsById = new Map(payload.songs.map((song) => [song.id, song]));
+
+  const orderedSongs = dedupeStrings(payload.ordering.songIds)
+    .map((songId) => songsById.get(songId) ?? null)
+    .filter((song): song is SongWithVersions => Boolean(song));
+
+  if (orderedSongs.length === 0) {
+    throw new Error('Nothing to export yet (no tracks in the current album view).');
+  }
+
+  return orderedSongs.map((song, index) => {
+    const latestVersion = getNewestRelevantSongVersion(song);
+    if (!latestVersion) {
+      throw new Error(`Could not resolve a latest version for "${song.title}".`);
+    }
+
+    return {
+      sourcePath: resolve(latestVersion.filePath),
+      outputFileName: buildOrderedTrackExportFileName(
+        latestVersion.fileName,
+        index + 1,
+        orderedSongs.length
+      ),
+      songTitle: song.title,
+    };
+  });
+}
+
+async function pathExists(absolutePath: string): Promise<boolean> {
+  try {
+    await fs.access(absolutePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveUniqueDirectoryPath(baseDirectoryPath: string): Promise<string> {
+  if (!(await pathExists(baseDirectoryPath))) {
+    return baseDirectoryPath;
+  }
+
+  let counter = 2;
+  let candidate = `${baseDirectoryPath}-${counter}`;
+
+  while (await pathExists(candidate)) {
+    counter += 1;
+    candidate = `${baseDirectoryPath}-${counter}`;
+  }
+
+  return candidate;
 }
 
 async function writeJsonAtomic(filePath: string, payload: unknown): Promise<void> {
@@ -1585,6 +1726,82 @@ function registerIpcHandlers(service: FileLibraryService): void {
     const raw = await fs.readFile(filePath, 'utf8');
     return parsePlaylistOrderExport(JSON.parse(raw));
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.EXPORT_LATEST_VERSIONS_IN_ORDER,
+    async (_event, payload: PlaylistOrderExportV1) => {
+      const validated = parsePlaylistOrderExport(payload);
+      const exportEntries = buildLatestOrderedExportEntries(validated);
+
+      let outputDirectoryPath: string | null = null;
+
+      if (IS_TEST_MODE && TEST_LATEST_ORDERED_EXPORT_DIRECTORY) {
+        outputDirectoryPath = resolve(TEST_LATEST_ORDERED_EXPORT_DIRECTORY);
+        await fs.rm(outputDirectoryPath, { recursive: true, force: true });
+        await fs.mkdir(outputDirectoryPath, { recursive: true });
+      } else {
+        const dialogOptions: OpenDialogOptions = {
+          title: 'Choose export destination folder',
+          message:
+            'Producer Player will create a new folder with each track\'s latest version in album order.',
+          buttonLabel: 'Create latest-version export folder',
+          defaultPath: validated.selection.selectedFolderPath
+            ? resolve(validated.selection.selectedFolderPath)
+            : app.getPath('documents'),
+          properties: ['openDirectory', 'createDirectory'],
+          securityScopedBookmarks: IS_MAC_APP_STORE_SANDBOX,
+        };
+
+        const result = mainWindow
+          ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+          : await dialog.showOpenDialog(dialogOptions);
+
+        if (result.canceled || result.filePaths.length === 0) {
+          return { folderPath: null, exportedCount: 0 };
+        }
+
+        const selectedParentDirectory = result.filePaths[0];
+        if (!selectedParentDirectory) {
+          return { folderPath: null, exportedCount: 0 };
+        }
+
+        const resolvedParentDirectory = resolve(selectedParentDirectory);
+        const parentStats = await fs.stat(resolvedParentDirectory);
+        if (!parentStats.isDirectory()) {
+          throw new Error(`Export destination is not a folder: ${resolvedParentDirectory}`);
+        }
+
+        const exportFolderName = buildLatestOrderedExportFolderName(
+          validated.selection.selectedFolderName
+        );
+
+        outputDirectoryPath = await resolveUniqueDirectoryPath(
+          join(resolvedParentDirectory, exportFolderName)
+        );
+
+        await fs.mkdir(outputDirectoryPath, { recursive: true });
+      }
+
+      if (!outputDirectoryPath) {
+        throw new Error('Could not determine an export destination.');
+      }
+
+      let exportedCount = 0;
+      for (const entry of exportEntries) {
+        if (!(await pathExists(entry.sourcePath))) {
+          throw new Error(
+            `Latest version file is missing for "${entry.songTitle}": ${entry.sourcePath}`
+          );
+        }
+
+        const targetPath = join(outputDirectoryPath, entry.outputFileName);
+        await fs.copyFile(entry.sourcePath, targetPath);
+        exportedCount += 1;
+      }
+
+      return { folderPath: outputDirectoryPath, exportedCount };
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.OPEN_IN_FINDER, async (_event, filePath: string) => {
     shell.showItemInFolder(resolve(filePath));

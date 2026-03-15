@@ -139,6 +139,8 @@ export const IPC_CHANNELS = {
   REORDER_SONGS: 'producer-player:reorder-songs',
   EXPORT_PLAYLIST_ORDER: 'producer-player:export-playlist-order',
   IMPORT_PLAYLIST_ORDER: 'producer-player:import-playlist-order',
+  EXPORT_LATEST_VERSIONS_IN_ORDER:
+    'producer-player:export-latest-versions-in-order',
   OPEN_IN_FINDER: 'producer-player:open-in-finder',
   OPEN_FOLDER: 'producer-player:open-folder',
   OPEN_EXTERNAL_URL: 'producer-player:open-external-url',
@@ -166,6 +168,9 @@ export interface ProducerPlayerBridge {
   reorderSongs(songIds: string[]): Promise<LibrarySnapshot>;
   exportPlaylistOrder(payload: PlaylistOrderExportV1): Promise<{ filePath: string | null }>;
   importPlaylistOrder(): Promise<PlaylistOrderExportV1 | null>;
+  exportLatestVersionsInOrder(
+    payload: PlaylistOrderExportV1
+  ): Promise<{ folderPath: string | null; exportedCount: number }>;
   revealFile(filePath: string): Promise<void>;
   openFolder(folderPath: string): Promise<void>;
   openExternalUrl(url: string): Promise<void>;

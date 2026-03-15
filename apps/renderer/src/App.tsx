@@ -1591,6 +1591,7 @@ export function App(): JSX.Element {
   const isSearching = searchText.trim().length > 0;
   const canReorderSongs = !isSearching;
   const canExportPlaylistOrder = songs.length > 0;
+  const canExportLatestVersionsInOrder = songs.length > 0;
   const canImportPlaylistOrder = snapshot.linkedFolders.length > 0;
   const listHintText = isSearching
     ? 'Search is filtering the list — clear it to reorder tracks.'
@@ -1910,6 +1911,18 @@ export function App(): JSX.Element {
       }
 
       await window.producerPlayer.exportPlaylistOrder(payload);
+    });
+  }
+
+  async function handleExportLatestVersionsInOrder(): Promise<void> {
+    await runVoidTask(async () => {
+      const payload = buildPlaylistOrderExportPayload();
+
+      if (payload.songs.length === 0) {
+        throw new Error('Nothing to export yet (no tracks in the current album view).');
+      }
+
+      await window.producerPlayer.exportLatestVersionsInOrder(payload);
     });
   }
 
@@ -3164,6 +3177,22 @@ export function App(): JSX.Element {
               title="Move older non-archived versions into old/ and keep the newest version in place."
             >
               Organize
+            </button>
+            <button
+              type="button"
+              className="action-button secondary"
+              onClick={() => {
+                void handleExportLatestVersionsInOrder();
+              }}
+              data-testid="export-latest-ordered-button"
+              title={
+                canExportLatestVersionsInOrder
+                  ? 'Create a new folder containing only the latest version of each track, renamed with ordered numeric prefixes.'
+                  : 'Link a folder and load tracks before exporting latest versions in order.'
+              }
+              disabled={!canExportLatestVersionsInOrder}
+            >
+              Export Latest
             </button>
             <button
               type="button"

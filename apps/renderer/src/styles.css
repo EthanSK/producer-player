@@ -200,6 +200,49 @@ input[type='range'] {
   padding: 0;
 }
 
+.sidebar-branding {
+  margin: 10px 10px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(92, 167, 255, 0.34);
+  border-radius: 12px;
+  background: linear-gradient(
+    140deg,
+    rgba(92, 167, 255, 0.2),
+    rgba(16, 25, 39, 0.92) 72%
+  );
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.sidebar-branding-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid rgba(125, 228, 255, 0.42);
+  box-shadow: 0 8px 18px rgba(2, 9, 19, 0.36);
+  object-fit: cover;
+}
+
+.sidebar-branding-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.sidebar-branding-copy strong {
+  font-size: 14px;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+}
+
+.sidebar-branding-copy .muted {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .folder-tools-card {
   margin: 10px 10px 0;
   border: 1px solid var(--border);

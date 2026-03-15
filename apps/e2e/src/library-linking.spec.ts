@@ -127,6 +127,7 @@ test.describe('Producer Player desktop shell', () => {
       await expect(page.getByTestId('folder-tools-card')).toBeVisible();
       await expect(page.getByTestId('link-folder-dialog-button')).toBeVisible();
       await expect(page.getByTestId('producer-player-branding-logo')).toBeVisible();
+      await expect(page.getByTestId('path-linker-disabled-message')).toHaveCount(0);
 
       await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
       await page.getByTestId('link-folder-path-button').click();

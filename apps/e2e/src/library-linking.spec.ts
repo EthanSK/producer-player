@@ -124,6 +124,9 @@ test.describe('Producer Player desktop shell', () => {
       await expect(page.getByTestId('track-order-hint')).toContainText('positions are preserved');
       await expect(page.locator('.panel-left [data-testid="status-card"]')).toHaveCount(1);
       await expect(page.locator('.panel-right [data-testid="status-card"]')).toHaveCount(0);
+      await expect(page.getByTestId('folder-tools-card')).toBeVisible();
+      await expect(page.getByTestId('link-folder-dialog-button')).toBeVisible();
+      await expect(page.getByTestId('producer-player-branding-logo')).toBeVisible();
 
       await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
       await page.getByTestId('link-folder-path-button').click();
@@ -160,6 +163,415 @@ test.describe('Producer Player desktop shell', () => {
       await expect(page.getByTestId('inspector-version-row')).toHaveCount(2);
       await expect(page.getByTestId('inspector-song-title')).toContainText('Midnight Echo');
     } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('opens the per-song checklist modal and persists items in-session', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-checklist-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-checklist-user-data-')
+    );
+
+    await writeTestWav(path.join(fixtureDirectory, 'Checklist Tune v1.wav'), {
+      frequencyHz: 510,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      const firstRow = page.getByTestId('main-list-row').first();
+      await expect(
+        firstRow.locator('.main-list-row-meta-footer [data-testid="song-checklist-button"]')
+      ).toBeVisible();
+
+      await firstRow.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.getByTestId('song-checklist-empty')).toContainText('No checklist items');
+
+      await page.getByTestId('song-checklist-input').fill('Fade ending');
+      await page.getByTestId('song-checklist-add').click();
+
+      await expect(page.getByTestId('song-checklist-item-text')).toHaveValue('Fade ending');
+      await page.getByTestId('song-checklist-close').click();
+      await expect(page.getByTestId('song-checklist-modal')).toHaveCount(0);
+
+      await firstRow.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-item-text')).toHaveValue('Fade ending');
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps checklist controls compact, supports full item workflow, and persists checklist state across restart', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-checklist-workflow-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-checklist-workflow-user-data-')
+    );
+
+    await writeTestWav(path.join(fixtureDirectory, 'Checklist Flow v1.wav'), {
+      frequencyHz: 530,
+    });
+
+    let firstLaunch: LaunchedApp | null = null;
+    let secondLaunch: LaunchedApp | null = null;
+
+    try {
+      firstLaunch = await launchProducerPlayer(userDataDirectory);
+
+      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+      const firstRow = firstLaunch.page.getByTestId('main-list-row').first();
+
+      const checklistPlacement = await firstRow
+        .locator('.main-list-row-meta-footer')
+        .evaluate((footer) => {
+          const checklistButton = footer.querySelector('[data-testid="song-checklist-button"]');
+          const dateLabel = footer.querySelector('.muted');
+
+          if (!(checklistButton instanceof HTMLElement) || !(dateLabel instanceof HTMLElement)) {
+            return null;
+          }
+
+          const checklistRect = checklistButton.getBoundingClientRect();
+          const dateRect = dateLabel.getBoundingClientRect();
+
+          return {
+            sharedParent: checklistButton.parentElement === dateLabel.parentElement,
+            checklistBeforeDate: Boolean(
+              checklistButton.compareDocumentPosition(dateLabel) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+            ),
+            centerDeltaPx: Math.abs(
+              checklistRect.top + checklistRect.height / 2 - (dateRect.top + dateRect.height / 2)
+            ),
+          };
+        });
+
+      expect(checklistPlacement).not.toBeNull();
+      if (!checklistPlacement) {
+        throw new Error('Could not resolve checklist/date placement in the song row metadata footer.');
+      }
+      expect(checklistPlacement.sharedParent).toBe(true);
+      expect(checklistPlacement.checklistBeforeDate).toBe(true);
+      expect(checklistPlacement.centerDeltaPx).toBeLessThan(10);
+
+      await firstRow.getByTestId('song-checklist-button').click();
+      await expect(firstLaunch.page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(firstLaunch.page.getByTestId('song-checklist-items')).toBeVisible();
+
+      await firstLaunch.page.getByTestId('song-checklist-input').fill('Fade ending');
+      await firstLaunch.page.keyboard.press('Enter');
+      await firstLaunch.page.getByTestId('song-checklist-input').fill('Check vocal ride');
+      await firstLaunch.page.getByTestId('song-checklist-add').click();
+
+      await expect(firstLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(2);
+      await expect(
+        firstRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
+      ).toHaveText('2');
+
+      const secondChecklistInput = firstLaunch.page.getByTestId('song-checklist-item-text').nth(1);
+      await secondChecklistInput.fill('Check vocal ride + mono');
+      await expect(secondChecklistInput).toHaveValue('Check vocal ride + mono');
+
+      const firstChecklistToggle = firstLaunch.page
+        .locator('.checklist-item-row input[type="checkbox"]')
+        .first();
+      await firstChecklistToggle.check();
+      await expect(firstChecklistToggle).toBeChecked();
+
+      await firstLaunch.page.keyboard.press('Escape');
+      await expect(firstLaunch.page.getByTestId('song-checklist-modal')).toHaveCount(0);
+
+      await firstRow.getByTestId('song-checklist-button').click();
+      await expect(firstLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(2);
+      await expect(
+        firstLaunch.page.locator('.checklist-item-row input[type="checkbox"]').first()
+      ).toBeChecked();
+      await expect(firstLaunch.page.getByTestId('song-checklist-item-text').nth(1)).toHaveValue(
+        'Check vocal ride + mono'
+      );
+
+      await firstLaunch.page.getByTestId('song-checklist-clear-completed').click();
+      await expect(firstLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(1);
+      await expect(firstLaunch.page.getByTestId('song-checklist-item-text').first()).toHaveValue(
+        'Check vocal ride + mono'
+      );
+      await expect(
+        firstRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
+      ).toHaveText('1');
+
+      await firstLaunch.page.locator('.checklist-remove-button').first().click();
+      await expect(firstLaunch.page.getByTestId('song-checklist-empty')).toBeVisible();
+      await expect(
+        firstRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
+      ).toHaveCount(0);
+
+      await firstLaunch.page.getByTestId('song-checklist-input').fill('Final listen pass');
+      await firstLaunch.page.getByTestId('song-checklist-add').click();
+      await expect(firstLaunch.page.getByTestId('song-checklist-item-text')).toHaveValue(
+        'Final listen pass'
+      );
+      await expect(
+        firstRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
+      ).toHaveText('1');
+
+      await firstLaunch.page.getByTestId('song-checklist-close').click();
+      await expect(firstLaunch.page.getByTestId('song-checklist-modal')).toHaveCount(0);
+
+      await firstLaunch.electronApp.close();
+      firstLaunch = null;
+
+      secondLaunch = await launchProducerPlayer(userDataDirectory);
+
+      await expect(secondLaunch.page.getByTestId('linked-folder-item')).toHaveCount(1);
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+
+      const reopenedRow = secondLaunch.page.getByTestId('main-list-row').first();
+      await expect(
+        reopenedRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
+      ).toHaveText('1');
+
+      await reopenedRow.getByTestId('song-checklist-button').click();
+      await expect(secondLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(1);
+      await expect(secondLaunch.page.getByTestId('song-checklist-item-text').first()).toHaveValue(
+        'Final listen pass'
+      );
+    } finally {
+      await firstLaunch?.electronApp.close();
+      await secondLaunch?.electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('opens branding + support links via trusted GitHub URLs and rejects untrusted URLs', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-support-links-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-support-links-user-data-')
+    );
+
+    await writeTestWav(path.join(fixtureDirectory, 'Support Tune v1.wav'), {
+      frequencyHz: 460,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await electronApp.evaluate(({ shell }) => {
+        const globalState = globalThis as typeof globalThis & {
+          __producerPlayerOpenedExternalUrls?: string[];
+          __producerPlayerRestoreOpenExternal?: () => void;
+        };
+        const originalOpenExternal = shell.openExternal.bind(shell);
+
+        globalState.__producerPlayerOpenedExternalUrls = [];
+        shell.openExternal = (async (url: string) => {
+          globalState.__producerPlayerOpenedExternalUrls?.push(url);
+        }) as typeof shell.openExternal;
+        globalState.__producerPlayerRestoreOpenExternal = () => {
+          shell.openExternal = originalOpenExternal;
+        };
+      });
+
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await page.getByTestId('main-list-row').first().click();
+
+      await expect(page.getByTestId('support-feedback-card')).toBeVisible();
+      await expect(page.getByTestId('support-feedback-bug')).toBeVisible();
+      await expect(page.getByTestId('support-feedback-feature')).toBeVisible();
+
+      await page.getByTestId('producer-player-branding').click();
+      await page.getByTestId('support-feedback-bug').click();
+      await page.getByTestId('support-feedback-feature').click();
+
+      await expect
+        .poll(() =>
+          electronApp.evaluate(() => {
+            const globalState = globalThis as typeof globalThis & {
+              __producerPlayerOpenedExternalUrls?: string[];
+            };
+            return globalState.__producerPlayerOpenedExternalUrls ?? [];
+          })
+        )
+        .toEqual([
+          'https://github.com/EthanSK/producer-player/actions',
+          'https://github.com/EthanSK/producer-player/issues/new?template=bug_report.yml',
+          'https://github.com/EthanSK/producer-player/issues/new?template=feature_request.yml',
+        ]);
+
+      const untrustedUrlError = await page.evaluate(async () => {
+        try {
+          await (window as any).producerPlayer.openExternalUrl('https://example.com/not-allowed');
+          return null;
+        } catch (error) {
+          if (error instanceof Error) {
+            return error.message;
+          }
+          return String(error);
+        }
+      });
+
+      expect(untrustedUrlError).toContain('Only Producer Player GitHub links are allowed.');
+    } finally {
+      await electronApp.evaluate(() => {
+        const globalState = globalThis as typeof globalThis & {
+          __producerPlayerRestoreOpenExternal?: () => void;
+          __producerPlayerOpenedExternalUrls?: string[];
+        };
+        globalState.__producerPlayerRestoreOpenExternal?.();
+        delete globalState.__producerPlayerRestoreOpenExternal;
+        delete globalState.__producerPlayerOpenedExternalUrls;
+      });
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('persists auto-organize preference and respects unlink cancel confirmation', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-settings-persistence-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-settings-persistence-user-data-')
+    );
+
+    await writeTestWav(path.join(fixtureDirectory, 'Settings Track v1.wav'), {
+      frequencyHz: 420,
+    });
+
+    let firstLaunch: LaunchedApp | null = null;
+    let secondLaunch: LaunchedApp | null = null;
+
+    try {
+      firstLaunch = await launchProducerPlayer(userDataDirectory);
+
+      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+
+      await expect(firstLaunch.page.getByTestId('linked-folder-item')).toHaveCount(1);
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(firstLaunch.page.getByTestId('auto-organize-checkbox')).toBeChecked();
+
+      await firstLaunch.page.evaluate(async () => {
+        await (window as any).producerPlayer.setAutoMoveOld(false);
+      });
+      await expect(firstLaunch.page.getByTestId('auto-organize-checkbox')).not.toBeChecked();
+
+      firstLaunch.page.once('dialog', async (dialog) => {
+        await dialog.dismiss();
+      });
+
+      await firstLaunch.page
+        .getByTestId('linked-folder-item')
+        .first()
+        .getByRole('button', { name: 'Unlink' })
+        .click();
+
+      await expect(firstLaunch.page.getByTestId('linked-folder-item')).toHaveCount(1);
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await firstLaunch.electronApp.close();
+      firstLaunch = null;
+
+      const statePath = path.join(userDataDirectory, STATE_FILE_NAME);
+      const persistedRaw = await fs.readFile(statePath, 'utf8');
+      const persistedState = JSON.parse(persistedRaw) as { autoMoveOld?: boolean };
+      expect(persistedState.autoMoveOld).toBe(false);
+
+      secondLaunch = await launchProducerPlayer(userDataDirectory);
+      await expect(secondLaunch.page.getByTestId('linked-folder-item')).toHaveCount(1);
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(secondLaunch.page.getByTestId('auto-organize-checkbox')).not.toBeChecked();
+    } finally {
+      await firstLaunch?.electronApp.close();
+      await secondLaunch?.electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('shows the Actions branding link, Full Screen label, and sample-rate badges', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-branding-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-branding-user-data-')
+    );
+
+    await writeTestWav(path.join(fixtureDirectory, 'Branding Tune v1.wav'), {
+      frequencyHz: 440,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await electronApp.evaluate(({ shell }) => {
+        const globalState = globalThis as typeof globalThis & {
+          __producerPlayerOpenedExternalUrls?: string[];
+          __producerPlayerRestoreOpenExternal?: () => void;
+        };
+        const originalOpenExternal = shell.openExternal.bind(shell);
+
+        globalState.__producerPlayerOpenedExternalUrls = [];
+        shell.openExternal = (async (url: string) => {
+          globalState.__producerPlayerOpenedExternalUrls?.push(url);
+        }) as typeof shell.openExternal;
+        globalState.__producerPlayerRestoreOpenExternal = () => {
+          shell.openExternal = originalOpenExternal;
+        };
+      });
+
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      const firstRow = page.getByTestId('main-list-row').first();
+      await firstRow.click();
+
+      await expect(page.getByTestId('analysis-expand-button')).toHaveText(/Full Screen/);
+      await expect(page.getByTestId('player-track-sample-rate')).toContainText('44.1 kHz');
+      await expect(page.getByTestId('inspector-song-sample-rate')).toContainText('44.1 kHz');
+
+      await page.getByTestId('producer-player-branding').click();
+      await expect
+        .poll(() =>
+          electronApp.evaluate(() => {
+            const globalState = globalThis as typeof globalThis & {
+              __producerPlayerOpenedExternalUrls?: string[];
+            };
+            return globalState.__producerPlayerOpenedExternalUrls?.[0] ?? null;
+          })
+        )
+        .toBe('https://github.com/EthanSK/producer-player/actions');
+    } finally {
+      await electronApp.evaluate(() => {
+        const globalState = globalThis as typeof globalThis & {
+          __producerPlayerRestoreOpenExternal?: () => void;
+          __producerPlayerOpenedExternalUrls?: string[];
+        };
+        globalState.__producerPlayerRestoreOpenExternal?.();
+        delete globalState.__producerPlayerRestoreOpenExternal;
+        delete globalState.__producerPlayerOpenedExternalUrls;
+      });
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });
       await fs.rm(userDataDirectory, { recursive: true, force: true });

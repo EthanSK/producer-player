@@ -246,6 +246,49 @@ async function writeRealAudioFixtures(fixtureDirectory: string): Promise<Record<
 test.describe('playback runtime deep dive', () => {
   test.skip(!hasFfmpeg(), 'ffmpeg is required for real codec fixture generation.');
 
+  test('surfaces sample rate in the inspector header and player dock', async () => {
+    test.skip(!hasFfprobe(), 'ffprobe is required for sample-rate verification.');
+
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-sample-rate-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-sample-rate-user-data-')
+    );
+
+    const sampleRatePath = path.join(fixtureDirectory, 'Sample Rate Check v1.wav');
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=4',
+      '-ar',
+      '48000',
+      '-c:a',
+      'pcm_s16le',
+      sampleRatePath,
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('main-list-row').first().click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Sample Rate Check v1.wav');
+      await expect(page.getByTestId('inspector-song-sample-rate')).toContainText('48 kHz');
+      await expect(page.getByTestId('player-track-sample-rate')).toContainText('48 kHz');
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('uses real wav/mp3/m4a/flac/aiff fixtures and plays all of them, including AIFF via local preparation', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-playback-fixture-')
@@ -719,9 +762,21 @@ test.describe('playback runtime deep dive', () => {
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
-      await page.getByTestId('main-list-row').filter({ hasText: 'Warm Master' }).first().click();
+      const cueSongVersion = async (songTitle: string, fileName: string): Promise<void> => {
+        await page.getByTestId('main-list-row').filter({ hasText: songTitle }).first().click();
+        await page
+          .getByTestId('inspector-version-row')
+          .filter({ hasText: fileName })
+          .getByRole('button', { name: 'Cue' })
+          .click();
+        await expect(page.getByTestId('analysis-track-label')).toContainText(fileName);
+      };
+
+      await cueSongVersion('Warm Master', 'Warm Master v1.wav');
       await expect(page.getByTestId('analysis-panel')).toContainText('Mastering + Reference');
-      await expect(page.getByTestId('analysis-status')).toContainText('Loading');
+      await expect
+        .poll(async () => ((await page.getByTestId('analysis-status').textContent()) ?? '').trim())
+        .toMatch(/Loading mastering analysis…|Ready\./);
 
       const initialPanelHeight = await page.getByTestId('analysis-panel').evaluate((element) => {
         return Math.round(element.getBoundingClientRect().height);
@@ -734,14 +789,12 @@ test.describe('playback runtime deep dive', () => {
         'No reference'
       );
 
-      await page.getByTestId('main-list-row').filter({ hasText: 'Bright Ref' }).first().click();
-      await expect(page.getByTestId('analysis-track-label')).toContainText('Bright Ref v1.wav');
-      await expect(page.getByTestId('analysis-status')).toContainText('Loading');
+      await cueSongVersion('Bright Ref', 'Bright Ref v1.wav');
 
-      const loadingPanelHeight = await page.getByTestId('analysis-panel').evaluate((element) => {
+      const switchedPanelHeight = await page.getByTestId('analysis-panel').evaluate((element) => {
         return Math.round(element.getBoundingClientRect().height);
       });
-      expect(Math.abs(initialPanelHeight - loadingPanelHeight)).toBeLessThanOrEqual(6);
+      expect(Math.abs(initialPanelHeight - switchedPanelHeight)).toBeLessThanOrEqual(6);
 
       await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading');
 
@@ -792,6 +845,257 @@ test.describe('playback runtime deep dive', () => {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });
       await fs.rm(referenceDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('supports use-current and clear-reference controls across inline and full-screen mastering views', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-reference-controls-fixture-')
+    );
+    const referenceDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-reference-controls-reference-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-reference-controls-user-data-')
+    );
+
+    const alphaPath = path.join(fixtureDirectory, 'Reference Alpha v1.wav');
+    const betaPath = path.join(fixtureDirectory, 'Reference Beta v1.wav');
+    const externalReferencePath = path.join(referenceDirectory, 'Overlay Reference.wav');
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=300:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      alphaPath,
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=480:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      betaPath,
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=2200:duration=6',
+      '-c:a',
+      'pcm_s16le',
+      externalReferencePath,
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory, {
+      extraEnv: {
+        PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH: externalReferencePath,
+      },
+    });
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+      await page.getByTestId('main-list-row').filter({ hasText: 'Reference Alpha' }).first().click();
+      await page
+        .getByTestId('inspector-version-row')
+        .filter({ hasText: 'Reference Alpha v1.wav' })
+        .getByRole('button', { name: 'Cue' })
+        .click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Reference Alpha v1.wav');
+
+      await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading', {
+        timeout: 12_000,
+      });
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('No reference');
+      await expect(page.getByTestId('analysis-ab-reference')).toBeDisabled();
+
+      await page.getByTestId('analysis-use-current-reference').click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('Reference Alpha v1.wav');
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('linked');
+      await expect(page.getByTestId('analysis-ab-reference')).toBeEnabled();
+      await expect(page.getByTestId('analysis-active-reference-inline')).not.toContainText(
+        'No reference loaded'
+      );
+
+      await page.getByTestId('analysis-clear-reference').click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('No reference');
+      await expect(page.getByTestId('analysis-ab-reference')).toBeDisabled();
+
+      await page.getByTestId('analysis-expand-button').click();
+      await expect(page.getByTestId('analysis-modal')).toBeVisible();
+
+      await page.getByTestId('analysis-choose-reference-overlay').click();
+      await expect(page.getByTestId('analysis-reference-slot-a')).toContainText('Overlay Reference.wav');
+
+      await page.getByTestId('analysis-close-button').click();
+      await expect(page.getByTestId('analysis-modal')).toHaveCount(0);
+
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('Overlay Reference.wav');
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('external');
+
+      await page.getByTestId('analysis-ab-reference').click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Overlay Reference.wav');
+      await page.getByTestId('analysis-ab-mix').click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Reference Alpha v1.wav');
+
+      await page.getByTestId('analysis-clear-reference').click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('No reference');
+      await expect(page.getByTestId('analysis-ab-reference')).toBeDisabled();
+
+      await page.getByTestId('analysis-expand-button').click();
+      await expect(page.getByTestId('analysis-reference-slot-a')).toContainText('No reference loaded.');
+      await page.getByTestId('analysis-close-button').click();
+      await expect(page.getByTestId('analysis-modal')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(referenceDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('covers analysis panel controls, inline reference workflow, and overlay normalization details', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-analysis-controls-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-analysis-controls-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=7',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Coverage Mix v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await expect(page.getByTestId('analysis-empty-state')).toBeVisible();
+
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await page.getByTestId('main-list-row').first().click();
+      await page
+        .getByTestId('inspector-version-row')
+        .first()
+        .getByRole('button', { name: 'Cue' })
+        .click();
+
+      await expect(page.getByTestId('analysis-track-label')).toContainText('Coverage Mix v1.wav');
+      await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading');
+      await expect(page.getByTestId('analysis-ab-toggle')).toBeVisible();
+      await expect(page.getByTestId('analysis-lra-stat')).toContainText('LU');
+      await expect(page.getByTestId('analysis-max-short-term-stat')).toContainText('LUFS');
+      await expect(page.getByTestId('analysis-max-momentary-stat')).toContainText('LUFS');
+      await expect(page.getByTestId('analysis-short-term-stat')).toContainText('LUFS');
+      await expect(page.getByTestId('analysis-tonal-balance')).toContainText('Low');
+      await expect(page.getByTestId('analysis-normalization-cap')).toBeVisible();
+      await expect(page.getByTestId('analysis-use-current-reference')).toBeEnabled();
+
+      await page.getByTestId('analysis-use-current-reference').click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('Coverage Mix v1.wav');
+      await expect(page.getByTestId('analysis-active-reference-inline')).toContainText(
+        'Loudness difference'
+      );
+
+      await page.getByTestId('analysis-expand-button').click();
+      await expect(page.getByTestId('analysis-modal')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-status')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-preview-mode')).toContainText('reference ready');
+      await expect(page.getByTestId('analysis-choose-reference-overlay')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-normalization-change')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-normalization-projected')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-normalization-cap')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-normalization-target')).toContainText('LUFS');
+      await expect(page.getByTestId('analysis-overlay-normalization-policy')).toBeVisible();
+
+      await page.getByTestId('analysis-close-button').click();
+      await expect(page.getByTestId('analysis-modal')).toHaveCount(0);
+
+      await page.getByTestId('analysis-clear-reference').click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('No reference');
+      await expect(page.getByTestId('analysis-active-reference-inline')).toContainText(
+        'No reference loaded'
+      );
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('shows analysis + reference error states for broken audio and missing reference files', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-analysis-errors-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-analysis-errors-user-data-')
+    );
+
+    const brokenTrackPath = path.join(fixtureDirectory, 'Broken Analysis v1.wav');
+    const missingReferencePath = path.join(
+      os.tmpdir(),
+      `producer-player-missing-reference-${Date.now()}.wav`
+    );
+
+    await fs.writeFile(brokenTrackPath, 'this is intentionally not valid audio data');
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory, {
+      extraEnv: {
+        PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH: missingReferencePath,
+      },
+    });
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('main-list-row').first().click();
+      await page
+        .getByTestId('inspector-version-row')
+        .first()
+        .getByRole('button', { name: 'Cue' })
+        .click();
+
+      await expect
+        .poll(async () => ((await page.getByTestId('analysis-status').textContent()) ?? '').trim())
+        .toBe('Analysis failed.');
+      await expect(page.getByTestId('analysis-error')).toBeVisible();
+
+      await page.getByTestId('analysis-expand-button').click();
+      await expect(page.getByTestId('analysis-overlay-status')).toContainText('Analysis failed.');
+      await expect(page.getByTestId('analysis-overlay-error')).toBeVisible();
+      await page.getByTestId('analysis-close-button').click();
+
+      await page.getByTestId('analysis-choose-reference').click();
+      await expect(page.getByTestId('analysis-reference-error')).toBeVisible();
+      await expect(page.getByTestId('analysis-reference-error')).not.toHaveText('');
+      await expect(page.getByTestId('app-shell')).toBeVisible();
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
       await fs.rm(userDataDirectory, { recursive: true, force: true });
     }
   });
@@ -1996,6 +2300,11 @@ test.describe('playback runtime deep dive', () => {
         ((await page.getByTestId('main-list-row').nth(1).locator('strong').textContent()) ?? '').trim();
 
       await page.getByTestId('main-list-row').nth(1).click();
+      await page
+        .getByTestId('inspector-version-row')
+        .first()
+        .getByRole('button', { name: 'Cue' })
+        .click();
       await expect(page.getByTestId('player-track-name')).toContainText(secondTrackName);
 
       await page.getByTestId('player-play-toggle').click();

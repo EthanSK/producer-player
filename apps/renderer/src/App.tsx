@@ -1319,15 +1319,20 @@ export function App(): JSX.Element {
 
     const availableVersionIds = new Set(selectedSong.versions.map((version) => version.id));
 
-    if (
-      selectedPlaybackVersionId &&
-      availableVersionIds.has(selectedPlaybackVersionId)
-    ) {
+    if (selectedPlaybackVersionId && availableVersionIds.has(selectedPlaybackVersionId)) {
+      return;
+    }
+
+    const currentPlaybackSelectionStillExists =
+      selectedPlaybackVersionId !== null &&
+      snapshot.versions.some((version) => version.id === selectedPlaybackVersionId);
+
+    if (currentPlaybackSelectionStillExists) {
       return;
     }
 
     setSelectedPlaybackVersionId(getPreferredPlaybackVersionId(selectedSong));
-  }, [selectedPlaybackVersionId, selectedSong]);
+  }, [selectedPlaybackVersionId, selectedSong, snapshot.versions]);
 
   const selectedPlaybackVersion =
     snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
@@ -2076,18 +2081,11 @@ export function App(): JSX.Element {
   }
 
   function handleSongRowSelect(songId: string): void {
-    const shouldKeepPlaying = shouldAutoplayOnTransport();
-
-    if (songId !== selectedSongId) {
+    if (songId !== selectedSongId && songId === selectedPlaybackSongId) {
       rememberCurrentSongPlayhead();
     }
 
     setSelectedSongId(songId);
-
-    if (shouldKeepPlaying) {
-      playOnNextLoadRef.current = true;
-      schedulePlaybackLoadTimeout('song-switch-autoplay');
-    }
   }
 
   async function handleSongRowPlay(songId: string): Promise<void> {
@@ -2258,6 +2256,23 @@ export function App(): JSX.Element {
     }
 
     if (!selectedPlaybackVersion) {
+      return;
+    }
+
+    const shouldSwitchToSelectedSong =
+      !!selectedSong && selectedSong.id !== selectedPlaybackSongId && audio.paused;
+
+    if (shouldSwitchToSelectedSong) {
+      const nextPlaybackVersionId = getPreferredPlaybackVersionId(selectedSong);
+
+      if (!nextPlaybackVersionId) {
+        return;
+      }
+
+      rememberCurrentSongPlayhead();
+      playOnNextLoadRef.current = true;
+      setSelectedPlaybackVersionId(nextPlaybackVersionId);
+      schedulePlaybackLoadTimeout('selected-song-play-request');
       return;
     }
 

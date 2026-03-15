@@ -88,6 +88,7 @@ const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
+const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
 const BUG_REPORT_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=bug_report.yml`;
 const FEATURE_REQUEST_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=feature_request.yml`;
 
@@ -271,6 +272,20 @@ function formatMeasuredStat(level: number | null | undefined, unit: string): str
   }
 
   return `${level.toFixed(1)} ${unit}`;
+}
+
+function formatSampleRateHz(sampleRateHz: number | null | undefined): string {
+  if (sampleRateHz === null || sampleRateHz === undefined || !Number.isFinite(sampleRateHz)) {
+    return '—';
+  }
+
+  const kilohertz = sampleRateHz / 1_000;
+  const roundedKilohertz = Math.round(kilohertz * 10) / 10;
+  const formattedKilohertz = Number.isInteger(roundedKilohertz)
+    ? roundedKilohertz.toFixed(0)
+    : roundedKilohertz.toFixed(1);
+
+  return `${formattedKilohertz} kHz`;
 }
 
 function buildAnalysisValue(
@@ -2712,6 +2727,16 @@ export function App(): JSX.Element {
               normalizationPreviewEnabled ? 'preview on' : 'preview off'
             } · ${normalizationPreview.explanation}`
           : 'Select a track to estimate platform normalization.';
+  const selectedPlaybackSampleRateText = buildAnalysisValue(
+    analysisStatus,
+    formatSampleRateHz(measuredAnalysis?.sampleRateHz),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+      empty: '—',
+    }
+  );
+  const checklistDraftIsEmpty = checklistDraftText.trim().length === 0;
 
   transportActionRef.current = {
     toggle: () => {
@@ -2724,7 +2749,13 @@ export function App(): JSX.Element {
   return (
     <div className="app-shell" data-testid="app-shell">
       <aside className="panel panel-left">
-        <section className="sidebar-branding" data-testid="producer-player-branding">
+        <button
+          type="button"
+          className="sidebar-branding sidebar-branding-button"
+          data-testid="producer-player-branding"
+          onClick={() => handleOpenSupportLink(PUBLIC_REPOSITORY_ACTIONS_URL)}
+          title="Open Producer Player GitHub Actions."
+        >
           <img
             src={producerPlayerIconUrl}
             alt="Producer Player logo"
@@ -2733,9 +2764,8 @@ export function App(): JSX.Element {
           />
           <div className="sidebar-branding-copy">
             <strong>Producer Player</strong>
-            <p className="muted">Desktop playback + version tracking for producers</p>
           </div>
-        </section>
+        </button>
 
         <section className="folder-tools-card" data-testid="folder-tools-card">
           <section className="folder-add-cta">
@@ -2888,10 +2918,10 @@ export function App(): JSX.Element {
               className="ghost analysis-expand-trigger"
               onClick={() => setAnalysisExpanded(true)}
               data-testid="analysis-expand-button"
-              title="Open the expanded mastering and reference workspace."
+              title="Open the full-screen mastering and reference workspace."
               disabled={!selectedPlaybackVersion}
             >
-              Expanded View <span aria-hidden="true">⤢</span>
+              Full Screen <span aria-hidden="true">⤢</span>
             </button>
           </div>
 
@@ -3328,14 +3358,21 @@ export function App(): JSX.Element {
                 <span className="track-number" aria-label={`Track ${index + 1}`}>
                   {index + 1}
                 </span>
-                <button
-                  type="button"
-                  className={`${song.id === selectedSongId ? 'selected' : ''} ${
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className={`main-list-row ${song.id === selectedSongId ? 'selected' : ''} ${
                     dragSongId === song.id ? 'drag-source' : ''
                   }`}
                   onClick={() => handleSongRowSelect(song.id)}
                   onDoubleClick={() => {
                     void handleSongRowPlay(song.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      handleSongRowSelect(song.id);
+                    }
                   }}
                   data-testid="main-list-row"
                   data-song-id={song.id}
@@ -3372,9 +3409,31 @@ export function App(): JSX.Element {
                     <span className="main-list-row-metadata" data-testid="main-list-row-metadata">
                       {songRowMetadataLabel}
                     </span>
-                    <span className="muted">{formatDate(song.latestExportAt)}</span>
+                    <div className="main-list-row-meta-footer">
+                      <button
+                        type="button"
+                        className={`song-checklist-button${songChecklistCount > 0 ? ' has-items' : ''}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleOpenSongChecklist(song.id);
+                        }}
+                        data-testid="song-checklist-button"
+                        title={
+                          songChecklistCount > 0
+                            ? `${songChecklistCount} checklist item(s) saved`
+                            : 'Open checklist for this song.'
+                        }
+                        aria-label={`${songRowTitle} checklist`}
+                      >
+                        <span>Checklist</span>
+                        {songChecklistCount > 0 ? (
+                          <span className="song-checklist-count">{songChecklistCount}</span>
+                        ) : null}
+                      </button>
+                      <span className="muted">{formatDate(song.latestExportAt)}</span>
+                    </div>
                   </div>
-                </button>
+                </div>
                 <label className="song-rating-control" data-testid="song-rating-control">
                   <span className="song-rating-value">{songRatingValue}/10</span>
                   <input
@@ -3396,22 +3455,6 @@ export function App(): JSX.Element {
                     aria-label={`${songRowTitle} rating`}
                   />
                 </label>
-                <button
-                  type="button"
-                  className={`song-checklist-button${songChecklistCount > 0 ? ' has-items' : ''}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleOpenSongChecklist(song.id);
-                  }}
-                  data-testid="song-checklist-button"
-                  title={
-                    songChecklistCount > 0
-                      ? `${songChecklistCount} checklist item(s) saved`
-                      : 'Open checklist for this song.'
-                  }
-                >
-                  Checklist
-                </button>
               </li>
             );
           })}
@@ -3421,9 +3464,14 @@ export function App(): JSX.Element {
         {selectedPlaybackVersion && (
           <section className="player-dock" data-testid="player-dock">
             <div className="player-dock-top">
-              <div>
+              <div className="player-track-details">
                 <strong data-testid="player-track-name">{activePlaybackLabel.fileName}</strong>
                 <p className="muted">{activePlaybackLabel.subtitle}</p>
+                <div className="player-track-badges">
+                  <span className="sample-rate-pill" data-testid="player-track-sample-rate">
+                    {selectedPlaybackSampleRateText}
+                  </span>
+                </div>
               </div>
               <button
                 type="button"
@@ -3532,6 +3580,9 @@ export function App(): JSX.Element {
             <section className="inspector-card">
               <h3 data-testid="inspector-song-title">{getSongDisplayFileName(selectedSong)}</h3>
               <p className="muted">Latest export: {formatDate(selectedSong.latestExportAt)}</p>
+              <p className="muted" data-testid="inspector-song-sample-rate">
+                Sample rate: {selectedPlaybackSampleRateText}
+              </p>
             </section>
           ) : (
             <section className="inspector-card empty-state">
@@ -3613,6 +3664,119 @@ export function App(): JSX.Element {
         </div>
       </aside>
 
+      {checklistModalSong ? (
+        <div
+          className="checklist-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Song checklist"
+          data-testid="song-checklist-modal"
+        >
+          <div className="checklist-modal-card">
+            <div className="checklist-modal-header">
+              <div>
+                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist</h2>
+                <p className="muted">
+                  {checklistCompletedCount}/{checklistModalItems.length} completed
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ghost"
+                onClick={handleCloseSongChecklist}
+                data-testid="song-checklist-close"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="checklist-input-row">
+              <input
+                value={checklistDraftText}
+                onChange={(event) => setChecklistDraftText(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleAddChecklistItem();
+                  }
+                }}
+                placeholder="Add a checklist item"
+                data-testid="song-checklist-input"
+              />
+              <button
+                type="button"
+                onClick={handleAddChecklistItem}
+                disabled={checklistDraftIsEmpty}
+                data-testid="song-checklist-add"
+              >
+                Add
+              </button>
+            </div>
+
+            {checklistModalItems.length > 0 ? (
+              <ul className="checklist-item-list" data-testid="song-checklist-items">
+                {checklistModalItems.map((item) => (
+                  <li key={item.id} className="checklist-item-row">
+                    <label className="checklist-item-toggle">
+                      <input
+                        type="checkbox"
+                        checked={item.completed}
+                        onChange={(event) => {
+                          handleToggleChecklistItem(
+                            checklistModalSong.id,
+                            item.id,
+                            event.currentTarget.checked
+                          );
+                        }}
+                      />
+                    </label>
+                    <input
+                      className={`checklist-item-text${item.completed ? ' completed' : ''}`}
+                      value={item.text}
+                      onChange={(event) => {
+                        handleChecklistItemTextChange(
+                          checklistModalSong.id,
+                          item.id,
+                          event.currentTarget.value
+                        );
+                      }}
+                      data-testid="song-checklist-item-text"
+                    />
+                    <button
+                      type="button"
+                      className="ghost checklist-remove-button"
+                      onClick={() => handleRemoveChecklistItem(checklistModalSong.id, item.id)}
+                      aria-label={`Remove ${item.text}`}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted checklist-empty-state" data-testid="song-checklist-empty">
+                No checklist items yet.
+              </p>
+            )}
+
+            <div className="checklist-modal-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => handleClearCompletedChecklistItems(checklistModalSong.id)}
+                disabled={checklistCompletedCount === 0}
+                data-testid="song-checklist-clear-completed"
+              >
+                Clear Completed
+              </button>
+              <button type="button" onClick={handleCloseSongChecklist}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {analysisExpanded ? (
         <div
           className="analysis-overlay"
@@ -3624,7 +3788,7 @@ export function App(): JSX.Element {
           <div className="analysis-overlay-card">
             <div className="analysis-overlay-header">
               <div>
-                <h2>Mastering Analysis</h2>
+                <h2>Mastering + Reference Full Screen</h2>
                 <p className="muted">LUFS · peaks · tone · refs · normalization</p>
               </div>
               <button

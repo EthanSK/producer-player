@@ -1,9 +1,14 @@
 import { defineConfig } from '@playwright/test';
 
+const configuredWorkers = Number.parseInt(
+  process.env.PLAYWRIGHT_WORKERS ?? (process.env.CI ? '4' : '10'),
+  10
+);
+
 export default defineConfig({
   testDir: './src',
-  fullyParallel: false,
-  workers: 1,
+  fullyParallel: true,
+  workers: Number.isFinite(configuredWorkers) && configuredWorkers > 0 ? configuredWorkers : 10,
   timeout: 60_000,
   expect: {
     timeout: 15_000,

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, protocol, shell } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeImage, protocol, shell } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, promises as fs } from 'node:fs';
 import { dirname, extname, join, parse, resolve } from 'node:path';
@@ -45,6 +45,7 @@ const TEST_REFERENCE_IMPORT_PATH =
 const ANALYSIS_DELAY_MS = Number(process.env.PRODUCER_PLAYER_ANALYSIS_DELAY_MS ?? '0');
 const PUBLIC_REPOSITORY_ORIGIN = 'https://github.com';
 const PUBLIC_REPOSITORY_PATH = '/EthanSK/producer-player';
+const DEVELOPMENT_WINDOW_ICON_PATH = resolve(__dirname, '../../../assets/icon/png/icon-512.png');
 
 const PLAYBACK_MIME_BY_EXTENSION: Record<string, string> = {
   wav: 'audio/wav',
@@ -807,6 +808,8 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
   }
 
   const ffmpegCommand = getBinaryCommandPath('ffmpeg');
+  const ffprobeCommand = getBinaryCommandPath('ffprobe');
+
   const ebur128Result = await runProcessCapture(ffmpegCommand, [
     '-hide_banner',
     '-loglevel',
@@ -821,16 +824,37 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
     '-',
   ]);
 
-  const volumedetectResult = await runProcessCapture(ffmpegCommand, [
-    '-hide_banner',
-    '-nostats',
-    '-i',
-    resolvedPath,
-    '-af',
-    'volumedetect',
-    '-f',
-    'null',
-    '-',
+  const [volumedetectResult, sampleRateHz] = await Promise.all([
+    runProcessCapture(ffmpegCommand, [
+      '-hide_banner',
+      '-nostats',
+      '-i',
+      resolvedPath,
+      '-af',
+      'volumedetect',
+      '-f',
+      'null',
+      '-',
+    ]),
+    (async () => {
+      try {
+        const probeResult = await runProcessCapture(ffprobeCommand, [
+          '-v',
+          'error',
+          '-select_streams',
+          'a:0',
+          '-show_entries',
+          'stream=sample_rate',
+          '-of',
+          'default=noprint_wrappers=1:nokey=1',
+          resolvedPath,
+        ]);
+
+        return parseInteger(probeResult.stdout.trim());
+      } catch {
+        return null;
+      }
+    })(),
   ]);
 
   const integratedMatches = Array.from(
@@ -872,6 +896,7 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
       momentaryMatches.length > 0 ? Math.max(...momentaryMatches) : null,
     maxShortTermLufs:
       shortTermMatches.length > 0 ? Math.max(...shortTermMatches) : null,
+    sampleRateHz,
   };
 }
 
@@ -1449,6 +1474,14 @@ async function createMainWindow(): Promise<void> {
     allowFileProtocol = true;
   }
 
+  const windowIconPath = developmentMode && existsSync(DEVELOPMENT_WINDOW_ICON_PATH)
+    ? DEVELOPMENT_WINDOW_ICON_PATH
+    : undefined;
+
+  if (process.platform === 'darwin' && windowIconPath && app.dock) {
+    app.dock.setIcon(nativeImage.createFromPath(windowIconPath));
+  }
+
   mainWindow = new BrowserWindow({
     title: 'Producer Player',
     width: 1380,
@@ -1458,6 +1491,7 @@ async function createMainWindow(): Promise<void> {
     center: true,
     backgroundColor: '#0a0f14',
     autoHideMenuBar: true,
+    ...(windowIconPath ? { icon: windowIconPath } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,

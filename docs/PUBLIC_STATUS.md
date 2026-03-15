@@ -23,7 +23,6 @@ _Last updated: 2026-03-10_
 - Signed macOS release already accepted by Apple
 - Apple notarization for outside-the-store distribution
 - Final polished public download channel
-- Chosen open-source license
 
 ## Honest public wording
 

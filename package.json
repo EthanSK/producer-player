@@ -4,6 +4,7 @@
   "private": true,
   "description": "Producer Player desktop app for producers managing album tracks, exports, and ordering.",
   "author": "EthanSK",
+  "license": "MIT",
   "homepage": "https://ethansk.github.io/producer-player/",
   "repository": {
     "type": "git",

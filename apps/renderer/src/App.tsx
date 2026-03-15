@@ -30,6 +30,7 @@ import {
   NORMALIZATION_PLATFORM_PROFILES,
   type NormalizationPlatformId,
 } from './platformNormalization';
+import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
@@ -44,6 +45,12 @@ interface LoadedReferenceTrack {
   playbackSource: PlaybackSourceInfo;
   previewAnalysis: TrackAnalysisResult;
   measuredAnalysis: AudioFileAnalysis;
+}
+
+interface SongChecklistItem {
+  id: string;
+  text: string;
+  completed: boolean;
 }
 
 const EMPTY_SNAPSHOT: LibrarySnapshot = {
@@ -79,6 +86,7 @@ const PREVIOUS_TRACK_RESTART_THRESHOLD_SECONDS = 2;
 const DEFAULT_PLAYBACK_VOLUME = 1;
 const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
+const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
 const BUG_REPORT_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=bug_report.yml`;
 const FEATURE_REQUEST_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=feature_request.yml`;
@@ -397,6 +405,84 @@ function persistSongRatings(ratings: Record<string, number>): void {
   window.localStorage.setItem(SONG_RATINGS_STORAGE_KEY, JSON.stringify(ratings));
 }
 
+function createChecklistItemId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `checklist-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
+}
+
+function readStoredSongChecklists(): Record<string, SongChecklistItem[]> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SONG_CHECKLISTS_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const checklistEntries = Object.entries(parsed).flatMap(([songId, items]) => {
+      if (songId.length === 0 || !Array.isArray(items)) {
+        return [];
+      }
+
+      const sanitizedItems: SongChecklistItem[] = items.flatMap((item) => {
+        if (!item || typeof item !== 'object') {
+          return [];
+        }
+
+        const candidate = item as {
+          id?: unknown;
+          text?: unknown;
+          completed?: unknown;
+        };
+
+        if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) {
+          return [];
+        }
+
+        if (typeof candidate.text !== 'string') {
+          return [];
+        }
+
+        if (typeof candidate.completed !== 'boolean') {
+          return [];
+        }
+
+        return [
+          {
+            id: candidate.id,
+            text: candidate.text,
+            completed: candidate.completed,
+          },
+        ];
+      });
+
+      return [[songId, sanitizedItems] as const];
+    });
+
+    return Object.fromEntries(checklistEntries) as Record<string, SongChecklistItem[]>;
+  } catch {
+    return {};
+  }
+}
+
+function persistSongChecklists(checklists: Record<string, SongChecklistItem[]>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(SONG_CHECKLISTS_STORAGE_KEY, JSON.stringify(checklists));
+}
+
 function formatAlbumDuration(totalSeconds: number | null): string {
   if (totalSeconds === null || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
     return 'Album length unavailable';
@@ -520,7 +606,14 @@ export function App(): JSX.Element {
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [playbackSourceReady, setPlaybackSourceReady] = useState(false);
   const [volume, setVolume] = useState(DEFAULT_PLAYBACK_VOLUME);
-  const [songRatings, setSongRatings] = useState<Record<string, number>>(() => readStoredSongRatings());
+  const [songRatings, setSongRatings] = useState<Record<string, number>>(() =>
+    readStoredSongRatings()
+  );
+  const [songChecklists, setSongChecklists] = useState<Record<string, SongChecklistItem[]>>(
+    () => readStoredSongChecklists()
+  );
+  const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
+  const [checklistDraftText, setChecklistDraftText] = useState('');
   const [resolvedAlbumDurationSecondsByVersionId, setResolvedAlbumDurationSecondsByVersionId] = useState<
     Record<string, number>
   >({});
@@ -692,6 +785,42 @@ export function App(): JSX.Element {
   useEffect(() => {
     persistSongRatings(songRatings);
   }, [songRatings]);
+
+  useEffect(() => {
+    persistSongChecklists(songChecklists);
+  }, [songChecklists]);
+
+  useEffect(() => {
+    if (!checklistModalSongId) {
+      return;
+    }
+
+    const songStillExists = snapshot.songs.some((song) => song.id === checklistModalSongId);
+    if (songStillExists) {
+      return;
+    }
+
+    setChecklistModalSongId(null);
+    setChecklistDraftText('');
+  }, [checklistModalSongId, snapshot.songs]);
+
+  useEffect(() => {
+    if (!checklistModalSongId) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setChecklistModalSongId(null);
+        setChecklistDraftText('');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [checklistModalSongId]);
 
   useEffect(() => {
     if (!referenceTrack && playbackPreviewMode === 'reference') {
@@ -1468,7 +1597,9 @@ export function App(): JSX.Element {
     : 'Drag tracks to reorder — track positions are preserved.';
   const emptyStateText = isSearching
     ? 'No matching tracks or versions.'
-    : 'No tracks found in linked folders.';
+    : loading
+      ? 'Loading…'
+      : 'No tracks found in linked folders.';
 
   const playbackQueue = useMemo(() => {
     const queue: SongVersion[] = [];
@@ -2350,6 +2481,92 @@ export function App(): JSX.Element {
     }));
   }
 
+  function updateSongChecklistItems(
+    songId: string,
+    updater: (items: SongChecklistItem[]) => SongChecklistItem[]
+  ): void {
+    setSongChecklists((current) => {
+      const currentItems = current[songId] ?? [];
+      const nextItems = updater(currentItems);
+
+      if (nextItems.length === 0) {
+        if (!(songId in current)) {
+          return current;
+        }
+
+        const { [songId]: _removed, ...rest } = current;
+        return rest;
+      }
+
+      return {
+        ...current,
+        [songId]: nextItems,
+      };
+    });
+  }
+
+  function handleOpenSongChecklist(songId: string): void {
+    setChecklistModalSongId(songId);
+    setChecklistDraftText('');
+  }
+
+  function handleCloseSongChecklist(): void {
+    setChecklistModalSongId(null);
+    setChecklistDraftText('');
+  }
+
+  function handleAddChecklistItem(): void {
+    const songId = checklistModalSongId;
+    const itemText = checklistDraftText.trim();
+
+    if (!songId || itemText.length === 0) {
+      return;
+    }
+
+    updateSongChecklistItems(songId, (items) => [
+      ...items,
+      {
+        id: createChecklistItemId(),
+        text: itemText,
+        completed: false,
+      },
+    ]);
+
+    setChecklistDraftText('');
+  }
+
+  function handleToggleChecklistItem(songId: string, itemId: string, completed: boolean): void {
+    updateSongChecklistItems(songId, (items) =>
+      items.map((item) => (item.id === itemId ? { ...item, completed } : item))
+    );
+  }
+
+  function handleChecklistItemTextChange(
+    songId: string,
+    itemId: string,
+    nextText: string
+  ): void {
+    updateSongChecklistItems(songId, (items) =>
+      items.map((item) => (item.id === itemId ? { ...item, text: nextText } : item))
+    );
+  }
+
+  function handleRemoveChecklistItem(songId: string, itemId: string): void {
+    updateSongChecklistItems(songId, (items) => items.filter((item) => item.id !== itemId));
+  }
+
+  function handleClearCompletedChecklistItems(songId: string): void {
+    updateSongChecklistItems(songId, (items) => items.filter((item) => !item.completed));
+  }
+
+  const checklistModalSong = checklistModalSongId
+    ? snapshot.songs.find((song) => song.id === checklistModalSongId) ?? null
+    : null;
+  const checklistModalItems = checklistModalSongId
+    ? songChecklists[checklistModalSongId] ?? []
+    : [];
+  const checklistCompletedCount = checklistModalItems.filter((item) => item.completed).length;
+
   const measuredIntegratedText = buildAnalysisValue(
     analysisStatus,
     formatMeasuredStat(measuredAnalysis?.integratedLufs, 'LUFS'),
@@ -2479,6 +2696,19 @@ export function App(): JSX.Element {
   return (
     <div className="app-shell" data-testid="app-shell">
       <aside className="panel panel-left">
+        <section className="sidebar-branding" data-testid="producer-player-branding">
+          <img
+            src={producerPlayerIconUrl}
+            alt="Producer Player logo"
+            className="sidebar-branding-logo"
+            data-testid="producer-player-branding-logo"
+          />
+          <div className="sidebar-branding-copy">
+            <strong>Producer Player</strong>
+            <p className="muted">Desktop playback + version tracking for producers</p>
+          </div>
+        </section>
+
         <section className="folder-tools-card" data-testid="folder-tools-card">
           <section className="folder-add-cta">
             <button
@@ -3032,6 +3262,7 @@ export function App(): JSX.Element {
             const songRowTitle = getSongDisplayTitle(song);
             const songRowMetadataLabel = getSongRowMetadataLabel(song);
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
+            const songChecklistCount = songChecklists[song.id]?.length ?? 0;
 
             return (
               <li
@@ -3121,6 +3352,22 @@ export function App(): JSX.Element {
                     aria-label={`${songRowTitle} rating`}
                   />
                 </label>
+                <button
+                  type="button"
+                  className={`song-checklist-button${songChecklistCount > 0 ? ' has-items' : ''}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleOpenSongChecklist(song.id);
+                  }}
+                  data-testid="song-checklist-button"
+                  title={
+                    songChecklistCount > 0
+                      ? `${songChecklistCount} checklist item(s) saved`
+                      : 'Open checklist for this song.'
+                  }
+                >
+                  Checklist
+                </button>
               </li>
             );
           })}

@@ -53,6 +53,10 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.IMPORT_PLAYLIST_ORDER);
   },
 
+  async exportLatestVersionsInOrder(payload: PlaylistOrderExportV1) {
+    return ipcRenderer.invoke(IPC_CHANNELS.EXPORT_LATEST_VERSIONS_IN_ORDER, payload);
+  },
+
   async revealFile(filePath: string) {
     await ipcRenderer.invoke(IPC_CHANNELS.OPEN_IN_FINDER, filePath);
   },

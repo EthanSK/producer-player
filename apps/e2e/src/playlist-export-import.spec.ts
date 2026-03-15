@@ -116,6 +116,106 @@ test.describe('Playlist export/import ordering', () => {
     }
   });
 
+  test('exports latest versions into an ordered folder with rewritten track-number prefixes', async () => {
+    const directories = await createE2ETestDirectories('producer-player-latest-ordered-export');
+    const orderedExportPath = path.join(directories.userDataDirectory, 'latest-ordered-exports');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      {
+        relativePath: 'Alpha v1.wav',
+        contents: 'alpha-v1',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z'),
+      },
+      {
+        relativePath: 'Alpha v2.wav',
+        contents: 'alpha-v2',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:13.000Z'),
+      },
+      {
+        relativePath: '07 - Beta v1.wav',
+        contents: 'beta-v1',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:11.000Z'),
+      },
+      {
+        relativePath: 'Gamma v1.wav',
+        contents: 'gamma-v1',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:12.000Z'),
+      },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory, {
+      extraEnv: {
+        PRODUCER_PLAYER_E2E_LATEST_ORDERED_EXPORT_DIRECTORY: orderedExportPath,
+      },
+    });
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(3);
+
+      const rows = await page.getByTestId('main-list-row').evaluateAll((elements) =>
+        elements
+          .map((element) => ({
+            id: element.getAttribute('data-song-id') ?? '',
+            text: element.textContent ?? '',
+          }))
+          .filter((entry) => entry.id.length > 0)
+      );
+
+      const alphaId = rows.find((entry) => entry.text.includes('Alpha'))?.id;
+      const betaId = rows.find((entry) => entry.text.includes('Beta'))?.id;
+      const gammaId = rows.find((entry) => entry.text.includes('Gamma'))?.id;
+
+      expect(alphaId).toBeTruthy();
+      expect(betaId).toBeTruthy();
+      expect(gammaId).toBeTruthy();
+
+      const orderedIds = [gammaId, alphaId, betaId].filter(
+        (id): id is string => typeof id === 'string' && id.length > 0
+      );
+
+      await page.evaluate(async (ids) => {
+        await (window as any).producerPlayer.reorderSongs(ids);
+      }, orderedIds);
+
+      await expect(page.getByTestId('main-list-row').first()).toHaveAttribute(
+        'data-song-id',
+        gammaId ?? ''
+      );
+
+      await page.getByTestId('export-latest-ordered-button').click();
+
+      await expect
+        .poll(async () => {
+          try {
+            const fileNames = await fs.readdir(orderedExportPath);
+            return fileNames.length;
+          } catch {
+            return 0;
+          }
+        })
+        .toBe(3);
+
+      const exportedFiles = (await fs.readdir(orderedExportPath)).sort();
+      expect(exportedFiles).toEqual([
+        '01 - Gamma v1.wav',
+        '02 - Alpha v2.wav',
+        '03 - Beta v1.wav',
+      ]);
+
+      const alphaLatestExportContents = await fs.readFile(
+        path.join(orderedExportPath, '02 - Alpha v2.wav'),
+        'utf8'
+      );
+      expect(alphaLatestExportContents).toBe('alpha-v2');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('shows an error when importing invalid JSON', async () => {
     const directories = await createE2ETestDirectories('producer-player-playlist-import-invalid');
     const importPath = path.join(directories.userDataDirectory, 'playlist-order-invalid.json');

@@ -1,19 +1,15 @@
 # License status
 
-Producer Player does **not** currently include a chosen open-source license.
-
-That is intentional for now: selecting a public license is a product/legal decision that should be made explicitly by the repository owner.
+Producer Player is now released under the **MIT License**.
 
 ## Current status
 
-- No `LICENSE` file has been added yet.
-- Until one is added, the default legal position is effectively **all rights reserved**.
+- `LICENSE` is present at the repo root.
+- `package.json` declares `"license": "MIT"`.
+- Public project messaging now reflects that the app is open source.
 
-## Why this was left manual
+## What this means
 
-Choosing a license changes how other people can use, modify, redistribute, and commercialise the project.
-That is not a safe decision to guess.
+This product is open source. Feel free to modify it.
 
-## Next step
-
-Pick a license deliberately, then add the matching `LICENSE` file at the repo root and update the README to reflect it.
+The MIT License permits use, modification, distribution, and private/commercial reuse, subject to the license terms and copyright notice.

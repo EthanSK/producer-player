@@ -3,7 +3,7 @@
 This repo now ships downloadable prebuilt desktop artifacts via:
 
 - `.github/workflows/release-desktop.yml`
-- Rolling pre-release snapshots on pushes to `main` / `master`
+- Versioned snapshot releases on pushes to `main` / `master`
 - Versioned GitHub Releases on `v*` tags
 
 ## What the workflow currently publishes
@@ -17,10 +17,18 @@ Unsigned desktop artifacts for immediate testability:
 
 Release behavior by trigger:
 
-- Push to `main`/`master` → builds all desktop targets, uploads run artifacts, and updates a rolling prerelease tag (`desktop-main-latest` or `desktop-master-latest`).
+- Push to `main`/`master` → builds all desktop targets, uploads run artifacts, and publishes a new snapshot GitHub Release (tagged `desktop-snapshot-...`) marked as **Latest**.
 - Push tag `v*` → builds all desktop targets and publishes a versioned GitHub Release for that tag.
 
 > Current default is intentionally unsigned/not notarized.
+
+## Snapshot versioning scheme (main/master)
+
+On each push to `main`/`master`, the workflow:
+
+- Computes a snapshot version: `<package.json version>-<branch>.<run_number>.<run_attempt>` (example: `0.1.0-main.123.1`)
+- Publishes a GitHub Release tagged: `desktop-snapshot-<snapshot version>`
+- Marks that release as GitHub **Latest** (even though it is still a prerelease), so the newest pushed build shows up as the “proper” latest download on the Releases page
 
 ## First release (recommended path)
 
@@ -46,7 +54,7 @@ Use **Run workflow** on:
 
 - <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
 
-If run on `main`/`master`, it also refreshes the rolling snapshot prerelease. On other branches, download artifacts from that run directly.
+If run on `main`/`master`, it also publishes a snapshot release. On other branches, download artifacts from that run directly.
 
 ## Release notes/changelog guidance
 

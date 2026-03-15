@@ -25,7 +25,7 @@ Right now:
 
 - The GitHub Pages landing page is live
 - The repository is public
-- Desktop workflow builds on each push to `main`/`master` and updates a rolling snapshot release
+- Desktop workflow builds on each push to `main`/`master` and publishes a new snapshot release (marked **Latest**)
 - Local Apple Silicon builds work (ZIP output)
 - Mac App Store packaging scaffolding is in the repo
 
@@ -77,6 +77,7 @@ Mac App Store packaging notes: [`docs/MAC_APP_STORE.md`](docs/MAC_APP_STORE.md)
 
 ## License
 
-No open-source license is set yet.
-Until a license is added, this repo should be treated as **all rights reserved**.
-See [`docs/LICENSE_STATUS.md`](docs/LICENSE_STATUS.md).
+This product is open source. Feel free to modify it.
+
+Producer Player is released under the **MIT License**.
+See [`LICENSE`](LICENSE) and [`docs/LICENSE_STATUS.md`](docs/LICENSE_STATUS.md).

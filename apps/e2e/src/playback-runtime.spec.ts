@@ -764,6 +764,30 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('analysis-active-reference')).toContainText(
         'External Reference.wav'
       );
+
+      await expect(page.getByTestId('analysis-overlay-normalization-panel')).toBeVisible();
+      const overlayNormalizationToggle = page.getByTestId('analysis-overlay-normalization-toggle');
+      await expect(overlayNormalizationToggle).toHaveText('Preview Off');
+      await overlayNormalizationToggle.click();
+      await expect(overlayNormalizationToggle).toHaveText('Preview On');
+      await expect(page.getByTestId('analysis-overlay-normalization-summary')).toContainText(
+        'preview on'
+      );
+
+      await page.getByTestId('analysis-overlay-platform-youtube').click();
+      await expect(page.getByTestId('analysis-overlay-platform-youtube')).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+      await expect(page.getByTestId('analysis-overlay-normalization-summary')).toContainText(
+        'YouTube selected'
+      );
+
+      await page.getByTestId('analysis-close-button').click();
+      await expect(page.getByTestId('analysis-modal')).toHaveCount(0);
+      await expect(page.getByTestId('analysis-platform-youtube')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByTestId('analysis-normalization-summary')).toContainText('YouTube selected');
+      await expect(page.getByTestId('analysis-normalization-summary')).toContainText('preview on');
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });

@@ -369,6 +369,15 @@ input[type='range'] {
   align-items: start;
 }
 
+.analysis-expand-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
 .analysis-panel-header h3,
 .analysis-overlay-header h2,
 .analysis-overlay-section h3 {
@@ -518,6 +527,10 @@ input[type='range'] {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.analysis-platform-grid.analysis-platform-grid-overlay {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .analysis-platform-button {

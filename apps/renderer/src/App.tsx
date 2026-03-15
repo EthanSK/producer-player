@@ -2870,13 +2870,13 @@ export function App(): JSX.Element {
             </div>
             <button
               type="button"
-              className="icon-button"
+              className="ghost analysis-expand-trigger"
               onClick={() => setAnalysisExpanded(true)}
               data-testid="analysis-expand-button"
-              title="Open the expanded mastering analysis."
+              title="Open the expanded mastering and reference workspace."
               disabled={!selectedPlaybackVersion}
             >
-              <span aria-hidden="true">⤢</span>
+              Expanded View <span aria-hidden="true">⤢</span>
             </button>
           </div>
 
@@ -3625,11 +3625,30 @@ export function App(): JSX.Element {
             {selectedPlaybackVersion ? (
               <div className="analysis-overlay-grid">
                 <section className="analysis-overlay-section">
-                  <h3>Current Track</h3>
+                  <h3>Current track + analysis status</h3>
                   <p>
                     <strong>{selectedPlaybackVersion.fileName}</strong>
                   </p>
                   <p className="muted">{selectedSong ? selectedSong.title : 'Unknown track'}</p>
+                  <p className="muted analysis-loading-line" data-testid="analysis-overlay-status">
+                    {analysisStatus === 'loading'
+                      ? 'Loading mastering analysis…'
+                      : analysisStatus === 'error'
+                        ? 'Analysis failed.'
+                        : 'Ready.'}
+                  </p>
+                  {analysisStatus === 'error' ? (
+                    <p className="error" data-testid="analysis-overlay-error">
+                      {analysisError ?? 'Could not analyse this track preview.'}
+                    </p>
+                  ) : null}
+                  <p className="muted" data-testid="analysis-overlay-preview-mode">
+                    {referenceTrack
+                      ? playbackPreviewMode === 'reference'
+                        ? `Auditioning reference: ${referenceTrack.fileName}`
+                        : `Mix loaded · reference ready: ${referenceTrack.fileName}`
+                      : 'Auditioning mix export'}
+                  </p>
                 </section>
 
                 <section className="analysis-overlay-section">
@@ -3780,6 +3799,110 @@ export function App(): JSX.Element {
                   </div>
 
                   {referenceError ? <p className="error">{referenceError}</p> : null}
+                </section>
+
+                <section
+                  className="analysis-overlay-section"
+                  data-testid="analysis-overlay-normalization-panel"
+                >
+                  <h3>Platform normalization preview</h3>
+                  <div className="analysis-normalization-header">
+                    <div>
+                      <strong>Streaming target emulation</strong>
+                      <p
+                        className="muted"
+                        data-testid="analysis-overlay-normalization-summary"
+                      >
+                        {normalizationSummaryText}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className={normalizationPreviewEnabled ? '' : 'ghost'}
+                      onClick={() => setNormalizationPreviewEnabled((current) => !current)}
+                      data-testid="analysis-overlay-normalization-toggle"
+                      disabled={analysisStatus !== 'ready' || !normalizationPreview}
+                      title="Toggle the selected platform loudness preview on the current playback."
+                    >
+                      Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
+                    </button>
+                  </div>
+
+                  <div
+                    className="analysis-platform-grid analysis-platform-grid-overlay"
+                    role="group"
+                    aria-label="Platform normalization presets"
+                  >
+                    {NORMALIZATION_PLATFORM_PROFILES.map((platform) => (
+                      <button
+                        key={`overlay-${platform.id}`}
+                        type="button"
+                        className={`analysis-platform-button${
+                          selectedNormalizationPlatformId === platform.id ? ' selected' : ''
+                        }`}
+                        onClick={() => setSelectedNormalizationPlatformId(platform.id)}
+                        data-testid={`analysis-overlay-platform-${platform.id}`}
+                        title={platform.description}
+                        aria-pressed={selectedNormalizationPlatformId === platform.id}
+                      >
+                        <span
+                          className="analysis-platform-icon"
+                          style={{ '--platform-accent': platform.accentColor } as CSSProperties}
+                        >
+                          <PlatformIcon platformId={platform.id} />
+                        </span>
+                        <span className="analysis-platform-copy">
+                          <strong>{platform.shortLabel}</strong>
+                          <span className="muted">{platform.targetLufs.toFixed(0)} LUFS</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="analysis-detail-grid analysis-detail-grid-wide">
+                    <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-change">
+                      <span className="analysis-stat-label">Applied change</span>
+                      <strong>{normalizationChangeText}</strong>
+                      <span className="muted">
+                        {normalizationPreviewEnabled
+                          ? 'Active on current playback'
+                          : 'Bypassed until Preview On'}
+                      </span>
+                    </div>
+                    <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-projected">
+                      <span className="analysis-stat-label">Projected loudness</span>
+                      <strong>{normalizationProjectedText}</strong>
+                      <span className="muted">Track-normalized estimate</span>
+                    </div>
+                    <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-cap">
+                      <span className="analysis-stat-label">Peak / boost cap</span>
+                      <strong>{normalizationCapText}</strong>
+                      <span className="muted">
+                        {normalizationPreview?.limitedByHeadroom
+                          ? 'Boost limited by true peak headroom'
+                          : selectedNormalizationPlatform.policy === 'down-only'
+                            ? 'Down-only preview for this platform'
+                            : 'Headroom-aware preview'}
+                      </span>
+                    </div>
+                    <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-target">
+                      <span className="analysis-stat-label">Target + true-peak ceiling</span>
+                      <strong>
+                        {selectedNormalizationPlatform.targetLufs.toFixed(0)} LUFS ·{' '}
+                        {selectedNormalizationPlatform.truePeakCeilingDbtp.toFixed(0)} dBTP
+                      </strong>
+                      <span className="muted">Platform default profile</span>
+                    </div>
+                    <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-policy">
+                      <span className="analysis-stat-label">Gain policy</span>
+                      <strong>
+                        {selectedNormalizationPlatform.policy === 'down-only'
+                          ? 'Down-only attenuation'
+                          : 'Up/down normalization'}
+                      </strong>
+                      <span className="muted">{selectedNormalizationPlatform.description}</span>
+                    </div>
+                  </div>
                 </section>
 
                 <section className="analysis-overlay-section analysis-comparison-panel">

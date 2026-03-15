@@ -1654,11 +1654,11 @@ test.describe('playback runtime deep dive', () => {
 
       await page.waitForTimeout(250);
 
-      await page.getByTestId('main-list-row').filter({ hasText: 'Near End Beta' }).first().click();
+      await page.getByTestId('main-list-row').filter({ hasText: 'Near End Beta' }).first().dblclick();
       await expect(page.getByTestId('player-track-name')).toContainText('Near End Beta');
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
 
-      await page.getByTestId('main-list-row').filter({ hasText: 'Near End Alpha' }).first().click();
+      await page.getByTestId('main-list-row').filter({ hasText: 'Near End Alpha' }).first().dblclick();
       await expect(page.getByTestId('player-track-name')).toContainText('Near End Alpha');
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
 
@@ -1738,7 +1738,7 @@ test.describe('playback runtime deep dive', () => {
         .getByTestId('main-list-row')
         .filter({ hasText: 'Restore Beta' })
         .first()
-        .click();
+        .dblclick();
       await expect(firstLaunch.page.getByTestId('player-track-name')).toContainText('Restore Beta');
       await expect(firstLaunch.page.getByTestId('player-play-toggle')).toHaveAttribute(
         'aria-label',
@@ -1751,7 +1751,7 @@ test.describe('playback runtime deep dive', () => {
         .getByTestId('main-list-row')
         .filter({ hasText: 'Restore Alpha' })
         .first()
-        .click();
+        .dblclick();
       await expect(firstLaunch.page.getByTestId('player-track-name')).toContainText('Restore Alpha');
       await expect(firstLaunch.page.getByTestId('player-play-toggle')).toHaveAttribute(
         'aria-label',
@@ -2026,6 +2026,79 @@ test.describe('playback runtime deep dive', () => {
       await page.getByTestId('player-prev').click();
       await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
       await expect.poll(readScrubberValue).toBeLessThan(0.25);
+
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('single-clicking another track while playback is active only selects it until play is pressed', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-selection-playback-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-selection-playback-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=330:duration=8',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Select Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=610:duration=8',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Select Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    const readScrubberValue = async (): Promise<number> => {
+      return Number.parseFloat(await page.getByTestId('player-scrubber').inputValue());
+    };
+
+    try {
+      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
+      await page.getByTestId('link-folder-path-button').click();
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const firstRow = page.getByTestId('main-list-row').nth(0);
+      const secondRow = page.getByTestId('main-list-row').nth(1);
+      const firstTrackName = ((await firstRow.locator('strong').textContent()) ?? '').trim();
+      const secondTrackName = ((await secondRow.locator('strong').textContent()) ?? '').trim();
+
+      await firstRow.click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
+      await expect.poll(readScrubberValue, { timeout: 12_000 }).toBeGreaterThan(1.2);
+
+      await secondRow.click();
+      await expect(secondRow).toHaveClass(/selected/);
+      await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+      await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await expect(page.getByTestId('player-track-name')).toContainText(secondTrackName);
 
       await expect(page.getByTestId('playback-error')).toHaveCount(0);
     } finally {

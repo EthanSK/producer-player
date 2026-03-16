@@ -158,14 +158,20 @@
       </div>
 
       <div class="hero-media container-wide">
-        <!-- Video explainer (placeholder — replace src once rendered) -->
         <div class="hero-video-wrap" id="explainer-video">
           <p class="section-label" style="margin-bottom: 0.6rem">Explainer</p>
-          <p class="muted-note" style="margin-bottom: 0">
-            Video walkthrough coming soon &mdash; see the
-            <a href="https://github.com/EthanSK/producer-player/blob/main/docs/VIDEO_SCRIPT.md">full script</a>
-            for a preview of what it will cover.
-          </p>
+          <video
+            controls
+            preload="metadata"
+            poster="./assets/screenshots/app-hero.png"
+            style="width: 100%; border-radius: 0.5rem"
+          >
+            <source
+              src="./assets/video/producer-player-explainer.mp4"
+              type="video/mp4"
+            />
+            Your browser does not support the video element.
+          </video>
         </div>
 
         <figure class="app-shot">

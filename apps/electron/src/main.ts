@@ -35,6 +35,9 @@ const IS_MAC_APP_STORE_SANDBOX = process.mas === true;
 const IS_TEST_MODE =
   process.env.APP_TEST_MODE === 'true' ||
   Boolean(process.env.PRODUCER_PLAYER_TEST_ID);
+const TEST_WINDOW_MODE = process.env.PRODUCER_PLAYER_E2E_WINDOW_MODE ?? 'foreground';
+const SHOULD_SHOW_TEST_WINDOW_INACTIVE = IS_TEST_MODE && TEST_WINDOW_MODE === 'background';
+const SHOULD_KEEP_TEST_WINDOW_HIDDEN = IS_TEST_MODE && TEST_WINDOW_MODE === 'hidden';
 
 const TEST_PLAYLIST_EXPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_EXPORT_PATH ?? null;
 const TEST_PLAYLIST_IMPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_IMPORT_PATH ?? null;
@@ -1498,8 +1501,9 @@ async function createMainWindow(): Promise<void> {
       nodeIntegration: false,
       sandbox: true,
       webviewTag: false,
+      backgroundThrottling: IS_TEST_MODE ? false : true,
     },
-    show: IS_TEST_MODE,
+    show: IS_TEST_MODE && !SHOULD_SHOW_TEST_WINDOW_INACTIVE && !SHOULD_KEEP_TEST_WINDOW_HIDDEN,
   });
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -1534,6 +1538,10 @@ async function createMainWindow(): Promise<void> {
   if (!IS_TEST_MODE) {
     mainWindow.once('ready-to-show', () => {
       mainWindow?.show();
+    });
+  } else if (SHOULD_SHOW_TEST_WINDOW_INACTIVE) {
+    mainWindow.once('ready-to-show', () => {
+      mainWindow?.showInactive();
     });
   }
 
@@ -1832,6 +1840,10 @@ function registerIpcHandlers(service: FileLibraryService): void {
         await fs.copyFile(entry.sourcePath, targetPath);
         exportedCount += 1;
       }
+
+      const orderingJsonPath = join(outputDirectoryPath, 'producer-player-order.json');
+      const orderingPayload = `${JSON.stringify(validated, null, 2)}\n`;
+      await fs.writeFile(orderingJsonPath, orderingPayload, 'utf8');
 
       return { folderPath: outputDirectoryPath, exportedCount };
     }

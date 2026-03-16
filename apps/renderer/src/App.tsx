@@ -3327,11 +3327,7 @@ export function App(): JSX.Element {
               searchText.trim().length > 0 && matchedVersionNames.length > 0;
 
             const secondaryRowText = showMatchedVersions
-              ? `Matched versions: ${matchedVersionNames.slice(0, 2).join(', ')}${
-                  matchedVersionNames.length > 2
-                    ? ` (+${matchedVersionNames.length - 2} more)`
-                    : ''
-                }`
+              ? `Matched versions: ${matchedVersionNames.join(', ')}`
               : `${song.versions.length} version(s)`;
             const songRowTitle = getSongDisplayTitle(song);
             const songRowMetadataLabel = getSongRowMetadataLabel(song);
@@ -3671,6 +3667,11 @@ export function App(): JSX.Element {
           aria-modal="true"
           aria-label="Song checklist"
           data-testid="song-checklist-modal"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              handleCloseSongChecklist();
+            }
+          }}
         >
           <div className="checklist-modal-card">
             <div className="checklist-modal-header">
@@ -3680,14 +3681,6 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
-              <button
-                type="button"
-                className="ghost"
-                onClick={handleCloseSongChecklist}
-                data-testid="song-checklist-close"
-              >
-                Close
-              </button>
             </div>
 
             <div className="checklist-input-row">

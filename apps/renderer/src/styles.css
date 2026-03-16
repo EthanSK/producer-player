@@ -253,6 +253,20 @@ input[type='range'] {
   letter-spacing: 0.015em;
 }
 
+.sidebar-by-line {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+  opacity: 0.7;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.sidebar-by-line:hover {
+  opacity: 1;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .folder-tools-card {
   margin: 10px 10px 0;
   border: 1px solid var(--border);

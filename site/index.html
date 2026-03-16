@@ -395,13 +395,24 @@
   </head>
 
   <body>
+    <script>
+      // Feature flags — flip to true to enable
+      var SHOW_3000AD_BRANDING = false;
+    </script>
     <div class="wrap">
       <nav>
         <a class="logo" href="#">
           <img src="./assets/icon.png" alt="" />
           Producer Player
         </a>
-        <a class="by-line" href="https://lnkfi.re/3000AD" target="_blank" rel="noopener">by 3000 AD</a>
+        <a class="by-line" id="by-3000ad" href="https://lnkfi.re/3000AD" target="_blank" rel="noopener" style="display:none">by 3000 AD</a>
+        <script>
+          if (SHOW_3000AD_BRANDING) {
+            document.getElementById('by-3000ad').style.display = '';
+          } else {
+            document.getElementById('by-3000ad').remove();
+          }
+        </script>
         <ul class="nav-links">
           <li><a href="#features">Features</a></li>
           <li><a href="#video">Demo</a></li>

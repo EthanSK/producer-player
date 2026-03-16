@@ -31,6 +31,7 @@ import {
   type NormalizationPlatformId,
 } from './platformNormalization';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
+import { SHOW_3000AD_BRANDING } from './featureFlags';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
@@ -1819,20 +1820,40 @@ export function App(): JSX.Element {
         return;
       }
 
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
-        return;
+      // Use activeElement to reliably detect what currently has focus,
+      // regardless of event propagation quirks.
+      const active = document.activeElement;
+
+      // Only allow space through for genuine text-entry elements where
+      // the user would expect to type a space character.
+      if (active instanceof HTMLElement) {
+        if (active.isContentEditable) {
+          return;
+        }
+
+        if (active.tagName === 'TEXTAREA') {
+          return;
+        }
+
+        if (active.tagName === 'INPUT') {
+          const inputType = (active as HTMLInputElement).type.toLowerCase();
+          // Text-entry input types where space is meaningful content
+          if (
+            inputType === 'text' ||
+            inputType === 'search' ||
+            inputType === 'email' ||
+            inputType === 'password' ||
+            inputType === 'url' ||
+            inputType === 'tel' ||
+            inputType === 'number'
+          ) {
+            return;
+          }
+        }
       }
 
-      if (
-        target.isContentEditable ||
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.tagName === 'SELECT'
-      ) {
-        return;
-      }
-
+      // For everything else — range sliders, buttons, divs, timeline,
+      // the body, or any non-text-entry element — always toggle play/pause.
       event.preventDefault();
       transportActionRef.current.toggle();
     };
@@ -2823,6 +2844,21 @@ export function App(): JSX.Element {
           />
           <div className="sidebar-branding-copy">
             <strong>Producer Player</strong>
+            {SHOW_3000AD_BRANDING && (
+              <a
+                className="sidebar-by-line"
+                href="https://lnkfi.re/3000AD"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void window.producerPlayer.openExternalUrl('https://lnkfi.re/3000AD');
+                }}
+                title="by 3000 AD"
+                data-testid="sidebar-by-3000ad"
+              >
+                by 3000 AD
+              </a>
+            )}
           </div>
         </button>
 
@@ -3334,16 +3370,6 @@ export function App(): JSX.Element {
             </button>
           </div>
         </header>
-
-        <div className="filter-row">
-          <input
-            value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
-            placeholder="Search tracks or versions"
-            data-testid="search-input"
-            title="Search by track title, version name, extension, or archived old/ paths."
-          />
-        </div>
 
         <p
           className="list-hint"

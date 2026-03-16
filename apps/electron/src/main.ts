@@ -1494,6 +1494,7 @@ async function createMainWindow(): Promise<void> {
     center: true,
     backgroundColor: '#0a0f14',
     autoHideMenuBar: true,
+    ...(IS_TEST_MODE ? { enableLargerThanScreen: true } : {}),
     ...(windowIconPath ? { icon: windowIconPath } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),

@@ -3623,6 +3623,26 @@ export function App(): JSX.Element {
                   </button>
                 </div>
               </div>
+              {selectedPlaybackSongId ? (
+                <button
+                  type="button"
+                  className={`transport-checklist-button${(songChecklists[selectedPlaybackSongId]?.length ?? 0) > 0 ? ' has-items' : ''}`}
+                  data-testid="transport-checklist-button"
+                  onClick={() => handleOpenSongChecklist(selectedPlaybackSongId)}
+                  title="Open checklist for this song."
+                  aria-label="Song checklist"
+                >
+                  <svg className="transport-checklist-icon" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M2 3.5h2v2H2zM6 3.5h8M2 7h2v2H2zM6 7h8M2 10.5h2v2H2zM6 10.5h8" />
+                  </svg>
+                  <span>Checklist</span>
+                  {(songChecklists[selectedPlaybackSongId]?.length ?? 0) > 0 ? (
+                    <span className="transport-checklist-count">
+                      {songChecklists[selectedPlaybackSongId]?.length}
+                    </span>
+                  ) : null}
+                </button>
+              ) : null}
               <button
                 type="button"
                 data-testid="player-repeat"
@@ -3795,22 +3815,38 @@ export function App(): JSX.Element {
 
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
               {checklistCapturedTimestamp !== null ? (
-                <span
-                  className="checklist-timestamp-badge checklist-input-timestamp-preview"
-                  title={`Seek to ${formatTime(checklistCapturedTimestamp)}`}
-                  data-testid="song-checklist-input-timestamp-preview"
-                  onClick={() => handleChecklistTimestampClick(checklistCapturedTimestamp)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      handleChecklistTimestampClick(checklistCapturedTimestamp);
-                    }
-                  }}
-                >
-                  {formatTime(checklistCapturedTimestamp)}
-                </span>
+                <div className="checklist-timestamp-preview-group">
+                  <button
+                    type="button"
+                    className="checklist-set-now-button"
+                    data-testid="song-checklist-set-now"
+                    onClick={() => setChecklistCapturedTimestamp(captureCurrentPlaybackTimestamp())}
+                    title="Capture current playback time"
+                    aria-label="Set timestamp to current playback position"
+                  >
+                    <svg className="checklist-set-now-icon" viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="8" cy="8" r="6.5" />
+                      <path d="M8 4v4.5l3 1.5" />
+                    </svg>
+                    <span>Set now</span>
+                  </button>
+                  <span
+                    className="checklist-timestamp-badge checklist-input-timestamp-preview"
+                    title={`Seek to ${formatTime(checklistCapturedTimestamp)}`}
+                    data-testid="song-checklist-input-timestamp-preview"
+                    onClick={() => handleChecklistTimestampClick(checklistCapturedTimestamp)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleChecklistTimestampClick(checklistCapturedTimestamp);
+                      }
+                    }}
+                  >
+                    {formatTime(checklistCapturedTimestamp)}
+                  </span>
+                </div>
               ) : null}
               <input
                 value={checklistDraftText}

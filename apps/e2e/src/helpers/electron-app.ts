@@ -44,6 +44,7 @@ export async function launchProducerPlayer(
       PRODUCER_PLAYER_USER_DATA_DIR: userDataDirectory,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       PRODUCER_PLAYER_TEST_ID: randomUUID(),
+      PRODUCER_PLAYER_E2E_WINDOW_MODE: 'background',
       ...(options.devMode ? { ELECTRON_DEV: 'true' } : {}),
       ...(options.rendererDevUrl ? { RENDERER_DEV_URL: options.rendererDevUrl } : {}),
       ...(options.extraEnv ?? {}),

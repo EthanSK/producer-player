@@ -196,13 +196,14 @@ test.describe('Playlist export/import ordering', () => {
             return 0;
           }
         })
-        .toBe(3);
+        .toBe(4);
 
       const exportedFiles = (await fs.readdir(orderedExportPath)).sort();
       expect(exportedFiles).toEqual([
         '01 - Gamma v1.wav',
         '02 - Alpha v2.wav',
         '03 - Beta v1.wav',
+        'producer-player-order.json',
       ]);
 
       const alphaLatestExportContents = await fs.readFile(

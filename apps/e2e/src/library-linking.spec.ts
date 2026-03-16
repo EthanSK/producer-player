@@ -85,6 +85,7 @@ async function launchProducerPlayer(userDataDirectory: string): Promise<Launched
       PRODUCER_PLAYER_USER_DATA_DIR: userDataDirectory,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       PRODUCER_PLAYER_TEST_ID: randomUUID(),
+      PRODUCER_PLAYER_E2E_WINDOW_MODE: 'background',
     },
   });
 
@@ -202,7 +203,7 @@ test.describe('Producer Player desktop shell', () => {
       await page.getByTestId('song-checklist-add').click();
 
       await expect(page.getByTestId('song-checklist-item-text')).toHaveValue('Fade ending');
-      await page.getByTestId('song-checklist-close').click();
+      await page.getByTestId('song-checklist-modal').getByRole('button', { name: 'Done' }).click();
       await expect(page.getByTestId('song-checklist-modal')).toHaveCount(0);
 
       await firstRow.getByTestId('song-checklist-button').click();
@@ -331,7 +332,10 @@ test.describe('Producer Player desktop shell', () => {
         firstRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
       ).toHaveText('1');
 
-      await firstLaunch.page.getByTestId('song-checklist-close').click();
+      await firstLaunch.page
+        .getByTestId('song-checklist-modal')
+        .getByRole('button', { name: 'Done' })
+        .click();
       await expect(firstLaunch.page.getByTestId('song-checklist-modal')).toHaveCount(0);
 
       await firstLaunch.electronApp.close();

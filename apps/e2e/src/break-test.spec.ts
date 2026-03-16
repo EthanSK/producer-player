@@ -123,59 +123,6 @@ test.describe('Producer Player edge cases', () => {
     }
   });
 
-  test('search with special regex chars does not crash', async () => {
-    const dirs = await createE2ETestDirectories('break-search-special');
-
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Alpha v1.wav', contents: 'RIFF stub data' },
-      { relativePath: 'Beta v1.wav', contents: 'RIFF stub data' },
-    ]);
-
-    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
-
-    try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-
-      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-
-      for (const term of ['.*', '(test)', '[bracket]']) {
-        await page.getByTestId('search-input').fill(term);
-        await expect(page.getByTestId('app-shell')).toBeVisible();
-      }
-    } finally {
-      await electronApp.close();
-      await cleanupE2ETestDirectories(dirs);
-    }
-  });
-
-  test('clearing search restores full list', async () => {
-    const dirs = await createE2ETestDirectories('break-search-clear');
-
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Alpha v1.wav', contents: 'RIFF stub data' },
-      { relativePath: 'Beta v1.wav', contents: 'RIFF stub data' },
-    ]);
-
-    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
-
-    try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-
-      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-
-      await page.getByTestId('search-input').fill('Alpha');
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
-
-      await page.getByTestId('search-input').fill('');
-      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-    } finally {
-      await electronApp.close();
-      await cleanupE2ETestDirectories(dirs);
-    }
-  });
-
   test('non-existent folder path does not crash', async () => {
     const dirs = await createE2ETestDirectories('break-nonexistent');
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);

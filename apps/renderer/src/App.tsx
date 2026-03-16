@@ -2371,6 +2371,22 @@ export function App(): JSX.Element {
     });
   }
 
+  function handleSkipSeconds(offsetSeconds: number): void {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.currentTime)) {
+      return;
+    }
+
+    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    const nextTime = Math.max(0, Math.min(audio.currentTime + offsetSeconds, duration));
+    handleSeek(nextTime);
+    logPlaybackEvent('skip-seconds', {
+      offsetSeconds,
+      fromSeconds: audio.currentTime,
+      toSeconds: nextTime,
+    });
+  }
+
   function handlePreviousTrack(): void {
     const audio = audioRef.current;
     const currentTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
@@ -3527,35 +3543,59 @@ export function App(): JSX.Element {
             </div>
 
             <div className="player-transport">
-              <button
-                type="button"
-                data-testid="player-prev"
-                onClick={handlePreviousTrack}
-                title="Restart current track when past 0:02; otherwise go to previous track."
-              >
-                ◀◀
-              </button>
-              <button
-                type="button"
-                className="play-toggle"
-                data-testid="player-play-toggle"
-                aria-label={isPlaying ? 'Pause' : 'Play'}
-                data-playing={isPlaying ? 'true' : 'false'}
-                onClick={() => {
-                  void handleTogglePlayback();
-                }}
-                title="Play or pause the selected track."
-              >
-                <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-              </button>
-              <button
-                type="button"
-                data-testid="player-next"
-                onClick={handleNextTrack}
-                title="Jump to next track in the current queue."
-              >
-                ▶▶
-              </button>
+              <div className="transport-nav-group">
+                <div className="transport-skip-row">
+                  <button
+                    type="button"
+                    className="skip-button"
+                    data-testid="player-skip-back-10"
+                    onClick={() => handleSkipSeconds(-10)}
+                    title="Skip back 10 seconds."
+                  >
+                    −10s
+                  </button>
+                  <button
+                    type="button"
+                    className="skip-button"
+                    data-testid="player-skip-forward-10"
+                    onClick={() => handleSkipSeconds(10)}
+                    title="Skip forward 10 seconds."
+                  >
+                    +10s
+                  </button>
+                </div>
+                <div className="transport-main-row">
+                  <button
+                    type="button"
+                    data-testid="player-prev"
+                    onClick={handlePreviousTrack}
+                    title="Restart current track when past 0:02; otherwise go to previous track."
+                  >
+                    ◀◀
+                  </button>
+                  <button
+                    type="button"
+                    className="play-toggle"
+                    data-testid="player-play-toggle"
+                    aria-label={isPlaying ? 'Pause' : 'Play'}
+                    data-playing={isPlaying ? 'true' : 'false'}
+                    onClick={() => {
+                      void handleTogglePlayback();
+                    }}
+                    title="Play or pause the selected track."
+                  >
+                    <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="player-next"
+                    onClick={handleNextTrack}
+                    title="Jump to next track in the current queue."
+                  >
+                    ▶▶
+                  </button>
+                </div>
+              </div>
               <button
                 type="button"
                 data-testid="player-repeat"
@@ -3726,7 +3766,16 @@ export function App(): JSX.Element {
               </div>
             </div>
 
-            <div className="checklist-input-row">
+            <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
+              {checklistCapturedTimestamp !== null ? (
+                <span
+                  className="checklist-timestamp-badge checklist-input-timestamp-preview"
+                  title={`Will save timestamp ${formatTime(checklistCapturedTimestamp)}`}
+                  data-testid="song-checklist-input-timestamp-preview"
+                >
+                  {formatTime(checklistCapturedTimestamp)}
+                </span>
+              ) : null}
               <input
                 value={checklistDraftText}
                 onChange={(event) => setChecklistDraftText(event.currentTarget.value)}

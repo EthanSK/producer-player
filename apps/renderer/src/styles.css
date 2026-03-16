@@ -1093,8 +1093,7 @@ input[type='range'] {
 }
 
 .checklist-input-timestamp-preview {
-  cursor: default;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .checklist-item-list {

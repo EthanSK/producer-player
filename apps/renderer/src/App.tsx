@@ -3770,8 +3770,17 @@ export function App(): JSX.Element {
               {checklistCapturedTimestamp !== null ? (
                 <span
                   className="checklist-timestamp-badge checklist-input-timestamp-preview"
-                  title={`Will save timestamp ${formatTime(checklistCapturedTimestamp)}`}
+                  title={`Seek to ${formatTime(checklistCapturedTimestamp)}`}
                   data-testid="song-checklist-input-timestamp-preview"
+                  onClick={() => handleChecklistTimestampClick(checklistCapturedTimestamp)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleChecklistTimestampClick(checklistCapturedTimestamp);
+                    }
+                  }}
                 >
                   {formatTime(checklistCapturedTimestamp)}
                 </span>

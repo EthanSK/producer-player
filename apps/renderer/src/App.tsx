@@ -3645,11 +3645,19 @@ export function App(): JSX.Element {
               ) : null}
               <button
                 type="button"
+                className={`transport-repeat-button${repeatMode !== 'off' ? ' active' : ''}`}
                 data-testid="player-repeat"
                 onClick={handleCycleRepeatMode}
-                title="Toggle repeat mode: Off, One, or All."
+                title={`Repeat: ${REPEAT_MODE_LABEL[repeatMode]}. Click to cycle.`}
+                aria-label={`Repeat ${REPEAT_MODE_LABEL[repeatMode]}`}
               >
-                Repeat: {REPEAT_MODE_LABEL[repeatMode]}
+                <svg className="transport-repeat-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M17 2l4 4-4 4" />
+                  <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                  <path d="M7 22l-4-4 4-4" />
+                  <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+                </svg>
+                {repeatMode === 'one' && <span className="transport-repeat-badge">1</span>}
               </button>
               <label
                 className="player-volume-control"

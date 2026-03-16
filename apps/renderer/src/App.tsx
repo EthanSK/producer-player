@@ -91,6 +91,7 @@ const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
 const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
+const PUBLIC_PAGES_URL = 'https://ethansk.github.io/producer-player/';
 const BUG_REPORT_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=bug_report.yml`;
 const FEATURE_REQUEST_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=feature_request.yml`;
 
@@ -2833,8 +2834,8 @@ export function App(): JSX.Element {
           type="button"
           className="sidebar-branding sidebar-branding-button"
           data-testid="producer-player-branding"
-          onClick={() => handleOpenSupportLink(PUBLIC_REPOSITORY_ACTIONS_URL)}
-          title="Open Producer Player GitHub Actions."
+          onClick={() => handleOpenSupportLink(PUBLIC_PAGES_URL)}
+          title="Open Producer Player website."
         >
           <img
             src={producerPlayerIconUrl}

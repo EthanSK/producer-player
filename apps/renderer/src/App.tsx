@@ -2600,7 +2600,7 @@ export function App(): JSX.Element {
 
   function captureCurrentPlaybackTimestamp(): number | null {
     const audio = audioRef.current;
-    if (!audio || audio.paused && audio.currentTime === 0) {
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration === 0) {
       return null;
     }
     const time = audio.currentTime;

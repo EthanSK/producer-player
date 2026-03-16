@@ -3,10 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Producer Player | Hear every export version without folder chaos</title>
+    <title>
+      Producer Player | Hear every export version without folder chaos
+    </title>
     <meta
       name="description"
-      content="Producer Player helps music producers keep export versions grouped by song, compare takes quickly, and keep album order intact."
+      content="Producer Player helps music producers track export versions, run mastering/reference A/B checks, and keep album order locked while songs evolve."
     />
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://ethansk.github.io/producer-player/" />
@@ -15,23 +17,35 @@
     <meta property="og:site_name" content="Producer Player" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="en_GB" />
-    <meta property="og:url" content="https://ethansk.github.io/producer-player/" />
-    <meta property="og:title" content="Producer Player | Hear every export version without folder chaos" />
+    <meta
+      property="og:url"
+      content="https://ethansk.github.io/producer-player/"
+    />
+    <meta
+      property="og:title"
+      content="Producer Player | Hear every export version without folder chaos"
+    />
     <meta
       property="og:description"
-      content="Desktop workflow for producers who need clear version history, fast A/B checks, and stable album ordering."
+      content="Desktop workflow for producers who need version history, mastering/reference A/B checks, and reliable album ordering."
     />
     <meta
       property="og:image"
       content="https://ethansk.github.io/producer-player/assets/screenshots/app-hero.png"
     />
-    <meta property="og:image:alt" content="Screenshot of the Producer Player desktop interface" />
+    <meta
+      property="og:image:alt"
+      content="Screenshot of the Producer Player desktop interface"
+    />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Producer Player | Hear every export version without folder chaos" />
+    <meta
+      name="twitter:title"
+      content="Producer Player | Hear every export version without folder chaos"
+    />
     <meta
       name="twitter:description"
-      content="Desktop workflow for producers who need clear version history, fast A/B checks, and stable album ordering."
+      content="Desktop workflow for producers who need version history, mastering/reference A/B checks, and reliable album ordering."
     />
     <meta
       name="twitter:image"
@@ -46,7 +60,7 @@
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "macOS, Linux, Windows",
         "softwareVersion": "0.1.0",
-        "description": "Producer Player helps producers keep export versions grouped by song, audition takes quickly, and keep album order intact.",
+        "description": "Producer Player helps producers track export versions, compare mixes to references, and keep album order intact while projects evolve.",
         "url": "https://ethansk.github.io/producer-player/",
         "downloadUrl": "https://github.com/EthanSK/producer-player/releases"
       }
@@ -54,22 +68,22 @@
 
     <script>
       (function () {
-        if (!('serviceWorker' in navigator)) {
+        if (!("serviceWorker" in navigator)) {
           return;
         }
 
-        window.addEventListener('load', function () {
+        window.addEventListener("load", function () {
           navigator.serviceWorker
             .getRegistrations()
             .then(function (registrations) {
               return Promise.all(
                 registrations.map(function (registration) {
                   return registration.unregister();
-                })
+                }),
               );
             })
             .then(function () {
-              if (!('caches' in window)) {
+              if (!("caches" in window)) {
                 return;
               }
 
@@ -77,12 +91,15 @@
                 return Promise.all(
                   cacheKeys.map(function (cacheKey) {
                     return caches.delete(cacheKey);
-                  })
+                  }),
                 );
               });
             })
             .catch(function (error) {
-              console.warn('[Producer Player] Service worker cleanup failed.', error);
+              console.warn(
+                "[Producer Player] Service worker cleanup failed.",
+                error,
+              );
             });
         });
       })();
@@ -97,22 +114,29 @@
           <p class="eyebrow">Producer Player</p>
           <h1>Hear every export version without folder chaos.</h1>
           <p class="lede">
-            A desktop app for music producers who keep bouncing new passes and need one clear place to compare old vs
-            new, preserve album order, and stop losing track of the latest version.
+            A desktop app for music producers who keep bouncing new passes and
+            need one place to manage version history, audition references, and
+            keep album order stable while making finishing decisions.
           </p>
 
           <div class="hero-actions">
-            <a class="button button-primary button-xl" href="https://github.com/EthanSK/producer-player/releases"
-              >Download latest preview</a
+            <a
+              class="button button-primary button-xl"
+              href="https://github.com/EthanSK/producer-player/releases"
+              >Download latest snapshot</a
             >
             <a class="button button-secondary" href="#status">Release status</a>
           </div>
 
-          <p class="hero-meta">Free on GitHub Releases • macOS, Linux, Windows builds • desktop-first workflow</p>
+          <p class="hero-meta">
+            GitHub Releases • macOS, Linux, Windows snapshots • checksums
+            published with each build
+          </p>
 
           <div class="hero-pills" aria-label="Core features">
             <span>Version history per song</span>
-            <span>Quick compare workflow</span>
+            <span>Mastering + reference A/B</span>
+            <span>Normalization preview presets</span>
             <span>Album order that stays put</span>
           </div>
         </div>
@@ -120,12 +144,13 @@
         <aside class="hero-panel" aria-label="Current release status summary">
           <h2>What you can use today</h2>
           <ul>
-            <li>Downloadable preview builds from GitHub Releases</li>
-            <li>Reliable top-level folder scanning for export files</li>
-            <li>Organised version grouping with archive handling</li>
+            <li>Rolling snapshot builds from pushes to <code>main</code></li>
+            <li>Mastering/reference workspace with A/B switching</li>
+            <li>Ordered export + playlist import/export workflows</li>
           </ul>
           <p>
-            <strong>In progress:</strong> signed + notarized macOS distribution for smoother first-time install.
+            <strong>In progress:</strong> signed + notarized macOS distribution
+            for smoother first-time install.
           </p>
         </aside>
       </div>
@@ -136,24 +161,33 @@
         <div class="container">
           <div class="section-heading narrow">
             <p class="section-label">Why producers use it</p>
-            <h2>Built around real export pain, not generic media library features.</h2>
+            <h2>
+              Built around finishing workflows, not generic media-library
+              features.
+            </h2>
           </div>
 
           <div class="cards cards-3">
             <article class="card">
               <h3>Group versions under one song</h3>
               <p>
-                Keep <code>v1</code>, <code>v2</code>, <code>v3</code> and beyond together so your folder doesn't turn
-                into guesswork.
+                Keep <code>v1</code>, <code>v2</code>, <code>v3</code> and
+                beyond together so your folder doesn't turn into guesswork.
               </p>
             </article>
             <article class="card">
-              <h3>Compare takes quickly</h3>
-              <p>Jump between versions fast when deciding if a new export is genuinely better than the previous one.</p>
+              <h3>Mastering + reference checks in one place</h3>
+              <p>
+                Review LUFS/peaks, load a reference file, and quick-switch Mix
+                vs Reference without leaving the app.
+              </p>
             </article>
             <article class="card">
-              <h3>Protect your album sequence</h3>
-              <p>Set your intended track order once, then keep it stable while versions continue to evolve.</p>
+              <h3>Keep order and export clean handoff folders</h3>
+              <p>
+                Lock your album sequence, then export latest versions in
+                numbered order or move playlist order via JSON.
+              </p>
             </article>
           </div>
         </div>
@@ -163,12 +197,20 @@
         <div class="container container-wide">
           <div class="section-heading narrow">
             <p class="section-label">Interface preview</p>
-            <h2>Designed to feel like a focused studio utility, not a file dump.</h2>
+            <h2>
+              Designed to feel like a focused studio utility, not a file dump.
+            </h2>
           </div>
 
           <figure class="app-shot">
-            <img src="./assets/screenshots/app-hero.png" alt="Producer Player showing grouped track versions and playlist order" />
-            <figcaption>Current desktop UI with grouped versions, track ordering, and direct playback controls.</figcaption>
+            <img
+              src="./assets/screenshots/app-hero.png"
+              alt="Producer Player showing grouped track versions and playlist order"
+            />
+            <figcaption>
+              Current desktop UI with grouped versions, track ordering,
+              mastering/reference tools, and direct playback controls.
+            </figcaption>
           </figure>
         </div>
       </section>
@@ -179,8 +221,9 @@
             <p class="section-label">Download and status</p>
             <h2>Honest release status, minus the doom banner vibe.</h2>
             <p>
-              The app is usable now through preview builds. Signed/notarized distribution is the remaining packaging
-              step before calling it a polished public macOS release.
+              Producer Player is actively usable via GitHub releases today.
+              Signing/notarization is still the remaining step before calling
+              the macOS path polished for non-technical users.
             </p>
           </div>
 
@@ -188,15 +231,25 @@
             <article class="card card-highlight">
               <h3>Use it now</h3>
               <ul>
-                <li>Grab the latest desktop ZIP build from GitHub Releases</li>
-                <li>Test your real export folders immediately</li>
-                <li>Follow release notes as fixes land</li>
+                <li>
+                  Grab the latest snapshot ZIP (macOS, Linux, Windows) from
+                  GitHub Releases
+                </li>
+                <li>Verify artifacts with published SHA-256 checksum files</li>
+                <li>
+                  Use real project folders and follow snapshot notes as fixes
+                  land
+                </li>
               </ul>
               <div class="card-actions">
-                <a class="button button-primary" href="https://github.com/EthanSK/producer-player/releases"
+                <a
+                  class="button button-primary"
+                  href="https://github.com/EthanSK/producer-player/releases"
                   >Go to downloads</a
                 >
-                <a class="button button-secondary" href="https://github.com/EthanSK/producer-player/blob/main/README.md"
+                <a
+                  class="button button-secondary"
+                  href="https://github.com/EthanSK/producer-player/blob/main/README.md"
                   >Quick start</a
                 >
               </div>
@@ -209,7 +262,10 @@
                 <li>Apple notarization for smoother install trust prompts</li>
                 <li>Clearer first-run install guide for non-technical users</li>
               </ul>
-              <p class="muted-note">Until then, treat downloads as preview builds rather than final 1.0 installers.</p>
+              <p class="muted-note">
+                Until then, treat downloads as preview builds rather than final
+                1.0 installers.
+              </p>
             </article>
           </div>
         </div>
@@ -223,15 +279,24 @@
           </div>
 
           <div class="cards cards-3 compact-links">
-            <a class="card card-link" href="https://github.com/EthanSK/producer-player">
+            <a
+              class="card card-link"
+              href="https://github.com/EthanSK/producer-player"
+            >
               <h3>Repository</h3>
               <p>Source code, issues, and roadmap.</p>
             </a>
-            <a class="card card-link" href="https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml">
+            <a
+              class="card card-link"
+              href="https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml"
+            >
               <h3>Build workflow</h3>
               <p>Desktop CI runs and artifact generation status.</p>
             </a>
-            <a class="card card-link" href="https://github.com/EthanSK/producer-player/blob/main/SECURITY.md">
+            <a
+              class="card card-link"
+              href="https://github.com/EthanSK/producer-player/blob/main/SECURITY.md"
+            >
               <h3>Security policy</h3>
               <p>Vulnerability reporting and project security baseline.</p>
             </a>
@@ -244,7 +309,10 @@
       <div class="container footer-shell">
         <p>Producer Player</p>
         <p>
-          GitHub Pages: <a href="https://ethansk.github.io/producer-player/">ethansk.github.io/producer-player</a>
+          GitHub Pages:
+          <a href="https://ethansk.github.io/producer-player/"
+            >ethansk.github.io/producer-player</a
+          >
         </p>
         <p>Open source under the MIT License. Feel free to modify it.</p>
       </div>

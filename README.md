@@ -1,86 +1,96 @@
-![Producer Player app screenshot (live app capture)](docs/assets/readme/app-hero.png)
+**Website: https://ethansk.github.io/producer-player/**
 
-Producer Player is a desktop app for producers who keep exporting new passes and need one clear place to track versions, compare mixes, and keep album order locked.
+---
 
-The screenshot above is a real capture from the current app UI on `main`.
+[![CI](https://github.com/EthanSK/producer-player/actions/workflows/ci.yml/badge.svg)](https://github.com/EthanSK/producer-player/actions/workflows/ci.yml)
+[![Release](https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## What ships on `main` right now
+# Producer Player
 
-- Version grouping by song (`Track v1`, `Track v2`, etc.) with archive-aware handling for older exports.
-- Stable drag-and-drop album order that persists through rescans, restarts, and relink flows.
-- Playback queue controls (play/pause, next/previous, repeat, scrub, volume) with per-song playhead continuity.
-- Mastering + reference workspace (inline and full-screen) with measured loudness/peak stats, tonal balance, and sample-rate visibility.
-- Quick A/B between current mix and reference track, including mix playhead restore after reference auditioning.
-- Platform normalization preview presets (Spotify, Apple Music, YouTube, TIDAL) with headroom-aware gain limits.
-- Playlist order JSON export/import (selection + ordering metadata included).
-- Ordered latest-version export utility (`Export Latest`) for numbered, album-sequenced handoff folders.
-- Per-song checklist workflow and persisted 1–10 rating slider.
-- Built-in support links for bug reports and feature requests via GitHub issue templates.
+A desktop app for music producers who keep exporting new passes and need one clear place to track versions, compare mixes, and keep album order locked.
 
-## Public links
+![Producer Player](docs/assets/readme/app-hero.png)
 
-- Live page: <https://ethansk.github.io/producer-player/>
-- Repository: <https://github.com/EthanSK/producer-player>
-- Releases: <https://github.com/EthanSK/producer-player/releases>
-- Desktop workflow: <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
-- Pages workflow: <https://github.com/EthanSK/producer-player/actions/workflows/pages.yml>
-- Security policy: [`SECURITY.md`](SECURITY.md)
+## Features
 
-## Release + download guidance
+- **Version Tracking** — Drag in a folder of bounces and Producer Player groups versions automatically (`Track v1`, `Track v2`, etc.), with archive-aware handling for older exports.
+- **A/B Mastering Workspace** — Compare your master against reference tracks with measured loudness, peak stats, tonal balance, and sample-rate visibility. Quick A/B with mix playhead restore after reference auditioning.
+- **Platform Normalization** — Hear what Spotify, Apple Music, YouTube, and TIDAL will do to your track with headroom-aware gain limits.
+- **Album Ordering** — Drag and reorder songs into your album sequence. Order persists through rescans, restarts, and relink flows.
+- **Checklists & Ratings** — Per-song checklist workflow and 1–10 rating slider to annotate and evaluate tracks.
+- **Time-Stamped Checklist Notes** — Add a checklist item and it captures the exact playback position. Click the timestamp to jump right back.
+- **Export Latest** — Exports the latest version of every song as numbered, album-sequenced files with ordering JSON for handoff.
+- **Playback Controls** — Play/pause, next/previous, repeat, scrub, and volume with per-song playhead continuity.
 
-Current release model:
+## Tech Stack
 
-- `v0.1.0` exists as the baseline tagged release.
-- Pushes to `main`/`master` publish rolling pre-release snapshots (`desktop-snapshot-*`) and mark them **Latest**.
-- Snapshot assets include macOS, Linux, and Windows ZIP builds plus SHA-256 checksum files.
+| Layer | Tech |
+|-------|------|
+| Desktop shell | Electron 40 |
+| Renderer | React + TypeScript |
+| Build tooling | Vite, electron-builder |
+| Testing | Playwright (E2E) |
+| CI/CD | GitHub Actions |
 
-Still not claimed:
+Monorepo with npm workspaces:
 
-- Signed/notarized polished macOS distribution for general users.
-- Mac App Store submission/approval.
+```
+apps/electron    — main process + preload bridge
+apps/renderer    — React UI
+apps/e2e         — Playwright desktop tests
+packages/contracts — shared IPC types
+packages/domain  — folder scanning, grouping, ordering logic
+site/            — GitHub Pages landing page
+```
 
-Treat current downloads as preview builds while signing/notarization is still pending.
-
-## Local development
+## Getting Started
 
 ```bash
+# Install dependencies
 npm install
+
+# Run in development mode
 npm run dev
 ```
 
-## Build and test
+## Build & Test
 
 ```bash
-npm run build
-npm run typecheck
-npm run e2e
-npm run e2e:ci
+npm run build        # full production build
+npm run typecheck    # type-check all workspaces
+npm run e2e          # build + run Playwright tests
+npm run e2e:ci       # CI-optimised E2E run
 ```
 
-## Desktop packaging
+## Desktop Packaging
 
 ```bash
-npm run build:mac
-npm run build:mac:dir
-npm run build:mac:mas-dev
-npm run build:mac:mas
-npm run release:desktop:linux
-npm run release:desktop:win
+npm run build:mac              # macOS ZIP
+npm run build:mac:dir          # macOS unpacked
+npm run build:mac:mas-dev      # Mac App Store (dev)
+npm run build:mac:mas          # Mac App Store (distribution)
+npm run release:desktop:linux  # Linux ZIP
+npm run release:desktop:win    # Windows ZIP
 ```
 
-- Release process notes: [`docs/RELEASING.md`](docs/RELEASING.md)
-- Mac App Store packaging notes: [`docs/MAC_APP_STORE.md`](docs/MAC_APP_STORE.md)
+See [docs/RELEASING.md](docs/RELEASING.md) and [docs/MAC_APP_STORE.md](docs/MAC_APP_STORE.md) for packaging details.
 
-## Repo layout
+## Downloads
 
-- `apps/electron` — Electron main process and preload bridge
-- `apps/renderer` — React renderer UI
-- `packages/contracts` — shared IPC/types
-- `packages/domain` — folder scanning/grouping/order logic
-- `apps/e2e` — Playwright desktop tests
-- `site/` — GitHub Pages landing page
+Pushes to `main` publish rolling pre-release snapshots (`desktop-snapshot-*`) with macOS, Linux, and Windows ZIP builds plus SHA-256 checksums.
+
+> Current builds are unsigned preview releases. Signed/notarized macOS distribution and Mac App Store submission are pending.
+
+**→ [Latest release](https://github.com/EthanSK/producer-player/releases)**
+
+## Links
+
+- [Website](https://ethansk.github.io/producer-player/)
+- [Repository](https://github.com/EthanSK/producer-player)
+- [Releases](https://github.com/EthanSK/producer-player/releases)
+- [Security Policy](SECURITY.md)
 
 ## License
 
-This project is open source under the **MIT License**.
-See [`LICENSE`](LICENSE) and [`docs/LICENSE_STATUS.md`](docs/LICENSE_STATUS.md).
+MIT — see [LICENSE](LICENSE).

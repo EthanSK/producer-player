@@ -3,54 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>
-      Producer Player | Hear every export version without folder chaos
-    </title>
+    <title>Producer Player</title>
     <meta
       name="description"
-      content="Producer Player helps music producers track export versions, run mastering/reference A/B checks, and keep album order locked while songs evolve."
+      content="A desktop app for music producers. Version management, mastering workspace, album ordering."
     />
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://ethansk.github.io/producer-player/" />
-    <meta name="theme-color" content="#08101f" />
+    <meta name="theme-color" content="#090e13" />
+    <link rel="icon" type="image/png" href="./assets/icon.png" />
 
+    <!-- Open Graph -->
     <meta property="og:site_name" content="Producer Player" />
     <meta property="og:type" content="website" />
-    <meta property="og:locale" content="en_GB" />
-    <meta
-      property="og:url"
-      content="https://ethansk.github.io/producer-player/"
-    />
-    <meta
-      property="og:title"
-      content="Producer Player | Hear every export version without folder chaos"
-    />
-    <meta
-      property="og:description"
-      content="Desktop workflow for producers who need version history, mastering/reference A/B checks, and reliable album ordering."
-    />
-    <meta
-      property="og:image"
-      content="https://ethansk.github.io/producer-player/assets/screenshots/app-hero.png"
-    />
-    <meta
-      property="og:image:alt"
-      content="Screenshot of the Producer Player desktop interface"
-    />
+    <meta property="og:url" content="https://ethansk.github.io/producer-player/" />
+    <meta property="og:title" content="Producer Player" />
+    <meta property="og:description" content="A desktop app for music producers. Version management, mastering workspace, album ordering." />
+    <meta property="og:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-hero.png" />
 
+    <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta
-      name="twitter:title"
-      content="Producer Player | Hear every export version without folder chaos"
-    />
-    <meta
-      name="twitter:description"
-      content="Desktop workflow for producers who need version history, mastering/reference A/B checks, and reliable album ordering."
-    />
-    <meta
-      name="twitter:image"
-      content="https://ethansk.github.io/producer-player/assets/screenshots/app-hero.png"
-    />
+    <meta name="twitter:title" content="Producer Player" />
+    <meta name="twitter:description" content="A desktop app for music producers. Version management, mastering workspace, album ordering." />
+    <meta name="twitter:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-hero.png" />
 
     <script type="application/ld+json">
       {
@@ -59,273 +34,498 @@
         "name": "Producer Player",
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "macOS, Linux, Windows",
-        "softwareVersion": "0.1.0",
-        "description": "Producer Player helps producers track export versions, compare mixes to references, and keep album order intact while projects evolve.",
+        "description": "Desktop app for music producers — version management, mastering workspace, album ordering.",
         "url": "https://ethansk.github.io/producer-player/",
-        "downloadUrl": "https://github.com/EthanSK/producer-player/releases"
+        "downloadUrl": "https://github.com/EthanSK/producer-player/releases",
+        "license": "https://opensource.org/licenses/MIT"
       }
     </script>
 
-    <script>
-      (function () {
-        if (!("serviceWorker" in navigator)) {
-          return;
+    <style>
+      /* ── Reset ── */
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      /* ── Tokens ── */
+      :root {
+        --bg: #090e13;
+        --bg-raised: #0d1218;
+        --bg-card: #111820;
+        --text: #e8ecf1;
+        --text-muted: #8a95a5;
+        --accent: #5ca7ff;
+        --green: #5fd28f;
+        --border: rgba(255, 255, 255, 0.06);
+        --radius: 12px;
+      }
+
+      /* ── Base ── */
+      html { scroll-behavior: smooth; }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.6;
+        color: var(--text);
+        background: var(--bg);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      img, video { display: block; max-width: 100%; }
+
+      /* ── Layout ── */
+      .wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      .wrap--wide {
+        max-width: 1080px;
+      }
+
+      /* ── Nav ── */
+      nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 0;
+      }
+
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        font-size: 15px;
+        color: var(--text);
+        text-decoration: none;
+      }
+
+      .logo:hover { text-decoration: none; }
+
+      .logo img {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        list-style: none;
+      }
+
+      .nav-links a {
+        font-size: 14px;
+        color: var(--text-muted);
+        transition: color 0.15s;
+      }
+
+      .nav-links a:hover {
+        color: var(--text);
+        text-decoration: none;
+      }
+
+      /* ── Hero ── */
+      .hero {
+        padding: 80px 0 0;
+        text-align: center;
+      }
+
+      .hero h1 {
+        font-size: clamp(2.4rem, 5vw, 3.6rem);
+        font-weight: 700;
+        line-height: 1.1;
+        letter-spacing: -0.03em;
+        margin-bottom: 16px;
+      }
+
+      .hero .tagline {
+        font-size: 18px;
+        color: var(--text-muted);
+        max-width: 520px;
+        margin: 0 auto 36px;
+        line-height: 1.5;
+      }
+
+      .hero-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-bottom: 60px;
+      }
+
+      /* ── Buttons ── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 24px;
+        border-radius: 10px;
+        font-size: 15px;
+        font-weight: 600;
+        text-decoration: none;
+        transition: transform 0.12s, opacity 0.12s;
+        border: none;
+        cursor: pointer;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+        text-decoration: none;
+      }
+
+      .btn--primary {
+        background: var(--accent);
+        color: #090e13;
+      }
+
+      .btn--ghost {
+        background: transparent;
+        color: var(--text-muted);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .btn--ghost:hover {
+        border-color: rgba(255, 255, 255, 0.2);
+        color: var(--text);
+      }
+
+      /* ── Screenshot ── */
+      .screenshot {
+        margin: 0 auto 24px;
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        background: var(--bg-raised);
+      }
+
+      .screenshot img {
+        width: 100%;
+        display: block;
+      }
+
+      /* ── Video ── */
+      .video-section {
+        padding: 80px 0;
+      }
+
+      .video-container {
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        background: #000;
+      }
+
+      .video-container video {
+        width: 100%;
+        display: block;
+      }
+
+      /* ── Features ── */
+      .features {
+        padding: 80px 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .features-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+      }
+
+      .feature {
+        padding: 24px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+      }
+
+      .feature-icon {
+        width: 32px;
+        height: 32px;
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        background: rgba(92, 167, 255, 0.1);
+        color: var(--accent);
+        font-size: 16px;
+      }
+
+      .feature h3 {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      .feature p {
+        font-size: 14px;
+        color: var(--text-muted);
+        line-height: 1.55;
+      }
+
+      /* ── CTA / Download ── */
+      .download {
+        padding: 80px 0;
+        text-align: center;
+        border-top: 1px solid var(--border);
+      }
+
+      .download h2 {
+        font-size: 24px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      .download p {
+        color: var(--text-muted);
+        font-size: 15px;
+        margin-bottom: 28px;
+      }
+
+      .platforms {
+        display: flex;
+        justify-content: center;
+        gap: 32px;
+        margin-top: 20px;
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+
+      .platforms span {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      /* ── Footer ── */
+      footer {
+        padding: 32px 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .footer-inner {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+
+      .footer-links {
+        display: flex;
+        gap: 20px;
+        list-style: none;
+      }
+
+      .footer-links a {
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+
+      .footer-links a:hover {
+        color: var(--text);
+      }
+
+      /* ── Responsive ── */
+      @media (max-width: 768px) {
+        .features-grid {
+          grid-template-columns: 1fr;
         }
 
-        window.addEventListener("load", function () {
-          navigator.serviceWorker
-            .getRegistrations()
-            .then(function (registrations) {
-              return Promise.all(
-                registrations.map(function (registration) {
-                  return registration.unregister();
-                }),
-              );
-            })
-            .then(function () {
-              if (!("caches" in window)) {
-                return;
-              }
+        .hero {
+          padding: 48px 0 0;
+        }
 
-              return caches.keys().then(function (cacheKeys) {
-                return Promise.all(
-                  cacheKeys.map(function (cacheKey) {
-                    return caches.delete(cacheKey);
-                  }),
-                );
-              });
-            })
-            .catch(function (error) {
-              console.warn(
-                "[Producer Player] Service worker cleanup failed.",
-                error,
-              );
-            });
-        });
-      })();
-    </script>
+        .hero-actions {
+          margin-bottom: 40px;
+        }
 
-    <link rel="stylesheet" href="./styles.css" />
+        .footer-inner {
+          flex-direction: column;
+          gap: 12px;
+          text-align: center;
+        }
+
+        nav {
+          padding: 16px 0;
+        }
+
+        .nav-links {
+          gap: 16px;
+        }
+
+        .platforms {
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .hero-actions {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .btn {
+          justify-content: center;
+        }
+      }
+    </style>
   </head>
+
   <body>
-    <header class="hero">
-      <div class="container hero-shell">
-        <div class="hero-copy">
-          <p class="eyebrow">Producer Player</p>
-          <h1>Hear every export version without folder chaos.</h1>
-          <p class="lede">
-            A desktop app for music producers who keep bouncing new passes and
-            need one place to manage version history, audition references, and
-            keep album order stable while making finishing decisions.
-          </p>
+    <div class="wrap">
+      <nav>
+        <a class="logo" href="#">
+          <img src="./assets/icon.png" alt="" />
+          Producer Player
+        </a>
+        <ul class="nav-links">
+          <li><a href="#features">Features</a></li>
+          <li><a href="#video">Demo</a></li>
+          <li><a href="https://github.com/EthanSK/producer-player">GitHub</a></li>
+        </ul>
+      </nav>
+    </div>
 
-          <div class="hero-actions">
-            <a
-              class="button button-primary button-xl"
-              href="https://github.com/EthanSK/producer-player/releases"
-              >Download latest snapshot</a
-            >
-            <a class="button button-secondary" href="#status">Release status</a>
-          </div>
-
-          <p class="hero-meta">
-            GitHub Releases • macOS, Linux, Windows snapshots • checksums
-            published with each build
-          </p>
-
-          <div class="hero-pills" aria-label="Core features">
-            <span>Version history per song</span>
-            <span>Mastering + reference A/B</span>
-            <span>Normalization preview presets</span>
-            <span>Album order that stays put</span>
-            <span>Per-song checklist + rating</span>
-            <span>Export Latest for handoff</span>
-          </div>
+    <section class="hero">
+      <div class="wrap">
+        <h1>Finish music,<br />not file management.</h1>
+        <p class="tagline">
+          A desktop app for producers who bounce a lot. Version tracking, mastering workspace, album ordering — one window.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn--primary" href="https://github.com/EthanSK/producer-player/releases">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Download
+          </a>
+          <a class="btn btn--ghost" href="https://github.com/EthanSK/producer-player">
+            View source
+          </a>
         </div>
-
-        <aside class="hero-panel" aria-label="Current release status summary">
-          <h2>What you can use today</h2>
-          <ul>
-            <li>Rolling snapshot builds from pushes to <code>main</code></li>
-            <li>Mastering/reference workspace with A/B switching</li>
-            <li>Ordered export + playlist import/export workflows</li>
-          </ul>
-          <p>
-            <strong>In progress:</strong> signed + notarized macOS distribution
-            for smoother first-time install.
-          </p>
-        </aside>
       </div>
 
-      <div class="hero-media container-wide">
-        <figure class="app-shot">
+      <div class="wrap wrap--wide">
+        <div class="screenshot">
           <img
             src="./assets/screenshots/app-hero.png"
-            alt="Producer Player showing grouped track versions and playlist order"
+            alt="Producer Player app interface"
+            loading="eager"
           />
-          <figcaption>
-            Current desktop UI &mdash; grouped versions, track ordering,
-            mastering/reference workspace, and direct playback controls.
-          </figcaption>
-        </figure>
+        </div>
+      </div>
+    </section>
 
-        <div class="hero-video-wrap" id="explainer-video">
-          <p class="section-label" style="margin-bottom: 0.6rem">
-            Explainer video
-          </p>
+    <section class="video-section" id="video">
+      <div class="wrap wrap--wide">
+        <div class="video-container">
           <video
             controls
             preload="metadata"
             poster="./assets/screenshots/app-hero.png"
-            style="width: 100%; border-radius: 0.5rem"
           >
-            <source
-              src="./assets/video/producer-player-explainer.mp4"
-              type="video/mp4"
-            />
-            Your browser does not support the video element.
+            <source src="./assets/video/producer-player-explainer.mp4" type="video/mp4" />
           </video>
         </div>
       </div>
-    </header>
+    </section>
 
-    <main>
-      <section class="section">
-        <div class="container">
-          <div class="section-heading narrow">
-            <p class="section-label">Why producers use it</p>
-            <h2>
-              Built around finishing workflows, not generic media-library
-              features.
-            </h2>
+    <section class="features" id="features">
+      <div class="wrap">
+        <div class="features-grid">
+          <div class="feature">
+            <div class="feature-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h7M3 12h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </div>
+            <h3>Version grouping</h3>
+            <p>Exports land under one song. Every version playable, latest on top.</p>
           </div>
 
-          <div class="cards cards-3">
-            <article class="card">
-              <h3>Group versions under one song</h3>
-              <p>
-                Keep <code>v1</code>, <code>v2</code>, <code>v3</code> and
-                beyond together so your folder doesn't turn into guesswork.
-              </p>
-            </article>
-            <article class="card">
-              <h3>Mastering + reference checks in one place</h3>
-              <p>
-                Review LUFS/peaks, load a reference file, and quick-switch Mix
-                vs Reference without leaving the app.
-              </p>
-            </article>
-            <article class="card">
-              <h3>Keep order and export clean handoff folders</h3>
-              <p>
-                Lock your album sequence, then export latest versions in
-                numbered order or move playlist order via JSON.
-              </p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section" id="status">
-        <div class="container">
-          <div class="section-heading narrow">
-            <p class="section-label">Download and status</p>
-            <h2>Honest release status, minus the doom banner vibe.</h2>
-            <p>
-              Producer Player is actively usable via GitHub releases today.
-              Signing/notarization is still the remaining step before calling
-              the macOS path polished for non-technical users.
-            </p>
+          <div class="feature">
+            <div class="feature-icon" style="background: rgba(95, 210, 143, 0.1); color: var(--green);">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 12V4l5 4-5 4ZM9 12V4l5 4-5 4Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>A/B mastering workspace</h3>
+            <p>LUFS, peaks, tonal balance. Toggle between your mix and a reference instantly.</p>
           </div>
 
-          <div class="cards cards-2">
-            <article class="card card-highlight">
-              <h3>Use it now</h3>
-              <ul>
-                <li>
-                  Grab the latest snapshot ZIP (macOS, Linux, Windows) from
-                  GitHub Releases
-                </li>
-                <li>Verify artifacts with published SHA-256 checksum files</li>
-                <li>
-                  Use real project folders and follow snapshot notes as fixes
-                  land
-                </li>
-              </ul>
-              <div class="card-actions">
-                <a
-                  class="button button-primary"
-                  href="https://github.com/EthanSK/producer-player/releases"
-                  >Go to downloads</a
-                >
-                <a
-                  class="button button-secondary"
-                  href="https://github.com/EthanSK/producer-player/blob/main/README.md"
-                  >Quick start</a
-                >
-              </div>
-            </article>
+          <div class="feature">
+            <div class="feature-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 3v10M8 5v8M12 1v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </div>
+            <h3>Platform normalization</h3>
+            <p>Preview how your master sounds on Spotify, Apple Music, YouTube, TIDAL.</p>
+          </div>
 
-            <article class="card">
-              <h3>Shipping next</h3>
-              <ul>
-                <li>Developer ID signing flow for macOS</li>
-                <li>Apple notarization for smoother install trust prompts</li>
-                <li>Clearer first-run install guide for non-technical users</li>
-              </ul>
-              <p class="muted-note">
-                Until then, treat downloads as preview builds rather than final
-                1.0 installers.
-              </p>
-            </article>
+          <div class="feature">
+            <div class="feature-icon" style="background: rgba(95, 210, 143, 0.1); color: var(--green);">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 3h12M2 7h12M2 11h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="3" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="4" cy="11" r="1.2" fill="currentColor"/></svg>
+            </div>
+            <h3>Album ordering</h3>
+            <p>Drag tracks into sequence. Order persists between sessions.</p>
+          </div>
+
+          <div class="feature">
+            <div class="feature-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Checklists &amp; ratings</h3>
+            <p>Per-song checklists for your finishing process. Rate tracks as you go.</p>
+          </div>
+
+          <div class="feature">
+            <div class="feature-icon" style="background: rgba(95, 210, 143, 0.1); color: var(--green);">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 13V8h2.5v5M6.75 13V5h2.5v8M10.5 13V2H13v11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Export Latest</h3>
+            <p>One click — numbered folder with latest versions, ready for distribution.</p>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section class="section section-alt" id="developer-links">
-        <div class="container">
-          <div class="section-heading narrow">
-            <p class="section-label">Developer links</p>
-            <h2>Technical resources (kept secondary on purpose).</h2>
-          </div>
-
-          <div class="cards cards-3 compact-links">
-            <a
-              class="card card-link"
-              href="https://github.com/EthanSK/producer-player"
-            >
-              <h3>Repository</h3>
-              <p>Source code, issues, and roadmap.</p>
-            </a>
-            <a
-              class="card card-link"
-              href="https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml"
-            >
-              <h3>Build workflow</h3>
-              <p>Desktop CI runs and artifact generation status.</p>
-            </a>
-            <a
-              class="card card-link"
-              href="https://github.com/EthanSK/producer-player/blob/main/SECURITY.md"
-            >
-              <h3>Security policy</h3>
-              <p>Vulnerability reporting and project security baseline.</p>
-            </a>
-          </div>
+    <section class="download" id="download">
+      <div class="wrap">
+        <h2>Get Producer Player</h2>
+        <p>Free and open source. MIT license.</p>
+        <a class="btn btn--primary" href="https://github.com/EthanSK/producer-player/releases">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download from GitHub
+        </a>
+        <div class="platforms">
+          <span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M12.5 11.4c-.4.9-.6 1.3-1.1 2.1-.7 1-1.6 2.3-2.8 2.3-1 0-1.4-.7-2.8-.7-1.4 0-1.8.7-2.8.7-1.2 0-2.1-1.2-2.8-2.2C-.7 11 -.9 8 .5 6.3c1-1.2 2.4-1.9 3.8-1.9 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.2 0 2.4.5 3.3 1.5-2.9 1.6-2.4 5.6.7 6.5Z" fill="currentColor"/><path d="M10.3 2.8c.5-.7.9-1.6.8-2.6-.9.1-1.9.6-2.5 1.3-.5.7-1 1.6-.8 2.5.9 0 1.9-.5 2.5-1.2Z" fill="currentColor"/></svg>
+            macOS
+          </span>
+          <span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M1 2.2l5.4-.7v5.2H1V2.2Zm0 11.6l5.4.7V9.3H1v4.5Zm6-5.1h8V1l-8 1.1v6.6Zm0 5.8L15 16V9.3H7v5.2Z" fill="currentColor"/></svg>
+            Windows
+          </span>
+          <span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            Linux
+          </span>
         </div>
-      </section>
-    </main>
+      </div>
+    </section>
 
-    <footer class="site-footer">
-      <div class="container footer-shell">
-        <p>Producer Player</p>
-        <p>
-          GitHub Pages:
-          <a href="https://ethansk.github.io/producer-player/"
-            >ethansk.github.io/producer-player</a
-          >
-        </p>
-        <p>Open source under the MIT License. Feel free to modify it.</p>
+    <footer>
+      <div class="wrap">
+        <div class="footer-inner">
+          <span>&copy; 2025 Producer Player</span>
+          <ul class="footer-links">
+            <li><a href="https://github.com/EthanSK/producer-player">GitHub</a></li>
+            <li><a href="https://github.com/EthanSK/producer-player/releases">Releases</a></li>
+            <li><a href="https://github.com/EthanSK/producer-player/blob/main/LICENSE">MIT License</a></li>
+          </ul>
+        </div>
       </div>
     </footer>
   </body>

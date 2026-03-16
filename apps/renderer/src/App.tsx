@@ -3947,6 +3947,19 @@ export function App(): JSX.Element {
               >
                 Clear Completed
               </button>
+              <button
+                type="button"
+                className="checklist-play-toggle"
+                data-playing={isPlaying ? 'true' : 'false'}
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+                title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                data-testid="song-checklist-play-toggle"
+                onClick={() => {
+                  void handleTogglePlayback();
+                }}
+              >
+                <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+              </button>
               <button type="button" onClick={handleCloseSongChecklist}>
                 Done
               </button>

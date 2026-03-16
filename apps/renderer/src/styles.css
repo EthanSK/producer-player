@@ -1343,8 +1343,28 @@ input[type='range'] {
 .checklist-modal-actions {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+button.checklist-play-toggle {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 999px;
+  border-color: var(--accent);
+  background: rgba(92, 167, 255, 0.15);
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+button.checklist-play-toggle[data-playing='true'] {
+  background: rgba(95, 210, 143, 0.18);
+  border-color: var(--success);
 }
 
 .panel-right {

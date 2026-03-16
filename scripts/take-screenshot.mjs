@@ -205,7 +205,7 @@ async function main() {
     // Set a good window size for the screenshot
     const window = await electronApp.browserWindow(page);
     await window.evaluate((win) => {
-      win.setSize(1600, 2000);
+      win.setSize(1600, 1300);
       win.center();
     });
     await page.waitForTimeout(500);

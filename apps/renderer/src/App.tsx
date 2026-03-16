@@ -2609,13 +2609,13 @@ export function App(): JSX.Element {
     }
 
     updateSongChecklistItems(songId, (items) => [
-      ...items,
       {
         id: createChecklistItemId(),
         text: itemText,
         completed: false,
         timestampSeconds: checklistCapturedTimestamp,
       },
+      ...items,
     ]);
 
     setChecklistDraftText('');

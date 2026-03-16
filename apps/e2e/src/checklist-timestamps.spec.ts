@@ -206,8 +206,9 @@ test.describe('Checklist timestamp feature', () => {
       const songIds = Object.keys(stored);
       const items = stored[songIds[0]];
       expect(items.length).toBe(2);
-      expect(items[0].text).toBe('First note');
-      expect(items[1].text).toBe('Second note');
+      // Newest item is prepended (newest-first order)
+      expect(items[0].text).toBe('Second note');
+      expect(items[1].text).toBe('First note');
       // Both should have timestampSeconds field
       expect('timestampSeconds' in items[0]).toBe(true);
       expect('timestampSeconds' in items[1]).toBe(true);

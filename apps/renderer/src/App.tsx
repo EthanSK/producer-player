@@ -51,6 +51,7 @@ interface SongChecklistItem {
   id: string;
   text: string;
   completed: boolean;
+  timestampSeconds: number | null;
 }
 
 const EMPTY_SNAPSHOT: LibrarySnapshot = {
@@ -458,6 +459,7 @@ function readStoredSongChecklists(): Record<string, SongChecklistItem[]> {
           id?: unknown;
           text?: unknown;
           completed?: unknown;
+          timestampSeconds?: unknown;
         };
 
         if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) {
@@ -472,11 +474,19 @@ function readStoredSongChecklists(): Record<string, SongChecklistItem[]> {
           return [];
         }
 
+        const timestampSeconds =
+          typeof candidate.timestampSeconds === 'number' &&
+          Number.isFinite(candidate.timestampSeconds) &&
+          candidate.timestampSeconds >= 0
+            ? candidate.timestampSeconds
+            : null;
+
         return [
           {
             id: candidate.id,
             text: candidate.text,
             completed: candidate.completed,
+            timestampSeconds,
           },
         ];
       });
@@ -629,6 +639,7 @@ export function App(): JSX.Element {
   );
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
   const [checklistDraftText, setChecklistDraftText] = useState('');
+  const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
   const [resolvedAlbumDurationSecondsByVersionId, setResolvedAlbumDurationSecondsByVersionId] = useState<
     Record<string, number>
   >({});
@@ -817,6 +828,7 @@ export function App(): JSX.Element {
 
     setChecklistModalSongId(null);
     setChecklistDraftText('');
+    setChecklistCapturedTimestamp(null);
   }, [checklistModalSongId, snapshot.songs]);
 
   useEffect(() => {
@@ -2548,14 +2560,44 @@ export function App(): JSX.Element {
     });
   }
 
+  function captureCurrentPlaybackTimestamp(): number | null {
+    const audio = audioRef.current;
+    if (!audio || audio.paused && audio.currentTime === 0) {
+      return null;
+    }
+    const time = audio.currentTime;
+    return Number.isFinite(time) && time >= 0 ? time : null;
+  }
+
   function handleOpenSongChecklist(songId: string): void {
     setChecklistModalSongId(songId);
     setChecklistDraftText('');
+    setChecklistCapturedTimestamp(captureCurrentPlaybackTimestamp());
   }
 
   function handleCloseSongChecklist(): void {
     setChecklistModalSongId(null);
     setChecklistDraftText('');
+    setChecklistCapturedTimestamp(null);
+  }
+
+  function handleChecklistTimestampClick(seconds: number): void {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    handleSeek(seconds);
+
+    if (audio.paused) {
+      void resumePlaybackContextIfNeeded()
+        .then(() => audio.play())
+        .catch(() => undefined);
+    }
+  }
+
+  function handleChecklistInputFocus(): void {
+    setChecklistCapturedTimestamp(captureCurrentPlaybackTimestamp());
   }
 
   function handleAddChecklistItem(): void {
@@ -2572,6 +2614,7 @@ export function App(): JSX.Element {
         id: createChecklistItemId(),
         text: itemText,
         completed: false,
+        timestampSeconds: checklistCapturedTimestamp,
       },
     ]);
 
@@ -3687,6 +3730,7 @@ export function App(): JSX.Element {
               <input
                 value={checklistDraftText}
                 onChange={(event) => setChecklistDraftText(event.currentTarget.value)}
+                onFocus={handleChecklistInputFocus}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault();
@@ -3709,7 +3753,7 @@ export function App(): JSX.Element {
             {checklistModalItems.length > 0 ? (
               <ul className="checklist-item-list" data-testid="song-checklist-items">
                 {checklistModalItems.map((item) => (
-                  <li key={item.id} className="checklist-item-row">
+                  <li key={item.id} className={`checklist-item-row${item.timestampSeconds !== null ? ' has-timestamp' : ''}`}>
                     <label className="checklist-item-toggle">
                       <input
                         type="checkbox"
@@ -3723,6 +3767,18 @@ export function App(): JSX.Element {
                         }}
                       />
                     </label>
+                    {item.timestampSeconds !== null ? (
+                      <button
+                        type="button"
+                        className="checklist-timestamp-badge"
+                        onClick={() => handleChecklistTimestampClick(item.timestampSeconds!)}
+                        data-testid="song-checklist-item-timestamp"
+                        title={`Jump to ${formatTime(item.timestampSeconds)}`}
+                        aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
+                      >
+                        {formatTime(item.timestampSeconds)}
+                      </button>
+                    ) : null}
                     <input
                       className={`checklist-item-text${item.completed ? ' completed' : ''}`}
                       value={item.text}

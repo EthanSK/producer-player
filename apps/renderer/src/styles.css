@@ -1053,6 +1053,62 @@ input[type='range'] {
   white-space: nowrap;
 }
 
+.transport-checklist-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary, #9ab6d3);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.transport-checklist-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary, #e0eaf5);
+}
+
+.transport-checklist-button.has-items {
+  border-color: rgba(95, 210, 143, 0.5);
+  background: rgba(95, 210, 143, 0.1);
+}
+
+.transport-checklist-button.has-items:hover {
+  background: rgba(95, 210, 143, 0.2);
+  border-color: rgba(95, 210, 143, 0.7);
+}
+
+.transport-checklist-icon {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.transport-checklist-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(92, 167, 255, 0.18);
+  color: #d9e8fb;
+}
+
 .player-scrubber-row {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1108,6 +1164,50 @@ input[type='range'] {
 
 .checklist-input-timestamp-preview {
   cursor: pointer;
+}
+
+.checklist-timestamp-preview-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.checklist-set-now-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(92, 167, 255, 0.25);
+  background: rgba(92, 167, 255, 0.08);
+  color: #8ec5ff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.checklist-set-now-button:hover {
+  background: rgba(92, 167, 255, 0.2);
+  border-color: rgba(92, 167, 255, 0.45);
+  color: #b8daff;
+}
+
+.checklist-set-now-button:active {
+  background: rgba(92, 167, 255, 0.3);
+}
+
+.checklist-set-now-icon {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .checklist-item-list {

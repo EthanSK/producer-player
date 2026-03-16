@@ -110,6 +110,20 @@
         border-radius: 6px;
       }
 
+      .by-line {
+        font-size: 12px;
+        color: var(--muted);
+        margin-left: 6px;
+        text-decoration: none;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+      }
+
+      .by-line:hover {
+        opacity: 1;
+        color: var(--accent);
+      }
+
       .nav-links {
         display: flex;
         align-items: center;
@@ -387,6 +401,7 @@
           <img src="./assets/icon.png" alt="" />
           Producer Player
         </a>
+        <a class="by-line" href="#" target="_blank" rel="noopener">by 3000 AD</a>
         <ul class="nav-links">
           <li><a href="#features">Features</a></li>
           <li><a href="#video">Demo</a></li>

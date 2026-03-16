@@ -205,6 +205,25 @@ figcaption {
   margin-bottom: 0;
 }
 
+.hero-media {
+  margin: 2rem auto 0;
+}
+
+.hero-video-wrap {
+  margin-bottom: 1.2rem;
+  padding: 1.1rem 1.3rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(109, 224, 187, 0.32);
+  background: linear-gradient(180deg, rgba(12, 26, 48, 0.95), rgba(8, 15, 29, 0.9));
+}
+
+.hero-video-wrap video,
+.hero-video-wrap iframe {
+  width: 100%;
+  border-radius: calc(var(--radius) - 6px);
+  aspect-ratio: 16 / 9;
+}
+
 .section {
   padding: 3.4rem 0;
 }

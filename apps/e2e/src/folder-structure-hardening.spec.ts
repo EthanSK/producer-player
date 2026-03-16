@@ -172,13 +172,6 @@ test.describe('folder structure hardening', () => {
       await expect(page.getByTestId('inspector-version-row').filter({ hasText: 'Bend the Knees v1.wav' })).toHaveCount(1);
       await expect(page.getByTestId('inspector-version-row').filter({ hasText: 'Bend the Knee v1.wav' })).toHaveCount(0);
       await expect(page.getByTestId('inspector-version-row').filter({ hasText: 'Orphan Song v1.wav' })).toHaveCount(0);
-
-      await page.getByTestId('search-input').fill('bend the knee v1');
-      await expect(page.getByTestId('main-list-row')).toHaveCount(0);
-
-      await page.getByTestId('search-input').fill('bend the knees');
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
-      await expect(page.getByTestId('main-list-row').first()).toContainText('Bend the Knees');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

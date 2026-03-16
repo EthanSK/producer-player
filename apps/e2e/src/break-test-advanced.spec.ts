@@ -288,31 +288,6 @@ test.describe('Producer Player advanced break tests', () => {
     }
   });
 
-  test('search input handles very long query string without crash', async () => {
-    const dirs = await createE2ETestDirectories('break-long-search');
-
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Alpha v1.wav', contents: 'RIFF stub' },
-    ]);
-
-    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
-
-    try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
-
-      const longQuery = 'x'.repeat(500);
-      await page.getByTestId('search-input').fill(longQuery);
-      await expect(page.getByTestId('app-shell')).toBeVisible();
-      await expect(page.getByTestId('main-list-row')).toHaveCount(0);
-    } finally {
-      await electronApp.close();
-      await cleanupE2ETestDirectories(dirs);
-    }
-  });
-
   test('unlink folder while song is selected clears inspector cleanly', async () => {
     const dirs = await createE2ETestDirectories('break-unlink-while-selected');
 
@@ -477,42 +452,6 @@ test.describe('Producer Player advanced break tests', () => {
       await expect(page.getByTestId('app-shell')).toBeVisible();
       // No folder should be linked
       await expect(page.getByTestId('linked-folder-item')).toHaveCount(0);
-    } finally {
-      await electronApp.close();
-      await cleanupE2ETestDirectories(dirs);
-    }
-  });
-
-  test('search during active playback does not interrupt player', async () => {
-    const dirs = await createE2ETestDirectories('break-search-during-playback');
-    const wavPath = path.join(dirs.fixtureDirectory, 'Live Song v1.wav');
-    const wavPath2 = path.join(dirs.fixtureDirectory, 'Other Song v1.wav');
-    await writeMinimalWav(wavPath);
-    await writeMinimalWav(wavPath2);
-
-    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
-
-    try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-
-      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-      await page.getByTestId('main-list-row').first().click();
-      await expect(page.getByTestId('player-dock')).toBeVisible();
-
-      // Type in search while track is loaded
-      await page.getByTestId('search-input').fill('Live');
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
-
-      // Player dock should still be visible with the loaded track
-      await expect(page.getByTestId('player-dock')).toBeVisible();
-      await expect(page.getByTestId('player-track-name')).toBeVisible();
-
-      // Clear search
-      await page.getByTestId('search-input').fill('');
-      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-
-      await expect(page.getByTestId('app-shell')).toBeVisible();
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);

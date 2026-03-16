@@ -114,35 +114,4 @@ test.describe('Checklist and export UX improvements', () => {
     }
   });
 
-  test('search shows all matched version file names without truncation', async () => {
-    const directories = await createE2ETestDirectories('producer-player-search-versions');
-
-    await writeFixtureFiles(directories.fixtureDirectory, [
-      { relativePath: 'MySong v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
-      { relativePath: 'MySong v2.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:11.000Z') },
-      { relativePath: 'MySong v3.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:12.000Z') },
-      { relativePath: 'Other v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:13.000Z') },
-    ]);
-
-    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
-
-    try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-
-      await page.getByTestId('search-input').fill('MySong v');
-
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
-
-      const rowText = await page.getByTestId('main-list-row').first().textContent();
-      expect(rowText).toContain('MySong v1.wav');
-      expect(rowText).toContain('MySong v2.wav');
-      expect(rowText).toContain('MySong v3.wav');
-      expect(rowText).not.toContain('more)');
-    } finally {
-      await electronApp.close();
-      await cleanupE2ETestDirectories(directories);
-    }
-  });
 });

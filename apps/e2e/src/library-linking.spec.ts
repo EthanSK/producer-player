@@ -148,6 +148,13 @@ test.describe('Producer Player desktop shell', () => {
         frequencyHz: 520,
       });
 
+      // Trigger a rescan so the new file is picked up immediately instead of
+      // relying solely on the file-system watcher which can be slow under load.
+      const rescanBtn = page.getByTestId('rescan-button');
+      if (await rescanBtn.isVisible()) {
+        await rescanBtn.click();
+      }
+
       const archivedVersionPath = path.join(fixtureDirectory, 'old', 'Midnight Echo v1.wav');
 
       await expect

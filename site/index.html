@@ -82,6 +82,8 @@
         height: 100%;
         z-index: 0;
         pointer-events: none;
+        image-rendering: auto;
+        will-change: transform;
       }
 
       #kscope-overlay {
@@ -596,16 +598,25 @@
       </footer>
     </div>
 
-    <!-- ── Kaleidoscope Animation ── -->
+    <!-- ── Kaleidoscope Animation (perf-optimized) ── -->
     <script>
     (function () {
       var c = document.getElementById('kscope');
       if (!c) return;
-      var ctx = c.getContext('2d');
-      var SEG = 12;
+
+      /* ── Perf: render at half resolution, CSS scales up ── */
+      var RES = 0.5;
+      var ctx = c.getContext('2d', { alpha: false });
+
+      var SEG = 8;           /* was 12 — fewer symmetry slices */
       var TAU = Math.PI * 2;
       var ANG = TAU / SEG;
       var W, H, maxR, sc;
+
+      /* Target ~24 fps — background doesn't need 60 */
+      var FPS = 24;
+      var FRAME_MS = 1000 / FPS;
+      var lastFrame = 0;
 
       /* Purple DMT palette [r, g, b] */
       var P = [
@@ -621,150 +632,171 @@
         [80, 0, 180]
       ];
 
-      function resize() {
-        W = c.width = window.innerWidth;
-        H = c.height = window.innerHeight;
-        maxR = Math.sqrt(W * W + H * H) / 2;
-        sc = maxR / 500;
-        ctx.fillStyle = '#0a0014';
-        ctx.fillRect(0, 0, W, H);
+      /* Pre-compute rgba strings for glow + core at common alphas */
+      function rgba(i, a) {
+        var p = P[((i % P.length) + P.length) % P.length];
+        return 'rgba(' + p[0] + ',' + p[1] + ',' + p[2] + ',' + a + ')';
       }
-      window.addEventListener('resize', resize);
-      resize();
 
       function rgb(i) {
         var p = P[((i % P.length) + P.length) % P.length];
         return 'rgb(' + p[0] + ',' + p[1] + ',' + p[2] + ')';
       }
 
+      function resize() {
+        W = c.width = Math.round(window.innerWidth * RES);
+        H = c.height = Math.round(window.innerHeight * RES);
+        maxR = Math.sqrt(W * W + H * H) / 2;
+        sc = maxR / 500;
+        ctx.fillStyle = '#0a0014';
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      /* Debounce resize */
+      var resizeTimer;
+      window.addEventListener('resize', function () {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(resize, 200);
+      });
+      resize();
+
+      /* ── Helpers: cheap fake-glow circles (no shadowBlur!) ── */
+      function glowOrb(x, y, r, colorIdx, alpha) {
+        /* Outer glow — larger, very transparent */
+        ctx.globalAlpha = alpha * 0.3;
+        ctx.fillStyle = rgb(colorIdx);
+        ctx.beginPath();
+        ctx.arc(x, y, r * 2.2, 0, TAU);
+        ctx.fill();
+        /* Core */
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, TAU);
+        ctx.fill();
+      }
+
+      function glowDot(x, y, r, colorIdx, alpha) {
+        ctx.globalAlpha = alpha * 0.35;
+        ctx.fillStyle = rgb(colorIdx);
+        ctx.beginPath();
+        ctx.arc(x, y, r * 2, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, TAU);
+        ctx.fill();
+      }
+
       /* ── Main loop ── */
       function frame(ts) {
+        requestAnimationFrame(frame);
+
+        /* Throttle to target FPS */
+        if (ts - lastFrame < FRAME_MS) return;
+        lastFrame = ts;
+
         var t = ts * 0.001;
 
-        /* Trail fade — low alpha = long glowing trails */
+        /* Trail fade — slightly stronger fade for perf (less pixel accumulation) */
         ctx.globalCompositeOperation = 'source-over';
         ctx.globalAlpha = 1;
-        ctx.fillStyle = 'rgba(8, 0, 18, 0.045)';
+        ctx.fillStyle = 'rgba(8, 0, 18, 0.07)';
         ctx.fillRect(0, 0, W, H);
 
         ctx.save();
         ctx.translate(W / 2, H / 2);
         ctx.rotate(t * 0.04);
 
-        /* ━━ Layer 1: Large flowing orbs ━━ */
-        ctx.shadowBlur = 35 * sc;
-        for (var i = 0; i < 8; i++) {
-          var p = t * 0.38 + i * 0.92;
+        /* No shadowBlur anywhere — all glow is faked with layered fills */
+        ctx.shadowBlur = 0;
+
+        /* ━━ Layer 1: Large flowing orbs (5, was 8) ━━ */
+        for (var i = 0; i < 5; i++) {
+          var p = t * 0.38 + i * 1.47;
           var dist = (Math.sin(p * 0.55) * 85 + 175) * sc;
           var bAng = Math.sin(p * 0.22) * ANG * 0.38;
           var r = (Math.sin(p * 0.85) * 10 + 24) * sc;
-          ctx.fillStyle = rgb(i);
-          ctx.shadowColor = rgb(i);
-          ctx.globalAlpha = 0.32 + Math.sin(p * 0.65) * 0.12;
+          var alpha = 0.32 + Math.sin(p * 0.65) * 0.12;
 
           for (var s = 0; s < SEG; s++) {
             var a = s * ANG + bAng;
-            ctx.beginPath();
-            ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, r, 0, TAU);
-            ctx.fill();
+            glowOrb(Math.cos(a) * dist, Math.sin(a) * dist, r, i, alpha);
             a = s * ANG - bAng;
-            ctx.beginPath();
-            ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, r, 0, TAU);
-            ctx.fill();
+            glowOrb(Math.cos(a) * dist, Math.sin(a) * dist, r, i, alpha);
           }
         }
 
-        /* ━━ Layer 2: Inner ring of smaller orbs ━━ */
-        ctx.shadowBlur = 25 * sc;
-        for (var i = 0; i < 6; i++) {
-          var p = t * 0.52 + i * 1.1;
+        /* ━━ Layer 2: Inner ring of smaller orbs (4, was 6) ━━ */
+        for (var i = 0; i < 4; i++) {
+          var p = t * 0.52 + i * 1.65;
           var dist = (Math.sin(p * 0.75) * 40 + 80) * sc;
           var bAng = Math.sin(p * 0.35) * ANG * 0.25;
           var r = (Math.sin(p * 1.1) * 6 + 12) * sc;
-          ctx.fillStyle = rgb(i + 4);
-          ctx.shadowColor = rgb(i + 4);
-          ctx.globalAlpha = 0.4 + Math.sin(p * 0.9) * 0.1;
+          var alpha = 0.4 + Math.sin(p * 0.9) * 0.1;
 
           for (var s = 0; s < SEG; s++) {
             var a = s * ANG + bAng;
-            ctx.beginPath();
-            ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, r, 0, TAU);
-            ctx.fill();
+            glowOrb(Math.cos(a) * dist, Math.sin(a) * dist, r, i + 4, alpha);
             a = s * ANG - bAng;
-            ctx.beginPath();
-            ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, r, 0, TAU);
-            ctx.fill();
+            glowOrb(Math.cos(a) * dist, Math.sin(a) * dist, r, i + 4, alpha);
           }
         }
 
-        /* ━━ Layer 3: Sacred geometry lines ━━ */
-        ctx.shadowBlur = 10 * sc;
-        ctx.globalAlpha = 0.2;
+        /* ━━ Layer 3: Sacred geometry lines (2, was 4) ━━ */
+        ctx.globalAlpha = 0.22;
         ctx.lineWidth = 1.8 * sc;
 
-        for (var i = 0; i < 4; i++) {
-          var p = t * 0.28 + i * 1.7;
+        for (var i = 0; i < 2; i++) {
+          var p = t * 0.28 + i * 3.4;
           var d1 = (Math.sin(p * 0.45) * 55 + 115) * sc;
           var d2 = (Math.sin(p * 0.65 + 1) * 65 + 210) * sc;
           var bAng = Math.sin(p * 0.18) * ANG * 0.28;
           ctx.strokeStyle = rgb(i + 3);
-          ctx.shadowColor = rgb(i + 3);
 
+          /* Batch all line segments into one path per line set */
+          ctx.beginPath();
           for (var s = 0; s < SEG; s++) {
             var a1 = s * ANG + bAng;
             var a2 = s * ANG + bAng + ANG * 0.42;
-            ctx.beginPath();
             ctx.moveTo(Math.cos(a1) * d1, Math.sin(a1) * d1);
             ctx.lineTo(Math.cos(a2) * d2, Math.sin(a2) * d2);
-            ctx.stroke();
-
             a1 = s * ANG - bAng;
             a2 = s * ANG - bAng - ANG * 0.42;
-            ctx.beginPath();
             ctx.moveTo(Math.cos(a1) * d1, Math.sin(a1) * d1);
             ctx.lineTo(Math.cos(a2) * d2, Math.sin(a2) * d2);
-            ctx.stroke();
           }
+          ctx.stroke();
         }
 
-        /* ━━ Layer 4: Spiraling particles ━━ */
-        ctx.shadowBlur = 12 * sc;
-        for (var i = 0; i < 6; i++) {
-          var speed = 35 + i * 14;
+        /* ━━ Layer 4: Spiraling particles (3, was 6) ━━ */
+        for (var i = 0; i < 3; i++) {
+          var speed = 35 + i * 28;
           var spiralR = ((t * speed + i * 75) % (maxR * 0.6));
-          var spiralA = t * (0.55 + i * 0.12) + i * ANG * 0.4;
+          var spiralA = t * (0.55 + i * 0.24) + i * ANG * 0.4;
           var dotR = 3 * sc;
           var alpha = Math.max(0, 1 - spiralR / (maxR * 0.6)) * 0.55;
-          ctx.globalAlpha = alpha;
-          ctx.fillStyle = rgb(i + 5);
-          ctx.shadowColor = rgb(i + 5);
 
           for (var s = 0; s < SEG; s++) {
             var a = s * ANG + spiralA;
-            ctx.beginPath();
-            ctx.arc(Math.cos(a) * spiralR, Math.sin(a) * spiralR, dotR, 0, TAU);
-            ctx.fill();
+            glowDot(Math.cos(a) * spiralR, Math.sin(a) * spiralR, dotR, i + 5, alpha);
             a = s * ANG - spiralA + Math.PI;
-            ctx.beginPath();
-            ctx.arc(Math.cos(a) * spiralR, Math.sin(a) * spiralR, dotR, 0, TAU);
-            ctx.fill();
+            glowDot(Math.cos(a) * spiralR, Math.sin(a) * spiralR, dotR, i + 5, alpha);
           }
         }
 
-        /* ━━ Layer 5: Centre mandala ━━ */
-        ctx.globalCompositeOperation = 'lighter';
-        for (var ring = 0; ring < 4; ring++) {
-          var rr = (Math.sin(t * 0.38 + ring * 0.85) * 14 + 38 + ring * 30) * sc;
+        /* ━━ Layer 5: Centre mandala (3 rings, was 4) ━━ */
+        /* Use globalAlpha for brightness instead of 'lighter' blend */
+        for (var ring = 0; ring < 3; ring++) {
+          var rr = (Math.sin(t * 0.38 + ring * 1.13) * 14 + 38 + ring * 30) * sc;
           ctx.strokeStyle = rgb(ring + 1);
-          ctx.shadowColor = rgb(ring + 1);
-          ctx.shadowBlur = 18 * sc;
           ctx.lineWidth = (1.4 + Math.sin(t + ring) * 0.7) * sc;
-          ctx.globalAlpha = 0.18 + Math.sin(t * 0.75 + ring) * 0.07;
+          ctx.globalAlpha = 0.22 + Math.sin(t * 0.75 + ring) * 0.08;
 
           ctx.beginPath();
           var dir = ring % 2 === 0 ? 1 : -1;
-          for (var v = 0; v <= 72; v++) {
-            var a = (v / 72) * TAU + t * 0.09 * dir;
+          /* 48 vertices instead of 72 */
+          for (var v = 0; v <= 48; v++) {
+            var a = (v / 48) * TAU + t * 0.09 * dir;
             var wobble = Math.sin(a * SEG * 0.5 + t * 1.4) * 9 * sc;
             var pr = rr + wobble;
             if (v === 0) ctx.moveTo(Math.cos(a) * pr, Math.sin(a) * pr);
@@ -774,17 +806,15 @@
           ctx.stroke();
         }
 
-        /* ━━ Layer 6: Bright outer rotating diamonds ━━ */
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.shadowBlur = 28 * sc;
-        for (var i = 0; i < 5; i++) {
-          var p = t * 0.24 + i * 1.32;
+        /* ━━ Layer 6: Outer rotating diamonds (3, was 5) ━━ */
+        /* Use globalAlpha for additive-like brightness instead of 'lighter' */
+        for (var i = 0; i < 3; i++) {
+          var p = t * 0.24 + i * 2.2;
           var dist = (Math.sin(p * 0.32) * 60 + 280) * sc;
           var bAng = Math.sin(p * 0.14) * ANG * 0.2;
           var sz = (Math.sin(p * 0.9) * 4 + 8) * sc;
           ctx.fillStyle = rgb(i + 2);
-          ctx.shadowColor = rgb(i + 2);
-          ctx.globalAlpha = 0.18 + Math.sin(p * 0.5) * 0.08;
+          ctx.globalAlpha = 0.22 + Math.sin(p * 0.5) * 0.1;
 
           for (var s = 0; s < SEG; s++) {
             var a = s * ANG + bAng;
@@ -805,9 +835,7 @@
           }
         }
 
-        ctx.globalCompositeOperation = 'source-over';
         ctx.restore();
-        requestAnimationFrame(frame);
       }
 
       requestAnimationFrame(frame);

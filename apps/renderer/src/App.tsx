@@ -656,6 +656,215 @@ function normalizeRememberedPlayheadSeconds(
   return normalizedSeconds <= 0.01 ? null : normalizedSeconds;
 }
 
+interface MigrationPreviewSong {
+  songName: string;
+  matchedSongId: string | null;
+  matchedSongTitle: string | null;
+  matchConfidence: 'exact' | 'fuzzy' | 'none';
+  items: Array<{
+    text: string;
+    completed: boolean;
+  }>;
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    Array.from({ length: n + 1 }, () => 0)
+  );
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function lenientParseJson(input: string): unknown {
+  let cleaned = input.trim();
+
+  // Strip markdown code fences
+  const fenceMatch = cleaned.match(/```(?:json|JSON)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) {
+    cleaned = fenceMatch[1].trim();
+  }
+
+  // Try parsing as-is first
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Continue with cleanup
+  }
+
+  // Remove trailing commas before } or ]
+  let fixed = cleaned.replace(/,(\s*[}\]])/g, '$1');
+
+  try {
+    return JSON.parse(fixed);
+  } catch {
+    // Continue
+  }
+
+  // Quote unquoted keys: { key: or , key:
+  fixed = fixed.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
+
+  try {
+    return JSON.parse(fixed);
+  } catch {
+    // Continue
+  }
+
+  // Replace single-quoted strings with double-quoted
+  fixed = fixed.replace(/:\s*'([^']*)'/g, ': "$1"');
+  fixed = fixed.replace(/\[\s*'([^']*)'/g, '["$1"');
+  fixed = fixed.replace(/,\s*'([^']*)'/g, ', "$1"');
+
+  try {
+    return JSON.parse(fixed);
+  } catch {
+    // Continue
+  }
+
+  // Last resort: try extracting a JSON object from the text
+  const jsonObjectMatch = cleaned.match(/(\{[\s\S]*\})/);
+  if (jsonObjectMatch) {
+    let extracted = jsonObjectMatch[1];
+    extracted = extracted.replace(/,(\s*[}\]])/g, '$1');
+    extracted = extracted.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
+    extracted = extracted.replace(/:\s*'([^']*)'/g, ': "$1"');
+    try {
+      return JSON.parse(extracted);
+    } catch {
+      // Give up
+    }
+  }
+
+  throw new Error(
+    'Could not parse the JSON. Common issues: missing quotes, unmatched brackets, or invalid syntax. ' +
+      'Try pasting the JSON into a validator first, or ask the LLM to regenerate it.'
+  );
+}
+
+function fuzzyMatchSong(
+  query: string,
+  allSongs: SongWithVersions[]
+): { songId: string; title: string; confidence: 'exact' | 'fuzzy' } | null {
+  const normalized = query.toLowerCase().trim();
+  if (normalized.length === 0) return null;
+
+  // Exact match on normalizedTitle
+  for (const song of allSongs) {
+    if (song.normalizedTitle.toLowerCase() === normalized) {
+      return { songId: song.id, title: song.title, confidence: 'exact' };
+    }
+  }
+
+  // Exact match on title (case-insensitive)
+  for (const song of allSongs) {
+    if (song.title.toLowerCase() === normalized) {
+      return { songId: song.id, title: song.title, confidence: 'exact' };
+    }
+  }
+
+  // Contains match (bidirectional)
+  for (const song of allSongs) {
+    const songNorm = song.normalizedTitle.toLowerCase();
+    if (songNorm.includes(normalized) || normalized.includes(songNorm)) {
+      return { songId: song.id, title: song.title, confidence: 'fuzzy' };
+    }
+  }
+
+  // Title contains match
+  for (const song of allSongs) {
+    const titleNorm = song.title.toLowerCase();
+    if (titleNorm.includes(normalized) || normalized.includes(titleNorm)) {
+      return { songId: song.id, title: song.title, confidence: 'fuzzy' };
+    }
+  }
+
+  // Levenshtein distance match
+  let bestMatch: { songId: string; title: string; distance: number } | null = null;
+  for (const song of allSongs) {
+    const songNorm = song.normalizedTitle.toLowerCase();
+    const distance = levenshteinDistance(normalized, songNorm);
+    const maxLen = Math.max(normalized.length, songNorm.length);
+    const similarity = maxLen > 0 ? 1 - distance / maxLen : 0;
+
+    if (similarity > 0.6 && (!bestMatch || distance < bestMatch.distance)) {
+      bestMatch = { songId: song.id, title: song.title, distance };
+    }
+  }
+
+  if (bestMatch) {
+    return { songId: bestMatch.songId, title: bestMatch.title, confidence: 'fuzzy' };
+  }
+
+  return null;
+}
+
+function parseMigrationInput(
+  raw: unknown,
+  allSongs: SongWithVersions[]
+): MigrationPreviewSong[] {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('Expected a JSON object with a "songs" array.');
+  }
+
+  const payload = raw as Record<string, unknown>;
+  const songsArray = payload.songs;
+
+  if (!Array.isArray(songsArray)) {
+    throw new Error(
+      'Expected a "songs" array in the JSON. Got: ' + typeof songsArray
+    );
+  }
+
+  const preview: MigrationPreviewSong[] = [];
+
+  for (const entry of songsArray) {
+    if (!entry || typeof entry !== 'object') continue;
+
+    const songEntry = entry as Record<string, unknown>;
+    const songName =
+      typeof songEntry.songName === 'string' ? songEntry.songName.trim() : '';
+
+    if (!songName) continue;
+
+    const match = fuzzyMatchSong(songName, allSongs);
+
+    const checklistItemsRaw = Array.isArray(songEntry.checklistItems)
+      ? songEntry.checklistItems
+      : [];
+    const items = checklistItemsRaw.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const itemObj = item as Record<string, unknown>;
+      const text = typeof itemObj.text === 'string' ? itemObj.text.trim() : '';
+      if (!text) return [];
+      const completed =
+        typeof itemObj.completed === 'boolean' ? itemObj.completed : false;
+      return [{ text, completed }];
+    });
+
+    if (items.length === 0) continue;
+
+    preview.push({
+      songName,
+      matchedSongId: match?.songId ?? null,
+      matchedSongTitle: match?.title ?? null,
+      matchConfidence: match?.confidence ?? 'none',
+      items,
+    });
+  }
+
+  return preview;
+}
+
 export function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>(EMPTY_SNAPSHOT);
   const [environment, setEnvironment] =
@@ -726,6 +935,13 @@ export function App(): JSX.Element {
   const [selectedNormalizationPlatformId, setSelectedNormalizationPlatformId] =
     useState<NormalizationPlatformId>('spotify');
   const [normalizationPreviewEnabled, setNormalizationPreviewEnabled] = useState(false);
+
+  const [migrationModalOpen, setMigrationModalOpen] = useState(false);
+  const [migrationJsonInput, setMigrationJsonInput] = useState('');
+  const [migrationParseError, setMigrationParseError] = useState<string | null>(null);
+  const [migrationPreview, setMigrationPreview] = useState<MigrationPreviewSong[] | null>(null);
+  const [migrationSchemaCopied, setMigrationSchemaCopied] = useState(false);
+  const [migrationImportDone, setMigrationImportDone] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
@@ -1068,6 +1284,23 @@ export function App(): JSX.Element {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [checklistModalSongId]);
+
+  useEffect(() => {
+    if (!migrationModalOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        handleCloseMigrationModal();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [migrationModalOpen]);
 
   useEffect(() => {
     if (!referenceTrack && playbackPreviewMode === 'reference') {
@@ -3029,6 +3262,153 @@ export function App(): JSX.Element {
     updateSongChecklistItems(songId, (items) => items.filter((item) => !item.completed));
   }
 
+  function handleOpenMigrationModal(): void {
+    setMigrationModalOpen(true);
+    setMigrationJsonInput('');
+    setMigrationParseError(null);
+    setMigrationPreview(null);
+    setMigrationSchemaCopied(false);
+    setMigrationImportDone(false);
+  }
+
+  function handleCloseMigrationModal(): void {
+    setMigrationModalOpen(false);
+    setMigrationJsonInput('');
+    setMigrationParseError(null);
+    setMigrationPreview(null);
+    setMigrationSchemaCopied(false);
+    setMigrationImportDone(false);
+  }
+
+  function handleCopyMigrationSchema(): void {
+    const songList = snapshot.songs.map((song) => song.title);
+
+    const schema = {
+      description:
+        'Parse the user\'s old notes about their songs and return structured JSON matching the schema below. ' +
+        'Match each note to the correct song by name. If you cannot determine a playback timestamp, omit timestampSeconds or set it to null. ' +
+        'Set completed to false for all items unless the notes clearly indicate something is done.',
+      schema: {
+        songs: [
+          {
+            songName: 'string — must match one of the song names listed below',
+            checklistItems: [
+              {
+                text: 'string — the checklist/note item text, preserved as-is from the original notes',
+                completed: 'boolean — default false',
+                timestampSeconds:
+                  'number | null — playback timestamp in seconds if known, otherwise null',
+              },
+            ],
+          },
+        ],
+      },
+      currentSongs: songList,
+      example: {
+        input:
+          'Leaky: needs more bass at the chorus, check high end. Midnight Drive: vocal too loud at verse 2, add reverb to bridge.',
+        output: {
+          songs: [
+            {
+              songName: 'Leaky',
+              checklistItems: [
+                {
+                  text: 'needs more bass at the chorus',
+                  completed: false,
+                  timestampSeconds: null,
+                },
+                {
+                  text: 'check high end',
+                  completed: false,
+                  timestampSeconds: null,
+                },
+              ],
+            },
+            {
+              songName: 'Midnight Drive',
+              checklistItems: [
+                {
+                  text: 'vocal too loud at verse 2',
+                  completed: false,
+                  timestampSeconds: null,
+                },
+                {
+                  text: 'add reverb to bridge',
+                  completed: false,
+                  timestampSeconds: null,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+
+    const schemaText = JSON.stringify(schema, null, 2);
+
+    void navigator.clipboard.writeText(schemaText).then(() => {
+      setMigrationSchemaCopied(true);
+      setTimeout(() => setMigrationSchemaCopied(false), 3000);
+    });
+  }
+
+  function handleParseMigrationJson(): void {
+    setMigrationParseError(null);
+    setMigrationPreview(null);
+    setMigrationImportDone(false);
+
+    const input = migrationJsonInput.trim();
+    if (input.length === 0) {
+      setMigrationParseError('Paste the LLM\'s JSON response above.');
+      return;
+    }
+
+    try {
+      const parsed = lenientParseJson(input);
+      const preview = parseMigrationInput(parsed, snapshot.songs);
+
+      if (preview.length === 0) {
+        setMigrationParseError(
+          'No matching songs found in the JSON. Make sure the song names in the JSON match your current songs.'
+        );
+        return;
+      }
+
+      setMigrationPreview(preview);
+    } catch (err) {
+      setMigrationParseError(
+        err instanceof Error ? err.message : 'Failed to parse the JSON input.'
+      );
+    }
+  }
+
+  function handleConfirmMigrationImport(): void {
+    if (!migrationPreview) return;
+
+    setSongChecklists((current) => {
+      const next = { ...current };
+
+      for (const entry of migrationPreview) {
+        if (!entry.matchedSongId) continue;
+
+        const existingItems = next[entry.matchedSongId] ?? [];
+        const newItems: SongChecklistItem[] = entry.items.map((item) => ({
+          id: createChecklistItemId(),
+          text: item.text,
+          completed: item.completed,
+          timestampSeconds: null,
+        }));
+
+        next[entry.matchedSongId] = [...newItems, ...existingItems];
+      }
+
+      return next;
+    });
+
+    setMigrationImportDone(true);
+    setMigrationPreview(null);
+  }
+
   const checklistModalSong = checklistModalSongId
     ? snapshot.songs.find((song) => song.id === checklistModalSongId) ?? null
     : null;
@@ -3774,6 +4154,16 @@ export function App(): JSX.Element {
               disabled={!canImportPlaylistOrder}
             >
               <span aria-hidden="true">⤒</span>
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={handleOpenMigrationModal}
+              data-testid="migration-modal-button"
+              aria-label="Migrate notes from other apps via LLM"
+              title="Migrate notes from other apps (Apple Notes, etc.) into checklists using an LLM to parse your notes."
+            >
+              <span aria-hidden="true">📋</span>
             </button>
           </div>
         </header>
@@ -4834,6 +5224,185 @@ export function App(): JSX.Element {
             ) : (
               <p className="muted">Pick a track to see mastering analysis.</p>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {migrationModalOpen ? (
+        <div
+          className="migration-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Migrate notes via LLM"
+          data-testid="migration-modal"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              handleCloseMigrationModal();
+            }
+          }}
+        >
+          <div className="migration-modal-card">
+            <div className="migration-modal-header">
+              <div>
+                <h2>Migrate Notes via LLM</h2>
+                <p className="muted">
+                  Import checklist items from other note apps using an LLM to parse your notes.
+                </p>
+              </div>
+              <button type="button" className="ghost" onClick={handleCloseMigrationModal}>
+                Close
+              </button>
+            </div>
+
+            <div className="migration-workflow-steps">
+              <div className="migration-step">
+                <span className="migration-step-number">1</span>
+                <div>
+                  <strong>Copy the schema &amp; song list</strong>
+                  <p className="muted">
+                    This copies a JSON schema plus your current song names to the clipboard.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleCopyMigrationSchema}
+                    data-testid="migration-copy-schema"
+                    className={migrationSchemaCopied ? 'migration-copied-button' : ''}
+                  >
+                    {migrationSchemaCopied ? '✓ Copied to Clipboard' : 'Copy Schema to Clipboard'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="migration-step">
+                <span className="migration-step-number">2</span>
+                <div>
+                  <strong>Paste into an LLM</strong>
+                  <p className="muted">
+                    Open ChatGPT, Claude, or any LLM. Paste the schema, then paste your old notes
+                    and ask it to return structured JSON matching the schema.
+                  </p>
+                </div>
+              </div>
+
+              <div className="migration-step">
+                <span className="migration-step-number">3</span>
+                <div>
+                  <strong>Paste the LLM&apos;s response below</strong>
+                  <p className="muted">
+                    Copy the JSON output from the LLM and paste it here. Don&apos;t worry about
+                    formatting — we handle code fences, trailing commas, and other quirks.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="migration-input-area">
+              <textarea
+                className="migration-json-textarea"
+                value={migrationJsonInput}
+                onChange={(event) => {
+                  setMigrationJsonInput(event.currentTarget.value);
+                  setMigrationParseError(null);
+                  setMigrationPreview(null);
+                  setMigrationImportDone(false);
+                }}
+                placeholder={'Paste the LLM\'s JSON response here…'}
+                rows={10}
+                data-testid="migration-json-input"
+              />
+              <button
+                type="button"
+                onClick={handleParseMigrationJson}
+                disabled={migrationJsonInput.trim().length === 0}
+                data-testid="migration-parse-button"
+              >
+                Parse &amp; Preview
+              </button>
+            </div>
+
+            {migrationParseError ? (
+              <p className="error migration-error" data-testid="migration-parse-error">
+                {migrationParseError}
+              </p>
+            ) : null}
+
+            {migrationImportDone ? (
+              <div className="migration-success" data-testid="migration-success">
+                <p>
+                  <strong>✓ Import complete!</strong> Checklist items have been added to the matched
+                  songs. You can close this dialog now or import more.
+                </p>
+              </div>
+            ) : null}
+
+            {migrationPreview && migrationPreview.length > 0 ? (
+              <div className="migration-preview" data-testid="migration-preview">
+                <h3>
+                  Preview —{' '}
+                  {migrationPreview.reduce((sum, s) => sum + s.items.length, 0)} items across{' '}
+                  {migrationPreview.filter((s) => s.matchedSongId).length} matched song(s)
+                </h3>
+                {migrationPreview.some((s) => !s.matchedSongId) ? (
+                  <p className="migration-warning">
+                    ⚠ Some songs could not be matched and will be skipped.
+                  </p>
+                ) : null}
+                <ul className="migration-preview-list">
+                  {migrationPreview.map((entry, index) => (
+                    <li
+                      key={`${entry.songName}-${index}`}
+                      className={`migration-preview-song${!entry.matchedSongId ? ' unmatched' : ''}`}
+                    >
+                      <div className="migration-preview-song-header">
+                        <strong>{entry.songName}</strong>
+                        {entry.matchedSongId ? (
+                          <span
+                            className={`migration-match-badge ${entry.matchConfidence}`}
+                            title={
+                              entry.matchConfidence === 'exact'
+                                ? 'Exact match'
+                                : `Fuzzy match → ${entry.matchedSongTitle}`
+                            }
+                          >
+                            {entry.matchConfidence === 'exact' ? '✓ exact' : `≈ ${entry.matchedSongTitle}`}
+                          </span>
+                        ) : (
+                          <span className="migration-match-badge none" title="No matching song found">
+                            ✗ no match — will be skipped
+                          </span>
+                        )}
+                      </div>
+                      <ul className="migration-preview-items">
+                        {entry.items.map((item, itemIndex) => (
+                          <li key={itemIndex}>
+                            <span className="migration-preview-item-text">{item.text}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+                <div className="migration-preview-actions">
+                  <button
+                    type="button"
+                    onClick={handleConfirmMigrationImport}
+                    data-testid="migration-confirm-import"
+                  >
+                    Import {migrationPreview.filter((s) => s.matchedSongId).length} Song(s)
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => {
+                      setMigrationPreview(null);
+                      setMigrationParseError(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

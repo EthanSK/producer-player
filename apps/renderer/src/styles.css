@@ -1612,3 +1612,238 @@ button.checklist-play-toggle[data-playing='true'] {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Migration modal ── */
+
+.migration-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  backdrop-filter: blur(4px);
+}
+
+.migration-modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 32px;
+  width: 100%;
+  max-width: 680px;
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.migration-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.migration-modal-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.migration-workflow-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.migration-step {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.migration-step-number {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #000;
+  font-weight: 700;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.migration-step strong {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.migration-step .muted {
+  font-size: 0.85em;
+  margin-bottom: 8px;
+}
+
+.migration-copied-button {
+  background: #22c55e !important;
+  border-color: #22c55e !important;
+  color: #000 !important;
+}
+
+.migration-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.migration-json-textarea {
+  width: 100%;
+  min-height: 140px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.migration-json-textarea::placeholder {
+  color: var(--text-muted, rgba(255, 255, 255, 0.4));
+}
+
+.migration-json-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.migration-error {
+  font-size: 0.88rem;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.migration-success {
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  font-size: 0.9rem;
+}
+
+.migration-success strong {
+  color: #4ade80;
+}
+
+.migration-preview h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.migration-warning {
+  color: #fbbf24;
+  font-size: 0.85rem;
+  margin-bottom: 8px;
+}
+
+.migration-preview-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.migration-preview-song {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.migration-preview-song.unmatched {
+  opacity: 0.55;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.migration-preview-song-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.migration-match-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.migration-match-badge.exact {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.migration-match-badge.fuzzy {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.migration-match-badge.none {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.migration-preview-items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.migration-preview-items li {
+  font-size: 0.85rem;
+  padding: 4px 0 4px 16px;
+  position: relative;
+}
+
+.migration-preview-items li::before {
+  content: '·';
+  position: absolute;
+  left: 4px;
+  color: var(--text-muted, rgba(255, 255, 255, 0.4));
+}
+
+.migration-preview-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 600px) {
+  .migration-modal-card {
+    padding: 20px;
+    max-width: 100%;
+  }
+  .migration-modal-header {
+    flex-direction: column;
+  }
+}

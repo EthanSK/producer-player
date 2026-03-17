@@ -11,9 +11,9 @@ interface SpectrumAnalyzerProps {
   width: number;
   height: number;
   isFullScreen?: boolean;
-  soloedBand?: number | null;
-  onBandSoloStart?: (bandIndex: number) => void;
-  onBandSoloEnd?: () => void;
+  isPlaying?: boolean;
+  activeBands?: ReadonlySet<number>;
+  onBandToggle?: (bandIndex: number) => void;
 }
 
 const MIN_FREQ = 20;
@@ -36,15 +36,15 @@ export function SpectrumAnalyzer({
   width,
   height,
   isFullScreen = false,
-  soloedBand = null,
-  onBandSoloStart,
-  onBandSoloEnd,
+  isPlaying = false,
+  activeBands,
+  onBandToggle,
 }: SpectrumAnalyzerProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
   const frequencyDataRef = useRef<Float32Array | null>(null);
   const smoothedDataRef = useRef<Float32Array | null>(null);
-  const isSoloingRef = useRef(false);
+  const hasReceivedDataRef = useRef(false);
 
   const dbToY = useCallback(
     (db: number, h: number): number => {
@@ -53,6 +53,9 @@ export function SpectrumAnalyzer({
     },
     []
   );
+
+  // Serialize activeBands for stable dependency tracking
+  const activeBandsKey = activeBands ? Array.from(activeBands).sort().join(',') : '';
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -88,22 +91,13 @@ export function SpectrumAnalyzer({
       smoothedDataRef.current.fill(DB_MIN);
     }
 
-    const draw = () => {
-      if (!canvas || !ctx || !analyserNode) return;
+    const sampleRate = analyserNode.context.sampleRate;
+    const fftSize = analyserNode.fftSize;
+    const hasActiveBands = activeBands && activeBands.size > 0;
 
-      analyserNode.getFloatFrequencyData(frequencyDataRef.current!);
-      const rawData = frequencyDataRef.current!;
+    // Render one frame from smoothedDataRef (used by both live and frozen paths)
+    const renderFrame = () => {
       const smoothed = smoothedDataRef.current!;
-
-      // Smooth the data for less jittery visualization
-      const smoothing = 0.7;
-      for (let i = 0; i < rawData.length; i++) {
-        const val = Number.isFinite(rawData[i]) ? rawData[i] : DB_MIN;
-        smoothed[i] = smoothed[i] * smoothing + val * (1 - smoothing);
-      }
-
-      const sampleRate = analyserNode.context.sampleRate;
-      const fftSize = analyserNode.fftSize;
 
       // Clear
       ctx.clearRect(0, 0, width, height);
@@ -118,12 +112,13 @@ export function SpectrumAnalyzer({
           const band = FREQUENCY_BANDS[i];
           const x1 = frequencyToX(band.minHz, width, MIN_FREQ, MAX_FREQ);
           const x2 = frequencyToX(band.maxHz, width, MIN_FREQ, MAX_FREQ);
+          const isBandActive = activeBands?.has(i) ?? false;
 
-          if (soloedBand === i) {
+          if (isBandActive) {
             ctx.fillStyle = 'rgba(92, 167, 255, 0.15)';
             ctx.fillRect(x1, 0, x2 - x1, height);
 
-            // Brighter border for soloed band
+            // Brighter border for active band
             ctx.strokeStyle = 'rgba(92, 167, 255, 0.6)';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -193,9 +188,10 @@ export function SpectrumAnalyzer({
           const x1 = frequencyToX(band.minHz, width, MIN_FREQ, MAX_FREQ);
           const x2 = frequencyToX(band.maxHz, width, MIN_FREQ, MAX_FREQ);
           const cx = (x1 + x2) / 2;
+          const isBandActive = activeBands?.has(i) ?? false;
 
-          ctx.fillStyle = soloedBand === i ? 'rgba(92, 167, 255, 0.9)' : 'rgba(156, 175, 196, 0.45)';
-          ctx.font = soloedBand === i ? 'bold 11px Inter, sans-serif' : '10px Inter, sans-serif';
+          ctx.fillStyle = isBandActive ? 'rgba(92, 167, 255, 0.9)' : 'rgba(156, 175, 196, 0.45)';
+          ctx.font = isBandActive ? 'bold 11px Inter, sans-serif' : '10px Inter, sans-serif';
           ctx.textAlign = 'center';
           ctx.fillText(band.shortLabel, cx, 14);
         }
@@ -297,18 +293,59 @@ export function SpectrumAnalyzer({
         ctx.shadowBlur = 0;
       }
 
-      // Solo instruction text in full screen
-      if (isFullScreen && soloedBand === null) {
+      // Instruction / status text in full screen
+      if (isFullScreen && !hasActiveBands) {
         ctx.fillStyle = 'rgba(156, 175, 196, 0.3)';
         ctx.font = '11px Inter, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText('Hold a band to solo', width - 8, height - 4);
-      } else if (isFullScreen && soloedBand !== null) {
+        ctx.fillText('Click a band to solo', width - 8, height - 4);
+      } else if (isFullScreen && hasActiveBands) {
+        const activeLabels = Array.from(activeBands!)
+          .sort((a, b) => a - b)
+          .map((i) => FREQUENCY_BANDS[i].label)
+          .join(', ');
         ctx.fillStyle = 'rgba(92, 167, 255, 0.9)';
         ctx.font = 'bold 12px Inter, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(`Soloing: ${FREQUENCY_BANDS[soloedBand].label}`, width - 8, height - 4);
+        ctx.fillText(`Soloing: ${activeLabels}`, width - 8, height - 4);
       }
+    };
+
+    // If not playing, draw a single frozen frame (or empty state if never played)
+    if (!isPlaying) {
+      if (hasReceivedDataRef.current) {
+        renderFrame();
+      } else {
+        // Never played yet — show empty state
+        ctx.fillStyle = 'rgba(9, 14, 19, 0.6)';
+        ctx.fillRect(0, 0, width, height);
+        if (isFullScreen) {
+          ctx.fillStyle = '#9cafc4';
+          ctx.font = '13px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Play a track to see the spectrum', width / 2, height / 2);
+        }
+      }
+      return;
+    }
+
+    // Live animation loop
+    const draw = () => {
+      if (!canvas || !ctx || !analyserNode) return;
+
+      analyserNode.getFloatFrequencyData(frequencyDataRef.current!);
+      const rawData = frequencyDataRef.current!;
+      const smoothed = smoothedDataRef.current!;
+
+      // Smooth the data for less jittery visualization
+      const smoothing = 0.7;
+      for (let i = 0; i < rawData.length; i++) {
+        const val = Number.isFinite(rawData[i]) ? rawData[i] : DB_MIN;
+        smoothed[i] = smoothed[i] * smoothing + val * (1 - smoothing);
+      }
+
+      hasReceivedDataRef.current = true;
+      renderFrame();
 
       animFrameRef.current = requestAnimationFrame(draw);
     };
@@ -320,11 +357,12 @@ export function SpectrumAnalyzer({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [analyserNode, width, height, isFullScreen, soloedBand, dbToY]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyserNode, width, height, isFullScreen, isPlaying, activeBandsKey, dbToY]);
 
-  const handleMouseDown = useCallback(
+  const handleClick = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!isFullScreen || !onBandSoloStart) return;
+      if (!isFullScreen || !onBandToggle) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
 
@@ -334,26 +372,11 @@ export function SpectrumAnalyzer({
       const bandIndex = getBandIndexForFrequency(freq);
 
       if (bandIndex >= 0) {
-        isSoloingRef.current = true;
-        onBandSoloStart(bandIndex);
+        onBandToggle(bandIndex);
       }
     },
-    [isFullScreen, onBandSoloStart, width]
+    [isFullScreen, onBandToggle, width]
   );
-
-  const handleMouseUp = useCallback(() => {
-    if (isSoloingRef.current && onBandSoloEnd) {
-      isSoloingRef.current = false;
-      onBandSoloEnd();
-    }
-  }, [onBandSoloEnd]);
-
-  const handleMouseLeave = useCallback(() => {
-    if (isSoloingRef.current && onBandSoloEnd) {
-      isSoloingRef.current = false;
-      onBandSoloEnd();
-    }
-  }, [onBandSoloEnd]);
 
   return (
     <canvas
@@ -367,9 +390,7 @@ export function SpectrumAnalyzer({
         display: 'block',
         cursor: isFullScreen ? 'crosshair' : 'default',
       }}
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseLeave}
+      onClick={handleClick}
       data-testid={isFullScreen ? 'spectrum-analyzer-full' : 'spectrum-analyzer-mini'}
     />
   );

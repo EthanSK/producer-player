@@ -972,13 +972,13 @@ export function App(): JSX.Element {
   const playbackAudioContextRef = useRef<AudioContext | null>(null);
   const playbackGainNodeRef = useRef<GainNode | null>(null);
   const playbackAnalyserNodeRef = useRef<AnalyserNode | null>(null);
-  const bandSoloFilterRef = useRef<BiquadFilterNode | null>(null);
+  const bandSoloFiltersRef = useRef<BiquadFilterNode[]>([]);
 
   const iCloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const iCloudBackupEnabledRef = useRef(iCloudBackupEnabled);
 
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
-  const [soloedBand, setSoloedBand] = useState<number | null>(null);
+  const [soloedBands, setSoloedBands] = useState<Set<number>>(new Set());
   const [spectrumFullWidth, setSpectrumFullWidth] = useState(860);
   const spectrumFullContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -1680,8 +1680,10 @@ export function App(): JSX.Element {
       playbackAnalyserNodeRef.current = null;
       setAnalyserNode(null);
 
-      bandSoloFilterRef.current?.disconnect();
-      bandSoloFilterRef.current = null;
+      for (const f of bandSoloFiltersRef.current) {
+        try { f.disconnect(); } catch { /* ignore */ }
+      }
+      bandSoloFiltersRef.current = [];
 
       playbackGainNodeRef.current?.disconnect();
       playbackGainNodeRef.current = null;
@@ -2986,63 +2988,50 @@ export function App(): JSX.Element {
     applyPlaybackGain(clampedVolume, appliedNormalizationGainDb);
   }
 
-  function handleBandSoloStart(bandIndex: number): void {
+  function rebuildBandSoloFilters(nextBands: Set<number>): void {
     const audioContext = playbackAudioContextRef.current;
     const gainNode = playbackGainNodeRef.current;
     if (!audioContext || !gainNode) return;
 
-    // Clean up any existing solo filter
-    if (bandSoloFilterRef.current) {
-      try {
-        bandSoloFilterRef.current.disconnect();
-      } catch {
-        // Ignore disconnect errors
-      }
-      bandSoloFilterRef.current = null;
+    // Tear down existing filter chain
+    for (const f of bandSoloFiltersRef.current) {
+      try { gainNode.disconnect(f); } catch { /* ignore */ }
+      try { f.disconnect(); } catch { /* ignore */ }
+    }
+    bandSoloFiltersRef.current = [];
+
+    if (nextBands.size === 0) {
+      // No solo — connect gain directly to destination
+      try { gainNode.connect(audioContext.destination); } catch { /* already connected */ }
+      return;
     }
 
-    const band = FREQUENCY_BANDS[bandIndex];
-    if (!band) return;
+    // Disconnect direct path
+    try { gainNode.disconnect(audioContext.destination); } catch { /* may not be connected */ }
 
-    const filter = createBandSoloFilter(audioContext, band);
-
-    // Reroute: disconnect gain → destination, insert filter
-    try {
-      gainNode.disconnect(audioContext.destination);
-    } catch {
-      // May already be disconnected
+    // Create a merger node so multiple band filters can feed into destination
+    // Each bandpass filter runs in parallel: gain → filter → destination
+    for (const bandIndex of nextBands) {
+      const band = FREQUENCY_BANDS[bandIndex];
+      if (!band) continue;
+      const filter = createBandSoloFilter(audioContext, band);
+      gainNode.connect(filter);
+      filter.connect(audioContext.destination);
+      bandSoloFiltersRef.current.push(filter);
     }
-
-    gainNode.connect(filter);
-    filter.connect(audioContext.destination);
-    bandSoloFilterRef.current = filter;
-    setSoloedBand(bandIndex);
   }
 
-  function handleBandSoloEnd(): void {
-    const audioContext = playbackAudioContextRef.current;
-    const gainNode = playbackGainNodeRef.current;
-    if (!audioContext || !gainNode) return;
-
-    // Remove solo filter and reconnect directly
-    if (bandSoloFilterRef.current) {
-      try {
-        gainNode.disconnect(bandSoloFilterRef.current);
-        bandSoloFilterRef.current.disconnect();
-      } catch {
-        // Ignore disconnect errors
+  function handleBandToggle(bandIndex: number): void {
+    setSoloedBands((prev) => {
+      const next = new Set(prev);
+      if (next.has(bandIndex)) {
+        next.delete(bandIndex);
+      } else {
+        next.add(bandIndex);
       }
-      bandSoloFilterRef.current = null;
-    }
-
-    // Reconnect gain → destination directly
-    try {
-      gainNode.connect(audioContext.destination);
-    } catch {
-      // Already connected
-    }
-
-    setSoloedBand(null);
+      rebuildBandSoloFilters(next);
+      return next;
+    });
   }
 
   async function loadReferenceTrack(
@@ -4353,15 +4342,17 @@ export function App(): JSX.Element {
               </div>
               <div className="player-dock-visualizations">
                 <SpectrumAnalyzer
-                  analyserNode={isPlaying ? analyserNode : null}
+                  analyserNode={analyserNode}
                   width={180}
                   height={48}
+                  isPlaying={isPlaying}
                 />
                 <LevelMeter
-                  analyserNode={isPlaying ? analyserNode : null}
+                  analyserNode={analyserNode}
                   orientation="horizontal"
                   width={120}
                   height={20}
+                  isPlaying={isPlaying}
                 />
               </div>
               <button
@@ -4868,64 +4859,83 @@ export function App(): JSX.Element {
                   <div className="analysis-overlay-viz-row">
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
                       <SpectrumAnalyzer
-                        analyserNode={isPlaying ? analyserNode : null}
+                        analyserNode={analyserNode}
                         width={spectrumFullWidth}
                         height={220}
                         isFullScreen
-                        soloedBand={soloedBand}
-                        onBandSoloStart={handleBandSoloStart}
-                        onBandSoloEnd={handleBandSoloEnd}
+                        activeBands={soloedBands}
+                        onBandToggle={handleBandToggle}
+                        isPlaying={isPlaying}
                       />
                     </div>
                     <div className="analysis-overlay-viz-meters">
                       <LevelMeter
-                        analyserNode={isPlaying ? analyserNode : null}
+                        analyserNode={analyserNode}
                         orientation="vertical"
                         width={40}
-                        height={200}
-                      />
-                      <LevelMeter
-                        analyserNode={isPlaying ? analyserNode : null}
-                        orientation="horizontal"
-                        width={200}
-                        height={32}
-                        showLabel
+                        height={220}
+                        isPlaying={isPlaying}
                       />
                     </div>
                   </div>
-                  {soloedBand !== null && (
+                  {soloedBands.size > 0 && (
                     <p className="spectrum-solo-label" data-testid="spectrum-solo-label">
-                      Soloing: <strong>{FREQUENCY_BANDS[soloedBand].label}</strong> ({FREQUENCY_BANDS[soloedBand].minHz}–{FREQUENCY_BANDS[soloedBand].maxHz} Hz)
+                      Soloing: <strong>{Array.from(soloedBands).sort().map(i => FREQUENCY_BANDS[i].label).join(' + ')}</strong>
                     </p>
                   )}
                 </section>
 
-                <section className="analysis-overlay-section">
-                  <h3>Current track</h3>
-                  <p>
-                    <strong>{selectedPlaybackVersion.fileName}</strong>
-                  </p>
-                  <p className="muted">{selectedSong ? selectedSong.title : 'Unknown track'}</p>
-                  <p className="muted analysis-loading-line" data-testid="analysis-overlay-status">
-                    {analysisStatus === 'loading'
-                      ? 'Loading mastering analysis…'
-                      : analysisStatus === 'error'
-                        ? 'Analysis failed.'
-                        : 'Ready.'}
-                  </p>
-                  {analysisStatus === 'error' ? (
-                    <p className="error" data-testid="analysis-overlay-error">
-                      {analysisError ?? 'Could not analyse this track preview.'}
+                <div className="analysis-overlay-side-by-side">
+                  <section className="analysis-overlay-section">
+                    <h3>Current track</h3>
+                    <p>
+                      <strong>{selectedPlaybackVersion.fileName}</strong>
                     </p>
-                  ) : null}
-                  <p className="muted" data-testid="analysis-overlay-preview-mode">
-                    {referenceTrack
-                      ? playbackPreviewMode === 'reference'
-                        ? `Playing reference: ${referenceTrack.fileName}`
-                        : `Mix loaded · reference ready: ${referenceTrack.fileName}`
-                      : 'Playing your mix'}
-                  </p>
-                </section>
+                    <p className="muted">{selectedSong ? selectedSong.title : 'Unknown track'}</p>
+                    <p className="muted analysis-loading-line" data-testid="analysis-overlay-status">
+                      {analysisStatus === 'loading'
+                        ? 'Loading mastering analysis…'
+                        : analysisStatus === 'error'
+                          ? 'Analysis failed.'
+                          : 'Ready.'}
+                    </p>
+                    {analysisStatus === 'error' ? (
+                      <p className="error" data-testid="analysis-overlay-error">
+                        {analysisError ?? 'Could not analyse this track preview.'}
+                      </p>
+                    ) : null}
+                    <p className="muted" data-testid="analysis-overlay-preview-mode">
+                      {referenceTrack
+                        ? playbackPreviewMode === 'reference'
+                          ? `Playing reference: ${referenceTrack.fileName}`
+                          : `Mix loaded · reference ready: ${referenceTrack.fileName}`
+                        : 'Playing your mix'}
+                    </p>
+                  </section>
+
+                  <section className="analysis-overlay-section">
+                    <h3>Tonal balance</h3>
+                    <div className="analysis-tonal-balance detailed">
+                      {(
+                        [
+                          ['Low', analysis?.tonalBalance.low ?? 0],
+                          ['Mid', analysis?.tonalBalance.mid ?? 0],
+                          ['High', analysis?.tonalBalance.high ?? 0],
+                        ] as Array<[string, number]>
+                      ).map(([label, value]) => (
+                        <div key={label} className="analysis-band-row">
+                          <span>{label}</span>
+                          <div className="analysis-band-meter" aria-hidden="true">
+                            <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
+                          </div>
+                          <strong>
+                            {analysisStatus === 'ready' && analysis ? formatPercent(value) : 'Loading…'}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
 
                 <section className="analysis-overlay-section">
                   <h3>Loudness &amp; peaks</h3>
@@ -4962,29 +4972,6 @@ export function App(): JSX.Element {
                       <span className="analysis-stat-label">Current loudness</span>
                       <strong>{shortTermEstimateText}</strong>
                     </div>
-                  </div>
-                </section>
-
-                <section className="analysis-overlay-section">
-                  <h3>Tonal balance</h3>
-                  <div className="analysis-tonal-balance detailed">
-                    {(
-                      [
-                        ['Low', analysis?.tonalBalance.low ?? 0],
-                        ['Mid', analysis?.tonalBalance.mid ?? 0],
-                        ['High', analysis?.tonalBalance.high ?? 0],
-                      ] as Array<[string, number]>
-                    ).map(([label, value]) => (
-                      <div key={label} className="analysis-band-row">
-                        <span>{label}</span>
-                        <div className="analysis-band-meter" aria-hidden="true">
-                          <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
-                        </div>
-                        <strong>
-                          {analysisStatus === 'ready' && analysis ? formatPercent(value) : 'Loading…'}
-                        </strong>
-                      </div>
-                    ))}
                   </div>
                 </section>
 

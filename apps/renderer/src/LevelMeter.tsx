@@ -6,6 +6,7 @@ interface LevelMeterProps {
   width?: number;
   height?: number;
   showLabel?: boolean;
+  isPlaying?: boolean;
 }
 
 const DB_MIN = -60;
@@ -26,6 +27,7 @@ export function LevelMeter({
   width = 120,
   height = 20,
   showLabel = false,
+  isPlaying = false,
 }: LevelMeterProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -33,6 +35,7 @@ export function LevelMeter({
   const peakLevelRef = useRef(DB_MIN);
   const peakHoldRef = useRef(DB_MIN);
   const peakHoldTimeRef = useRef(0);
+  const hasReceivedDataRef = useRef(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -47,76 +50,10 @@ export function LevelMeter({
     ctx.scale(dpr, dpr);
 
     const isHorizontal = orientation === 'horizontal';
-    const meterLength = isHorizontal ? width : height;
     const meterThickness = isHorizontal ? height : width;
 
-    if (!analyserNode) {
-      // Draw empty state
-      ctx.fillStyle = 'rgba(9, 14, 19, 0.6)';
-      ctx.fillRect(0, 0, width, height);
-
-      // Empty meter groove
-      const grooveColor = 'rgba(255, 255, 255, 0.04)';
-      if (isHorizontal) {
-        ctx.fillStyle = grooveColor;
-        const grooveH = Math.max(4, meterThickness * 0.5);
-        const grooveY = (height - grooveH) / 2;
-        ctx.fillRect(2, grooveY, width - 4, grooveH);
-      } else {
-        ctx.fillStyle = grooveColor;
-        const grooveW = Math.max(4, meterThickness * 0.5);
-        const grooveX = (width - grooveW) / 2;
-        ctx.fillRect(grooveX, 2, grooveW, height - 4);
-      }
-      return;
-    }
-
-    const timeDomainData = new Float32Array(analyserNode.fftSize);
-
-    const draw = () => {
-      if (!canvas || !ctx || !analyserNode) return;
-
-      analyserNode.getFloatTimeDomainData(timeDomainData);
-
-      // Calculate RMS and peak
-      let sum = 0;
-      let peak = 0;
-      for (let i = 0; i < timeDomainData.length; i++) {
-        const sample = timeDomainData[i];
-        sum += sample * sample;
-        const abs = Math.abs(sample);
-        if (abs > peak) peak = abs;
-      }
-
-      const rmsRaw = Math.sqrt(sum / timeDomainData.length);
-      const rmsDb = rmsRaw > 0 ? 20 * Math.log10(rmsRaw) : DB_MIN;
-      const peakDb = peak > 0 ? 20 * Math.log10(peak) : DB_MIN;
-
-      // Apply ballistics - fast attack, slow release
-      if (rmsDb > rmsLevelRef.current) {
-        rmsLevelRef.current = rmsLevelRef.current * ATTACK_SMOOTHING + rmsDb * (1 - ATTACK_SMOOTHING);
-      } else {
-        rmsLevelRef.current = rmsLevelRef.current * RELEASE_SMOOTHING + rmsDb * (1 - RELEASE_SMOOTHING);
-      }
-
-      if (peakDb > peakLevelRef.current) {
-        peakLevelRef.current = peakDb;
-      } else {
-        peakLevelRef.current = peakLevelRef.current * RELEASE_SMOOTHING + peakDb * (1 - RELEASE_SMOOTHING);
-      }
-
-      // Peak hold
-      const now = performance.now();
-      if (peakDb >= peakHoldRef.current) {
-        peakHoldRef.current = peakDb;
-        peakHoldTimeRef.current = now;
-      } else if (now - peakHoldTimeRef.current > PEAK_HOLD_TIME_MS) {
-        peakHoldRef.current -= PEAK_FALL_RATE_DB_PER_FRAME;
-        if (peakHoldRef.current < DB_MIN) {
-          peakHoldRef.current = DB_MIN;
-        }
-      }
-
+    // Render a single frame using current ref values
+    const renderFrame = () => {
       const rmsNorm = dbToNormalized(rmsLevelRef.current);
       const peakNorm = dbToNormalized(peakLevelRef.current);
       const peakHoldNorm = dbToNormalized(peakHoldRef.current);
@@ -230,6 +167,105 @@ export function LevelMeter({
           ctx.fillRect(meterX, holdY - 1, meterW, 2);
         }
       }
+    };
+
+    if (!analyserNode) {
+      // No analyser at all: draw empty state or frozen state
+      if (hasReceivedDataRef.current) {
+        renderFrame();
+      } else {
+        ctx.fillStyle = 'rgba(9, 14, 19, 0.6)';
+        ctx.fillRect(0, 0, width, height);
+
+        // Empty meter groove
+        const grooveColor = 'rgba(255, 255, 255, 0.04)';
+        if (isHorizontal) {
+          ctx.fillStyle = grooveColor;
+          const grooveH = Math.max(4, meterThickness * 0.5);
+          const grooveY = (height - grooveH) / 2;
+          ctx.fillRect(2, grooveY, width - 4, grooveH);
+        } else {
+          ctx.fillStyle = grooveColor;
+          const grooveW = Math.max(4, meterThickness * 0.5);
+          const grooveX = (width - grooveW) / 2;
+          ctx.fillRect(grooveX, 2, grooveW, height - 4);
+        }
+      }
+      return;
+    }
+
+    // If not playing, render a frozen frame with last known values
+    if (!isPlaying) {
+      if (hasReceivedDataRef.current) {
+        renderFrame();
+      } else {
+        // Never played yet — show empty groove
+        ctx.fillStyle = 'rgba(9, 14, 19, 0.6)';
+        ctx.fillRect(0, 0, width, height);
+        const grooveColor = 'rgba(255, 255, 255, 0.04)';
+        if (isHorizontal) {
+          ctx.fillStyle = grooveColor;
+          const grooveH = Math.max(4, meterThickness * 0.5);
+          const grooveY = (height - grooveH) / 2;
+          ctx.fillRect(2, grooveY, width - 4, grooveH);
+        } else {
+          ctx.fillStyle = grooveColor;
+          const grooveW = Math.max(4, meterThickness * 0.5);
+          const grooveX = (width - grooveW) / 2;
+          ctx.fillRect(grooveX, 2, grooveW, height - 4);
+        }
+      }
+      return;
+    }
+
+    const timeDomainData = new Float32Array(analyserNode.fftSize);
+
+    const draw = () => {
+      if (!canvas || !ctx || !analyserNode) return;
+
+      analyserNode.getFloatTimeDomainData(timeDomainData);
+
+      // Calculate RMS and peak
+      let sum = 0;
+      let peak = 0;
+      for (let i = 0; i < timeDomainData.length; i++) {
+        const sample = timeDomainData[i];
+        sum += sample * sample;
+        const abs = Math.abs(sample);
+        if (abs > peak) peak = abs;
+      }
+
+      const rmsRaw = Math.sqrt(sum / timeDomainData.length);
+      const rmsDb = rmsRaw > 0 ? 20 * Math.log10(rmsRaw) : DB_MIN;
+      const peakDb = peak > 0 ? 20 * Math.log10(peak) : DB_MIN;
+
+      // Apply ballistics - fast attack, slow release
+      if (rmsDb > rmsLevelRef.current) {
+        rmsLevelRef.current = rmsLevelRef.current * ATTACK_SMOOTHING + rmsDb * (1 - ATTACK_SMOOTHING);
+      } else {
+        rmsLevelRef.current = rmsLevelRef.current * RELEASE_SMOOTHING + rmsDb * (1 - RELEASE_SMOOTHING);
+      }
+
+      if (peakDb > peakLevelRef.current) {
+        peakLevelRef.current = peakDb;
+      } else {
+        peakLevelRef.current = peakLevelRef.current * RELEASE_SMOOTHING + peakDb * (1 - RELEASE_SMOOTHING);
+      }
+
+      // Peak hold
+      const now = performance.now();
+      if (peakDb >= peakHoldRef.current) {
+        peakHoldRef.current = peakDb;
+        peakHoldTimeRef.current = now;
+      } else if (now - peakHoldTimeRef.current > PEAK_HOLD_TIME_MS) {
+        peakHoldRef.current -= PEAK_FALL_RATE_DB_PER_FRAME;
+        if (peakHoldRef.current < DB_MIN) {
+          peakHoldRef.current = DB_MIN;
+        }
+      }
+
+      hasReceivedDataRef.current = true;
+      renderFrame();
 
       animFrameRef.current = requestAnimationFrame(draw);
     };
@@ -241,7 +277,7 @@ export function LevelMeter({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [analyserNode, orientation, width, height, showLabel]);
+  }, [analyserNode, orientation, width, height, showLabel, isPlaying]);
 
   return (
     <canvas

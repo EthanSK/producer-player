@@ -3819,19 +3819,41 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
-              <button
-                type="button"
-                className="checklist-play-toggle"
-                data-playing={isPlaying ? 'true' : 'false'}
-                aria-label={isPlaying ? 'Pause' : 'Play'}
-                title={isPlaying ? 'Pause playback' : 'Resume playback'}
-                data-testid="song-checklist-play-toggle"
-                onClick={() => {
-                  void handleTogglePlayback();
-                }}
-              >
-                <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-              </button>
+              <div className="checklist-transport-group">
+                <button
+                  type="button"
+                  className="checklist-skip-button"
+                  data-testid="song-checklist-skip-back-10"
+                  onClick={() => handleSkipSeconds(-10)}
+                  title="Skip back 10 seconds"
+                  aria-label="Skip back 10 seconds"
+                >
+                  −10s
+                </button>
+                <button
+                  type="button"
+                  className="checklist-play-toggle"
+                  data-playing={isPlaying ? 'true' : 'false'}
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                  data-testid="song-checklist-play-toggle"
+                  onClick={() => {
+                    void handleTogglePlayback();
+                  }}
+                >
+                  <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="checklist-skip-button"
+                  data-testid="song-checklist-skip-forward-10"
+                  onClick={() => handleSkipSeconds(10)}
+                  title="Skip forward 10 seconds"
+                  aria-label="Skip forward 10 seconds"
+                >
+                  +10s
+                </button>
+              </div>
             </div>
 
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>

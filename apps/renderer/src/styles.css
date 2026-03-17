@@ -1350,6 +1350,35 @@ input[type='range'] {
   flex-wrap: wrap;
 }
 
+.checklist-transport-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+button.checklist-skip-button {
+  width: auto;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: rgba(92, 167, 255, 0.10);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+button.checklist-skip-button:hover {
+  background: rgba(92, 167, 255, 0.22);
+}
+
 button.checklist-play-toggle {
   width: 36px;
   height: 36px;

@@ -3433,27 +3433,27 @@ export function App(): JSX.Element {
               ) : null}
 
               <div className="analysis-stat-grid compact">
-                <div className="analysis-stat-card" data-testid="analysis-integrated-stat">
+                <div className="analysis-stat-card" data-testid="analysis-integrated-stat" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
                   <span className="analysis-stat-label">Integrated LUFS</span>
                   <strong>{measuredIntegratedText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-lra-stat">
+                <div className="analysis-stat-card" data-testid="analysis-lra-stat" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
                   <span className="analysis-stat-label">Loudness range</span>
                   <strong>{measuredLraText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-true-peak-stat">
+                <div className="analysis-stat-card" data-testid="analysis-true-peak-stat" title="True Peak — the highest inter-sample peak level in the track, measured via oversampling.">
                   <span className="analysis-stat-label">True Peak</span>
                   <strong>{measuredTruePeakText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-max-short-term-stat">
+                <div className="analysis-stat-card" data-testid="analysis-max-short-term-stat" title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time.">
                   <span className="analysis-stat-label">Peak short-term</span>
                   <strong>{measuredMaxShortTermText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-max-momentary-stat">
+                <div className="analysis-stat-card" data-testid="analysis-max-momentary-stat" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
                   <span className="analysis-stat-label">Peak momentary</span>
                   <strong>{measuredMaxMomentaryText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-short-term-stat">
+                <div className="analysis-stat-card" data-testid="analysis-short-term-stat" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
                   <span className="analysis-stat-label">Current loudness</span>
                   <strong>{shortTermEstimateText}</strong>
                 </div>
@@ -4524,35 +4524,35 @@ export function App(): JSX.Element {
                 <section className="analysis-overlay-section">
                   <h3>Loudness &amp; peaks</h3>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
-                    <div className="analysis-stat-card">
+                    <div className="analysis-stat-card" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
                       <span className="analysis-stat-label">Integrated LUFS</span>
                       <strong>{measuredIntegratedText}</strong>
                     </div>
-                    <div className="analysis-stat-card">
+                    <div className="analysis-stat-card" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
                       <span className="analysis-stat-label">Loudness range</span>
                       <strong>{measuredLraText}</strong>
                     </div>
-                    <div className="analysis-stat-card">
+                    <div className="analysis-stat-card" title="True Peak — the highest inter-sample peak level in the track, measured via oversampling.">
                       <span className="analysis-stat-label">True Peak</span>
                       <strong>{measuredTruePeakText}</strong>
                     </div>
-                    <div className="analysis-stat-card">
+                    <div className="analysis-stat-card" title="Sample Peak — the highest digital sample value in the track, without oversampling.">
                       <span className="analysis-stat-label">Sample peak</span>
                       <strong>{measuredSamplePeakText}</strong>
                     </div>
-                    <div className="analysis-stat-card">
+                    <div className="analysis-stat-card" title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time.">
                       <span className="analysis-stat-label">Peak short-term</span>
                       <strong>{measuredMaxShortTermText}</strong>
                     </div>
-                    <div className="analysis-stat-card">
+                    <div className="analysis-stat-card" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
                       <span className="analysis-stat-label">Peak momentary</span>
                       <strong>{measuredMaxMomentaryText}</strong>
                     </div>
-                    <div className="analysis-stat-card">
+                    <div className="analysis-stat-card" title="Average volume level across the entire track (RMS-based), in dBFS.">
                       <span className="analysis-stat-label">Mean volume</span>
                       <strong>{measuredMeanVolumeText}</strong>
                     </div>
-                    <div className="analysis-stat-card">
+                    <div className="analysis-stat-card" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
                       <span className="analysis-stat-label">Current loudness</span>
                       <strong>{shortTermEstimateText}</strong>
                     </div>

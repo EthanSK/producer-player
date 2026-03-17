@@ -3857,6 +3857,19 @@ export function App(): JSX.Element {
             </div>
 
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
+              <input
+                value={checklistDraftText}
+                onChange={(event) => setChecklistDraftText(event.currentTarget.value)}
+                onFocus={handleChecklistInputFocus}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleAddChecklistItem();
+                  }
+                }}
+                placeholder="Add a checklist item"
+                data-testid="song-checklist-input"
+              />
               {checklistCapturedTimestamp !== null ? (
                 <div className="checklist-timestamp-preview-group">
                   <button
@@ -3891,19 +3904,6 @@ export function App(): JSX.Element {
                   </span>
                 </div>
               ) : null}
-              <input
-                value={checklistDraftText}
-                onChange={(event) => setChecklistDraftText(event.currentTarget.value)}
-                onFocus={handleChecklistInputFocus}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    handleAddChecklistItem();
-                  }
-                }}
-                placeholder="Add a checklist item"
-                data-testid="song-checklist-input"
-              />
               <button
                 type="button"
                 onClick={handleAddChecklistItem}

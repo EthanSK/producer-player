@@ -3577,23 +3577,32 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="skip-button"
-                    data-testid="player-skip-back-10"
-                    onClick={() => handleSkipSeconds(-10)}
-                    title="Skip back 10 seconds."
+                    data-testid="player-skip-back-5"
+                    onClick={() => handleSkipSeconds(-5)}
+                    title="Skip back 5 seconds."
                   >
-                    −10s
+                    −5s
                   </button>
                   <button
                     type="button"
                     className="skip-button"
-                    data-testid="player-skip-forward-10"
-                    onClick={() => handleSkipSeconds(10)}
-                    title="Skip forward 10 seconds."
+                    data-testid="player-skip-forward-5"
+                    onClick={() => handleSkipSeconds(5)}
+                    title="Skip forward 5 seconds."
                   >
-                    +10s
+                    +5s
                   </button>
                 </div>
                 <div className="transport-main-row">
+                  <button
+                    type="button"
+                    className="skip-button skip-button-small"
+                    data-testid="player-skip-back-1"
+                    onClick={() => handleSkipSeconds(-1)}
+                    title="Skip back 1 second."
+                  >
+                    −1s
+                  </button>
                   <button
                     type="button"
                     data-testid="player-prev"
@@ -3622,6 +3631,15 @@ export function App(): JSX.Element {
                     title="Jump to next track in the current queue."
                   >
                     ▶▶
+                  </button>
+                  <button
+                    type="button"
+                    className="skip-button skip-button-small"
+                    data-testid="player-skip-forward-1"
+                    onClick={() => handleSkipSeconds(1)}
+                    title="Skip forward 1 second."
+                  >
+                    +1s
                   </button>
                 </div>
               </div>
@@ -3825,12 +3843,22 @@ export function App(): JSX.Element {
                 <button
                   type="button"
                   className="checklist-skip-button"
-                  data-testid="song-checklist-skip-back-10"
-                  onClick={() => handleSkipSeconds(-10)}
-                  title="Skip back 10 seconds"
-                  aria-label="Skip back 10 seconds"
+                  data-testid="song-checklist-skip-back-5"
+                  onClick={() => handleSkipSeconds(-5)}
+                  title="Skip back 5 seconds"
+                  aria-label="Skip back 5 seconds"
                 >
-                  −10s
+                  −5s
+                </button>
+                <button
+                  type="button"
+                  className="checklist-skip-button checklist-skip-button-small"
+                  data-testid="song-checklist-skip-back-1"
+                  onClick={() => handleSkipSeconds(-1)}
+                  title="Skip back 1 second"
+                  aria-label="Skip back 1 second"
+                >
+                  −1s
                 </button>
                 <button
                   type="button"
@@ -3847,13 +3875,23 @@ export function App(): JSX.Element {
                 </button>
                 <button
                   type="button"
-                  className="checklist-skip-button"
-                  data-testid="song-checklist-skip-forward-10"
-                  onClick={() => handleSkipSeconds(10)}
-                  title="Skip forward 10 seconds"
-                  aria-label="Skip forward 10 seconds"
+                  className="checklist-skip-button checklist-skip-button-small"
+                  data-testid="song-checklist-skip-forward-1"
+                  onClick={() => handleSkipSeconds(1)}
+                  title="Skip forward 1 second"
+                  aria-label="Skip forward 1 second"
                 >
-                  +10s
+                  +1s
+                </button>
+                <button
+                  type="button"
+                  className="checklist-skip-button"
+                  data-testid="song-checklist-skip-forward-5"
+                  onClick={() => handleSkipSeconds(5)}
+                  title="Skip forward 5 seconds"
+                  aria-label="Skip forward 5 seconds"
+                >
+                  +5s
                 </button>
               </div>
             </div>

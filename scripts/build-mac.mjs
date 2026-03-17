@@ -94,7 +94,11 @@ if (isMasTarget) {
   buildEnv.PRODUCER_PLAYER_SKIP_BUNDLED_FFMPEG = 'true';
   maybeWarnAboutSigningIdentity(target === 'mas' ? 'Apple Distribution' : 'Apple Development');
 } else {
-  buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
+  // Allow signing when CSC_LINK or CSC_NAME is explicitly provided (e.g. CI);
+  // otherwise disable auto-discovery so local unsigned builds don't error.
+  if (!process.env.CSC_LINK && !process.env.CSC_NAME) {
+    buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
+  }
   buildEnv.PRODUCER_PLAYER_SKIP_BUNDLED_FFMPEG = 'false';
 }
 

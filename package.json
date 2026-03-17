@@ -53,12 +53,17 @@
       "apps/renderer/dist/**/*",
       "package.json"
     ],
+    "afterSign": "scripts/notarize.js",
     "mac": {
       "target": [
         "zip"
       ],
       "category": "public.app-category.music",
       "icon": "assets/icon/ProducerPlayer.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "artifactName": "Producer-Player-${version}-mac-${arch}.${ext}"
     },
     "mas": {
@@ -91,6 +96,7 @@
     }
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
     "electron-builder": "^26.0.12",

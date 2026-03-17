@@ -66,7 +66,7 @@ jobs:
           echo "is_tag_release=false" >> "$GITHUB_OUTPUT"
 
   build-desktop:
-    name: Build desktop unsigned (${{ matrix.slug }})
+    name: Build desktop (${{ matrix.slug }})
     needs: compute-version
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -100,7 +100,30 @@ jobs:
           set -euo pipefail
           npm version "${{ needs.compute-version.outputs.build_version }}" --no-git-tag-version --allow-same-version
 
-      - name: Build unsigned desktop package
+      # ─── macOS Code Signing & Notarization ───────────────────────────
+      # To enable signed + notarized macOS builds, add these GitHub Actions
+      # secrets in the repo settings (Settings → Secrets and variables → Actions):
+      #
+      #   CSC_LINK                     – base64-encoded .p12 certificate
+      #                                  (export from Keychain → base64 -i cert.p12 | pbcopy)
+      #   CSC_KEY_PASSWORD             – password used when exporting the .p12
+      #   APPLE_ID                     – Apple ID email for notarization
+      #   APPLE_APP_SPECIFIC_PASSWORD  – app-specific password (appleid.apple.com → Security)
+      #   APPLE_TEAM_ID                – 10-character Apple Developer Team ID
+      #
+      # electron-builder reads CSC_LINK / CSC_KEY_PASSWORD automatically.
+      # The notarize.js afterSign hook reads the APPLE_* variables.
+      # If secrets are not set the build produces an unsigned binary (no error).
+      # ─────────────────────────────────────────────────────────────────
+
+      - name: Build desktop package
+        env:
+          # macOS signing (only populated when secrets exist)
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release:desktop:${{ matrix.slug }}
 
       - name: Generate SHA-256 checksum (macOS/Linux)

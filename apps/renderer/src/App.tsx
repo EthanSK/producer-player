@@ -2604,7 +2604,9 @@ export function App(): JSX.Element {
       return null;
     }
     const time = audio.currentTime;
-    return Number.isFinite(time) && time >= 0 ? time : null;
+    // Round to whole seconds — display already shows whole seconds via
+    // formatTime(), so storing sub-second precision is misleading on export.
+    return Number.isFinite(time) && time >= 0 ? Math.floor(time) : null;
   }
 
   function handleOpenSongChecklist(songId: string): void {

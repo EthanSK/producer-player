@@ -48,6 +48,25 @@ const TEST_REFERENCE_IMPORT_PATH =
 const ANALYSIS_DELAY_MS = Number(process.env.PRODUCER_PLAYER_ANALYSIS_DELAY_MS ?? '0');
 const PUBLIC_REPOSITORY_ORIGIN = 'https://github.com';
 const PUBLIC_REPOSITORY_PATH = '/EthanSK/producer-player';
+
+/**
+ * Trusted external URLs that may be opened from the renderer.
+ * Each entry is an { origin, pathPrefix? } pair.
+ *   • origin   – must match exactly (scheme + host + port).
+ *   • pathPrefix – when provided the URL pathname must equal it or start
+ *                  with it followed by '/'. Omit to allow any path under
+ *                  the origin.
+ *
+ * To allow a new external link, just add another entry here.
+ */
+const TRUSTED_EXTERNAL_URLS: { origin: string; pathPrefix?: string }[] = [
+  // GitHub repository (existing)
+  { origin: 'https://github.com', pathPrefix: '/EthanSK/producer-player' },
+  // GitHub Pages site (title branding link)
+  { origin: 'https://ethansk.github.io', pathPrefix: '/producer-player' },
+  // Linkfire "by 3000 AD" link
+  { origin: 'https://lnkfi.re', pathPrefix: '/3000AD' },
+];
 const DEVELOPMENT_WINDOW_ICON_PATH = resolve(__dirname, '../../../assets/icon/png/icon-512.png');
 
 const PLAYBACK_MIME_BY_EXTENSION: Record<string, string> = {
@@ -1435,20 +1454,33 @@ function validateRendererDevUrl(url: string): void {
   }
 }
 
-function parseTrustedRepositoryUrl(url: string): URL {
+/**
+ * Validate that a URL matches one of the entries in TRUSTED_EXTERNAL_URLS.
+ * Throws if the URL is not in the allowlist — keeps the app secure by
+ * requiring every external link to be explicitly approved.
+ */
+function parseTrustedExternalUrl(url: string): URL {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error(`Invalid support URL: ${url}`);
+    throw new Error(`Invalid URL: ${url}`);
   }
 
-  const matchesRepositoryPath =
-    parsed.pathname === PUBLIC_REPOSITORY_PATH ||
-    parsed.pathname.startsWith(`${PUBLIC_REPOSITORY_PATH}/`);
+  const isTrusted = TRUSTED_EXTERNAL_URLS.some(({ origin, pathPrefix }) => {
+    if (parsed.origin !== origin) return false;
+    if (pathPrefix === undefined) return true;
+    return (
+      parsed.pathname === pathPrefix ||
+      parsed.pathname.startsWith(`${pathPrefix}/`)
+    );
+  });
 
-  if (parsed.origin !== PUBLIC_REPOSITORY_ORIGIN || !matchesRepositoryPath) {
-    throw new Error('Only Producer Player GitHub links are allowed.');
+  if (!isTrusted) {
+    throw new Error(
+      'This external URL is not in the trusted allowlist. ' +
+        'Add it to TRUSTED_EXTERNAL_URLS in main.ts to allow it.'
+    );
   }
 
   return parsed;
@@ -1875,7 +1907,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL_URL, async (_event, url: string) => {
-    const trustedUrl = parseTrustedRepositoryUrl(url);
+    const trustedUrl = parseTrustedExternalUrl(url);
     await shell.openExternal(trustedUrl.toString());
   });
 

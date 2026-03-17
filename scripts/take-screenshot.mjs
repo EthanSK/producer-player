@@ -274,6 +274,9 @@ async function main() {
     });
     await page.waitForTimeout(500);
 
+    // Hide test-mode-only UI elements that shouldn't appear in screenshots
+    await page.addStyleTag({ content: '.path-linker { display: none !important; }' });
+
     // --- Start audio playback so spectrum analyzer & level meter are active ---
     // Close checklist modal first if open (we'll reopen it later for the checklist screenshot)
     const doneButtonPre = page.getByText('Done', { exact: true });

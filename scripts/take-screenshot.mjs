@@ -20,38 +20,32 @@ const SCREENSHOT_DIR = path.join(workspaceRoot, 'site/assets/screenshots');
 
 // Realistic song names for a producer's album (6 songs, fits cleanly in window)
 const SAMPLE_SONGS = [
-  // thedrums: 6 versions — most recent, auto-selected to showcase version history
+  // thedrums: V6, 5 versions (matching Ethan's real app exactly)
   { name: 'thedrums v6.wav',                  date: '2026-03-16T21:04:53.000Z' },
-  { name: 'thedrums v5.wav',                  date: '2026-03-14T10:00:00.000Z' },
-  { name: 'thedrums v4.wav',                  date: '2026-03-10T08:15:00.000Z' },
-  { name: 'thedrums v3.wav',                  date: '2026-03-05T20:30:00.000Z' },
-  { name: 'thedrums v2.wav',                  date: '2026-02-25T13:00:00.000Z' },
-  { name: 'thedrums v1.wav',                  date: '2026-02-15T17:45:00.000Z' },
-  // barber smith: 3 versions
+  { name: 'thedrums v5.wav',                  date: '2026-02-22T00:41:57.000Z' },
+  { name: 'thedrums v4.wav',                  date: '2025-12-29T01:52:06.000Z' },
+  { name: 'thedrumsv3.wav',                   date: '2025-12-09T23:23:50.000Z' },
+  { name: 'thedrumsv2.wav',                   date: '2025-12-05T23:10:31.000Z' },
+  // barber smith: V3, 2 versions
   { name: 'barber smith v3.wav',              date: '2025-11-19T02:06:38.000Z' },
-  { name: 'barber smith v2.wav',              date: '2025-10-20T14:00:00.000Z' },
   { name: 'barber smith v1.wav',              date: '2025-09-15T10:00:00.000Z' },
-  // bend the knees: 6 versions
+  // bend the knees: V6, 4 versions
   { name: 'bend the knees v6.wav',            date: '2025-12-13T17:31:21.000Z' },
-  { name: 'bend the knees v5.wav',            date: '2025-12-01T12:00:00.000Z' },
   { name: 'bend the knees v4.wav',            date: '2025-11-20T09:00:00.000Z' },
-  { name: 'bend the knees v3.wav',            date: '2025-11-10T15:30:00.000Z' },
   { name: 'bend the knees v2.wav',            date: '2025-10-25T18:00:00.000Z' },
   { name: 'bend the knees v1.wav',            date: '2025-10-05T11:00:00.000Z' },
-  // Engineering|Alignment: 5 versions
+  // Engineering|Alignment: V5, 4 versions
   { name: 'Engineering|Alignment v5.wav',     date: '2026-03-16T23:17:44.000Z' },
-  { name: 'Engineering|Alignment v4.wav',     date: '2026-03-10T14:00:00.000Z' },
   { name: 'Engineering|Alignment v3.wav',     date: '2026-03-01T20:00:00.000Z' },
   { name: 'Engineering|Alignment v2.wav',     date: '2026-02-20T16:00:00.000Z' },
   { name: 'Engineering|Alignment v1.wav',     date: '2026-02-10T12:00:00.000Z' },
-  // leaky: 6 versions
+  // leaky: V6, 5 versions
   { name: 'leaky v6.wav',                     date: '2026-03-08T00:13:12.000Z' },
   { name: 'leaky v5.wav',                     date: '2026-03-01T15:00:00.000Z' },
   { name: 'leaky v4.wav',                     date: '2026-02-22T10:00:00.000Z' },
-  { name: 'leaky v3.wav',                     date: '2026-02-15T08:00:00.000Z' },
   { name: 'leaky v2.wav',                     date: '2026-02-05T22:00:00.000Z' },
   { name: 'leaky v1.wav',                     date: '2026-01-20T14:00:00.000Z' },
-  // holy fuck kevin parker: 8 versions (showing high version count)
+  // holy fuck kevin parker: V14, 12 versions
   { name: 'holy fuck kevin parker v14.wav',   date: '2026-03-10T01:27:28.000Z' },
   { name: 'holy fuck kevin parker v13.wav',   date: '2026-03-05T20:00:00.000Z' },
   { name: 'holy fuck kevin parker v12.wav',   date: '2026-02-28T15:00:00.000Z' },
@@ -59,18 +53,39 @@ const SAMPLE_SONGS = [
   { name: 'holy fuck kevin parker v10.wav',   date: '2026-02-15T08:00:00.000Z' },
   { name: 'holy fuck kevin parker v9.wav',    date: '2026-02-10T12:00:00.000Z' },
   { name: 'holy fuck kevin parker v8.wav',    date: '2026-02-01T16:00:00.000Z' },
-  { name: 'holy fuck kevin parker v1.wav',    date: '2026-01-15T11:00:00.000Z' },
-  // geetar seshnew: 9 versions
+  { name: 'holy fuck kevin parker v7.wav',    date: '2026-01-25T14:00:00.000Z' },
+  { name: 'holy fuck kevin parker v6.wav',    date: '2026-01-20T10:00:00.000Z' },
+  { name: 'holy fuck kevin parker v5.wav',    date: '2026-01-15T11:00:00.000Z' },
+  { name: 'holy fuck kevin parker v3.wav',    date: '2025-12-20T16:00:00.000Z' },
+  { name: 'holy fuck kevin parker v1.wav',    date: '2025-11-15T11:00:00.000Z' },
+  // geetar seshnew: V9, 8 versions
   { name: 'geetar seshnew v9.wav',            date: '2026-03-13T00:14:10.000Z' },
   { name: 'geetar seshnew v8.wav',            date: '2026-03-08T18:00:00.000Z' },
   { name: 'geetar seshnew v7.wav',            date: '2026-03-01T14:00:00.000Z' },
+  { name: 'geetar seshnew v6.wav',            date: '2026-02-22T12:00:00.000Z' },
+  { name: 'geetar seshnew v5.wav',            date: '2026-02-15T10:00:00.000Z' },
+  { name: 'geetar seshnew v4.wav',            date: '2026-02-08T08:00:00.000Z' },
+  { name: 'geetar seshnew v2.wav',            date: '2026-01-25T15:00:00.000Z' },
   { name: 'geetar seshnew v1.wav',            date: '2026-01-20T09:00:00.000Z' },
-  // smokeweedwav: 5 versions
+  // smokeweedwav: V5, 5 versions (estimated)
   { name: 'smokeweedwav v5.wav',              date: '2026-03-12T11:30:00.000Z' },
   { name: 'smokeweedwav v4.wav',              date: '2026-03-05T09:00:00.000Z' },
   { name: 'smokeweedwav v3.wav',              date: '2026-02-25T15:00:00.000Z' },
   { name: 'smokeweedwav v2.wav',              date: '2026-02-15T12:00:00.000Z' },
   { name: 'smokeweedwav v1.wav',              date: '2026-02-01T10:00:00.000Z' },
+  // 4 additional songs to reach 12 tracks total (placeholder names — update when known)
+  { name: 'bassline theory v3.wav',           date: '2026-03-14T16:00:00.000Z' },
+  { name: 'bassline theory v2.wav',           date: '2026-03-01T12:00:00.000Z' },
+  { name: 'bassline theory v1.wav',           date: '2026-02-10T14:00:00.000Z' },
+  { name: 'night terrace v4.wav',             date: '2026-03-11T20:00:00.000Z' },
+  { name: 'night terrace v2.wav',             date: '2026-02-15T18:00:00.000Z' },
+  { name: 'night terrace v1.wav',             date: '2026-01-28T10:00:00.000Z' },
+  { name: 'soft collapse v2.wav',             date: '2026-03-09T14:00:00.000Z' },
+  { name: 'soft collapse v1.wav',             date: '2026-02-20T11:00:00.000Z' },
+  { name: 'dopamine rush v7.wav',             date: '2026-03-15T22:00:00.000Z' },
+  { name: 'dopamine rush v5.wav',             date: '2026-03-05T15:00:00.000Z' },
+  { name: 'dopamine rush v3.wav',             date: '2026-02-18T09:00:00.000Z' },
+  { name: 'dopamine rush v1.wav',             date: '2026-01-30T12:00:00.000Z' },
 ];
 
 // Checklist items with timestamps for the screenshot
@@ -256,8 +271,8 @@ async function main() {
         return Array.from(els).map(el => el.getAttribute('data-song-id')).filter(Boolean);
       });
 
-      // Seed varied ratings for a natural look
-      const ratingValues = [8, 6, 9, 7, 10, 4, 7];
+      // Ratings matching Ethan's real app: thedrums=9, barber smith=8, bend the knees=8, Engineering|Alignment=9, leaky=8, holy fuck kevin parker=8, geetar seshnew=7, smokeweedwav=7, + 4 extras
+      const ratingValues = [9, 8, 8, 9, 8, 8, 7, 7, 8, 7, 6, 9];
       const ratings = {};
       allSongIds.forEach((id, i) => {
         if (id) ratings[id] = ratingValues[i % ratingValues.length];

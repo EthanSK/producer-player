@@ -1036,6 +1036,17 @@ input[type='range'] {
   color: var(--text-primary, #e0eaf5);
 }
 
+.skip-button.skip-button-small {
+  font-size: 10px;
+  padding: 1px 5px;
+  min-width: 30px;
+  opacity: 0.75;
+}
+
+.skip-button.skip-button-small:hover {
+  opacity: 1;
+}
+
 .player-volume-control {
   display: inline-flex;
   align-items: center;
@@ -1377,6 +1388,17 @@ button.checklist-skip-button {
 
 button.checklist-skip-button:hover {
   background: rgba(92, 167, 255, 0.22);
+}
+
+button.checklist-skip-button.checklist-skip-button-small {
+  font-size: 10px;
+  padding: 0 6px;
+  height: 24px;
+  opacity: 0.75;
+}
+
+button.checklist-skip-button.checklist-skip-button-small:hover {
+  opacity: 1;
 }
 
 button.checklist-play-toggle {

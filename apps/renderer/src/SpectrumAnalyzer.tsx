@@ -42,8 +42,8 @@ export function SpectrumAnalyzer({
 }: SpectrumAnalyzerProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
-  const frequencyDataRef = useRef<Float32Array | null>(null);
-  const smoothedDataRef = useRef<Float32Array | null>(null);
+  const frequencyDataRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const smoothedDataRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const hasReceivedDataRef = useRef(false);
 
   const dbToY = useCallback(

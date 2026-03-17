@@ -393,7 +393,7 @@ describe('Real-world mastering scenarios', () => {
     const spotify = computePlatformNormalizationPreview(analysis, getProfile('spotify'))!;
     const apple = computePlatformNormalizationPreview(analysis, getProfile('appleMusic'))!;
     // Apple should turn down more than Spotify
-    expect(apple.appliedGainDb).toBeLessThan(spotify.appliedGainDb);
+    expect(apple.appliedGainDb!).toBeLessThan(spotify.appliedGainDb!);
     expect(apple.projectedIntegratedLufs!).toBeLessThan(spotify.projectedIntegratedLufs!);
   });
 });

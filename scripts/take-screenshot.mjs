@@ -20,27 +20,57 @@ const SCREENSHOT_DIR = path.join(workspaceRoot, 'site/assets/screenshots');
 
 // Realistic song names for a producer's album (6 songs, fits cleanly in window)
 const SAMPLE_SONGS = [
-  // Neon Lights: 5 versions — most recent song, will be auto-selected to showcase version history
-  { name: 'Neon Lights v5.wav',         date: '2026-03-14T10:00:00.000Z' },
-  { name: 'Neon Lights v4.wav',         date: '2026-03-10T08:15:00.000Z' },
-  { name: 'Neon Lights v3.wav',         date: '2026-03-05T20:30:00.000Z' },
-  { name: 'Neon Lights v2.wav',         date: '2026-02-25T13:00:00.000Z' },
-  { name: 'Neon Lights v1.wav',         date: '2026-02-15T17:45:00.000Z' },
-  // Fever Dream: single version
-  { name: 'Fever Dream v1.wav',         date: '2026-03-12T11:30:00.000Z' },
-  { name: 'Slow Burn v1.wav',           date: '2026-03-09T15:00:00.000Z' },
-  // Lost Signal: 4 versions
-  { name: 'Lost Signal v4.wav',         date: '2026-03-08T09:30:00.000Z' },
-  { name: 'Lost Signal v3.wav',         date: '2026-03-03T14:00:00.000Z' },
-  { name: 'Lost Signal v2.wav',         date: '2026-02-22T18:00:00.000Z' },
-  { name: 'Lost Signal v1.wav',         date: '2026-02-10T12:00:00.000Z' },
-  // Echoes: 2 versions
-  { name: 'Echoes v2.wav',              date: '2026-03-06T12:00:00.000Z' },
-  { name: 'Echoes v1.wav',              date: '2026-02-28T22:30:00.000Z' },
-  // Golden Hour: 3 versions
-  { name: 'Golden Hour v3.wav',         date: '2026-03-01T16:45:00.000Z' },
-  { name: 'Golden Hour v2.wav',         date: '2026-02-20T16:45:00.000Z' },
-  { name: 'Golden Hour v1.wav',         date: '2026-02-12T11:00:00.000Z' },
+  // thedrums: 6 versions — most recent, auto-selected to showcase version history
+  { name: 'thedrums v6.wav',                  date: '2026-03-16T21:04:53.000Z' },
+  { name: 'thedrums v5.wav',                  date: '2026-03-14T10:00:00.000Z' },
+  { name: 'thedrums v4.wav',                  date: '2026-03-10T08:15:00.000Z' },
+  { name: 'thedrums v3.wav',                  date: '2026-03-05T20:30:00.000Z' },
+  { name: 'thedrums v2.wav',                  date: '2026-02-25T13:00:00.000Z' },
+  { name: 'thedrums v1.wav',                  date: '2026-02-15T17:45:00.000Z' },
+  // barber smith: 3 versions
+  { name: 'barber smith v3.wav',              date: '2025-11-19T02:06:38.000Z' },
+  { name: 'barber smith v2.wav',              date: '2025-10-20T14:00:00.000Z' },
+  { name: 'barber smith v1.wav',              date: '2025-09-15T10:00:00.000Z' },
+  // bend the knees: 6 versions
+  { name: 'bend the knees v6.wav',            date: '2025-12-13T17:31:21.000Z' },
+  { name: 'bend the knees v5.wav',            date: '2025-12-01T12:00:00.000Z' },
+  { name: 'bend the knees v4.wav',            date: '2025-11-20T09:00:00.000Z' },
+  { name: 'bend the knees v3.wav',            date: '2025-11-10T15:30:00.000Z' },
+  { name: 'bend the knees v2.wav',            date: '2025-10-25T18:00:00.000Z' },
+  { name: 'bend the knees v1.wav',            date: '2025-10-05T11:00:00.000Z' },
+  // Engineering|Alignment: 5 versions
+  { name: 'Engineering|Alignment v5.wav',     date: '2026-03-16T23:17:44.000Z' },
+  { name: 'Engineering|Alignment v4.wav',     date: '2026-03-10T14:00:00.000Z' },
+  { name: 'Engineering|Alignment v3.wav',     date: '2026-03-01T20:00:00.000Z' },
+  { name: 'Engineering|Alignment v2.wav',     date: '2026-02-20T16:00:00.000Z' },
+  { name: 'Engineering|Alignment v1.wav',     date: '2026-02-10T12:00:00.000Z' },
+  // leaky: 6 versions
+  { name: 'leaky v6.wav',                     date: '2026-03-08T00:13:12.000Z' },
+  { name: 'leaky v5.wav',                     date: '2026-03-01T15:00:00.000Z' },
+  { name: 'leaky v4.wav',                     date: '2026-02-22T10:00:00.000Z' },
+  { name: 'leaky v3.wav',                     date: '2026-02-15T08:00:00.000Z' },
+  { name: 'leaky v2.wav',                     date: '2026-02-05T22:00:00.000Z' },
+  { name: 'leaky v1.wav',                     date: '2026-01-20T14:00:00.000Z' },
+  // holy fuck kevin parker: 8 versions (showing high version count)
+  { name: 'holy fuck kevin parker v14.wav',   date: '2026-03-10T01:27:28.000Z' },
+  { name: 'holy fuck kevin parker v13.wav',   date: '2026-03-05T20:00:00.000Z' },
+  { name: 'holy fuck kevin parker v12.wav',   date: '2026-02-28T15:00:00.000Z' },
+  { name: 'holy fuck kevin parker v11.wav',   date: '2026-02-20T10:00:00.000Z' },
+  { name: 'holy fuck kevin parker v10.wav',   date: '2026-02-15T08:00:00.000Z' },
+  { name: 'holy fuck kevin parker v9.wav',    date: '2026-02-10T12:00:00.000Z' },
+  { name: 'holy fuck kevin parker v8.wav',    date: '2026-02-01T16:00:00.000Z' },
+  { name: 'holy fuck kevin parker v1.wav',    date: '2026-01-15T11:00:00.000Z' },
+  // geetar seshnew: 9 versions
+  { name: 'geetar seshnew v9.wav',            date: '2026-03-13T00:14:10.000Z' },
+  { name: 'geetar seshnew v8.wav',            date: '2026-03-08T18:00:00.000Z' },
+  { name: 'geetar seshnew v7.wav',            date: '2026-03-01T14:00:00.000Z' },
+  { name: 'geetar seshnew v1.wav',            date: '2026-01-20T09:00:00.000Z' },
+  // smokeweedwav: 5 versions
+  { name: 'smokeweedwav v5.wav',              date: '2026-03-12T11:30:00.000Z' },
+  { name: 'smokeweedwav v4.wav',              date: '2026-03-05T09:00:00.000Z' },
+  { name: 'smokeweedwav v3.wav',              date: '2026-02-25T15:00:00.000Z' },
+  { name: 'smokeweedwav v2.wav',              date: '2026-02-15T12:00:00.000Z' },
+  { name: 'smokeweedwav v1.wav',              date: '2026-02-01T10:00:00.000Z' },
 ];
 
 // Checklist items with timestamps for the screenshot

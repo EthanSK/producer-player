@@ -3300,32 +3300,48 @@ export function App(): JSX.Element {
           </label>
 
           {iCloudAvailability === null || iCloudAvailability.available ? (
-            <label
-              className="checkbox-row"
-              title="Back up checklists, ratings, and preferences to iCloud Drive so they sync across your Macs."
-            >
-              <input
-                type="checkbox"
-                checked={iCloudBackupEnabled}
-                onChange={(event) => {
-                  void handleToggleICloudBackup(event.target.checked);
-                }}
-                data-testid="icloud-backup-checkbox"
-                title="Toggle iCloud Drive backup."
-                disabled={iCloudAvailability !== null && !iCloudAvailability.available}
-              />
-              Back up to iCloud
-              {iCloudSyncStatus === 'syncing' && (
-                <span className="muted" style={{ marginLeft: '0.4em', fontSize: '0.85em' }}>
-                  Syncing…
-                </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label
+                className="checkbox-row"
+                title="Back up checklists, ratings, and preferences to iCloud Drive so they sync across your Macs."
+                style={{ flex: 1, minWidth: 0 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={iCloudBackupEnabled}
+                  onChange={(event) => {
+                    void handleToggleICloudBackup(event.target.checked);
+                  }}
+                  data-testid="icloud-backup-checkbox"
+                  title="Toggle iCloud Drive backup."
+                  disabled={iCloudAvailability !== null && !iCloudAvailability.available}
+                />
+                Back up to iCloud
+                {iCloudSyncStatus === 'syncing' && (
+                  <span className="muted" style={{ marginLeft: '0.4em', fontSize: '0.85em' }}>
+                    Syncing…
+                  </span>
+                )}
+                {iCloudSyncStatus === 'success' && (
+                  <span className="muted" style={{ marginLeft: '0.4em', fontSize: '0.85em', color: '#4ade80' }}>
+                    ✓ Saved
+                  </span>
+                )}
+              </label>
+              {iCloudAvailability?.path && (
+                <button
+                  type="button"
+                  className="icloud-show-folder-btn"
+                  title="Show iCloud folder in Finder"
+                  data-testid="icloud-show-folder-btn"
+                  onClick={() => {
+                    void window.producerPlayer.openFolder(iCloudAvailability.path!);
+                  }}
+                >
+                  Show
+                </button>
               )}
-              {iCloudSyncStatus === 'success' && (
-                <span className="muted" style={{ marginLeft: '0.4em', fontSize: '0.85em', color: '#4ade80' }}>
-                  ✓ Saved
-                </span>
-              )}
-            </label>
+            </div>
           ) : (
             <p
               className="muted"

@@ -1487,6 +1487,24 @@ button.checklist-play-toggle[data-playing='true'] {
   height: 16px;
 }
 
+.icloud-show-folder-btn {
+  background: transparent;
+  border: 1px solid var(--text-muted, #666);
+  color: var(--text-muted, #999);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.icloud-show-folder-btn:hover {
+  color: var(--text-main, #fff);
+  border-color: var(--text-main, #fff);
+}
+
 .muted {
   color: var(--text-muted);
   margin: 2px 0;

@@ -32,6 +32,9 @@ import {
 } from './platformNormalization';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
 import { SHOW_3000AD_BRANDING } from './featureFlags';
+import { SpectrumAnalyzer } from './SpectrumAnalyzer';
+import { LevelMeter } from './LevelMeter';
+import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
@@ -123,6 +126,14 @@ function PlatformIcon({ platformId }: { platformId: NormalizationPlatformId }): 
           <path d="M12 12.2 8.2 16 12 19.8 15.8 16Z" className="platform-icon-fill" />
         </svg>
       );
+    case 'amazon':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6 15c3 2 9 2 12 0" />
+          <path d="M15.5 15.5 18 14" />
+          <circle cx="12" cy="10" r="5" />
+        </svg>
+      );
     default:
       return <span aria-hidden="true">♪</span>;
   }
@@ -177,7 +188,7 @@ function describeMediaErrorCode(code: number | undefined): string {
 
 function buildPlaybackFallbackGuidance(source: PlaybackSourceInfo | null): string {
   const extension = source?.extension ? `.${source.extension}` : 'this file';
-  return `Try exporting it again as WAV, MP3, or AAC (.m4a), then rescan the folder. ${extension} may not be ready for playback yet.`;
+  return `Try re-exporting as WAV, MP3, or AAC (.m4a) and rescan.`;
 }
 
 function getPathTail(value: string | null | undefined): string {
@@ -689,6 +700,11 @@ export function App(): JSX.Element {
   });
   const playbackAudioContextRef = useRef<AudioContext | null>(null);
   const playbackGainNodeRef = useRef<GainNode | null>(null);
+  const playbackAnalyserNodeRef = useRef<AnalyserNode | null>(null);
+  const bandSoloFilterRef = useRef<BiquadFilterNode | null>(null);
+
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
+  const [soloedBand, setSoloedBand] = useState<number | null>(null);
 
   const applyPlaybackGain = useCallback(
     (nextVolume: number, nextNormalizationGainDb: number) => {
@@ -986,8 +1002,8 @@ export function App(): JSX.Element {
       const extensionText = source?.extension ? `.${source.extension}` : 'This file';
       const supportText =
         playbackSourceSupportRef.current === 'no'
-          ? `${extensionText} is not ready for playback in Producer Player yet.`
-          : 'Producer Player could not get the track ready to play in time.';
+          ? `${extensionText} isn't supported for playback yet.`
+          : 'The track took too long to load.';
 
       const message = `Playback couldn’t start. ${supportText} ${buildPlaybackFallbackGuidance(
         source
@@ -1015,15 +1031,26 @@ export function App(): JSX.Element {
         const playbackGainNode = playbackAudioContext.createGain();
         const playbackSourceNode = playbackAudioContext.createMediaElementSource(audio);
 
-        playbackSourceNode.connect(playbackGainNode);
+        // Create analyser node for real-time FFT/level data
+        const playbackAnalyserNode = playbackAudioContext.createAnalyser();
+        playbackAnalyserNode.fftSize = 4096;
+        playbackAnalyserNode.smoothingTimeConstant = 0.82;
+
+        // Audio chain: source → analyser → gain → destination
+        playbackSourceNode.connect(playbackAnalyserNode);
+        playbackAnalyserNode.connect(playbackGainNode);
         playbackGainNode.connect(playbackAudioContext.destination);
         playbackGainNode.gain.value = DEFAULT_PLAYBACK_VOLUME;
 
         playbackAudioContextRef.current = playbackAudioContext;
         playbackGainNodeRef.current = playbackGainNode;
+        playbackAnalyserNodeRef.current = playbackAnalyserNode;
+        setAnalyserNode(playbackAnalyserNode);
       } catch {
         playbackAudioContextRef.current = null;
         playbackGainNodeRef.current = null;
+        playbackAnalyserNodeRef.current = null;
+        setAnalyserNode(null);
       }
     }
 
@@ -1108,7 +1135,7 @@ export function App(): JSX.Element {
           .then(() => audio.play())
           .catch((cause: unknown) => {
             const message = cause instanceof Error ? cause.message : String(cause);
-            setPlaybackError(`Repeat-one playback restart failed: ${message}.`);
+            setPlaybackError(`Couldn't restart the track on repeat: ${message}.`);
             logPlaybackEvent('repeat-one-restart-failed', {
               message,
             });
@@ -1148,8 +1175,8 @@ export function App(): JSX.Element {
       const detail = code ? `${codeLabel} (code ${code})` : codeLabel;
       const compatibilityHint =
         code === 4 || playbackSourceSupportRef.current === 'no'
-          ? `${source?.extension ? `.${source.extension}` : 'This format'} is not supported for playback yet.`
-          : 'Producer Player could not decode the selected file.';
+          ? `${source?.extension ? `.${source.extension}` : 'This format'} isn't supported for playback yet.`
+          : 'This file couldn\'t be decoded.';
 
       const message = `Playback failed. ${compatibilityHint} ${buildPlaybackFallbackGuidance(
         source
@@ -1211,6 +1238,13 @@ export function App(): JSX.Element {
       audio.removeEventListener('waiting', onWaiting);
       audio.removeEventListener('emptied', onEmptied);
       audio.removeEventListener('abort', onAbort);
+
+      playbackAnalyserNodeRef.current?.disconnect();
+      playbackAnalyserNodeRef.current = null;
+      setAnalyserNode(null);
+
+      bandSoloFilterRef.current?.disconnect();
+      bandSoloFilterRef.current = null;
 
       playbackGainNodeRef.current?.disconnect();
       playbackGainNodeRef.current = null;
@@ -2350,7 +2384,7 @@ export function App(): JSX.Element {
 
         if (playbackSourceSupportRef.current === 'no') {
           setPlaybackError(
-            `This format is not supported for playback yet. ${buildPlaybackFallbackGuidance(
+            `This format isn't supported for playback yet. ${buildPlaybackFallbackGuidance(
               source
             )}`
           );
@@ -2466,6 +2500,65 @@ export function App(): JSX.Element {
     const clampedVolume = Math.max(0, Math.min(nextVolume, 1));
     setVolume(clampedVolume);
     applyPlaybackGain(clampedVolume, appliedNormalizationGainDb);
+  }
+
+  function handleBandSoloStart(bandIndex: number): void {
+    const audioContext = playbackAudioContextRef.current;
+    const gainNode = playbackGainNodeRef.current;
+    if (!audioContext || !gainNode) return;
+
+    // Clean up any existing solo filter
+    if (bandSoloFilterRef.current) {
+      try {
+        bandSoloFilterRef.current.disconnect();
+      } catch {
+        // Ignore disconnect errors
+      }
+      bandSoloFilterRef.current = null;
+    }
+
+    const band = FREQUENCY_BANDS[bandIndex];
+    if (!band) return;
+
+    const filter = createBandSoloFilter(audioContext, band);
+
+    // Reroute: disconnect gain → destination, insert filter
+    try {
+      gainNode.disconnect(audioContext.destination);
+    } catch {
+      // May already be disconnected
+    }
+
+    gainNode.connect(filter);
+    filter.connect(audioContext.destination);
+    bandSoloFilterRef.current = filter;
+    setSoloedBand(bandIndex);
+  }
+
+  function handleBandSoloEnd(): void {
+    const audioContext = playbackAudioContextRef.current;
+    const gainNode = playbackGainNodeRef.current;
+    if (!audioContext || !gainNode) return;
+
+    // Remove solo filter and reconnect directly
+    if (bandSoloFilterRef.current) {
+      try {
+        gainNode.disconnect(bandSoloFilterRef.current);
+        bandSoloFilterRef.current.disconnect();
+      } catch {
+        // Ignore disconnect errors
+      }
+      bandSoloFilterRef.current = null;
+    }
+
+    // Reconnect gain → destination directly
+    try {
+      gainNode.connect(audioContext.destination);
+    } catch {
+      // Already connected
+    }
+
+    setSoloedBand(null);
   }
 
   async function loadReferenceTrack(
@@ -2711,7 +2804,7 @@ export function App(): JSX.Element {
   );
   const measuredTruePeakText = buildAnalysisValue(
     analysisStatus,
-    formatMeasuredStat(measuredAnalysis?.truePeakDbfs, 'dBFS'),
+    formatMeasuredStat(measuredAnalysis?.truePeakDbfs, 'dBTP'),
     {
       loading: 'Loading…',
       error: 'Error',
@@ -2767,7 +2860,7 @@ export function App(): JSX.Element {
         });
   const referenceTruePeakText =
     referenceStatus === 'ready' && referenceTrack
-      ? formatMeasuredStat(referenceTrack.measuredAnalysis.truePeakDbfs, 'dBFS')
+      ? formatMeasuredStat(referenceTrack.measuredAnalysis.truePeakDbfs, 'dBTP')
       : buildAnalysisValue(referenceStatus, '—', {
           loading: 'Loading…',
           error: 'Error',
@@ -2793,7 +2886,7 @@ export function App(): JSX.Element {
   const normalizationCapText =
     analysisStatus === 'ready' && normalizationPreview
       ? normalizationPreview.headroomCapDb === null
-        ? 'No peak cap data'
+        ? 'No true peak data available'
         : `${normalizationPreview.headroomCapDb >= 0 ? '+' : ''}${normalizationPreview.headroomCapDb.toFixed(1)} dB before ${selectedNormalizationPlatform.truePeakCeilingDbtp.toFixed(0)} dBTP`
       : buildAnalysisValue(analysisStatus, '—', {
           loading: 'Loading…',
@@ -2802,14 +2895,14 @@ export function App(): JSX.Element {
         });
   const normalizationSummaryText =
     analysisStatus === 'loading'
-      ? 'Loading platform normalization preview…'
+      ? 'Analysing…'
       : analysisStatus === 'error'
-        ? 'Platform normalization preview unavailable.'
+        ? 'Could not analyse this track.'
         : normalizationPreview
-          ? `${selectedNormalizationPlatform.label} selected · ${
+          ? `${selectedNormalizationPlatform.label} · ${
               normalizationPreviewEnabled ? 'preview on' : 'preview off'
             } · ${normalizationPreview.explanation}`
-          : 'Select a track to estimate platform normalization.';
+          : 'Select a track to preview platform loudness.';
   const selectedPlaybackSampleRateText = buildAnalysisValue(
     analysisStatus,
     formatSampleRateHz(measuredAnalysis?.sampleRateHz),
@@ -2874,7 +2967,7 @@ export function App(): JSX.Element {
                 void handleOpenFolderDialog();
               }}
               data-testid="link-folder-dialog-button"
-              title="Choose a folder to watch for exported audio files."
+              title="Choose a folder containing your exported audio files."
             >
               Add Folder…
             </button>
@@ -2882,9 +2975,9 @@ export function App(): JSX.Element {
               <p
                 className="muted"
                 data-testid="path-linker-disabled-message"
-                title="In Mac App Store sandbox builds, folder access must come from Add Folder so the app can request a security-scoped bookmark."
+                title="Mac App Store builds require Add Folder for persistent access."
               >
-                Mac App Store build: use Add Folder… so Producer Player can retain sandbox access.
+                Mac App Store build — use Add Folder… to keep access between sessions.
               </p>
             ) : null}
           </section>
@@ -3050,7 +3143,7 @@ export function App(): JSX.Element {
                   <strong>{measuredIntegratedText}</strong>
                 </div>
                 <div className="analysis-stat-card" data-testid="analysis-lra-stat">
-                  <span className="analysis-stat-label">Dynamics range</span>
+                  <span className="analysis-stat-label">Loudness range</span>
                   <strong>{measuredLraText}</strong>
                 </div>
                 <div className="analysis-stat-card" data-testid="analysis-true-peak-stat">
@@ -3143,9 +3236,9 @@ export function App(): JSX.Element {
                 <p className="muted">
                   {referenceTrack
                     ? playbackPreviewMode === 'reference'
-                      ? `Auditioning ${referenceTrack.fileName}`
-                      : `Ready to switch to ${referenceTrack.fileName}`
-                    : 'Load a reference to audition the mix and reference from the same panel.'}
+                      ? `Playing reference: ${referenceTrack.fileName}`
+                      : `Tap Reference to A/B against ${referenceTrack.fileName}`
+                    : 'Load a reference track to A/B from here.'}
                 </p>
               </div>
 
@@ -3199,7 +3292,7 @@ export function App(): JSX.Element {
                     onClick={() => setNormalizationPreviewEnabled((current) => !current)}
                     data-testid="analysis-normalization-toggle"
                     disabled={analysisStatus !== 'ready' || !normalizationPreview}
-                    title="Toggle the selected platform loudness preview on the current playback."
+                    title="Apply this platform's loudness adjustment to your playback."
                   >
                     Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
                   </button>
@@ -3238,24 +3331,24 @@ export function App(): JSX.Element {
                     <strong>{normalizationChangeText}</strong>
                     <span className="muted">
                       {normalizationPreviewEnabled
-                        ? 'Active on current playback'
-                        : 'Bypassed until Preview On'}
+                        ? 'Previewing now'
+                        : 'Off — tap Preview On to hear it'}
                     </span>
                   </div>
                   <div className="analysis-stat-card compact" data-testid="analysis-normalization-projected">
                     <span className="analysis-stat-label">Projected loudness</span>
                     <strong>{normalizationProjectedText}</strong>
-                    <span className="muted">Track-normalized estimate</span>
+                    <span className="muted">After normalization</span>
                   </div>
                   <div className="analysis-stat-card compact" data-testid="analysis-normalization-cap">
-                    <span className="analysis-stat-label">Peak / boost cap</span>
+                    <span className="analysis-stat-label">Headroom cap</span>
                     <strong>{normalizationCapText}</strong>
                     <span className="muted">
                       {normalizationPreview?.limitedByHeadroom
-                        ? 'Boost limited by true peak headroom'
+                        ? 'Boost limited by true peak'
                         : selectedNormalizationPlatform.policy === 'down-only'
-                          ? 'Down-only preview for this platform'
-                          : 'Headroom-aware preview'}
+                          ? 'This platform only turns down'
+                          : 'Within headroom'}
                     </span>
                   </div>
                 </div>
@@ -3556,6 +3649,19 @@ export function App(): JSX.Element {
                     {selectedPlaybackSampleRateText}
                   </span>
                 </div>
+              </div>
+              <div className="player-dock-visualizations">
+                <SpectrumAnalyzer
+                  analyserNode={isPlaying ? analyserNode : null}
+                  width={180}
+                  height={48}
+                />
+                <LevelMeter
+                  analyserNode={isPlaying ? analyserNode : null}
+                  orientation="horizontal"
+                  width={120}
+                  height={20}
+                />
               </div>
               <button
                 type="button"
@@ -4041,7 +4147,7 @@ export function App(): JSX.Element {
           <div className="analysis-overlay-card">
             <div className="analysis-overlay-header">
               <div>
-                <h2>Mastering + Reference Full Screen</h2>
+                <h2>Mastering + Reference</h2>
                 <p className="muted">LUFS · peaks · tone · refs · normalization</p>
               </div>
               <button
@@ -4056,8 +4162,45 @@ export function App(): JSX.Element {
 
             {selectedPlaybackVersion ? (
               <div className="analysis-overlay-grid">
+                <section className="analysis-overlay-section analysis-overlay-visualizations" data-testid="analysis-overlay-visualizations">
+                  <h3>Real-time Spectrum &amp; Level</h3>
+                  <div className="analysis-overlay-viz-row">
+                    <div className="analysis-overlay-viz-spectrum">
+                      <SpectrumAnalyzer
+                        analyserNode={isPlaying ? analyserNode : null}
+                        width={860}
+                        height={200}
+                        isFullScreen
+                        soloedBand={soloedBand}
+                        onBandSoloStart={handleBandSoloStart}
+                        onBandSoloEnd={handleBandSoloEnd}
+                      />
+                    </div>
+                    <div className="analysis-overlay-viz-meters">
+                      <LevelMeter
+                        analyserNode={isPlaying ? analyserNode : null}
+                        orientation="vertical"
+                        width={40}
+                        height={200}
+                      />
+                      <LevelMeter
+                        analyserNode={isPlaying ? analyserNode : null}
+                        orientation="horizontal"
+                        width={200}
+                        height={32}
+                        showLabel
+                      />
+                    </div>
+                  </div>
+                  {soloedBand !== null && (
+                    <p className="spectrum-solo-label" data-testid="spectrum-solo-label">
+                      Soloing: <strong>{FREQUENCY_BANDS[soloedBand].label}</strong> ({FREQUENCY_BANDS[soloedBand].minHz}–{FREQUENCY_BANDS[soloedBand].maxHz} Hz)
+                    </p>
+                  )}
+                </section>
+
                 <section className="analysis-overlay-section">
-                  <h3>Current track + analysis status</h3>
+                  <h3>Current track</h3>
                   <p>
                     <strong>{selectedPlaybackVersion.fileName}</strong>
                   </p>
@@ -4077,21 +4220,21 @@ export function App(): JSX.Element {
                   <p className="muted" data-testid="analysis-overlay-preview-mode">
                     {referenceTrack
                       ? playbackPreviewMode === 'reference'
-                        ? `Auditioning reference: ${referenceTrack.fileName}`
+                        ? `Playing reference: ${referenceTrack.fileName}`
                         : `Mix loaded · reference ready: ${referenceTrack.fileName}`
-                      : 'Auditioning mix export'}
+                      : 'Playing your mix'}
                   </p>
                 </section>
 
                 <section className="analysis-overlay-section">
-                  <h3>Measured loudness + peaks</h3>
+                  <h3>Loudness &amp; peaks</h3>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card">
                       <span className="analysis-stat-label">Integrated LUFS</span>
                       <strong>{measuredIntegratedText}</strong>
                     </div>
                     <div className="analysis-stat-card">
-                      <span className="analysis-stat-label">Dynamics range</span>
+                      <span className="analysis-stat-label">Loudness range</span>
                       <strong>{measuredLraText}</strong>
                     </div>
                     <div className="analysis-stat-card">
@@ -4122,7 +4265,7 @@ export function App(): JSX.Element {
                 </section>
 
                 <section className="analysis-overlay-section">
-                  <h3>Estimated tonal balance</h3>
+                  <h3>Tonal balance</h3>
                   <div className="analysis-tonal-balance detailed">
                     {(
                       [
@@ -4145,10 +4288,9 @@ export function App(): JSX.Element {
                 </section>
 
                 <section className="analysis-overlay-section">
-                  <h3>Reference track workflow</h3>
+                  <h3>Reference track</h3>
                   <p className="muted">
-                    Load a reference file or set the current track as the reference, then audition
-                    the mix and reference from the same panel.
+                    Load a reference track to A/B against your mix.
                   </p>
                   <div className="analysis-reference-actions">
                     <button
@@ -4240,7 +4382,7 @@ export function App(): JSX.Element {
                   <h3>Platform normalization preview</h3>
                   <div className="analysis-normalization-header">
                     <div>
-                      <strong>Streaming target emulation</strong>
+                      <strong>Streaming loudness preview</strong>
                       <p
                         className="muted"
                         data-testid="analysis-overlay-normalization-summary"
@@ -4254,7 +4396,7 @@ export function App(): JSX.Element {
                       onClick={() => setNormalizationPreviewEnabled((current) => !current)}
                       data-testid="analysis-overlay-normalization-toggle"
                       disabled={analysisStatus !== 'ready' || !normalizationPreview}
-                      title="Toggle the selected platform loudness preview on the current playback."
+                      title="Apply this platform's loudness adjustment to your playback."
                     >
                       Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
                     </button>
@@ -4297,40 +4439,40 @@ export function App(): JSX.Element {
                       <strong>{normalizationChangeText}</strong>
                       <span className="muted">
                         {normalizationPreviewEnabled
-                          ? 'Active on current playback'
-                          : 'Bypassed until Preview On'}
+                          ? 'Previewing now'
+                          : 'Off — tap Preview On to hear it'}
                       </span>
                     </div>
                     <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-projected">
                       <span className="analysis-stat-label">Projected loudness</span>
                       <strong>{normalizationProjectedText}</strong>
-                      <span className="muted">Track-normalized estimate</span>
+                      <span className="muted">After normalization</span>
                     </div>
                     <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-cap">
-                      <span className="analysis-stat-label">Peak / boost cap</span>
+                      <span className="analysis-stat-label">Headroom cap</span>
                       <strong>{normalizationCapText}</strong>
                       <span className="muted">
                         {normalizationPreview?.limitedByHeadroom
-                          ? 'Boost limited by true peak headroom'
+                          ? 'Boost limited by true peak'
                           : selectedNormalizationPlatform.policy === 'down-only'
-                            ? 'Down-only preview for this platform'
-                            : 'Headroom-aware preview'}
+                            ? 'This platform only turns down'
+                            : 'Within headroom'}
                       </span>
                     </div>
                     <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-target">
-                      <span className="analysis-stat-label">Target + true-peak ceiling</span>
+                      <span className="analysis-stat-label">Target &amp; peak ceiling</span>
                       <strong>
                         {selectedNormalizationPlatform.targetLufs.toFixed(0)} LUFS ·{' '}
                         {selectedNormalizationPlatform.truePeakCeilingDbtp.toFixed(0)} dBTP
                       </strong>
-                      <span className="muted">Platform default profile</span>
+                      <span className="muted">Platform target</span>
                     </div>
                     <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-policy">
                       <span className="analysis-stat-label">Gain policy</span>
                       <strong>
                         {selectedNormalizationPlatform.policy === 'down-only'
-                          ? 'Down-only attenuation'
-                          : 'Up/down normalization'}
+                          ? 'Turn down only'
+                          : 'Turn up & down'}
                       </strong>
                       <span className="muted">{selectedNormalizationPlatform.description}</span>
                     </div>
@@ -4338,7 +4480,7 @@ export function App(): JSX.Element {
                 </section>
 
                 <section className="analysis-overlay-section analysis-comparison-panel">
-                  <h3>Current export vs reference track</h3>
+                  <h3>Your mix vs reference</h3>
                   {referenceTrack && activeReferenceComparison ? (
                     <div data-testid="analysis-active-reference">
                       <p>

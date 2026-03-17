@@ -1503,6 +1503,55 @@ button.checklist-play-toggle[data-playing='true'] {
   margin: 0;
 }
 
+/* ── Spectrum Analyzer + Level Meter ── */
+
+.player-dock-visualizations {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.analysis-overlay-visualizations {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(92, 167, 255, 0.06), rgba(255, 255, 255, 0.02));
+}
+
+.analysis-overlay-viz-row {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.analysis-overlay-viz-spectrum {
+  flex: 1;
+  min-width: 0;
+}
+
+.analysis-overlay-viz-spectrum canvas {
+  width: 100% !important;
+}
+
+.analysis-overlay-viz-meters {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.spectrum-solo-label {
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(92, 167, 255, 0.12);
+  border: 1px solid rgba(92, 167, 255, 0.3);
+  color: var(--accent);
+  font-size: 13px;
+  text-align: center;
+}
+
 @media (max-width: 1360px) {
   .app-shell {
     grid-template-columns: 300px 1fr 320px;

@@ -1204,7 +1204,7 @@ input[type='range'] {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  align-items: start;
+  align-items: center;
 }
 
 .checklist-modal-header h2 {

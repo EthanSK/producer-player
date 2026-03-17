@@ -3604,7 +3604,7 @@ export function App(): JSX.Element {
               title={
                 canImportPlaylistOrder
                   ? 'Import a previously exported playlist/order JSON and apply it to the current library.'
-                  : 'Link the target album folder before importing a playlist JSON.'
+                  : 'Link the album folder first to import track order.'
               }
               disabled={!canImportPlaylistOrder}
             >

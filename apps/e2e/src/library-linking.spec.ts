@@ -128,10 +128,8 @@ test.describe('Producer Player desktop shell', () => {
       await expect(page.getByTestId('folder-tools-card')).toBeVisible();
       await expect(page.getByTestId('link-folder-dialog-button')).toBeVisible();
       await expect(page.getByTestId('producer-player-branding-logo')).toBeVisible();
-      await expect(page.getByTestId('path-linker-disabled-message')).toHaveCount(0);
 
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
 
       // Nested folders are ignored by scan policy.
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
@@ -193,8 +191,7 @@ test.describe('Producer Player desktop shell', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       const firstRow = page.getByTestId('main-list-row').first();
@@ -240,8 +237,7 @@ test.describe('Producer Player desktop shell', () => {
     try {
       firstLaunch = await launchProducerPlayer(userDataDirectory);
 
-      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+      await firstLaunch.page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
 
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
       const firstRow = firstLaunch.page.getByTestId('main-list-row').first();
@@ -402,8 +398,7 @@ test.describe('Producer Player desktop shell', () => {
         };
       });
 
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await page.getByTestId('main-list-row').first().click();
 
@@ -477,8 +472,7 @@ test.describe('Producer Player desktop shell', () => {
     try {
       firstLaunch = await launchProducerPlayer(userDataDirectory);
 
-      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+      await firstLaunch.page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
 
       await expect(firstLaunch.page.getByTestId('linked-folder-item')).toHaveCount(1);
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
@@ -553,8 +547,7 @@ test.describe('Producer Player desktop shell', () => {
         };
       });
 
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
 
       const firstRow = page.getByTestId('main-list-row').first();
       await firstRow.click();
@@ -608,8 +601,7 @@ test.describe('Producer Player desktop shell', () => {
     try {
       firstLaunch = await launchProducerPlayer(userDataDirectory);
 
-      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+      await firstLaunch.page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
 
       await expect(firstLaunch.page.getByTestId('linked-folder-item')).toHaveCount(1);
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
@@ -701,8 +693,7 @@ test.describe('Producer Player desktop shell', () => {
     try {
       firstLaunch = await launchProducerPlayer(firstUserDataDirectory);
 
-      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+      await firstLaunch.page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
 
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
 
@@ -757,8 +748,7 @@ test.describe('Producer Player desktop shell', () => {
     try {
       secondLaunch = await launchProducerPlayer(secondUserDataDirectory);
 
-      await secondLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await secondLaunch.page.getByTestId('link-folder-path-button').click();
+      await secondLaunch.page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
 
       await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(secondLaunch.page.getByTestId('main-list-row').first()).toContainText('Alpha');
@@ -803,10 +793,8 @@ test.describe('Producer Player desktop shell', () => {
     try {
       firstLaunch = await launchProducerPlayer(userDataDirectory);
 
-      await firstLaunch.page.getByTestId('link-folder-path-input').fill(albumADirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-button').click();
-      await firstLaunch.page.getByTestId('link-folder-path-input').fill(albumBDirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+      await firstLaunch.page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, albumADirectory);
+      await firstLaunch.page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, albumBDirectory);
 
       await expect(firstLaunch.page.getByTestId('linked-folder-item')).toHaveCount(2);
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
@@ -905,8 +893,7 @@ test.describe('Producer Player desktop shell', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 

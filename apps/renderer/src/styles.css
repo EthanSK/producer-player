@@ -742,6 +742,15 @@ input[type='range'] {
   overflow-wrap: anywhere;
 }
 
+.folder-row-path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  max-width: 100%;
+}
+
 .folder-row-actions {
   display: flex;
   flex-direction: column;

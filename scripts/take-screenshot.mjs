@@ -197,10 +197,9 @@ async function main() {
     console.log('Waiting for app shell...');
     await page.waitForSelector('[data-testid="app-shell"]', { timeout: 30000 });
 
-    // Link the fixture folder
+    // Link the fixture folder via IPC (path-linker UI was removed)
     console.log('Linking sample folder...');
-    await page.getByTestId('link-folder-path-input').fill(fixtureDir);
-    await page.getByTestId('link-folder-path-button').click();
+    await page.evaluate(async (p) => { await window.producerPlayer.linkFolder(p); }, fixtureDir);
 
     // Wait for songs to appear
     console.log('Waiting for songs to load...');
@@ -274,8 +273,8 @@ async function main() {
     });
     await page.waitForTimeout(500);
 
-    // Hide test-mode-only UI elements that shouldn't appear in screenshots
-    await page.addStyleTag({ content: '.path-linker { display: none !important; }' });
+    // Hide test-mode-only UI elements and long paths that shouldn't appear in screenshots
+    await page.addStyleTag({ content: '.path-linker { display: none !important; } .folder-row-path { display: none !important; }' });
 
     // --- Start audio playback so spectrum analyzer & level meter are active ---
     // Close checklist modal first if open (we'll reopen it later for the checklist screenshot)

@@ -202,10 +202,10 @@ async function main() {
       }
     }
 
-    // Set a good window size for the screenshot
+    // Set a normal desktop aspect ratio for the screenshot (~16:10)
     const window = await electronApp.browserWindow(page);
     await window.evaluate((win) => {
-      win.setSize(1600, 1300);
+      win.setSize(1440, 900);
       win.center();
     });
     await page.waitForTimeout(500);

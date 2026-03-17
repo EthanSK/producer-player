@@ -368,7 +368,8 @@ input[type='range'] {
   overflow: auto;
   border-top: 1px solid var(--border);
   min-height: 0;
-  flex: 1;
+  flex: 0 1 auto;
+  max-height: 160px;
 }
 
 .analysis-panel {
@@ -376,13 +377,14 @@ input[type='range'] {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  min-height: 280px;
-  height: clamp(280px, 34vh, 420px);
-  max-height: 420px;
+  /* Flex child: grows into available space but shrinks when window is shorter.
+     min-height matches roughly the transport/play-area bar height. */
+  flex: 1 1 280px;
+  min-height: 140px;
   overflow-y: auto;
-  align-content: start;
   background: linear-gradient(180deg, rgba(92, 167, 255, 0.08), rgba(255, 255, 255, 0.02));
 }
 

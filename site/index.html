@@ -59,7 +59,7 @@
       }
 
       /* ── Base ── */
-      html { scroll-behavior: smooth; }
+      html { scroll-behavior: smooth; background: #090e13; }
 
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, Arial, sans-serif;
@@ -72,6 +72,33 @@
       a { color: var(--accent); text-decoration: none; }
       a:hover { text-decoration: underline; }
       img, video { display: block; max-width: 100%; }
+
+      /* ── Kaleidoscope Background ── */
+      #kscope {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 0;
+        pointer-events: none;
+      }
+
+      #kscope-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+        background: rgba(9, 14, 19, 0.55);
+        pointer-events: none;
+      }
+
+      #content {
+        position: relative;
+        z-index: 2;
+      }
 
       /* ── Layout ── */
       .wrap {
@@ -100,6 +127,7 @@
         font-size: 15px;
         color: var(--text);
         text-decoration: none;
+        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
       }
 
       .logo:hover { text-decoration: none; }
@@ -135,6 +163,7 @@
         font-size: 14px;
         color: var(--text-muted);
         transition: color 0.15s;
+        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
       }
 
       .nav-links a:hover {
@@ -154,6 +183,7 @@
         line-height: 1.1;
         letter-spacing: -0.03em;
         margin-bottom: 16px;
+        text-shadow: 0 2px 30px rgba(0, 0, 0, 0.6), 0 0 60px rgba(74, 0, 128, 0.3);
       }
 
       .hero .tagline {
@@ -162,6 +192,7 @@
         max-width: 520px;
         margin: 0 auto 36px;
         line-height: 1.5;
+        text-shadow: 0 1px 12px rgba(0, 0, 0, 0.5);
       }
 
       .hero-actions {
@@ -198,9 +229,11 @@
       }
 
       .btn--ghost {
-        background: transparent;
+        background: rgba(9, 14, 19, 0.5);
         color: var(--text-muted);
         border: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
       }
 
       .btn--ghost:hover {
@@ -254,8 +287,10 @@
       .feature {
         padding: 24px;
         border-radius: var(--radius);
-        border: 1px solid var(--border);
-        background: var(--bg-card);
+        border: 1px solid rgba(123, 47, 190, 0.12);
+        background: rgba(17, 24, 32, 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
       }
 
       .feature-icon {
@@ -294,12 +329,14 @@
         font-size: 24px;
         font-weight: 600;
         margin-bottom: 8px;
+        text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
       }
 
       .download p {
         color: var(--text-muted);
         font-size: 15px;
         margin-bottom: 28px;
+        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
       }
 
       .platforms {
@@ -395,172 +432,397 @@
   </head>
 
   <body>
-    <script>
-      // Feature flags — flip to true to enable
-      var SHOW_3000AD_BRANDING = false;
-    </script>
-    <div class="wrap">
-      <nav>
-        <a class="logo" href="#">
-          <img src="./assets/icon.png" alt="" />
-          Producer Player
-        </a>
-        <a class="by-line" id="by-3000ad" href="https://lnkfi.re/3000AD" target="_blank" rel="noopener" style="display:none">by 3000 AD</a>
-        <script>
-          if (SHOW_3000AD_BRANDING) {
-            document.getElementById('by-3000ad').style.display = '';
-          } else {
-            document.getElementById('by-3000ad').remove();
-          }
-        </script>
-        <ul class="nav-links">
-          <li><a href="#features">Features</a></li>
-          <li><a href="#video">Demo</a></li>
-          <li><a href="https://github.com/EthanSK/producer-player">GitHub</a></li>
-        </ul>
-      </nav>
-    </div>
+    <!-- ── Kaleidoscope Background ── -->
+    <canvas id="kscope"></canvas>
+    <div id="kscope-overlay"></div>
 
-    <section class="hero">
+    <!-- ── Content ── -->
+    <div id="content">
+      <script>
+        // Feature flags — flip to true to enable
+        var SHOW_3000AD_BRANDING = false;
+      </script>
       <div class="wrap">
-        <h1>Finish music,<br />not file management.</h1>
-        <p class="tagline">
-          A desktop app for producers who bounce a lot. Version tracking, mastering workspace, album ordering — one window.
-        </p>
-        <div class="hero-actions">
+        <nav>
+          <a class="logo" href="#">
+            <img src="./assets/icon.png" alt="" />
+            Producer Player
+          </a>
+          <a class="by-line" id="by-3000ad" href="https://lnkfi.re/3000AD" target="_blank" rel="noopener" style="display:none">by 3000 AD</a>
+          <script>
+            if (SHOW_3000AD_BRANDING) {
+              document.getElementById('by-3000ad').style.display = '';
+            } else {
+              document.getElementById('by-3000ad').remove();
+            }
+          </script>
+          <ul class="nav-links">
+            <li><a href="#features">Features</a></li>
+            <li><a href="#video">Demo</a></li>
+            <li><a href="https://github.com/EthanSK/producer-player">GitHub</a></li>
+          </ul>
+        </nav>
+      </div>
+
+      <section class="hero">
+        <div class="wrap">
+          <h1>Finish music,<br />not file management.</h1>
+          <p class="tagline">
+            A desktop app for producers who bounce a lot. Version tracking, mastering workspace, album ordering — one window.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn--primary" href="https://github.com/EthanSK/producer-player/releases">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Download
+            </a>
+            <a class="btn btn--ghost" href="https://github.com/EthanSK/producer-player">
+              View source
+            </a>
+          </div>
+        </div>
+
+        <div class="wrap wrap--wide">
+          <div class="screenshot">
+            <img
+              src="./assets/screenshots/app-hero.png"
+              alt="Producer Player app interface"
+              loading="eager"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section class="video-section" id="video">
+        <div class="wrap wrap--wide">
+          <div class="video-container">
+            <video
+              controls
+              preload="metadata"
+              poster="./assets/video/poster.jpg"
+            >
+              <source src="./assets/video/producer-player-explainer-web.mp4" type="video/mp4" />
+            </video>
+          </div>
+        </div>
+      </section>
+
+      <section class="features" id="features">
+        <div class="wrap">
+          <div class="features-grid">
+            <div class="feature">
+              <div class="feature-icon">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h7M3 12h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </div>
+              <h3>All Versions, One Place</h3>
+              <p>Every bounce of a song grouped together. Latest version always on top.</p>
+            </div>
+
+            <div class="feature">
+              <div class="feature-icon" style="background: rgba(95, 210, 143, 0.1); color: var(--green);">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 12V4l5 4-5 4ZM9 12V4l5 4-5 4Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <h3>Compare Your Mixes</h3>
+              <p>Switch between your track and a reference in one click. Hear the difference instantly.</p>
+            </div>
+
+            <div class="feature">
+              <div class="feature-icon">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 3v10M8 5v8M12 1v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </div>
+              <h3>Preview on Every Platform</h3>
+              <p>Hear how your song will actually sound on Spotify, Apple Music, YouTube, and more.</p>
+            </div>
+
+            <div class="feature">
+              <div class="feature-icon" style="background: rgba(95, 210, 143, 0.1); color: var(--green);">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 3h12M2 7h12M2 11h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="3" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="4" cy="11" r="1.2" fill="currentColor"/></svg>
+              </div>
+              <h3>Drag to Order</h3>
+              <p>Arrange your tracklist by dragging. Saved automatically.</p>
+            </div>
+
+            <div class="feature">
+              <div class="feature-icon">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <h3>Checklists &amp; Ratings</h3>
+              <p>A to-do list for each song so nothing gets missed. Rate tracks as you go.</p>
+            </div>
+
+            <div class="feature">
+              <div class="feature-icon" style="background: rgba(95, 210, 143, 0.1); color: var(--green);">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 13V8h2.5v5M6.75 13V5h2.5v8M10.5 13V2H13v11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <h3>One-Click Export</h3>
+              <p>Grab the latest version of every song in one click, ready to share.</p>
+            </div>
+
+            <div class="feature">
+              <div class="feature-icon">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <h3>Notes Pinned to Moments</h3>
+              <p>Drop a note at any point in a song. Click it later to jump right back.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="download" id="download">
+        <div class="wrap">
+          <h2>Get Producer Player</h2>
+          <p>Free and open source. MIT license.</p>
           <a class="btn btn--primary" href="https://github.com/EthanSK/producer-player/releases">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Download
+            Download from GitHub
           </a>
-          <a class="btn btn--ghost" href="https://github.com/EthanSK/producer-player">
-            View source
-          </a>
-        </div>
-      </div>
-
-      <div class="wrap wrap--wide">
-        <div class="screenshot">
-          <img
-            src="./assets/screenshots/app-hero.png"
-            alt="Producer Player app interface"
-            loading="eager"
-          />
-        </div>
-      </div>
-    </section>
-
-    <section class="video-section" id="video">
-      <div class="wrap wrap--wide">
-        <div class="video-container">
-          <video
-            controls
-            preload="metadata"
-            poster="./assets/video/poster.jpg"
-          >
-            <source src="./assets/video/producer-player-explainer-web.mp4" type="video/mp4" />
-          </video>
-        </div>
-      </div>
-    </section>
-
-    <section class="features" id="features">
-      <div class="wrap">
-        <div class="features-grid">
-          <div class="feature">
-            <div class="feature-icon">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h7M3 12h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-            </div>
-            <h3>Version grouping</h3>
-            <p>Exports land under one song. Every version playable, latest on top.</p>
-          </div>
-
-          <div class="feature">
-            <div class="feature-icon" style="background: rgba(95, 210, 143, 0.1); color: var(--green);">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 12V4l5 4-5 4ZM9 12V4l5 4-5 4Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <h3>A/B mastering workspace</h3>
-            <p>LUFS, peaks, tonal balance. Toggle between your mix and a reference instantly.</p>
-          </div>
-
-          <div class="feature">
-            <div class="feature-icon">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 3v10M8 5v8M12 1v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            </div>
-            <h3>Platform normalization</h3>
-            <p>Preview how your master sounds on Spotify, Apple Music, YouTube, TIDAL.</p>
-          </div>
-
-          <div class="feature">
-            <div class="feature-icon" style="background: rgba(95, 210, 143, 0.1); color: var(--green);">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 3h12M2 7h12M2 11h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="6" cy="3" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="4" cy="11" r="1.2" fill="currentColor"/></svg>
-            </div>
-            <h3>Album ordering</h3>
-            <p>Drag tracks into sequence. Order persists between sessions.</p>
-          </div>
-
-          <div class="feature">
-            <div class="feature-icon">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 8l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <h3>Checklists &amp; ratings</h3>
-            <p>Per-song checklists for your finishing process. Rate tracks as you go.</p>
-          </div>
-
-          <div class="feature">
-            <div class="feature-icon" style="background: rgba(95, 210, 143, 0.1); color: var(--green);">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 13V8h2.5v5M6.75 13V5h2.5v8M10.5 13V2H13v11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <h3>Export Latest</h3>
-            <p>One click — numbered folder with latest versions, ready for distribution.</p>
-          </div>
-
-          <div class="feature">
-            <div class="feature-icon">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <h3>Time-stamped notes</h3>
-            <p>Add a checklist item and it captures exactly where you are in the track. Click the timestamp to jump back.</p>
+          <div class="platforms">
+            <span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M12.5 11.4c-.4.9-.6 1.3-1.1 2.1-.7 1-1.6 2.3-2.8 2.3-1 0-1.4-.7-2.8-.7-1.4 0-1.8.7-2.8.7-1.2 0-2.1-1.2-2.8-2.2C-.7 11 -.9 8 .5 6.3c1-1.2 2.4-1.9 3.8-1.9 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.2 0 2.4.5 3.3 1.5-2.9 1.6-2.4 5.6.7 6.5Z" fill="currentColor"/><path d="M10.3 2.8c.5-.7.9-1.6.8-2.6-.9.1-1.9.6-2.5 1.3-.5.7-1 1.6-.8 2.5.9 0 1.9-.5 2.5-1.2Z" fill="currentColor"/></svg>
+              macOS
+            </span>
+            <span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M1 2.2l5.4-.7v5.2H1V2.2Zm0 11.6l5.4.7V9.3H1v4.5Zm6-5.1h8V1l-8 1.1v6.6Zm0 5.8L15 16V9.3H7v5.2Z" fill="currentColor"/></svg>
+              Windows
+            </span>
+            <span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              Linux
+            </span>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="download" id="download">
-      <div class="wrap">
-        <h2>Get Producer Player</h2>
-        <p>Free and open source. MIT license.</p>
-        <a class="btn btn--primary" href="https://github.com/EthanSK/producer-player/releases">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Download from GitHub
-        </a>
-        <div class="platforms">
-          <span>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M12.5 11.4c-.4.9-.6 1.3-1.1 2.1-.7 1-1.6 2.3-2.8 2.3-1 0-1.4-.7-2.8-.7-1.4 0-1.8.7-2.8.7-1.2 0-2.1-1.2-2.8-2.2C-.7 11 -.9 8 .5 6.3c1-1.2 2.4-1.9 3.8-1.9 1.3 0 2.1.7 3.1.7 1 0 1.6-.7 3.1-.7 1.2 0 2.4.5 3.3 1.5-2.9 1.6-2.4 5.6.7 6.5Z" fill="currentColor"/><path d="M10.3 2.8c.5-.7.9-1.6.8-2.6-.9.1-1.9.6-2.5 1.3-.5.7-1 1.6-.8 2.5.9 0 1.9-.5 2.5-1.2Z" fill="currentColor"/></svg>
-            macOS
-          </span>
-          <span>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M1 2.2l5.4-.7v5.2H1V2.2Zm0 11.6l5.4.7V9.3H1v4.5Zm6-5.1h8V1l-8 1.1v6.6Zm0 5.8L15 16V9.3H7v5.2Z" fill="currentColor"/></svg>
-            Windows
-          </span>
-          <span>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-            Linux
-          </span>
+      <footer>
+        <div class="wrap">
+          <div class="footer-inner">
+            <span>&copy; 2025 Producer Player</span>
+            <ul class="footer-links">
+              <li><a href="https://github.com/EthanSK/producer-player">GitHub</a></li>
+              <li><a href="https://github.com/EthanSK/producer-player/releases">Releases</a></li>
+              <li><a href="https://github.com/EthanSK/producer-player/blob/main/LICENSE">MIT License</a></li>
+            </ul>
+          </div>
         </div>
-      </div>
-    </section>
+      </footer>
+    </div>
 
-    <footer>
-      <div class="wrap">
-        <div class="footer-inner">
-          <span>&copy; 2025 Producer Player</span>
-          <ul class="footer-links">
-            <li><a href="https://github.com/EthanSK/producer-player">GitHub</a></li>
-            <li><a href="https://github.com/EthanSK/producer-player/releases">Releases</a></li>
-            <li><a href="https://github.com/EthanSK/producer-player/blob/main/LICENSE">MIT License</a></li>
-          </ul>
-        </div>
-      </div>
-    </footer>
+    <!-- ── Kaleidoscope Animation ── -->
+    <script>
+    (function () {
+      var c = document.getElementById('kscope');
+      if (!c) return;
+      var ctx = c.getContext('2d');
+      var SEG = 12;
+      var TAU = Math.PI * 2;
+      var ANG = TAU / SEG;
+      var W, H, maxR, sc;
+
+      /* Purple DMT palette [r, g, b] */
+      var P = [
+        [74, 0, 128],
+        [123, 47, 190],
+        [192, 64, 160],
+        [155, 48, 255],
+        [224, 64, 251],
+        [139, 0, 255],
+        [186, 85, 211],
+        [106, 13, 173],
+        [200, 40, 200],
+        [80, 0, 180]
+      ];
+
+      function resize() {
+        W = c.width = window.innerWidth;
+        H = c.height = window.innerHeight;
+        maxR = Math.sqrt(W * W + H * H) / 2;
+        sc = maxR / 500;
+        ctx.fillStyle = '#0a0014';
+        ctx.fillRect(0, 0, W, H);
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      function rgb(i) {
+        var p = P[((i % P.length) + P.length) % P.length];
+        return 'rgb(' + p[0] + ',' + p[1] + ',' + p[2] + ')';
+      }
+
+      /* ── Main loop ── */
+      function frame(ts) {
+        var t = ts * 0.001;
+
+        /* Trail fade — low alpha = long glowing trails */
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(8, 0, 18, 0.045)';
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.save();
+        ctx.translate(W / 2, H / 2);
+        ctx.rotate(t * 0.04);
+
+        /* ━━ Layer 1: Large flowing orbs ━━ */
+        ctx.shadowBlur = 35 * sc;
+        for (var i = 0; i < 8; i++) {
+          var p = t * 0.38 + i * 0.92;
+          var dist = (Math.sin(p * 0.55) * 85 + 175) * sc;
+          var bAng = Math.sin(p * 0.22) * ANG * 0.38;
+          var r = (Math.sin(p * 0.85) * 10 + 24) * sc;
+          ctx.fillStyle = rgb(i);
+          ctx.shadowColor = rgb(i);
+          ctx.globalAlpha = 0.32 + Math.sin(p * 0.65) * 0.12;
+
+          for (var s = 0; s < SEG; s++) {
+            var a = s * ANG + bAng;
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, r, 0, TAU);
+            ctx.fill();
+            a = s * ANG - bAng;
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, r, 0, TAU);
+            ctx.fill();
+          }
+        }
+
+        /* ━━ Layer 2: Inner ring of smaller orbs ━━ */
+        ctx.shadowBlur = 25 * sc;
+        for (var i = 0; i < 6; i++) {
+          var p = t * 0.52 + i * 1.1;
+          var dist = (Math.sin(p * 0.75) * 40 + 80) * sc;
+          var bAng = Math.sin(p * 0.35) * ANG * 0.25;
+          var r = (Math.sin(p * 1.1) * 6 + 12) * sc;
+          ctx.fillStyle = rgb(i + 4);
+          ctx.shadowColor = rgb(i + 4);
+          ctx.globalAlpha = 0.4 + Math.sin(p * 0.9) * 0.1;
+
+          for (var s = 0; s < SEG; s++) {
+            var a = s * ANG + bAng;
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, r, 0, TAU);
+            ctx.fill();
+            a = s * ANG - bAng;
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, r, 0, TAU);
+            ctx.fill();
+          }
+        }
+
+        /* ━━ Layer 3: Sacred geometry lines ━━ */
+        ctx.shadowBlur = 10 * sc;
+        ctx.globalAlpha = 0.2;
+        ctx.lineWidth = 1.8 * sc;
+
+        for (var i = 0; i < 4; i++) {
+          var p = t * 0.28 + i * 1.7;
+          var d1 = (Math.sin(p * 0.45) * 55 + 115) * sc;
+          var d2 = (Math.sin(p * 0.65 + 1) * 65 + 210) * sc;
+          var bAng = Math.sin(p * 0.18) * ANG * 0.28;
+          ctx.strokeStyle = rgb(i + 3);
+          ctx.shadowColor = rgb(i + 3);
+
+          for (var s = 0; s < SEG; s++) {
+            var a1 = s * ANG + bAng;
+            var a2 = s * ANG + bAng + ANG * 0.42;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a1) * d1, Math.sin(a1) * d1);
+            ctx.lineTo(Math.cos(a2) * d2, Math.sin(a2) * d2);
+            ctx.stroke();
+
+            a1 = s * ANG - bAng;
+            a2 = s * ANG - bAng - ANG * 0.42;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a1) * d1, Math.sin(a1) * d1);
+            ctx.lineTo(Math.cos(a2) * d2, Math.sin(a2) * d2);
+            ctx.stroke();
+          }
+        }
+
+        /* ━━ Layer 4: Spiraling particles ━━ */
+        ctx.shadowBlur = 12 * sc;
+        for (var i = 0; i < 6; i++) {
+          var speed = 35 + i * 14;
+          var spiralR = ((t * speed + i * 75) % (maxR * 0.6));
+          var spiralA = t * (0.55 + i * 0.12) + i * ANG * 0.4;
+          var dotR = 3 * sc;
+          var alpha = Math.max(0, 1 - spiralR / (maxR * 0.6)) * 0.55;
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = rgb(i + 5);
+          ctx.shadowColor = rgb(i + 5);
+
+          for (var s = 0; s < SEG; s++) {
+            var a = s * ANG + spiralA;
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * spiralR, Math.sin(a) * spiralR, dotR, 0, TAU);
+            ctx.fill();
+            a = s * ANG - spiralA + Math.PI;
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * spiralR, Math.sin(a) * spiralR, dotR, 0, TAU);
+            ctx.fill();
+          }
+        }
+
+        /* ━━ Layer 5: Centre mandala ━━ */
+        ctx.globalCompositeOperation = 'lighter';
+        for (var ring = 0; ring < 4; ring++) {
+          var rr = (Math.sin(t * 0.38 + ring * 0.85) * 14 + 38 + ring * 30) * sc;
+          ctx.strokeStyle = rgb(ring + 1);
+          ctx.shadowColor = rgb(ring + 1);
+          ctx.shadowBlur = 18 * sc;
+          ctx.lineWidth = (1.4 + Math.sin(t + ring) * 0.7) * sc;
+          ctx.globalAlpha = 0.18 + Math.sin(t * 0.75 + ring) * 0.07;
+
+          ctx.beginPath();
+          var dir = ring % 2 === 0 ? 1 : -1;
+          for (var v = 0; v <= 72; v++) {
+            var a = (v / 72) * TAU + t * 0.09 * dir;
+            var wobble = Math.sin(a * SEG * 0.5 + t * 1.4) * 9 * sc;
+            var pr = rr + wobble;
+            if (v === 0) ctx.moveTo(Math.cos(a) * pr, Math.sin(a) * pr);
+            else ctx.lineTo(Math.cos(a) * pr, Math.sin(a) * pr);
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
+
+        /* ━━ Layer 6: Bright outer rotating diamonds ━━ */
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.shadowBlur = 28 * sc;
+        for (var i = 0; i < 5; i++) {
+          var p = t * 0.24 + i * 1.32;
+          var dist = (Math.sin(p * 0.32) * 60 + 280) * sc;
+          var bAng = Math.sin(p * 0.14) * ANG * 0.2;
+          var sz = (Math.sin(p * 0.9) * 4 + 8) * sc;
+          ctx.fillStyle = rgb(i + 2);
+          ctx.shadowColor = rgb(i + 2);
+          ctx.globalAlpha = 0.18 + Math.sin(p * 0.5) * 0.08;
+
+          for (var s = 0; s < SEG; s++) {
+            var a = s * ANG + bAng;
+            var cx = Math.cos(a) * dist;
+            var cy = Math.sin(a) * dist;
+            var rot = t * 0.7 + i;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(rot);
+            ctx.beginPath();
+            ctx.moveTo(0, -sz);
+            ctx.lineTo(sz * 0.6, 0);
+            ctx.lineTo(0, sz);
+            ctx.lineTo(-sz * 0.6, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.restore();
+        requestAnimationFrame(frame);
+      }
+
+      requestAnimationFrame(frame);
+    })();
+    </script>
   </body>
 </html>

@@ -151,11 +151,43 @@ export const IPC_CHANNELS = {
   PICK_REFERENCE_TRACK: 'producer-player:pick-reference-track',
   SNAPSHOT_UPDATED: 'producer-player:snapshot-updated',
   TRANSPORT_COMMAND: 'producer-player:transport-command',
+  SYNC_TO_ICLOUD: 'producer-player:sync-to-icloud',
+  LOAD_FROM_ICLOUD: 'producer-player:load-from-icloud',
+  CHECK_ICLOUD_AVAILABLE: 'producer-player:check-icloud-available',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
 export type TransportCommand = 'play-pause' | 'next-track' | 'previous-track';
 export type TransportCommandListener = (command: TransportCommand) => void;
+
+
+export interface ICloudBackupData {
+  checklists: Record<string, unknown[]>;
+  ratings: Record<string, number>;
+  state: {
+    iCloudEnabled: boolean;
+    updatedAt: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface ICloudSyncResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface ICloudLoadResult {
+  available: boolean;
+  data: ICloudBackupData | null;
+  iCloudNewerThan?: string;
+  error?: string;
+}
+
+export interface ICloudAvailabilityResult {
+  available: boolean;
+  path: string | null;
+  reason?: string;
+}
 
 export interface ProducerPlayerBridge {
   getLibrarySnapshot(): Promise<LibrarySnapshot>;
@@ -179,6 +211,9 @@ export interface ProducerPlayerBridge {
   resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo>;
   analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis>;
   pickReferenceTrack(): Promise<ReferenceTrackSelection | null>;
+  syncToICloud(data: ICloudBackupData): Promise<ICloudSyncResult>;
+  loadFromICloud(): Promise<ICloudLoadResult>;
+  checkICloudAvailable(): Promise<ICloudAvailabilityResult>;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
   onTransportCommand(listener: TransportCommandListener): () => void;
 }

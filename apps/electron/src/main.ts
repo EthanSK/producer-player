@@ -7,6 +7,10 @@ import { dirname, extname, join, parse, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import type {
   AudioFileAnalysis,
+  ICloudAvailabilityResult,
+  ICloudBackupData,
+  ICloudLoadResult,
+  ICloudSyncResult,
   LibrarySnapshot,
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
@@ -31,6 +35,11 @@ const PLAYBACK_CACHE_DIRECTORY = 'playback-cache';
 const FFMPEG_BINARY_DIRECTORY = 'bin';
 const AIFF_LIKE_EXTENSIONS = new Set(['aiff', 'aif', 'aifc']);
 const IS_MAC_APP_STORE_SANDBOX = process.mas === true;
+
+const ICLOUD_DRIVE_DIRECTORY_NAME = 'Producer Player';
+const ICLOUD_CHECKLISTS_FILE = 'checklists.json';
+const ICLOUD_RATINGS_FILE = 'ratings.json';
+const ICLOUD_STATE_FILE = 'state.json';
 
 const IS_TEST_MODE =
   process.env.APP_TEST_MODE === 'true' ||
@@ -1638,6 +1647,165 @@ async function ensureLibraryService(): Promise<FileLibraryService> {
   return service;
 }
 
+function getICloudDriveBasePath(): string {
+  return join(
+    app.getPath('home'),
+    'Library',
+    'Mobile Documents',
+    'com~apple~CloudDocs'
+  );
+}
+
+function getICloudBackupDirectoryPath(): string {
+  return join(getICloudDriveBasePath(), ICLOUD_DRIVE_DIRECTORY_NAME);
+}
+
+async function checkICloudAvailability(): Promise<ICloudAvailabilityResult> {
+  if (process.platform !== 'darwin') {
+    return {
+      available: false,
+      path: null,
+      reason: 'iCloud Drive backup is only available on macOS.',
+    };
+  }
+
+  const iCloudBasePath = getICloudDriveBasePath();
+
+  try {
+    const stats = await fs.stat(iCloudBasePath);
+    if (!stats.isDirectory()) {
+      return {
+        available: false,
+        path: null,
+        reason: 'iCloud Drive path exists but is not a directory.',
+      };
+    }
+
+    return {
+      available: true,
+      path: getICloudBackupDirectoryPath(),
+    };
+  } catch {
+    return {
+      available: false,
+      path: null,
+      reason: 'iCloud Drive is not set up on this Mac. Enable it in System Settings \u2192 Apple ID \u2192 iCloud \u2192 iCloud Drive.',
+    };
+  }
+}
+
+async function syncDataToICloud(data: ICloudBackupData): Promise<ICloudSyncResult> {
+  const availability = await checkICloudAvailability();
+  if (!availability.available || !availability.path) {
+    return {
+      success: false,
+      error: availability.reason ?? 'iCloud Drive is not available.',
+    };
+  }
+
+  const backupDirectory = availability.path;
+
+  try {
+    await fs.mkdir(backupDirectory, { recursive: true });
+
+    await Promise.all([
+      writeJsonAtomic(
+        join(backupDirectory, ICLOUD_CHECKLISTS_FILE),
+        data.checklists
+      ),
+      writeJsonAtomic(
+        join(backupDirectory, ICLOUD_RATINGS_FILE),
+        data.ratings
+      ),
+      writeJsonAtomic(
+        join(backupDirectory, ICLOUD_STATE_FILE),
+        data.state
+      ),
+    ]);
+
+    return { success: true };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      error: `Failed to write iCloud backup: ${message}`,
+    };
+  }
+}
+
+async function loadDataFromICloud(): Promise<ICloudLoadResult> {
+  const availability = await checkICloudAvailability();
+  if (!availability.available || !availability.path) {
+    return {
+      available: false,
+      data: null,
+      error: availability.reason,
+    };
+  }
+
+  const backupDirectory = availability.path;
+
+  try {
+    await fs.access(backupDirectory);
+  } catch {
+    return {
+      available: true,
+      data: null,
+    };
+  }
+
+  try {
+    const filePaths = {
+      checklists: join(backupDirectory, ICLOUD_CHECKLISTS_FILE),
+      ratings: join(backupDirectory, ICLOUD_RATINGS_FILE),
+      state: join(backupDirectory, ICLOUD_STATE_FILE),
+    };
+
+    let latestModifiedAt: Date | null = null;
+    for (const filePath of Object.values(filePaths)) {
+      try {
+        const stats = await fs.stat(filePath);
+        if (!latestModifiedAt || stats.mtime > latestModifiedAt) {
+          latestModifiedAt = stats.mtime;
+        }
+      } catch {
+        // File may not exist yet.
+      }
+    }
+
+    const readJsonSafe = async <T>(filePath: string, fallback: T): Promise<T> => {
+      try {
+        const raw = await fs.readFile(filePath, 'utf8');
+        return JSON.parse(raw) as T;
+      } catch {
+        return fallback;
+      }
+    };
+
+    const [checklists, ratings, state] = await Promise.all([
+      readJsonSafe<Record<string, unknown[]>>(filePaths.checklists, {}),
+      readJsonSafe<Record<string, number>>(filePaths.ratings, {}),
+      readJsonSafe<ICloudBackupData['state']>(filePaths.state, {
+        iCloudEnabled: true,
+        updatedAt: new Date(0).toISOString(),
+      }),
+    ]);
+
+    return {
+      available: true,
+      data: { checklists, ratings, state },
+      iCloudNewerThan: latestModifiedAt ? latestModifiedAt.toISOString() : undefined,
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      available: true,
+      data: null,
+      error: `Failed to read iCloud backup: ${message}`,
+    };
+  }
+}
+
 function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.GET_LIBRARY_SNAPSHOT, async () => service.getSnapshot());
   ipcMain.handle(IPC_CHANNELS.GET_ENVIRONMENT, async () => buildEnvironmentInfo());
@@ -1925,6 +2093,18 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.PICK_REFERENCE_TRACK, async () => {
     return pickReferenceTrack();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CHECK_ICLOUD_AVAILABLE, async () => {
+    return checkICloudAvailability();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_TO_ICLOUD, async (_event, data: ICloudBackupData) => {
+    return syncDataToICloud(data);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LOAD_FROM_ICLOUD, async () => {
+    return loadDataFromICloud();
   });
 }
 

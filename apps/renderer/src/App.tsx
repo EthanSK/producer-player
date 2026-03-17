@@ -879,7 +879,8 @@ export function App(): JSX.Element {
   const [dragSongId, setDragSongId] = useState<string | null>(null);
   const [dragOverSongId, setDragOverSongId] = useState<string | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<DragOverPosition>('before');
-  const [folderPathInput, setFolderPathInput] = useState('');
+  // folderPathInput removed — path-linker UI is no longer rendered in the app.
+  // Tests link folders via page.evaluate(() => window.producerPlayer.linkFolder(path)).
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
@@ -2363,15 +2364,8 @@ export function App(): JSX.Element {
     }
   }
 
-  function handleLinkFolderPath(): void {
-    const folderPath = folderPathInput.trim();
-    if (!folderPath) {
-      return;
-    }
-
-    void runSnapshotTask(() => window.producerPlayer.linkFolder(folderPath));
-    setFolderPathInput('');
-  }
+  // handleLinkFolderPath removed — path-linker UI is no longer rendered.
+  // Tests use page.evaluate(() => window.producerPlayer.linkFolder(path)) directly.
 
   async function handleOpenFolderDialog(): Promise<void> {
     await runSnapshotTask(() => window.producerPlayer.linkFolderWithDialog());
@@ -3602,30 +3596,8 @@ export function App(): JSX.Element {
             ) : null}
           </section>
 
-          {environment.isTestMode && environment.canLinkFolderByPath ? (
-            <div className="path-linker">
-              <input
-                data-testid="link-folder-path-input"
-                value={folderPathInput}
-                onChange={(event) => setFolderPathInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    handleLinkFolderPath();
-                  }
-                }}
-                placeholder="Paste folder path"
-                title="Paste a local folder path and press Enter or Link Path."
-              />
-              <button
-                type="button"
-                onClick={handleLinkFolderPath}
-                data-testid="link-folder-path-button"
-                title="Link the folder path typed in the input field."
-              >
-                Link Path
-              </button>
-            </div>
-          ) : null}
+          {/* Path-linker removed from production UI. Tests link folders via
+              page.evaluate(() => window.producerPlayer.linkFolder(path)). */}
 
           <section
             className="naming-guide"
@@ -3742,7 +3714,7 @@ export function App(): JSX.Element {
             >
               <div className="folder-row-content">
                 <strong>{folder.name}</strong>
-                <p className="muted">{folder.path}</p>
+                <p className="muted folder-row-path" title={folder.path}>{folder.path}</p>
                 <p className="muted">{folder.fileCount} tracked files</p>
               </div>
               <div className="folder-row-actions">

@@ -1055,10 +1055,14 @@ input[type='range'] {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
+  /* Match width to spectrum analyzer (180px) */
+  width: 180px;
+  box-sizing: border-box;
 }
 
 .player-volume-control input {
-  width: 120px;
+  flex: 1;
+  min-width: 0;
 }
 
 .player-volume-control .muted {
@@ -1568,6 +1572,14 @@ button.checklist-play-toggle[data-playing='true'] {
   color: var(--accent);
   font-size: 13px;
   text-align: center;
+}
+
+/* Side-by-side: current track (left) + tonal balance (right) */
+.analysis-overlay-side-by-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: start;
 }
 
 @media (max-width: 1360px) {

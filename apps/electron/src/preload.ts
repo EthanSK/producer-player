@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
+  type ICloudBackupData,
   type PlaylistOrderExportV1,
   type ProducerPlayerBridge,
   type SnapshotListener,
@@ -83,6 +84,19 @@ const bridge: ProducerPlayerBridge = {
 
   async pickReferenceTrack() {
     return ipcRenderer.invoke(IPC_CHANNELS.PICK_REFERENCE_TRACK);
+  },
+
+
+  async syncToICloud(data: ICloudBackupData) {
+    return ipcRenderer.invoke(IPC_CHANNELS.SYNC_TO_ICLOUD, data);
+  },
+
+  async loadFromICloud() {
+    return ipcRenderer.invoke(IPC_CHANNELS.LOAD_FROM_ICLOUD);
+  },
+
+  async checkICloudAvailable() {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHECK_ICLOUD_AVAILABLE);
   },
 
   onSnapshotUpdated(listener: SnapshotListener) {

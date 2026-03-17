@@ -9,6 +9,8 @@ import {
 } from 'react';
 import type {
   AudioFileAnalysis,
+  ICloudAvailabilityResult,
+  ICloudBackupData,
   LibrarySnapshot,
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
@@ -92,6 +94,8 @@ const DEFAULT_PLAYBACK_VOLUME = 1;
 const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
+const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
+const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
 const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
 const PUBLIC_PAGES_URL = 'https://ethansk.github.io/producer-player/';
@@ -521,6 +525,46 @@ function persistSongChecklists(checklists: Record<string, SongChecklistItem[]>):
   window.localStorage.setItem(SONG_CHECKLISTS_STORAGE_KEY, JSON.stringify(checklists));
 }
 
+function readICloudBackupEnabled(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(ICLOUD_BACKUP_ENABLED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function persistICloudBackupEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(ICLOUD_BACKUP_ENABLED_KEY, enabled ? 'true' : 'false');
+}
+
+function readICloudLastSync(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    return window.localStorage.getItem(ICLOUD_LAST_SYNC_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistICloudLastSync(timestamp: string): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(ICLOUD_LAST_SYNC_KEY, timestamp);
+}
+
 function formatAlbumDuration(totalSeconds: number | null): string {
   if (totalSeconds === null || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
     return 'Album length unavailable';
@@ -650,6 +694,17 @@ export function App(): JSX.Element {
   const [songChecklists, setSongChecklists] = useState<Record<string, SongChecklistItem[]>>(
     () => readStoredSongChecklists()
   );
+  const [iCloudBackupEnabled, setICloudBackupEnabled] = useState<boolean>(() =>
+    readICloudBackupEnabled()
+  );
+  const [iCloudAvailability, setICloudAvailability] = useState<ICloudAvailabilityResult | null>(
+    null
+  );
+  const [iCloudSyncStatus, setICloudSyncStatus] = useState<
+    'idle' | 'syncing' | 'success' | 'error'
+  >('idle');
+  const [iCloudSyncError, setICloudSyncError] = useState<string | null>(null);
+  const [iCloudInitialLoadDone, setICloudInitialLoadDone] = useState(false);
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
@@ -702,6 +757,9 @@ export function App(): JSX.Element {
   const playbackGainNodeRef = useRef<GainNode | null>(null);
   const playbackAnalyserNodeRef = useRef<AnalyserNode | null>(null);
   const bandSoloFilterRef = useRef<BiquadFilterNode | null>(null);
+
+  const iCloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iCloudBackupEnabledRef = useRef(iCloudBackupEnabled);
 
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
   const [soloedBand, setSoloedBand] = useState<number | null>(null);
@@ -2275,6 +2333,53 @@ export function App(): JSX.Element {
     await runSnapshotTask(() => window.producerPlayer.setAutoMoveOld(enabled));
   }
 
+  async function handleToggleICloudBackup(enabled: boolean): Promise<void> {
+    if (enabled) {
+      const availability = await window.producerPlayer.checkICloudAvailable();
+      setICloudAvailability(availability);
+
+      if (!availability.available) {
+        setICloudSyncError(availability.reason ?? 'iCloud Drive is not available.');
+        return;
+      }
+
+      setICloudBackupEnabled(true);
+      persistICloudBackupEnabled(true);
+      setICloudSyncError(null);
+
+      const now = new Date().toISOString();
+      const backupData: ICloudBackupData = {
+        checklists: songChecklists,
+        ratings: songRatings,
+        state: {
+          iCloudEnabled: true,
+          updatedAt: now,
+        },
+      };
+
+      setICloudSyncStatus('syncing');
+      try {
+        const result = await window.producerPlayer.syncToICloud(backupData);
+        if (result.success) {
+          setICloudSyncStatus('success');
+          persistICloudLastSync(now);
+          setTimeout(() => setICloudSyncStatus('idle'), 2000);
+        } else {
+          setICloudSyncStatus('error');
+          setICloudSyncError(result.error ?? 'Initial sync failed.');
+        }
+      } catch {
+        setICloudSyncStatus('error');
+        setICloudSyncError('Failed to sync to iCloud.');
+      }
+    } else {
+      setICloudBackupEnabled(false);
+      persistICloudBackupEnabled(false);
+      setICloudSyncStatus('idle');
+      setICloudSyncError(null);
+    }
+  }
+
   function buildSongOrderAfterDrop(
     draggedSongId: string,
     targetSongId: string,
@@ -3193,6 +3298,50 @@ export function App(): JSX.Element {
             />
             Auto-organize old versions
           </label>
+
+          {iCloudAvailability === null || iCloudAvailability.available ? (
+            <label
+              className="checkbox-row"
+              title="Back up checklists, ratings, and preferences to iCloud Drive so they sync across your Macs."
+            >
+              <input
+                type="checkbox"
+                checked={iCloudBackupEnabled}
+                onChange={(event) => {
+                  void handleToggleICloudBackup(event.target.checked);
+                }}
+                data-testid="icloud-backup-checkbox"
+                title="Toggle iCloud Drive backup."
+                disabled={iCloudAvailability !== null && !iCloudAvailability.available}
+              />
+              Back up to iCloud
+              {iCloudSyncStatus === 'syncing' && (
+                <span className="muted" style={{ marginLeft: '0.4em', fontSize: '0.85em' }}>
+                  Syncing…
+                </span>
+              )}
+              {iCloudSyncStatus === 'success' && (
+                <span className="muted" style={{ marginLeft: '0.4em', fontSize: '0.85em', color: '#4ade80' }}>
+                  ✓ Saved
+                </span>
+              )}
+            </label>
+          ) : (
+            <p
+              className="muted"
+              style={{ fontSize: '0.85em', marginTop: '0.4em' }}
+              title={iCloudAvailability.reason ?? 'iCloud Drive not available.'}
+              data-testid="icloud-unavailable-hint"
+            >
+              ☁️ iCloud backup: macOS only
+            </p>
+          )}
+
+          {iCloudSyncError && (
+            <p className="error" style={{ fontSize: '0.85em', marginTop: '0.3em' }} data-testid="icloud-sync-error">
+              {iCloudSyncError}
+            </p>
+          )}
 
           {loading && <p className="muted">Loading snapshot…</p>}
           {error && <p className="error">{error}</p>}

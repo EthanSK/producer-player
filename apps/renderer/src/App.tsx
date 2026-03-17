@@ -705,6 +705,8 @@ export function App(): JSX.Element {
 
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
   const [soloedBand, setSoloedBand] = useState<number | null>(null);
+  const [spectrumFullWidth, setSpectrumFullWidth] = useState(860);
+  const spectrumFullContainerRef = useRef<HTMLDivElement | null>(null);
 
   const applyPlaybackGain = useCallback(
     (nextVolume: number, nextNormalizationGainDb: number) => {
@@ -824,6 +826,26 @@ export function App(): JSX.Element {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
+  }, [analysisExpanded]);
+
+  // ResizeObserver for full-screen spectrum width
+  useEffect(() => {
+    if (!analysisExpanded) return;
+    const container = spectrumFullContainerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        if (w > 0) setSpectrumFullWidth(w);
+      }
+    });
+    observer.observe(container);
+    // Set initial width
+    const initialWidth = Math.floor(container.clientWidth);
+    if (initialWidth > 0) setSpectrumFullWidth(initialWidth);
+
+    return () => observer.disconnect();
   }, [analysisExpanded]);
 
   useEffect(() => {
@@ -1035,6 +1057,8 @@ export function App(): JSX.Element {
         const playbackAnalyserNode = playbackAudioContext.createAnalyser();
         playbackAnalyserNode.fftSize = 4096;
         playbackAnalyserNode.smoothingTimeConstant = 0.82;
+        playbackAnalyserNode.minDecibels = -90;
+        playbackAnalyserNode.maxDecibels = -10;
 
         // Audio chain: source → analyser → gain → destination
         playbackSourceNode.connect(playbackAnalyserNode);
@@ -3214,7 +3238,7 @@ export function App(): JSX.Element {
 
               <div className="analysis-ab-toggle" data-testid="analysis-ab-toggle">
                 <span className="analysis-ab-label">Quick A/B</span>
-                <div className="analysis-ab-actions" role="group" aria-label="Quick A/B audition">
+                <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
                   <button
                     type="button"
                     className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
@@ -3269,7 +3293,7 @@ export function App(): JSX.Element {
                     <span className="analysis-stat-label">Reference comparison</span>
                     <strong>No reference loaded</strong>
                     <span className="muted">
-                      Choose a reference file or set the current track.
+                      Load a reference to compare against.
                     </span>
                   </div>
                 )}
@@ -3376,7 +3400,7 @@ export function App(): JSX.Element {
             </>
           ) : (
             <p className="muted" data-testid="analysis-empty-state">
-              Select a track to see analysis + A/B.
+              Pick a track to see loudness analysis and A/B.
             </p>
           )}
         </section>
@@ -3424,7 +3448,7 @@ export function App(): JSX.Element {
               title={
                 canExportLatestVersionsInOrder
                   ? 'Create a new folder containing only the latest version of each track, renamed with ordered numeric prefixes.'
-                  : 'Link a folder and load tracks before exporting latest versions in order.'
+                  : 'Link a folder first to export latest versions.'
               }
               disabled={!canExportLatestVersionsInOrder}
             >
@@ -3441,7 +3465,7 @@ export function App(): JSX.Element {
               title={
                 canExportPlaylistOrder
                   ? 'Export the current album selection + ordering (with metadata) as JSON.'
-                  : 'Link a folder and load tracks before exporting a playlist JSON.'
+                  : 'Link a folder first to export track order.'
               }
               disabled={!canExportPlaylistOrder}
             >
@@ -3470,7 +3494,7 @@ export function App(): JSX.Element {
         <p
           className="list-hint"
           data-testid="track-order-hint"
-          title="Drag and drop tracks to reorder them. Producer Player keeps this order between sessions."
+          title="Drag tracks to reorder. Order is saved automatically."
         >
           {listHintText}
         </p>
@@ -3572,8 +3596,8 @@ export function App(): JSX.Element {
                   }}
                   title={
                     canReorderSongs
-                      ? 'Select track. Drag rows to reorder track order.'
-                      : 'Select track. Clear search to enable drag-and-drop ordering.'
+                      ? 'Click to select, drag to reorder.'
+                      : 'Click to select. Clear search to reorder.'
                   }
                 >
                   <div className="main-list-row-primary">
@@ -3846,7 +3870,7 @@ export function App(): JSX.Element {
             </section>
           ) : (
             <section className="inspector-card empty-state">
-              Select a track to inspect versions.
+              Pick a track to see its version history.
             </section>
           )}
 
@@ -4165,11 +4189,11 @@ export function App(): JSX.Element {
                 <section className="analysis-overlay-section analysis-overlay-visualizations" data-testid="analysis-overlay-visualizations">
                   <h3>Real-time Spectrum &amp; Level</h3>
                   <div className="analysis-overlay-viz-row">
-                    <div className="analysis-overlay-viz-spectrum">
+                    <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
                       <SpectrumAnalyzer
                         analyserNode={isPlaying ? analyserNode : null}
-                        width={860}
-                        height={200}
+                        width={spectrumFullWidth}
+                        height={220}
                         isFullScreen
                         soloedBand={soloedBand}
                         onBandSoloStart={handleBandSoloStart}
@@ -4323,7 +4347,7 @@ export function App(): JSX.Element {
 
                   <div className="analysis-ab-toggle">
                     <span className="analysis-ab-label">Quick A/B</span>
-                    <div className="analysis-ab-actions" role="group" aria-label="Quick A/B audition">
+                    <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
                       <button
                         type="button"
                         className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
@@ -4515,13 +4539,13 @@ export function App(): JSX.Element {
                     </div>
                   ) : (
                     <p className="muted" data-testid="analysis-active-reference">
-                      Load a reference to see deltas.
+                      Load a reference track to compare.
                     </p>
                   )}
                 </section>
               </div>
             ) : (
-              <p className="muted">Select a track and wait for analysis to finish.</p>
+              <p className="muted">Pick a track to see mastering analysis.</p>
             )}
           </div>
         </div>

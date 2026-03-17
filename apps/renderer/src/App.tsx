@@ -3819,6 +3819,19 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
+              <button
+                type="button"
+                className="checklist-play-toggle"
+                data-playing={isPlaying ? 'true' : 'false'}
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+                title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                data-testid="song-checklist-play-toggle"
+                onClick={() => {
+                  void handleTogglePlayback();
+                }}
+              >
+                <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+              </button>
             </div>
 
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
@@ -3946,19 +3959,6 @@ export function App(): JSX.Element {
                 data-testid="song-checklist-clear-completed"
               >
                 Clear Completed
-              </button>
-              <button
-                type="button"
-                className="checklist-play-toggle"
-                data-playing={isPlaying ? 'true' : 'false'}
-                aria-label={isPlaying ? 'Pause' : 'Play'}
-                title={isPlaying ? 'Pause playback' : 'Resume playback'}
-                data-testid="song-checklist-play-toggle"
-                onClick={() => {
-                  void handleTogglePlayback();
-                }}
-              >
-                <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
               </button>
               <button type="button" onClick={handleCloseSongChecklist}>
                 Done

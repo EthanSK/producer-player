@@ -25,21 +25,30 @@ export interface PlatformNormalizationPreview {
 }
 
 /**
- * Platform normalization profiles.
+ * Platform normalization profiles — verified against authoritative sources.
  *
- * Spotify  — -14 LUFS (Normal mode), -1 dBTP. Down-only: loud tracks are
- *            turned down, quiet tracks are NOT boosted in the default mode.
+ * Sources (verified March 2026):
  *
- * Apple Music — Sound Check normalizes to -16 LUFS (per AES TD1008), -1 dBTP.
- *              Adjusts both up and down with headroom-aware gain limiting.
+ * Spotify  — -14 LUFS integrated (Normal mode), -1 dBTP true peak ceiling.
+ *            Both up and down: positive gain applied to quiet tracks, capped
+ *            so true peak stays at or below -1 dBTP. No limiter in Normal mode.
+ *            Ref: https://support.spotify.com/us/artists/article/loudness-normalization/
+ *
+ * Apple Music — Sound Check normalizes to -16 LUFS integrated, -1 dBTP.
+ *              Adjusts both up and down. Quiet tracks are raised only as far
+ *              as peak headroom allows (no limiter, no compression).
+ *              Ref: https://www.production-expert.com/...apple-choose-16lufs...
  *
  * YouTube — -14 LUFS, -1 dBTP, down-only. Loud tracks are turned down;
- *           quiet tracks are not boosted.
+ *           quiet tracks play at their original level.
+ *           Ref: https://www.meterplugs.com/blog/2019/09/18/youtube-changes-loudness-reference-to-14-lufs.html
  *
- * Tidal   — -14 LUFS, -1 dBTP, down-only. Does not raise the level of
- *           music quieter than -14 LUFS.
+ * Tidal   — -14 LUFS, -1 dBTP, down-only. Tidal does not raise the level
+ *           of music quieter than -14 LUFS.
+ *           Ref: https://productionadvice.co.uk/tidal-loudness/
  *
  * Amazon Music — -14 LUFS, -2 dBTP, down-only. Loud tracks are turned down.
+ *               Amazon recommends the stricter -2 dBTP ceiling.
  */
 export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProfile[] = [
   {
@@ -48,9 +57,9 @@ export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProf
     shortLabel: 'Spotify',
     targetLufs: -14,
     truePeakCeilingDbtp: -1,
-    policy: 'down-only',
+    policy: 'peak-limited-upward',
     accentColor: '#1ed760',
-    description: 'Spotify turns down loud tracks to -14 LUFS but does not boost quiet ones in normal mode.',
+    description: 'Spotify normalizes to -14 LUFS. Quiet tracks get boosted (capped at -1 dBTP); loud tracks are turned down.',
   },
   {
     id: 'appleMusic',
@@ -60,7 +69,7 @@ export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProf
     truePeakCeilingDbtp: -1,
     policy: 'peak-limited-upward',
     accentColor: '#fa243c',
-    description: 'Apple Music Sound Check normalizes up and down to -16 LUFS, capped at -1 dBTP.',
+    description: 'Apple Music Sound Check targets -16 LUFS. Adjusts both up and down, limited by true peak headroom.',
   },
   {
     id: 'youtube',
@@ -70,7 +79,7 @@ export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProf
     truePeakCeilingDbtp: -1,
     policy: 'down-only',
     accentColor: '#ff0033',
-    description: 'YouTube turns down loud tracks to -14 LUFS but does not boost quiet ones.',
+    description: 'YouTube turns down loud tracks to -14 LUFS but will not boost quiet ones.',
   },
   {
     id: 'tidal',
@@ -136,16 +145,16 @@ export function computePlatformNormalizationPreview(
   if (platform.policy === 'down-only') {
     appliedGainDb = Math.min(rawGainDb, 0);
     explanation = rawGainDb >= 0
-      ? `${platform.label} only turns down loud tracks — yours is at or below the target, so no change.`
-      : `${platform.label} will turn this down by ${Math.abs(roundDb(rawGainDb)).toFixed(1)} dB to hit ${platform.targetLufs.toFixed(0)} LUFS.`;
+      ? `${platform.label} only turns down loud tracks \u2014 yours is at or below the target, so no change.`
+      : `${platform.label} will turn this track down by ${Math.abs(roundDb(rawGainDb)).toFixed(1)} dB to hit ${platform.targetLufs.toFixed(0)} LUFS.`;
   } else if (rawGainDb > 0) {
     if (headroomCapDb !== null) {
       const cappedPositiveGainDb = Math.max(0, headroomCapDb);
       limitedByHeadroom = cappedPositiveGainDb < rawGainDb;
       appliedGainDb = Math.min(rawGainDb, cappedPositiveGainDb);
       explanation = limitedByHeadroom
-        ? `${platform.label} would boost by ${rawGainDb.toFixed(1)} dB, but true peak headroom caps it at ${appliedGainDb.toFixed(1)} dB (${platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling).`
-        : `${platform.label} boosts this by ${appliedGainDb.toFixed(1)} dB — enough headroom to stay under ${platform.truePeakCeilingDbtp.toFixed(0)} dBTP.`;
+        ? `${platform.label} would boost by ${rawGainDb.toFixed(1)} dB, but true peak headroom limits the boost to ${appliedGainDb.toFixed(1)} dB (capped at ${platform.truePeakCeilingDbtp.toFixed(0)} dBTP).`
+        : `${platform.label} boosts this track by ${appliedGainDb.toFixed(1)} dB \u2014 enough headroom to stay under ${platform.truePeakCeilingDbtp.toFixed(0)} dBTP.`;
     } else {
       explanation = `${platform.label} would boost this track, but true peak data is not available to verify the headroom cap.`;
     }

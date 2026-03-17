@@ -856,6 +856,128 @@ export function App(): JSX.Element {
     persistSongChecklists(songChecklists);
   }, [songChecklists]);
 
+  // Keep ref in sync
+  useEffect(() => {
+    iCloudBackupEnabledRef.current = iCloudBackupEnabled;
+  }, [iCloudBackupEnabled]);
+
+  // Check iCloud availability on mount
+  useEffect(() => {
+    let cancelled = false;
+
+    window.producerPlayer.checkICloudAvailable().then((result) => {
+      if (cancelled) return;
+      setICloudAvailability(result);
+
+      // If not available and toggle was somehow left on, turn it off
+      if (!result.available && readICloudBackupEnabled()) {
+        setICloudBackupEnabled(false);
+        persistICloudBackupEnabled(false);
+      }
+    }).catch(() => {
+      if (cancelled) return;
+      setICloudAvailability({ available: false, path: null, reason: 'Could not check iCloud availability.' });
+    });
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load from iCloud on startup if enabled
+  useEffect(() => {
+    if (!iCloudBackupEnabled || iCloudInitialLoadDone) return;
+    if (iCloudAvailability === null) return; // Wait for availability check
+
+    if (!iCloudAvailability.available) {
+      setICloudInitialLoadDone(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    window.producerPlayer.loadFromICloud().then((result) => {
+      if (cancelled) return;
+      setICloudInitialLoadDone(true);
+
+      if (!result.data) return;
+
+      // Compare timestamps: only load if iCloud is newer
+      const localLastSync = readICloudLastSync();
+      const iCloudUpdatedAt = result.data.state?.updatedAt;
+
+      if (localLastSync && iCloudUpdatedAt) {
+        const localTime = new Date(localLastSync).getTime();
+        const iCloudTime = new Date(iCloudUpdatedAt).getTime();
+        if (localTime >= iCloudTime) return; // Local is same or newer
+      }
+
+      // Load iCloud data into state
+      if (result.data.checklists && typeof result.data.checklists === 'object') {
+        const parsedChecklists = result.data.checklists as Record<string, SongChecklistItem[]>;
+        setSongChecklists(parsedChecklists);
+        persistSongChecklists(parsedChecklists);
+      }
+
+      if (result.data.ratings && typeof result.data.ratings === 'object') {
+        const parsedRatings = result.data.ratings as Record<string, number>;
+        setSongRatings(parsedRatings);
+        persistSongRatings(parsedRatings);
+      }
+    }).catch(() => {
+      if (cancelled) return;
+      setICloudInitialLoadDone(true);
+    });
+
+    return () => { cancelled = true; };
+  }, [iCloudBackupEnabled, iCloudAvailability, iCloudInitialLoadDone]);
+
+  // Sync to iCloud whenever ratings or checklists change (debounced)
+  useEffect(() => {
+    if (!iCloudBackupEnabledRef.current) return;
+    if (!iCloudInitialLoadDone) return;
+
+    if (iCloudSyncTimerRef.current) {
+      clearTimeout(iCloudSyncTimerRef.current);
+    }
+
+    iCloudSyncTimerRef.current = setTimeout(() => {
+      if (!iCloudBackupEnabledRef.current) return;
+
+      const now = new Date().toISOString();
+      const backupData: ICloudBackupData = {
+        checklists: songChecklists,
+        ratings: songRatings,
+        state: {
+          iCloudEnabled: true,
+          updatedAt: now,
+        },
+      };
+
+      setICloudSyncStatus('syncing');
+      setICloudSyncError(null);
+
+      window.producerPlayer.syncToICloud(backupData).then((result) => {
+        if (result.success) {
+          setICloudSyncStatus('success');
+          persistICloudLastSync(now);
+          // Reset status after a brief display
+          setTimeout(() => setICloudSyncStatus('idle'), 2000);
+        } else {
+          setICloudSyncStatus('error');
+          setICloudSyncError(result.error ?? 'Sync failed.');
+        }
+      }).catch(() => {
+        setICloudSyncStatus('error');
+        setICloudSyncError('Failed to sync to iCloud.');
+      });
+    }, 1500); // Debounce: wait 1.5s after last change
+
+    return () => {
+      if (iCloudSyncTimerRef.current) {
+        clearTimeout(iCloudSyncTimerRef.current);
+      }
+    };
+  }, [songRatings, songChecklists, iCloudInitialLoadDone]);
+
   useEffect(() => {
     if (!checklistModalSongId) {
       return;

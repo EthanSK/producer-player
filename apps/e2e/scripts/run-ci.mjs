@@ -10,7 +10,8 @@ function hasCommand(command) {
 
 const isLinux = os.platform() === 'linux';
 
-let command = ['npx', 'playwright', 'test'];
+const forwardedArgs = process.argv.slice(2);
+let command = ['npx', 'playwright', 'test', ...forwardedArgs];
 
 if (isLinux && hasCommand('xvfb-run')) {
   command = ['xvfb-run', '-a', ...command];

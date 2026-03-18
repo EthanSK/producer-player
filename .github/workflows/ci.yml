@@ -65,4 +65,5 @@ jobs:
       - name: Run runtime smoke tests
         env:
           PLAYWRIGHT_WORKERS: 2
-        run: npm run ci -w @producer-player/e2e -- --grep @smoke
+          PLAYWRIGHT_GREP: '@smoke'
+        run: npm run ci -w @producer-player/e2e

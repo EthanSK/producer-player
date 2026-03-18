@@ -1,4 +1,4 @@
-name: Desktop prebuilt releases
+name: Release Desktop
 
 on:
   workflow_dispatch:
@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       build_version: ${{ steps.meta.outputs.build_version }}
-      snapshot_tag: ${{ steps.meta.outputs.snapshot_tag }}
-      snapshot_name: ${{ steps.meta.outputs.snapshot_name }}
-      is_snapshot: ${{ steps.meta.outputs.is_snapshot }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_name: ${{ steps.meta.outputs.release_name }}
+      is_branch_build: ${{ steps.meta.outputs.is_branch_build }}
       is_tag_release: ${{ steps.meta.outputs.is_tag_release }}
     steps:
       - name: Checkout
@@ -42,27 +42,27 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             tag_version="${GITHUB_REF_NAME#v}"
             echo "build_version=${tag_version}" >> "$GITHUB_OUTPUT"
-            echo "snapshot_tag=" >> "$GITHUB_OUTPUT"
-            echo "snapshot_name=" >> "$GITHUB_OUTPUT"
-            echo "is_snapshot=false" >> "$GITHUB_OUTPUT"
+            echo "release_tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "release_name=Producer Player ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "is_branch_build=false" >> "$GITHUB_OUTPUT"
             echo "is_tag_release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [[ "${GITHUB_REF}" == "refs/heads/main" || "${GITHUB_REF}" == "refs/heads/master" ]]; then
-            snapshot_version="${base_version}-${GITHUB_REF_NAME}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-            echo "build_version=${snapshot_version}" >> "$GITHUB_OUTPUT"
-            echo "snapshot_tag=desktop-snapshot-${snapshot_version}" >> "$GITHUB_OUTPUT"
-            echo "snapshot_name=Desktop snapshot (${GITHUB_REF_NAME}) ${snapshot_version}" >> "$GITHUB_OUTPUT"
-            echo "is_snapshot=true" >> "$GITHUB_OUTPUT"
+            build_num="${GITHUB_RUN_NUMBER}"
+            echo "build_version=${base_version}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=v${base_version}-${build_num}" >> "$GITHUB_OUTPUT"
+            echo "release_name=Producer Player v${base_version} (build ${build_num})" >> "$GITHUB_OUTPUT"
+            echo "is_branch_build=true" >> "$GITHUB_OUTPUT"
             echo "is_tag_release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "build_version=${base_version}" >> "$GITHUB_OUTPUT"
-          echo "snapshot_tag=" >> "$GITHUB_OUTPUT"
-          echo "snapshot_name=" >> "$GITHUB_OUTPUT"
-          echo "is_snapshot=false" >> "$GITHUB_OUTPUT"
+          echo "release_tag=" >> "$GITHUB_OUTPUT"
+          echo "release_name=" >> "$GITHUB_OUTPUT"
+          echo "is_branch_build=false" >> "$GITHUB_OUTPUT"
           echo "is_tag_release=false" >> "$GITHUB_OUTPUT"
 
   build-desktop:
@@ -93,8 +93,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Set build version (tags + main snapshots)
-        if: needs.compute-version.outputs.is_snapshot == 'true' || needs.compute-version.outputs.is_tag_release == 'true'
+      - name: Set build version
+        if: needs.compute-version.outputs.is_branch_build == 'true' || needs.compute-version.outputs.is_tag_release == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -163,36 +163,8 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    name: Publish tagged release assets
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: build-desktop
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download built artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: desktop-*-${{ github.ref_name }}
-          merge-multiple: true
-          path: release-assets
-
-      - name: Show assets
-        run: ls -lah release-assets
-
-      - name: Attach assets to GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          make_latest: true
-          generate_release_notes: false
-          body_path: .github/RELEASE_NOTES_TEMPLATE.md
-          files: |
-            release-assets/*
-
-  publish-branch-snapshot:
-    name: Publish versioned branch snapshot assets
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     needs:
       - compute-version
       - build-desktop
@@ -211,18 +183,27 @@ jobs:
       - name: Show assets
         run: ls -lah release-assets
 
-      - name: Publish snapshot GitHub Release (marked Latest)
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.compute-version.outputs.snapshot_tag }}
+          tag_name: ${{ needs.compute-version.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
-          name: ${{ needs.compute-version.outputs.snapshot_name }}
-          prerelease: true
+          name: ${{ needs.compute-version.outputs.release_name }}
+          prerelease: false
           make_latest: true
           generate_release_notes: false
           body: |
-            Automated unsigned desktop snapshot for `${{ github.ref_name }}`.
-            Version: `${{ needs.compute-version.outputs.build_version }}`
+            ## Producer Player v${{ needs.compute-version.outputs.build_version }}
+
+            **Downloads** — pick the ZIP for your platform, unzip, and run.
+
+            | Platform | File |
+            |----------|------|
+            | macOS (Apple Silicon) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-mac-arm64.zip` |
+            | macOS (Intel) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-mac-x64.zip` |
+            | Linux (x64) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-linux-x64.zip` |
+            | Windows (x64) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-win-x64.zip` |
+
             Commit: `${{ github.sha }}`
             Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           files: |

@@ -37,8 +37,14 @@ export async function launchProducerPlayer(
   const workspaceRoot = path.resolve(__dirname, '../../../..');
   const electronEntry = path.join(workspaceRoot, 'apps/electron/dist/main.cjs');
 
+  const launchArgs = [electronEntry];
+  if (process.platform === 'linux' && process.env.CI) {
+    launchArgs.unshift('--disable-setuid-sandbox');
+    launchArgs.unshift('--no-sandbox');
+  }
+
   const electronApp = await electron.launch({
-    args: [electronEntry],
+    args: launchArgs,
     env: {
       ...process.env,
       PRODUCER_PLAYER_USER_DATA_DIR: userDataDirectory,

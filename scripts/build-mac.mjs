@@ -111,5 +111,8 @@ if (isMasTarget) {
     `[producer-player] Completed ${target} build. This target still requires Apple signing/provisioning setup and App Store Connect submission steps.`
   );
 } else {
-  console.log(`[producer-player] Completed unsigned macOS ${target} build.`);
+  const isSigned = !!(process.env.CSC_LINK || process.env.CSC_NAME);
+  console.log(
+    `[producer-player] Completed ${isSigned ? 'signed' : 'unsigned'} macOS ${target} build.`
+  );
 }

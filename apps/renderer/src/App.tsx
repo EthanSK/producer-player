@@ -2104,11 +2104,14 @@ export function App(): JSX.Element {
   const listHintText = isSearching
     ? 'Search is filtering the list — clear it to reorder tracks.'
     : 'Drag tracks to reorder — track positions are preserved.';
+  const showEmptyStateAddFolder = songs.length === 0 && !isSearching && !loading;
   const emptyStateText = isSearching
     ? 'No matching tracks or versions.'
     : loading
       ? 'Loading…'
-      : 'No tracks found in linked folders.';
+      : snapshot.linkedFolders.length === 0
+        ? 'No folder linked yet.'
+        : 'No tracks found in linked folders.';
 
   const playbackQueue = useMemo(() => {
     const queue: SongVersion[] = [];
@@ -3329,10 +3332,17 @@ export function App(): JSX.Element {
 
     const schemaText = JSON.stringify(schema, null, 2);
 
-    void navigator.clipboard.writeText(schemaText).then(() => {
-      setMigrationSchemaCopied(true);
-      setTimeout(() => setMigrationSchemaCopied(false), 3000);
-    });
+    setMigrationParseError(null);
+    void window.producerPlayer
+      .copyTextToClipboard(schemaText)
+      .then(() => {
+        setMigrationSchemaCopied(true);
+        setTimeout(() => setMigrationSchemaCopied(false), 3000);
+      })
+      .catch(() => {
+        setMigrationSchemaCopied(false);
+        setMigrationParseError('Couldn’t copy the schema. Try again.');
+      });
   }
 
   function handleParseMigrationJson(): void {
@@ -4297,7 +4307,24 @@ export function App(): JSX.Element {
               </li>
             );
           })}
-          {songs.length === 0 && <li className="empty-state">{emptyStateText}</li>}
+          {songs.length === 0 && (
+            <li className={`empty-state${showEmptyStateAddFolder ? ' empty-state-cta' : ''}`}>
+              <p>{emptyStateText}</p>
+              {showEmptyStateAddFolder ? (
+                <button
+                  type="button"
+                  className="add-folder-primary empty-state-add-folder"
+                  onClick={() => {
+                    void handleOpenFolderDialog();
+                  }}
+                  data-testid="main-list-empty-add-folder"
+                  title="Choose a folder containing your exported audio files."
+                >
+                  Add Folder…
+                </button>
+              ) : null}
+            </li>
+          )}
         </ul>
 
         {selectedPlaybackVersion && (

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeImage, protocol, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, protocol, shell } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, promises as fs } from 'node:fs';
 import { dirname, extname, join, parse, resolve } from 'node:path';
@@ -2077,6 +2077,10 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL_URL, async (_event, url: string) => {
     const trustedUrl = parseTrustedExternalUrl(url);
     await shell.openExternal(trustedUrl.toString());
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COPY_TEXT_TO_CLIPBOARD, async (_event, text: string) => {
+    clipboard.writeText(text);
   });
 
   ipcMain.handle(IPC_CHANNELS.TO_FILE_URL, async (_event, filePath: string) => {

@@ -1529,6 +1529,23 @@ button.checklist-play-toggle[data-playing='true'] {
   padding: 12px;
 }
 
+.empty-state p {
+  margin: 0;
+}
+
+.empty-state-cta {
+  display: grid;
+  place-items: center;
+  gap: 14px;
+  text-align: center;
+  min-height: 220px;
+  padding: 32px 20px;
+}
+
+.empty-state-add-folder {
+  justify-self: center;
+}
+
 .error {
   color: var(--danger);
   margin: 0;

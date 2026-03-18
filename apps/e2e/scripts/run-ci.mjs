@@ -8,15 +8,23 @@ function hasCommand(command) {
   return check.status === 0;
 }
 
-const isLinux = os.platform() === 'linux';
+const platform = os.platform();
+const isLinux = platform === 'linux';
+const isWindows = platform === 'win32';
 
 const forwardedArgs = process.argv.slice(2);
 const grepArg = process.env.PLAYWRIGHT_GREP?.trim();
 const grepArgs = grepArg ? ['--grep', grepArg] : [];
-let command = ['npx', 'playwright', 'test', ...grepArgs, ...forwardedArgs];
+const workersArg = process.env.PLAYWRIGHT_WORKERS?.trim();
+const workerArgs = workersArg ? ['--workers', workersArg] : [];
+const npxCommand = isWindows ? 'npx.cmd' : 'npx';
+
+let command = ['npx', 'playwright', 'test', ...workerArgs, ...grepArgs, ...forwardedArgs];
 
 if (isLinux && hasCommand('xvfb-run')) {
-  command = ['xvfb-run', '-a', ...command];
+  command = ['xvfb-run', '-a', npxCommand, 'playwright', 'test', ...workerArgs, ...grepArgs, ...forwardedArgs];
+} else {
+  command = [npxCommand, 'playwright', 'test', ...workerArgs, ...grepArgs, ...forwardedArgs];
 }
 
 const run = spawnSync(command[0], command.slice(1), {
@@ -26,6 +34,11 @@ const run = spawnSync(command[0], command.slice(1), {
     CI: process.env.CI ?? '1',
   },
 });
+
+if (run.error) {
+  console.error(run.error);
+  process.exit(1);
+}
 
 if (run.status !== 0) {
   process.exit(run.status ?? 1);

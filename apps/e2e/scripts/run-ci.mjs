@@ -11,7 +11,9 @@ function hasCommand(command) {
 const isLinux = os.platform() === 'linux';
 
 const forwardedArgs = process.argv.slice(2);
-let command = ['npx', 'playwright', 'test', ...forwardedArgs];
+const grepArg = process.env.PLAYWRIGHT_GREP?.trim();
+const grepArgs = grepArg ? ['--grep', grepArg] : [];
+let command = ['npx', 'playwright', 'test', ...grepArgs, ...forwardedArgs];
 
 if (isLinux && hasCommand('xvfb-run')) {
   command = ['xvfb-run', '-a', ...command];

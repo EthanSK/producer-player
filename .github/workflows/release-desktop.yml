@@ -86,8 +86,7 @@ jobs:
             build_num="${GITHUB_RUN_NUMBER}"
             commit_subject="$(git log -1 --pretty=%s)"
             commit_body="$(git log -1 --pretty=%b)"
-            commit_text="$commit_subject
-$commit_body"
+            commit_text="$(printf '%s\n%s' "$commit_subject" "$commit_body")"
             bump_level="patch"
 
             if printf '%s' "$commit_text" | grep -Eiq '(^feat(\(|:))|(\[minor\])'; then

@@ -583,15 +583,14 @@
           <div class="hero-actions">
             <a class="btn btn--primary" id="hero-download-primary" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              Download for your OS
+              Download macOS (Universal)
             </a>
-            <a class="btn btn--ghost btn--compact" id="hero-download-mac" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip">macOS (Universal)</a>
             <a class="btn btn--ghost btn--compact" id="hero-download-win" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-win-x64.zip">Windows</a>
             <a class="btn btn--ghost btn--compact" id="hero-download-linux" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-linux-x64.zip">Linux</a>
             <a class="btn btn--ghost" href="https://github.com/EthanSK/producer-player">
               View source
             </a>
-            <div class="hero-download-note" id="hero-download-note">macOS currently ships as one universal build for Apple Silicon + Intel.</div>
+            <div class="hero-download-note" id="hero-download-note">Direct latest-release links — no browser OS detection, one universal macOS ZIP.</div>
           </div>
         </div>
 
@@ -673,9 +672,9 @@
               <span class="download-kicker">Recommended</span>
               <a class="btn btn--primary download-primary" id="download-primary" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Download for your OS
+                Download macOS (Universal)
               </a>
-              <p class="download-recommend-note" id="download-detected-note">We pick a default based on your browser OS.</p>
+              <p class="download-recommend-note" id="download-detected-note">Direct latest-release asset links that roll forward automatically.</p>
             </div>
 
             <div class="download-options">
@@ -720,74 +719,6 @@
         </div>
       </footer>
     </div>
-
-    <script>
-    (function () {
-      var downloads = {
-        fallback: 'https://github.com/EthanSK/producer-player/releases/latest',
-        macUniversal: 'https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip',
-        winX64: 'https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-win-x64.zip',
-        linuxX64: 'https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-linux-x64.zip'
-      };
-
-      var heroPrimary = document.getElementById('hero-download-primary');
-      var sectionPrimary = document.getElementById('download-primary');
-      var heroNote = document.getElementById('hero-download-note');
-      var sectionNote = document.getElementById('download-detected-note');
-
-      function setPrimary(el, href, label) {
-        if (!el) return;
-        el.setAttribute('href', href);
-        el.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' + label;
-      }
-
-      function detectPlatform() {
-        var ua = (navigator.userAgent || '').toLowerCase();
-        var platform = (navigator.platform || '').toLowerCase();
-
-        if (platform.indexOf('win') >= 0 || ua.indexOf('windows') >= 0) {
-          return { key: 'windows', href: downloads.winX64, label: 'Download for Windows', note: 'Detected Windows in your browser.' };
-        }
-
-        if (platform.indexOf('linux') >= 0 || ua.indexOf('linux') >= 0) {
-          return { key: 'linux', href: downloads.linuxX64, label: 'Download for Linux', note: 'Detected Linux in your browser.' };
-        }
-
-        if (platform.indexOf('mac') >= 0 || ua.indexOf('mac os x') >= 0) {
-          var looksArm = ua.indexOf('arm') >= 0 || ua.indexOf('aarch64') >= 0 || ua.indexOf('apple silicon') >= 0;
-          if (looksArm) {
-            return {
-              key: 'mac-universal-arm',
-              href: downloads.macUniversal,
-              label: 'Download for macOS (Universal)',
-              note: 'Detected macOS Apple Silicon. Current desktop build is one universal ZIP for both Apple Silicon and Intel.'
-            };
-          }
-
-          return {
-            key: 'mac-universal',
-            href: downloads.macUniversal,
-            label: 'Download for macOS (Universal)',
-            note: 'Detected macOS. Current desktop build is one universal ZIP for both Intel and Apple Silicon.'
-          };
-        }
-
-        return {
-          key: 'fallback',
-          href: downloads.fallback,
-          label: 'Open latest release',
-          note: 'Could not confidently detect OS; using latest release page fallback.'
-        };
-      }
-
-      var detected = detectPlatform();
-      setPrimary(heroPrimary, detected.href, detected.label);
-      setPrimary(sectionPrimary, detected.href, detected.label);
-
-      if (heroNote) heroNote.textContent = detected.note;
-      if (sectionNote) sectionNote.textContent = detected.note;
-    })();
-    </script>
 
     <!-- ── Kaleidoscope Animation (balanced: perf + beauty) ── -->
     <script>

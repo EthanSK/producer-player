@@ -3970,15 +3970,22 @@ export function App(): JSX.Element {
                       title={platform.description}
                       aria-pressed={selectedNormalizationPlatformId === platform.id}
                     >
-                      <span
-                        className="analysis-platform-icon"
-                        style={{ '--platform-accent': platform.accentColor } as CSSProperties}
-                      >
-                        <PlatformIcon platformId={platform.id} />
-                      </span>
-                      <span className="analysis-platform-copy">
-                        <strong>{platform.shortLabel}</strong>
-                        <span className="muted">{platform.targetLufs.toFixed(0)} LUFS</span>
+                      <span className="analysis-platform-title">{platform.label}</span>
+                      <span className="analysis-platform-meta-row">
+                        <span
+                          className="analysis-platform-icon"
+                          style={{ '--platform-accent': platform.accentColor } as CSSProperties}
+                        >
+                          <PlatformIcon platformId={platform.id} />
+                        </span>
+                        <span className="analysis-platform-copy">
+                          <span className="analysis-platform-target">
+                            {platform.targetLufs.toFixed(0)} LUFS target
+                          </span>
+                          <span className="muted">
+                            {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                          </span>
+                        </span>
                       </span>
                     </button>
                   ))}
@@ -5103,21 +5110,28 @@ export function App(): JSX.Element {
                         title={platform.description}
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
                       >
-                        <span
-                          className="analysis-platform-icon"
-                          style={{ '--platform-accent': platform.accentColor } as CSSProperties}
-                        >
-                          <PlatformIcon platformId={platform.id} />
-                        </span>
-                        <span className="analysis-platform-copy">
-                          <strong>{platform.shortLabel}</strong>
-                          <span className="muted">{platform.targetLufs.toFixed(0)} LUFS</span>
+                        <span className="analysis-platform-title">{platform.label}</span>
+                        <span className="analysis-platform-meta-row">
+                          <span
+                            className="analysis-platform-icon"
+                            style={{ '--platform-accent': platform.accentColor } as CSSProperties}
+                          >
+                            <PlatformIcon platformId={platform.id} />
+                          </span>
+                          <span className="analysis-platform-copy">
+                            <span className="analysis-platform-target">
+                              {platform.targetLufs.toFixed(0)} LUFS target
+                            </span>
+                            <span className="muted">
+                              {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                            </span>
+                          </span>
                         </span>
                       </button>
                     ))}
                   </div>
 
-                  <div className="analysis-detail-grid analysis-detail-grid-wide">
+                  <div className="analysis-normalization-metrics-grid">
                     <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-change">
                       <span className="analysis-stat-label">Applied change</span>
                       <strong>{normalizationChangeText}</strong>

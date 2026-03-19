@@ -5,6 +5,55 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/ProducerPlayer_AppStore.provisionprofile"
 PROFILE_PATH="${PRODUCER_PLAYER_PROVISIONING_PROFILE:-$DEFAULT_PROFILE_PATH}"
 SCREENSHOT_DIR="$ROOT_DIR/artifacts/app-store-connect/screenshots"
+MODE="${MAS_PREFLIGHT_MODE:-submit}"
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/mas-preflight.sh [--for build|submit]
+
+Modes:
+  --for submit   Full submission readiness (default): includes upload tooling checks.
+  --for build    Build readiness only: upload tooling is warning-level, not blocker.
+
+You can also set MAS_PREFLIGHT_MODE=build|submit.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --for)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value after --for"
+        usage
+        exit 2
+      fi
+      MODE="$2"
+      shift 2
+      ;;
+    --for=*)
+      MODE="${1#*=}"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+case "$MODE" in
+  build|submit)
+    ;;
+  *)
+    echo "Invalid mode: $MODE (expected 'build' or 'submit')"
+    exit 2
+    ;;
+esac
 
 read_package_field() {
   local field_path="$1"
@@ -105,7 +154,11 @@ if xcrun --find iTMSTransporter >/dev/null 2>&1; then
 elif [[ -x "/Applications/Transporter.app/Contents/itms/bin/iTMSTransporter" ]]; then
   append_ok "Upload tool available: /Applications/Transporter.app/Contents/itms/bin/iTMSTransporter"
 else
-  append_blocker "No iTMSTransporter found (install Xcode or Apple's Transporter app)"
+  if [[ "$MODE" == "submit" ]]; then
+    append_blocker "No iTMSTransporter found (install Xcode or Apple's Transporter app)"
+  else
+    append_warning "No iTMSTransporter found (needed later for upload, not for local build)"
+  fi
 fi
 
 if xcodebuild -version >/dev/null 2>&1; then
@@ -156,6 +209,7 @@ echo "- Product: $PRODUCT_NAME"
 echo "- Version: $APP_VERSION"
 echo "- Bundle ID: $APP_ID"
 echo "- Profile path: $PROFILE_PATH"
+echo "- Mode: $MODE"
 echo ""
 
 echo "✅ Ready checks"
@@ -182,7 +236,7 @@ echo "❌ Blockers"
 if [[ "${#BLOCKERS[@]}" -eq 0 ]]; then
   echo "- (none)"
   echo ""
-  echo "MAS preflight passed."
+  echo "MAS preflight passed for mode '$MODE'."
   exit 0
 fi
 
@@ -191,5 +245,5 @@ for item in "${BLOCKERS[@]}"; do
 done
 
 echo ""
-echo "MAS preflight failed (${#BLOCKERS[@]} blocker(s))."
+echo "MAS preflight failed for mode '$MODE' (${#BLOCKERS[@]} blocker(s))."
 exit 1

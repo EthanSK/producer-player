@@ -70,8 +70,11 @@ npm run build:mac              # macOS ZIP
 npm run build:mac:dir          # macOS unpacked
 npm run build:mac:mas-dev      # Mac App Store (dev)
 npm run build:mac:mas          # Mac App Store (distribution)
-npm run mas:preflight          # MAS blockers + environment check
+npm run build:mac:mas:local    # MAS build with default profile/env override
+npm run mas:preflight          # full submission preflight (includes upload tooling)
+npm run mas:preflight:build    # build-only preflight (upload tooling is warning-level)
 npm run mas:screenshots        # Generate ASC screenshot pack
+npm run mas:upload             # Upload latest MAS .pkg via iTMSTransporter
 npm run release:desktop:linux  # Linux ZIP
 npm run release:desktop:win    # Windows ZIP
 ```

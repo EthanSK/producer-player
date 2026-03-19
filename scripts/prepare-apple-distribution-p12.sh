@@ -20,6 +20,13 @@ if [[ ! -f "$CERT_PATH" ]]; then
 fi
 
 if [[ ! -f "$KEY_PATH" ]]; then
+  fallback_key="$(find "$DEFAULT_SIGNING_DIR" -maxdepth 1 -type f -name 'apple_distribution_private_key*.pem' 2>/dev/null | sort | tail -n 1)"
+  if [[ -n "$fallback_key" && -f "$fallback_key" ]]; then
+    KEY_PATH="$fallback_key"
+  fi
+fi
+
+if [[ ! -f "$KEY_PATH" ]]; then
   echo "Private key file not found: $KEY_PATH"
   echo "Set APPLE_DISTRIBUTION_PRIVATE_KEY_PATH if your key is elsewhere."
   exit 1
@@ -49,6 +56,7 @@ openssl pkcs12 -export \
   -name "Apple Distribution" \
   -passout "pass:${P12_PASSWORD}"
 
+echo "Using private key: $KEY_PATH"
 echo "Created: $OUTPUT_P12"
 echo "Next (install into login keychain):"
 echo "  security import \"$OUTPUT_P12\" -k ~/Library/Keychains/login.keychain-db -P \"<P12_PASSWORD>\" -T /usr/bin/codesign -T /usr/bin/security"

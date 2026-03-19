@@ -577,7 +577,7 @@
           <div class="hero-actions">
             <a class="btn btn--primary" id="hero-download-primary" href="https://github.com/EthanSK/producer-player/releases/latest">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              Download latest release
+              Download for macOS (Universal)
             </a>
             <a class="btn btn--ghost btn--compact" id="hero-download-mac" href="https://github.com/EthanSK/producer-player/releases/latest">macOS (Universal)</a>
             <a class="btn btn--ghost btn--compact" id="hero-download-win" href="https://github.com/EthanSK/producer-player/releases/latest">Windows</a>
@@ -585,7 +585,6 @@
             <a class="btn btn--ghost" href="https://github.com/EthanSK/producer-player">
               View source
             </a>
-            <div class="hero-download-note" id="hero-download-note">Resolving latest direct download links…</div>
           </div>
         </div>
 
@@ -703,7 +702,6 @@
 
       var elPrimary = document.getElementById('hero-download-primary');
       var elSecondaryPrimary = document.getElementById('download-primary');
-      var elNote = document.getElementById('hero-download-note');
       var elMac = document.getElementById('hero-download-mac');
       var elWin = document.getElementById('hero-download-win');
       var elLinux = document.getElementById('hero-download-linux');
@@ -766,11 +764,6 @@
           elSecondaryPrimary.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Download from GitHub';
         }
 
-        if (elNote) {
-          elNote.textContent = availability.macUniversal
-            ? 'Direct links always track the latest GitHub release.'
-            : 'Direct links always track the latest GitHub release. Latest macOS artifact is not universal yet.';
-        }
       }
 
       fetch(apiUrl)

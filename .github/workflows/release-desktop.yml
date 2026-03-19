@@ -37,7 +37,40 @@ jobs:
         run: |
           set -euo pipefail
 
-          base_version="$(node -p "require('./package.json').version")"
+          fallback_version="$(node -p "require('./package.json').version")"
+
+          bump_semver() {
+            local version="$1"
+            local level="$2"
+            local major minor patch
+            IFS='.' read -r major minor patch <<< "$version"
+
+            case "$level" in
+              minor)
+                minor=$((minor + 1))
+                patch=0
+                ;;
+              major)
+                major=$((major + 1))
+                minor=0
+                patch=0
+                ;;
+              *)
+                patch=$((patch + 1))
+                ;;
+            esac
+
+            printf '%s.%s.%s' "$major" "$minor" "$patch"
+          }
+
+          latest_tag="$(git ls-remote --tags --refs origin 'v*' | awk -F/ '{print $3}' | sort -V | tail -n 1 || true)"
+          latest_base_version="$(printf '%s' "$latest_tag" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/' || true)"
+
+          if [[ -n "$latest_base_version" ]]; then
+            base_version="$latest_base_version"
+          else
+            base_version="$fallback_version"
+          fi
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             tag_version="${GITHUB_REF_NAME#v}"
@@ -51,9 +84,21 @@ jobs:
 
           if [[ "${GITHUB_REF}" == "refs/heads/main" || "${GITHUB_REF}" == "refs/heads/master" ]]; then
             build_num="${GITHUB_RUN_NUMBER}"
-            echo "build_version=${base_version}" >> "$GITHUB_OUTPUT"
-            echo "release_tag=v${base_version}-${build_num}" >> "$GITHUB_OUTPUT"
-            echo "release_name=Producer Player v${base_version} (build ${build_num})" >> "$GITHUB_OUTPUT"
+            commit_subject="$(git log -1 --pretty=%s)"
+            commit_body="$(git log -1 --pretty=%b)"
+            commit_text="$commit_subject
+$commit_body"
+            bump_level="patch"
+
+            if printf '%s' "$commit_text" | grep -Eiq '(^feat(\(|:))|(\[minor\])'; then
+              bump_level="minor"
+            fi
+
+            next_version="$(bump_semver "$base_version" "$bump_level")"
+
+            echo "build_version=${next_version}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=v${next_version}-${build_num}" >> "$GITHUB_OUTPUT"
+            echo "release_name=Producer Player v${next_version} (build ${build_num})" >> "$GITHUB_OUTPUT"
             echo "is_branch_build=true" >> "$GITHUB_OUTPUT"
             echo "is_tag_release=false" >> "$GITHUB_OUTPUT"
             exit 0

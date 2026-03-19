@@ -37,3 +37,14 @@
 - FFmpeg ebur128 for static file analysis (LUFS, true peak, dynamics)
 - Web Audio API for real-time spectrum, level metering, band soloing
 - Platform normalization values must be verified against authoritative sources before changing
+
+## Release Versioning
+
+- Every meaningful Producer Player code/content change that is intended to ship should advance the app version on the next `main` release.
+- Default bump level: **patch**.
+- Use a **minor** bump for clearly meaningful user-facing feature work or noticeably broader UX/product changes.
+- Commit messages should make that intent legible:
+  - `feat:` (or `feat(...)`) → minor bump
+  - `fix:`, `chore:`, `refactor:`, `docs:`, `test:` → patch bump by default
+  - `[minor]` in the commit subject/body can force a minor bump when needed
+- The release workflow is the source of truth for applying the bump on branch builds; do not leave Producer Player shipping forever at the same app version.

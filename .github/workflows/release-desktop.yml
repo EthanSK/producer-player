@@ -180,6 +180,46 @@ jobs:
           merge-multiple: true
           path: release-assets
 
+      - name: Create stable latest-download aliases
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          shopt -s nullglob
+
+          patterns=(
+            "Producer-Player-*-mac-universal.zip"
+            "Producer-Player-*-linux-x64.zip"
+            "Producer-Player-*-win-x64.zip"
+          )
+
+          aliases=(
+            "Producer-Player-latest-mac-universal.zip"
+            "Producer-Player-latest-linux-x64.zip"
+            "Producer-Player-latest-win-x64.zip"
+          )
+
+          for i in "${!patterns[@]}"; do
+            pattern="${patterns[$i]}"
+            alias_name="${aliases[$i]}"
+            matches=($pattern)
+
+            if [ ${#matches[@]} -ne 1 ]; then
+              echo "Expected exactly one match for pattern '$pattern', got ${#matches[@]}"
+              ls -lah
+              exit 1
+            fi
+
+            src="${matches[0]}"
+            cp "$src" "$alias_name"
+
+            src_sha="$src.sha256"
+            if [ -f "$src_sha" ]; then
+              hash_value="$(awk '{print $1}' "$src_sha")"
+              echo "$hash_value  $alias_name" > "$alias_name.sha256"
+            fi
+          done
+
       - name: Show assets
         run: ls -lah release-assets
 
@@ -195,13 +235,15 @@ jobs:
           body: |
             ## Producer Player v${{ needs.compute-version.outputs.build_version }}
 
-            **Downloads** — pick the ZIP for your platform, unzip, and run.
+            **Stable direct latest-download links** (auto-follow new releases):
 
-            | Platform | File |
-            |----------|------|
-            | macOS (Universal: Apple Silicon + Intel) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-mac-universal.zip` |
-            | Linux (x64) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-linux-x64.zip` |
-            | Windows (x64) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-win-x64.zip` |
+            | Platform | Stable URL |
+            |----------|------------|
+            | macOS (Universal: Apple Silicon + Intel) | `https://github.com/${{ github.repository }}/releases/latest/download/Producer-Player-latest-mac-universal.zip` |
+            | Linux (x64) | `https://github.com/${{ github.repository }}/releases/latest/download/Producer-Player-latest-linux-x64.zip` |
+            | Windows (x64) | `https://github.com/${{ github.repository }}/releases/latest/download/Producer-Player-latest-win-x64.zip` |
+
+            Versioned assets are attached below for auditing/reproducibility.
 
             Commit: `${{ github.sha }}`
             Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}

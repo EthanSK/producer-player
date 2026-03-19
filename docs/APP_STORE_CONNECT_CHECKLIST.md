@@ -19,6 +19,12 @@ This checks:
 
 If preflight fails, fix blockers before trying to submit.
 
+Current blockers observed on Ethan’s Mac mini (2026-03-19):
+- no `Apple Distribution` identity in keychain
+- no MAS provisioning profile at default path
+- no `iTMSTransporter` (Xcode/Transporter not installed)
+- browser session to App Store Connect currently redirects with `authResult=FAILED` (sign-in required)
+
 ---
 
 ## 1) Apple Developer prerequisites
@@ -45,8 +51,8 @@ P12_PASSWORD='...' ./scripts/prepare-apple-distribution-p12.sh /path/to/AppleDis
 ## 2) Build MAS binary locally
 
 ```bash
-# Uses preflight + build
-./scripts/build-mas-local.sh
+# Uses build-mode preflight + MAS build
+npm run build:mac:mas:local
 
 # or explicitly
 PRODUCER_PLAYER_PROVISIONING_PROFILE='/absolute/path/to/profile.provisionprofile' npm run build:mac:mas
@@ -64,7 +70,7 @@ Requires `APPLE_ID` and `APPLE_APP_SPECIFIC_PASSWORD`.
 ```bash
 APPLE_ID='you@example.com' \
 APPLE_APP_SPECIFIC_PASSWORD='xxxx-xxxx-xxxx-xxxx' \
-./scripts/upload-mas-build.sh
+npm run mas:upload
 ```
 
 Optional if your account needs an explicit provider short name:

@@ -585,8 +585,7 @@
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Download for your OS
             </a>
-            <a class="btn btn--ghost btn--compact" id="hero-download-mac-arm" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip">macOS (Apple Silicon)</a>
-            <a class="btn btn--ghost btn--compact" id="hero-download-mac-intel" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip">macOS (Intel)</a>
+            <a class="btn btn--ghost btn--compact" id="hero-download-mac" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip">macOS (Universal)</a>
             <a class="btn btn--ghost btn--compact" id="hero-download-win" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-win-x64.zip">Windows</a>
             <a class="btn btn--ghost btn--compact" id="hero-download-linux" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-linux-x64.zip">Linux</a>
             <a class="btn btn--ghost" href="https://github.com/EthanSK/producer-player">
@@ -683,8 +682,7 @@
               <article class="download-card">
                 <h3>macOS</h3>
                 <div class="download-links">
-                  <a class="download-link" id="download-mac-arm" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip">Apple Silicon</a>
-                  <a class="download-link" id="download-mac-intel" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip">Intel</a>
+                  <a class="download-link" id="download-mac" href="https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-latest-mac-universal.zip">macOS (Universal)</a>
                 </div>
                 <span class="download-caption">Current desktop release uses one universal macOS ZIP for both Apple Silicon and Intel.</span>
               </article>
@@ -759,18 +757,18 @@
           var looksArm = ua.indexOf('arm') >= 0 || ua.indexOf('aarch64') >= 0 || ua.indexOf('apple silicon') >= 0;
           if (looksArm) {
             return {
-              key: 'mac-arm',
+              key: 'mac-universal-arm',
               href: downloads.macUniversal,
-              label: 'Download for macOS (Apple Silicon)',
-              note: 'Detected macOS Apple Silicon. Current desktop build is universal, so it also works on Intel Macs.'
+              label: 'Download for macOS (Universal)',
+              note: 'Detected macOS Apple Silicon. Current desktop build is one universal ZIP for both Apple Silicon and Intel.'
             };
           }
 
           return {
-            key: 'mac-intel-or-universal',
+            key: 'mac-universal',
             href: downloads.macUniversal,
-            label: 'Download for macOS (Intel)',
-            note: 'Detected macOS. Current desktop build is universal, so one ZIP covers both Intel and Apple Silicon.'
+            label: 'Download for macOS (Universal)',
+            note: 'Detected macOS. Current desktop build is one universal ZIP for both Intel and Apple Silicon.'
           };
         }
 

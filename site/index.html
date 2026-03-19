@@ -117,7 +117,8 @@
       nav {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-start;
+        gap: 12px;
         padding: 20px 0;
       }
 
@@ -154,24 +155,6 @@
         color: var(--accent);
       }
 
-      .nav-links {
-        display: flex;
-        align-items: center;
-        gap: 24px;
-        list-style: none;
-      }
-
-      .nav-links a {
-        font-size: 14px;
-        color: var(--text-muted);
-        transition: color 0.15s;
-        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
-      }
-
-      .nav-links a:hover {
-        color: var(--text);
-        text-decoration: none;
-      }
 
       /* ── Hero ── */
       .hero {
@@ -520,10 +503,6 @@
           padding: 16px 0;
         }
 
-        .nav-links {
-          gap: 16px;
-        }
-
         .platforms {
           flex-direction: column;
           align-items: center;
@@ -569,11 +548,6 @@
               document.getElementById('by-3000ad').remove();
             }
           </script>
-          <ul class="nav-links">
-            <li><a href="#features">Features</a></li>
-            <li><a href="#video">Demo</a></li>
-            <li><a href="https://github.com/EthanSK/producer-player">GitHub</a></li>
-          </ul>
         </nav>
       </div>
 

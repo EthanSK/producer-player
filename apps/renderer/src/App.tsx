@@ -16,6 +16,7 @@ import type {
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
   ReferenceTrackSelection,
+  SongChecklistItem,
   SongVersion,
   SongWithVersions,
   TransportCommand,
@@ -32,6 +33,11 @@ import {
   NORMALIZATION_PLATFORM_PROFILES,
   type NormalizationPlatformId,
 } from './platformNormalization';
+import {
+  mergeLegacyAndSharedUserState,
+  sanitizeSongChecklists,
+  sanitizeSongRatings,
+} from './sharedUserState';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
 import { SHOW_3000AD_BRANDING } from './featureFlags';
 import { SpectrumAnalyzer } from './SpectrumAnalyzer';
@@ -51,13 +57,6 @@ interface LoadedReferenceTrack {
   playbackSource: PlaybackSourceInfo;
   previewAnalysis: TrackAnalysisResult;
   measuredAnalysis: AudioFileAnalysis;
-}
-
-interface SongChecklistItem {
-  id: string;
-  text: string;
-  completed: boolean;
-  timestampSeconds: number | null;
 }
 
 const EMPTY_SNAPSHOT: LibrarySnapshot = {
@@ -414,17 +413,7 @@ function readStoredSongRatings(): Record<string, number> {
       return {};
     }
 
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const entries = Object.entries(parsed).filter(
-      ([songId, rating]) =>
-        songId.length > 0 &&
-        typeof rating === 'number' &&
-        Number.isFinite(rating) &&
-        rating >= 1 &&
-        rating <= 10
-    );
-
-    return Object.fromEntries(entries) as Record<string, number>;
+    return sanitizeSongRatings(JSON.parse(raw));
   } catch {
     return {};
   }
@@ -457,61 +446,7 @@ function readStoredSongChecklists(): Record<string, SongChecklistItem[]> {
       return {};
     }
 
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return {};
-    }
-
-    const checklistEntries = Object.entries(parsed).flatMap(([songId, items]) => {
-      if (songId.length === 0 || !Array.isArray(items)) {
-        return [];
-      }
-
-      const sanitizedItems: SongChecklistItem[] = items.flatMap((item) => {
-        if (!item || typeof item !== 'object') {
-          return [];
-        }
-
-        const candidate = item as {
-          id?: unknown;
-          text?: unknown;
-          completed?: unknown;
-          timestampSeconds?: unknown;
-        };
-
-        if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) {
-          return [];
-        }
-
-        if (typeof candidate.text !== 'string') {
-          return [];
-        }
-
-        if (typeof candidate.completed !== 'boolean') {
-          return [];
-        }
-
-        const timestampSeconds =
-          typeof candidate.timestampSeconds === 'number' &&
-          Number.isFinite(candidate.timestampSeconds) &&
-          candidate.timestampSeconds >= 0
-            ? candidate.timestampSeconds
-            : null;
-
-        return [
-          {
-            id: candidate.id,
-            text: candidate.text,
-            completed: candidate.completed,
-            timestampSeconds,
-          },
-        ];
-      });
-
-      return [[songId, sanitizedItems] as const];
-    });
-
-    return Object.fromEntries(checklistEntries) as Record<string, SongChecklistItem[]>;
+    return sanitizeSongChecklists(JSON.parse(raw));
   } catch {
     return {};
   }
@@ -904,6 +839,7 @@ export function App(): JSX.Element {
   const [songChecklists, setSongChecklists] = useState<Record<string, SongChecklistItem[]>>(
     () => readStoredSongChecklists()
   );
+  const [sharedUserStateReady, setSharedUserStateReady] = useState(false);
   const [iCloudBackupEnabled, setICloudBackupEnabled] = useState<boolean>(() =>
     readICloudBackupEnabled()
   );
@@ -976,6 +912,7 @@ export function App(): JSX.Element {
   const bandSoloFiltersRef = useRef<BiquadFilterNode[]>([]);
 
   const iCloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sharedUserStateSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const iCloudBackupEnabledRef = useRef(iCloudBackupEnabled);
 
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
@@ -1124,12 +1061,72 @@ export function App(): JSX.Element {
   }, [analysisExpanded]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    window.producerPlayer
+      .getSharedUserState()
+      .then((sharedState) => {
+        if (cancelled) {
+          return;
+        }
+
+        const merged = mergeLegacyAndSharedUserState(
+          {
+            ratings: sanitizeSongRatings(sharedState?.ratings),
+            checklists: sanitizeSongChecklists(sharedState?.checklists),
+          },
+          {
+            ratings: readStoredSongRatings(),
+            checklists: readStoredSongChecklists(),
+          }
+        );
+
+        setSongRatings(merged.ratings);
+        setSongChecklists(merged.checklists);
+        persistSongRatings(merged.ratings);
+        persistSongChecklists(merged.checklists);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setSharedUserStateReady(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     persistSongRatings(songRatings);
   }, [songRatings]);
 
   useEffect(() => {
     persistSongChecklists(songChecklists);
   }, [songChecklists]);
+
+  useEffect(() => {
+    if (!sharedUserStateReady) {
+      return;
+    }
+
+    if (sharedUserStateSyncTimerRef.current) {
+      clearTimeout(sharedUserStateSyncTimerRef.current);
+    }
+
+    sharedUserStateSyncTimerRef.current = setTimeout(() => {
+      void window.producerPlayer
+        .setSharedUserState({ ratings: songRatings, checklists: songChecklists })
+        .catch(() => undefined);
+    }, 250);
+
+    return () => {
+      if (sharedUserStateSyncTimerRef.current) {
+        clearTimeout(sharedUserStateSyncTimerRef.current);
+      }
+    };
+  }, [sharedUserStateReady, songRatings, songChecklists]);
 
   // Keep ref in sync
   useEffect(() => {
@@ -1187,13 +1184,13 @@ export function App(): JSX.Element {
 
       // Load iCloud data into state
       if (result.data.checklists && typeof result.data.checklists === 'object') {
-        const parsedChecklists = result.data.checklists as Record<string, SongChecklistItem[]>;
+        const parsedChecklists = sanitizeSongChecklists(result.data.checklists);
         setSongChecklists(parsedChecklists);
         persistSongChecklists(parsedChecklists);
       }
 
       if (result.data.ratings && typeof result.data.ratings === 'object') {
-        const parsedRatings = result.data.ratings as Record<string, number>;
+        const parsedRatings = sanitizeSongRatings(result.data.ratings);
         setSongRatings(parsedRatings);
         persistSongRatings(parsedRatings);
       }

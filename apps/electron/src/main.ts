@@ -12,6 +12,8 @@ import type {
   ICloudLoadResult,
   ICloudSyncResult,
   LibrarySnapshot,
+  SharedUserState,
+  SongChecklistItem,
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
@@ -26,6 +28,7 @@ import { FileLibraryService } from '@producer-player/domain';
 const DEFAULT_RENDERER_DEV_URL =
   process.env.RENDERER_DEV_URL ?? 'http://127.0.0.1:4207';
 const STATE_FILE_NAME = 'producer-player-electron-state.json';
+const SHARED_USER_STATE_FILE_NAME = 'producer-player-shared-user-state.json';
 const STATE_DIRECTORY_NAME = 'Producer Player';
 const ORDER_SIDECAR_DIRECTORY = '.producer-player';
 const ORDER_SIDECAR_FILE = 'order-state.json';
@@ -173,6 +176,10 @@ function getLegacyStateFilePath(): string {
   return join(app.getPath('userData'), STATE_FILE_NAME);
 }
 
+function getSharedUserStateFilePath(): string {
+  return join(getStateDirectoryPath(), SHARED_USER_STATE_FILE_NAME);
+}
+
 function getFolderOrderSidecarPath(folderPath: string): string {
   return join(folderPath, ORDER_SIDECAR_DIRECTORY, ORDER_SIDECAR_FILE);
 }
@@ -189,6 +196,13 @@ interface PersistedState {
 interface PersistedStateLoadResult {
   state: PersistedState;
   shouldAttemptSidecarOrderRestore: boolean;
+}
+
+interface PersistedSharedUserState {
+  version: number;
+  ratings: Record<string, number>;
+  checklists: Record<string, SongChecklistItem[]>;
+  updatedAt: string;
 }
 
 interface FolderOrderSidecar {
@@ -210,6 +224,15 @@ function createFallbackState(): PersistedState {
   };
 }
 
+function createFallbackSharedUserState(): PersistedSharedUserState {
+  return {
+    version: 1,
+    ratings: {},
+    checklists: {},
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
 function parseStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -226,6 +249,82 @@ function parseStringRecord(value: unknown): Record<string, string> {
   const entries = Object.entries(value).filter(
     (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string'
   );
+
+  return Object.fromEntries(entries);
+}
+
+function parseSongRatings(value: unknown): Record<string, number> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const entries = Object.entries(value).flatMap(([songId, rating]) => {
+    if (
+      songId.length === 0 ||
+      typeof rating !== 'number' ||
+      !Number.isFinite(rating) ||
+      rating < 1 ||
+      rating > 10
+    ) {
+      return [];
+    }
+
+    return [[songId, rating] as const];
+  });
+
+  return Object.fromEntries(entries);
+}
+
+function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return [];
+    }
+
+    const candidate = entry as Partial<SongChecklistItem>;
+    if (
+      typeof candidate.id !== 'string' ||
+      candidate.id.trim().length === 0 ||
+      typeof candidate.text !== 'string' ||
+      typeof candidate.completed !== 'boolean'
+    ) {
+      return [];
+    }
+
+    const timestampSeconds =
+      typeof candidate.timestampSeconds === 'number' &&
+      Number.isFinite(candidate.timestampSeconds) &&
+      candidate.timestampSeconds >= 0
+        ? candidate.timestampSeconds
+        : null;
+
+    return [
+      {
+        id: candidate.id,
+        text: candidate.text,
+        completed: candidate.completed,
+        timestampSeconds,
+      },
+    ];
+  });
+}
+
+function parseSongChecklists(value: unknown): Record<string, SongChecklistItem[]> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const entries = Object.entries(value).flatMap(([songId, items]) => {
+    if (songId.length === 0) {
+      return [];
+    }
+
+    return [[songId, parseSongChecklistItems(items)] as const];
+  });
 
   return Object.fromEntries(entries);
 }
@@ -482,6 +581,46 @@ async function readPersistedState(): Promise<PersistedStateLoadResult> {
     state: fallback,
     shouldAttemptSidecarOrderRestore: true,
   };
+}
+
+function parsePersistedSharedUserState(raw: string): PersistedSharedUserState {
+  const fallback = createFallbackSharedUserState();
+  const parsed = JSON.parse(raw) as Partial<PersistedSharedUserState>;
+
+  return {
+    version: typeof parsed.version === 'number' ? parsed.version : fallback.version,
+    ratings: parseSongRatings(parsed.ratings),
+    checklists: parseSongChecklists(parsed.checklists),
+    updatedAt:
+      typeof parsed.updatedAt === 'string' && parsed.updatedAt.length > 0
+        ? parsed.updatedAt
+        : fallback.updatedAt,
+  };
+}
+
+async function readPersistedSharedUserState(): Promise<PersistedSharedUserState> {
+  const sharedUserStatePath = getSharedUserStateFilePath();
+
+  try {
+    const raw = await fs.readFile(sharedUserStatePath, 'utf8');
+    return parsePersistedSharedUserState(raw);
+  } catch {
+    return createFallbackSharedUserState();
+  }
+}
+
+async function writePersistedSharedUserState(
+  payload: Omit<SharedUserState, 'updatedAt'>
+): Promise<PersistedSharedUserState> {
+  const nextState: PersistedSharedUserState = {
+    version: 1,
+    ratings: parseSongRatings(payload.ratings),
+    checklists: parseSongChecklists(payload.checklists),
+    updatedAt: new Date().toISOString(),
+  };
+
+  await writeJsonAtomic(getSharedUserStateFilePath(), nextState);
+  return nextState;
 }
 
 function cachePersistedFolderBookmarks(bookmarks: Record<string, string>): void {
@@ -1817,7 +1956,7 @@ async function loadDataFromICloud(): Promise<ICloudLoadResult> {
     };
 
     const [checklists, ratings, state] = await Promise.all([
-      readJsonSafe<Record<string, unknown[]>>(filePaths.checklists, {}),
+      readJsonSafe<Record<string, SongChecklistItem[]>>(filePaths.checklists, {}),
       readJsonSafe<Record<string, number>>(filePaths.ratings, {}),
       readJsonSafe<ICloudBackupData['state']>(filePaths.state, {
         iCloudEnabled: true,
@@ -2132,6 +2271,17 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.PICK_REFERENCE_TRACK, async () => {
     return pickReferenceTrack();
   });
+
+  ipcMain.handle(IPC_CHANNELS.GET_SHARED_USER_STATE, async () => {
+    return readPersistedSharedUserState();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SET_SHARED_USER_STATE,
+    async (_event, state: Omit<SharedUserState, 'updatedAt'>) => {
+      return writePersistedSharedUserState(state);
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.CHECK_ICLOUD_AVAILABLE, async () => {
     return checkICloudAvailability();

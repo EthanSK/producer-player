@@ -71,12 +71,20 @@ npm run build:mac
 npm run build:mac:dir
 npm run build:mac:mas-dev
 npm run build:mac:mas
+npm run mas:preflight
+npm run mas:screenshots
+./scripts/build-mas-local.sh
+./scripts/upload-mas-build.sh
 ```
 
 - `build:mac` → unsigned ZIP
 - `build:mac:dir` → unpacked mac app directory
 - `build:mac:mas-dev` → Mac App Store development build
 - `build:mac:mas` → Mac App Store distribution-oriented build
+- `mas:preflight` → environment + signing + profile + tooling blocker check
+- `mas:screenshots` → generate App Store Connect screenshot pack
+- `build-mas-local.sh` → preflight + MAS build wrapper
+- `upload-mas-build.sh` → upload MAS `.pkg` to App Store Connect via iTMSTransporter
 
 For App Store-oriented builds, set:
 
@@ -86,8 +94,7 @@ export PRODUCER_PLAYER_PROVISIONING_PROFILE=/absolute/path/to/profile.provisionp
 
 If electron-builder cannot choose the correct signing identity automatically, also set `CSC_NAME`.
 
-See [`docs/MAC_APP_STORE.md`](./MAC_APP_STORE.md) for the exact current status and manual Apple-account work that still remains.
-
+See [`docs/MAC_APP_STORE.md`](./MAC_APP_STORE.md) and [`docs/APP_STORE_CONNECT_CHECKLIST.md`](./APP_STORE_CONNECT_CHECKLIST.md) for current status and Apple-account steps.
 ## Optional signing configuration (not required for current unsigned flow)
 
 If you later enable signing/notarization for outside-the-store distribution, configure these GitHub repository secrets:

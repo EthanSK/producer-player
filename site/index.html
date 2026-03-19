@@ -732,6 +732,11 @@
         }
       }
 
+      function setButtonVisible(el, visible) {
+        if (!el) return;
+        el.style.display = visible ? '' : 'none';
+      }
+
       function detectPrimaryKey() {
         var nav = window.navigator || {};
         var platform = (nav.platform || '').toLowerCase();
@@ -744,7 +749,7 @@
         if (isMac) return 'mac';
         if (isWin) return 'win';
         if (isLinux) return 'linux';
-        return 'mac';
+        return null;
       }
 
       function applyLinks() {
@@ -758,6 +763,10 @@
         setButton(elLinux, links.linux, 'Linux', !links.linux);
 
         var primaryKey = detectPrimaryKey();
+        setButtonVisible(elMac, primaryKey !== 'mac');
+        setButtonVisible(elWin, primaryKey !== 'win');
+        setButtonVisible(elLinux, primaryKey !== 'linux');
+
         var primaryHref = links[primaryKey] || links.mac || links.win || links.linux || fallbackUrl;
         var primaryLabel = {
           mac: 'Download for macOS',

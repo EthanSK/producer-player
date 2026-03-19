@@ -776,18 +776,18 @@
             var url = String(assets[i].browser_download_url || '');
             if (!url) continue;
 
-            if (name.indexOf('-mac-universal.zip') >= 0) {
+            if (name.endsWith('-mac-universal.zip')) {
               availability.macUniversal = true;
               links.mac = url;
-            } else if (name.indexOf('-mac-arm64.zip') >= 0) {
+            } else if (name.endsWith('-mac-arm64.zip')) {
               availability.macArm64 = true;
               if (!links.mac) links.mac = url;
-            } else if (name.indexOf('-mac-x64.zip') >= 0) {
+            } else if (name.endsWith('-mac-x64.zip')) {
               availability.macX64 = true;
               if (!links.mac) links.mac = url;
-            } else if (name.indexOf('-win-x64.zip') >= 0) {
+            } else if (name.endsWith('-win-x64.zip')) {
               links.win = url;
-            } else if (name.indexOf('-linux-x64.zip') >= 0) {
+            } else if (name.endsWith('-linux-x64.zip')) {
               links.linux = url;
             }
           }

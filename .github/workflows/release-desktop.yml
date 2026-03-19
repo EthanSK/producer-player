@@ -199,8 +199,7 @@ jobs:
 
             | Platform | File |
             |----------|------|
-            | macOS (Apple Silicon) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-mac-arm64.zip` |
-            | macOS (Intel) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-mac-x64.zip` |
+            | macOS (Universal: Apple Silicon + Intel) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-mac-universal.zip` |
             | Linux (x64) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-linux-x64.zip` |
             | Windows (x64) | `Producer-Player-${{ needs.compute-version.outputs.build_version }}-win-x64.zip` |
 

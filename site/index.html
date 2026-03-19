@@ -188,6 +188,23 @@
         margin-bottom: 60px;
       }
 
+      .hero-download-note {
+        width: 100%;
+        margin-top: 4px;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .btn--compact {
+        padding: 10px 14px;
+        font-size: 13px;
+      }
+
+      .btn[aria-disabled="true"] {
+        pointer-events: none;
+        opacity: 0.45;
+      }
+
       /* ── Buttons ── */
       .btn {
         display: inline-flex;
@@ -558,13 +575,18 @@
             A desktop app for producers who bounce a lot. Version tracking, mastering workspace, album ordering, and more — one window.
           </p>
           <div class="hero-actions">
-            <a class="btn btn--primary" href="https://github.com/EthanSK/producer-player/releases">
+            <a class="btn btn--primary" id="hero-download-primary" href="https://github.com/EthanSK/producer-player/releases/latest">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              Download
+              Download latest release
             </a>
+            <a class="btn btn--ghost btn--compact" id="hero-download-mac-arm" href="https://github.com/EthanSK/producer-player/releases/latest">macOS (Apple Silicon)</a>
+            <a class="btn btn--ghost btn--compact" id="hero-download-mac-intel" href="https://github.com/EthanSK/producer-player/releases/latest" aria-disabled="true">macOS (Intel)</a>
+            <a class="btn btn--ghost btn--compact" id="hero-download-win" href="https://github.com/EthanSK/producer-player/releases/latest">Windows</a>
+            <a class="btn btn--ghost btn--compact" id="hero-download-linux" href="https://github.com/EthanSK/producer-player/releases/latest">Linux</a>
             <a class="btn btn--ghost" href="https://github.com/EthanSK/producer-player">
               View source
             </a>
+            <div class="hero-download-note" id="hero-download-note">Resolving latest direct download links…</div>
           </div>
         </div>
 
@@ -674,6 +696,115 @@
         </div>
       </footer>
     </div>
+
+    <script>
+    (function () {
+      var fallbackUrl = 'https://github.com/EthanSK/producer-player/releases/latest';
+      var apiUrl = 'https://api.github.com/repos/EthanSK/producer-player/releases/latest';
+
+      var elPrimary = document.getElementById('hero-download-primary');
+      var elNote = document.getElementById('hero-download-note');
+      var elMacArm = document.getElementById('hero-download-mac-arm');
+      var elMacIntel = document.getElementById('hero-download-mac-intel');
+      var elWin = document.getElementById('hero-download-win');
+      var elLinux = document.getElementById('hero-download-linux');
+
+      var links = {
+        macArm: fallbackUrl,
+        macIntel: fallbackUrl,
+        win: fallbackUrl,
+        linux: fallbackUrl,
+      };
+
+      function setButton(el, href, label, disabled) {
+        if (!el) return;
+        el.textContent = label;
+        if (disabled) {
+          el.setAttribute('aria-disabled', 'true');
+          el.removeAttribute('href');
+        } else {
+          el.removeAttribute('aria-disabled');
+          el.setAttribute('href', href || fallbackUrl);
+        }
+      }
+
+      function detectPrimaryKey() {
+        var nav = window.navigator || {};
+        var platform = (nav.platform || '').toLowerCase();
+        var ua = (nav.userAgent || '').toLowerCase();
+        var uaData = nav.userAgentData || null;
+        var arch = uaData && uaData.architecture ? String(uaData.architecture).toLowerCase() : '';
+
+        var isMac = platform.indexOf('mac') >= 0 || ua.indexOf('mac os') >= 0;
+        var isWin = platform.indexOf('win') >= 0 || ua.indexOf('windows') >= 0;
+        var isLinux = platform.indexOf('linux') >= 0 || ua.indexOf('linux') >= 0 || ua.indexOf('x11') >= 0;
+        var isArmMac = isMac && (arch.indexOf('arm') >= 0 || ua.indexOf('arm64') >= 0 || ua.indexOf('aarch64') >= 0);
+
+        if (isMac) return isArmMac ? 'macArm' : 'macIntel';
+        if (isWin) return 'win';
+        if (isLinux) return 'linux';
+        return 'macArm';
+      }
+
+      function applyLinks() {
+        setButton(elMacArm, links.macArm, 'macOS (Apple Silicon)', !links.macArm);
+        setButton(elMacIntel, links.macIntel, 'macOS (Intel)', !links.macIntel);
+        setButton(elWin, links.win, 'Windows', !links.win);
+        setButton(elLinux, links.linux, 'Linux', !links.linux);
+
+        var primaryKey = detectPrimaryKey();
+        var primaryHref = links[primaryKey] || links.macArm || links.win || links.linux || fallbackUrl;
+        var primaryLabel = {
+          macArm: 'Download for macOS (Apple Silicon)',
+          macIntel: 'Download for macOS (Intel)',
+          win: 'Download for Windows',
+          linux: 'Download for Linux',
+        }[primaryKey] || 'Download latest release';
+
+        if (elPrimary) {
+          elPrimary.setAttribute('href', primaryHref);
+          elPrimary.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' + primaryLabel;
+        }
+
+        if (elNote) {
+          var hasIntel = !!links.macIntel;
+          elNote.textContent = hasIntel
+            ? 'Direct links always track the latest GitHub release.'
+            : 'Direct links always track the latest GitHub release. Intel macOS build is not currently published.';
+        }
+      }
+
+      fetch(apiUrl)
+        .then(function (res) { return res.ok ? res.json() : Promise.reject(new Error('latest release unavailable')); })
+        .then(function (release) {
+          var assets = (release && Array.isArray(release.assets)) ? release.assets : [];
+          var i;
+          for (i = 0; i < assets.length; i += 1) {
+            var name = String(assets[i].name || '').toLowerCase();
+            var url = String(assets[i].browser_download_url || '');
+            if (!url) continue;
+            if (name.indexOf('-mac-arm64.zip') >= 0) links.macArm = url;
+            else if (name.indexOf('-mac-x64.zip') >= 0) links.macIntel = url;
+            else if (name.indexOf('-win-x64.zip') >= 0) links.win = url;
+            else if (name.indexOf('-linux-x64.zip') >= 0) links.linux = url;
+          }
+
+          if (!links.macArm) links.macArm = fallbackUrl;
+          if (!links.win) links.win = fallbackUrl;
+          if (!links.linux) links.linux = fallbackUrl;
+          if (!links.macIntel) links.macIntel = null;
+
+          applyLinks();
+        })
+        .catch(function () {
+          links.macArm = fallbackUrl;
+          links.macIntel = null;
+          links.win = fallbackUrl;
+          links.linux = fallbackUrl;
+          applyLinks();
+        });
+    })();
+    </script>
 
     <!-- ── Kaleidoscope Animation (balanced: perf + beauty) ── -->
     <script>

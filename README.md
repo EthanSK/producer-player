@@ -70,11 +70,13 @@ npm run build:mac              # macOS ZIP
 npm run build:mac:dir          # macOS unpacked
 npm run build:mac:mas-dev      # Mac App Store (dev)
 npm run build:mac:mas          # Mac App Store (distribution)
+npm run mas:preflight          # MAS blockers + environment check
+npm run mas:screenshots        # Generate ASC screenshot pack
 npm run release:desktop:linux  # Linux ZIP
 npm run release:desktop:win    # Windows ZIP
 ```
 
-See [docs/RELEASING.md](docs/RELEASING.md) and [docs/MAC_APP_STORE.md](docs/MAC_APP_STORE.md) for packaging details.
+See [docs/RELEASING.md](docs/RELEASING.md), [docs/MAC_APP_STORE.md](docs/MAC_APP_STORE.md), and [docs/APP_STORE_CONNECT_CHECKLIST.md](docs/APP_STORE_CONNECT_CHECKLIST.md) for packaging/submission details.
 
 ## Downloads
 

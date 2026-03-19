@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
+  type WheelEvent,
 } from 'react';
 import type {
   AudioFileAnalysis,
@@ -230,6 +231,28 @@ function formatTime(seconds: number): string {
   const remainingSeconds = rounded % 60;
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
 }
+
+function clampTimestampSeconds(
+  seconds: number,
+  durationSeconds?: number,
+  offsetSeconds = 0
+): number | null {
+  if (!Number.isFinite(seconds)) {
+    return null;
+  }
+
+  const maxDuration =
+    typeof durationSeconds === 'number' && Number.isFinite(durationSeconds)
+      ? Math.max(0, Math.floor(durationSeconds))
+      : null;
+  const withOffset = Math.floor(seconds - offsetSeconds);
+  const clamped = Math.max(0, maxDuration === null ? withOffset : Math.min(withOffset, maxDuration));
+  return Number.isFinite(clamped) ? clamped : null;
+}
+
+const CHECKLIST_CAPTURE_LOOKBACK_SECONDS = 1;
+const CHECKLIST_PREVIEW_SCROLL_STEP_SECONDS = 1;
+const CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS = 1200;
 
 function formatTrackCount(count: number): string {
   return `${count} track${count === 1 ? '' : 's'}`;
@@ -854,6 +877,8 @@ export function App(): JSX.Element {
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
+  const [checklistTimestampMode, setChecklistTimestampMode] = useState<'live' | 'frozen'>('live');
+  const [activeChecklistTimestampIds, setActiveChecklistTimestampIds] = useState<string[]>([]);
   const [resolvedAlbumDurationSecondsByVersionId, setResolvedAlbumDurationSecondsByVersionId] = useState<
     Record<string, number>
   >({});
@@ -883,6 +908,18 @@ export function App(): JSX.Element {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
   const repeatModeRef = useRef<RepeatMode>('off');
+  const isPlayingRef = useRef(isPlaying);
+  const currentTimeSecondsRef = useRef(currentTimeSeconds);
+  const durationSecondsRef = useRef(durationSeconds);
+  const checklistModalSongIdRef = useRef<string | null>(checklistModalSongId);
+  const checklistDraftTextRef = useRef(checklistDraftText);
+  const checklistInputFocusedRef = useRef(false);
+  const selectedPlaybackSongIdRef = useRef<string | null>(null);
+  const queueMoveTargetSongIdRef = useRef<string | null>(null);
+  const checklistHighlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
+  const previousChecklistPlaybackTimeRef = useRef(0);
   const playbackSourceRef = useRef<PlaybackSourceInfo | null>(null);
   const expectedSourceUrlRef = useRef<string | null>(null);
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -960,6 +997,51 @@ export function App(): JSX.Element {
   useEffect(() => {
     playbackSourceReadyRef.current = playbackSourceReady;
   }, [playbackSourceReady]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    currentTimeSecondsRef.current = currentTimeSeconds;
+  }, [currentTimeSeconds]);
+
+  useEffect(() => {
+    durationSecondsRef.current = durationSeconds;
+  }, [durationSeconds]);
+
+  useEffect(() => {
+    checklistModalSongIdRef.current = checklistModalSongId;
+  }, [checklistModalSongId]);
+
+  useEffect(() => {
+    checklistDraftTextRef.current = checklistDraftText;
+  }, [checklistDraftText]);
+
+  useEffect(() => {
+    if (!checklistModalSongId) {
+      previousChecklistPlaybackTimeRef.current = currentTimeSeconds;
+      return;
+    }
+
+    if (checklistTimestampMode !== 'live') {
+      return;
+    }
+
+    setChecklistCapturedTimestamp(captureCurrentPlaybackTimestamp());
+  }, [checklistModalSongId, checklistTimestampMode, currentTimeSeconds, durationSeconds]);
+
+  useEffect(() => {
+    if (checklistModalSongId === null) {
+      checklistInputFocusedRef.current = false;
+      setActiveChecklistTimestampIds([]);
+      for (const timeout of checklistHighlightTimeoutsRef.current.values()) {
+        clearTimeout(timeout);
+      }
+      checklistHighlightTimeoutsRef.current.clear();
+      previousChecklistPlaybackTimeRef.current = currentTimeSeconds;
+    }
+  }, [checklistModalSongId, currentTimeSeconds]);
 
   useEffect(() => {
     const selectedVersion =
@@ -1578,10 +1660,36 @@ export function App(): JSX.Element {
         return;
       }
 
+      const checklistTyping =
+        checklistModalSongIdRef.current !== null &&
+        checklistModalSongIdRef.current === selectedPlaybackSongIdRef.current &&
+        checklistInputFocusedRef.current &&
+        checklistDraftTextRef.current.trim().length > 0;
+
+      if (checklistTyping) {
+        const endedAt = Number.isFinite(audio.duration) ? audio.duration : currentTimeSecondsRef.current;
+        setCurrentTimeSeconds(endedAt);
+        setIsPlaying(false);
+        logPlaybackEvent('ended-paused-for-checklist-typing', {
+          currentTimeSeconds: endedAt,
+        });
+        return;
+      }
+
       const advanced = moveInQueueRef.current(1, {
         wrap: mode === 'all',
         autoplay: true,
       });
+
+      if (
+        advanced &&
+        checklistModalSongIdRef.current !== null &&
+        checklistModalSongIdRef.current === selectedPlaybackSongIdRef.current &&
+        queueMoveTargetSongIdRef.current
+      ) {
+        setChecklistModalSongId(queueMoveTargetSongIdRef.current);
+        resetChecklistComposer(0);
+      }
 
       if (!advanced) {
         setIsPlaying(false);
@@ -1838,6 +1946,7 @@ export function App(): JSX.Element {
     snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
   const selectedPlaybackFilePath = selectedPlaybackVersion?.filePath ?? null;
   const selectedPlaybackSongId = selectedPlaybackVersion?.songId ?? null;
+  selectedPlaybackSongIdRef.current = selectedPlaybackSongId;
   const activeMixPlaybackSource =
     selectedPlaybackFilePath &&
     mixPlaybackSourceSelectedFilePath === selectedPlaybackFilePath
@@ -2265,6 +2374,7 @@ export function App(): JSX.Element {
         return false;
       }
 
+      queueMoveTargetSongIdRef.current = nextVersion.songId;
       playOnNextLoadRef.current = autoplay;
       rememberCurrentSongPlayhead();
       setSelectedSongId(nextVersion.songId);
@@ -3028,6 +3138,12 @@ export function App(): JSX.Element {
     });
   }
 
+  function handleClearSoloedBands(): void {
+    const empty = new Set<number>();
+    rebuildBandSoloFilters(empty);
+    setSoloedBands(empty);
+  }
+
   async function loadReferenceTrack(
     sourceType: ReferenceTrackSource,
     selection: Pick<LoadedReferenceTrack, 'filePath' | 'fileName' | 'subtitle' | 'playbackSource'>,
@@ -3158,27 +3274,63 @@ export function App(): JSX.Element {
     });
   }
 
-  function captureCurrentPlaybackTimestamp(): number | null {
+  function captureCurrentPlaybackTimestamp(
+    offsetSeconds = 0,
+    fallbackSeconds = currentTimeSecondsRef.current
+  ): number | null {
     const audio = audioRef.current;
-    if (!audio || !Number.isFinite(audio.duration) || audio.duration === 0) {
+    const duration =
+      audio && Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : durationSecondsRef.current > 0
+          ? durationSecondsRef.current
+          : undefined;
+    if (duration === undefined) {
       return null;
     }
-    const time = audio.currentTime;
-    // Round to whole seconds — display already shows whole seconds via
-    // formatTime(), so storing sub-second precision is misleading on export.
-    return Number.isFinite(time) && time >= 0 ? Math.floor(time) : null;
+
+    const time =
+      audio && Number.isFinite(audio.currentTime) ? audio.currentTime : fallbackSeconds;
+
+    return clampTimestampSeconds(time, duration, offsetSeconds);
+  }
+
+  function clearChecklistTimestampHighlights(): void {
+    for (const timeout of checklistHighlightTimeoutsRef.current.values()) {
+      clearTimeout(timeout);
+    }
+    checklistHighlightTimeoutsRef.current.clear();
+    setActiveChecklistTimestampIds([]);
+  }
+
+  function resetChecklistComposer(nextTimestamp: number | null = 0): void {
+    setChecklistDraftText('');
+    setChecklistTimestampMode('live');
+    setChecklistCapturedTimestamp(nextTimestamp);
+    clearChecklistTimestampHighlights();
+  }
+
+  function freezeChecklistTimestampAtCurrentPlayback(): void {
+    const timestamp = captureCurrentPlaybackTimestamp(CHECKLIST_CAPTURE_LOOKBACK_SECONDS);
+    if (timestamp === null) {
+      return;
+    }
+
+    setChecklistTimestampMode('frozen');
+    setChecklistCapturedTimestamp(timestamp);
   }
 
   function handleOpenSongChecklist(songId: string): void {
     setChecklistModalSongId(songId);
-    setChecklistDraftText('');
-    setChecklistCapturedTimestamp(captureCurrentPlaybackTimestamp());
+    resetChecklistComposer(captureCurrentPlaybackTimestamp());
   }
 
   function handleCloseSongChecklist(): void {
     setChecklistModalSongId(null);
     setChecklistDraftText('');
     setChecklistCapturedTimestamp(null);
+    setChecklistTimestampMode('live');
+    clearChecklistTimestampHighlights();
   }
 
   function handleChecklistTimestampClick(seconds: number): void {
@@ -3197,7 +3349,77 @@ export function App(): JSX.Element {
   }
 
   function handleChecklistInputFocus(): void {
-    setChecklistCapturedTimestamp(captureCurrentPlaybackTimestamp());
+    checklistInputFocusedRef.current = true;
+  }
+
+  function handleChecklistInputBlur(): void {
+    checklistInputFocusedRef.current = false;
+  }
+
+  function handleChecklistDraftTextChange(nextText: string): void {
+    const wasEmpty = checklistDraftTextRef.current.trim().length === 0;
+    setChecklistDraftText(nextText);
+
+    if (nextText.trim().length === 0) {
+      setChecklistTimestampMode('live');
+      setChecklistCapturedTimestamp(captureCurrentPlaybackTimestamp());
+      return;
+    }
+
+    if (wasEmpty && checklistTimestampMode === 'live') {
+      freezeChecklistTimestampAtCurrentPlayback();
+    }
+  }
+
+  function handleChecklistSetNow(): void {
+    freezeChecklistTimestampAtCurrentPlayback();
+  }
+
+  function handleChecklistTimestampPreviewWheel(event: WheelEvent<HTMLButtonElement>): void {
+    event.preventDefault();
+
+    const audio = audioRef.current;
+    if (!audio || !audio.paused) {
+      return;
+    }
+
+    const direction = event.deltaY > 0 ? 1 : event.deltaY < 0 ? -1 : 0;
+    if (direction === 0) {
+      return;
+    }
+
+    const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : undefined;
+    const baseTimestamp = checklistCapturedTimestamp ?? captureCurrentPlaybackTimestamp() ?? 0;
+    const nextTimestamp = clampTimestampSeconds(
+      baseTimestamp + direction * CHECKLIST_PREVIEW_SCROLL_STEP_SECONDS,
+      duration,
+      0
+    );
+
+    if (nextTimestamp === null) {
+      return;
+    }
+
+    setChecklistTimestampMode('frozen');
+    setChecklistCapturedTimestamp(nextTimestamp);
+  }
+
+  function highlightChecklistTimestamp(itemId: string): void {
+    setActiveChecklistTimestampIds((current) =>
+      current.includes(itemId) ? current : [...current, itemId]
+    );
+
+    const existingTimeout = checklistHighlightTimeoutsRef.current.get(itemId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+
+    const timeout = setTimeout(() => {
+      setActiveChecklistTimestampIds((current) => current.filter((id) => id !== itemId));
+      checklistHighlightTimeoutsRef.current.delete(itemId);
+    }, CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS);
+
+    checklistHighlightTimeoutsRef.current.set(itemId, timeout);
   }
 
   function handleAddChecklistItem(): void {
@@ -3218,7 +3440,7 @@ export function App(): JSX.Element {
       ...items,
     ]);
 
-    setChecklistDraftText('');
+    resetChecklistComposer(captureCurrentPlaybackTimestamp());
   }
 
   function handleToggleChecklistItem(songId: string, itemId: string, completed: boolean): void {
@@ -3406,6 +3628,41 @@ export function App(): JSX.Element {
     ? songChecklists[checklistModalSongId] ?? []
     : [];
   const checklistCompletedCount = checklistModalItems.filter((item) => item.completed).length;
+
+  useEffect(() => {
+    if (
+      checklistModalSongId !== selectedPlaybackSongId ||
+      checklistModalItems.length === 0 ||
+      !isPlaying
+    ) {
+      previousChecklistPlaybackTimeRef.current = currentTimeSeconds;
+      return;
+    }
+
+    const previousTime = previousChecklistPlaybackTimeRef.current;
+    if (currentTimeSeconds < previousTime) {
+      previousChecklistPlaybackTimeRef.current = currentTimeSeconds;
+      return;
+    }
+
+    for (const item of checklistModalItems) {
+      if (item.timestampSeconds === null) {
+        continue;
+      }
+
+      if (item.timestampSeconds > previousTime && item.timestampSeconds <= currentTimeSeconds) {
+        highlightChecklistTimestamp(item.id);
+      }
+    }
+
+    previousChecklistPlaybackTimeRef.current = currentTimeSeconds;
+  }, [
+    checklistModalItems,
+    checklistModalSongId,
+    currentTimeSeconds,
+    isPlaying,
+    selectedPlaybackSongId,
+  ]);
 
   const measuredIntegratedText = buildAnalysisValue(
     analysisStatus,
@@ -3779,16 +4036,17 @@ export function App(): JSX.Element {
             <>
               <div className="analysis-track-summary">
                 <strong data-testid="analysis-track-label">{selectedPlaybackVersion.fileName}</strong>
-                <p className="muted">{selectedSong ? selectedSong.title : 'Unknown track'}</p>
               </div>
 
-              <p className="muted analysis-loading-line" data-testid="analysis-status">
-                {analysisStatus === 'loading'
-                  ? 'Loading mastering analysis…'
-                  : analysisStatus === 'error'
-                    ? 'Analysis failed.'
-                    : 'Ready.'}
-              </p>
+              {analysisStatus !== 'ready' ? (
+                <p className="muted analysis-loading-line" data-testid="analysis-status">
+                  {analysisStatus === 'loading'
+                    ? 'Loading mastering analysis…'
+                    : analysisStatus === 'error'
+                      ? 'Analysis failed.'
+                      : 'Preparing mastering analysis…'}
+                </p>
+              ) : null}
 
               {analysisStatus === 'error' ? (
                 <p className="error" data-testid="analysis-error">
@@ -4378,20 +4636,20 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="skip-button"
-                    data-testid="player-skip-back-5"
-                    onClick={() => handleSkipSeconds(-5)}
-                    title="Skip back 5 seconds."
+                    data-testid="player-skip-back-10"
+                    onClick={() => handleSkipSeconds(-10)}
+                    title="Skip back 10 seconds."
                   >
-                    −5s
+                    −10s
                   </button>
                   <button
                     type="button"
                     className="skip-button"
-                    data-testid="player-skip-forward-5"
-                    onClick={() => handleSkipSeconds(5)}
-                    title="Skip forward 5 seconds."
+                    data-testid="player-skip-forward-10"
+                    onClick={() => handleSkipSeconds(10)}
+                    title="Skip forward 10 seconds."
                   >
-                    +5s
+                    +10s
                   </button>
                 </div>
                 <div className="transport-main-row">
@@ -4644,12 +4902,12 @@ export function App(): JSX.Element {
                 <button
                   type="button"
                   className="checklist-skip-button"
-                  data-testid="song-checklist-skip-back-5"
-                  onClick={() => handleSkipSeconds(-5)}
-                  title="Skip back 5 seconds"
-                  aria-label="Skip back 5 seconds"
+                  data-testid="song-checklist-skip-back-10"
+                  onClick={() => handleSkipSeconds(-10)}
+                  title="Skip back 10 seconds"
+                  aria-label="Skip back 10 seconds"
                 >
-                  −5s
+                  −10s
                 </button>
                 <button
                   type="button"
@@ -4687,12 +4945,12 @@ export function App(): JSX.Element {
                 <button
                   type="button"
                   className="checklist-skip-button"
-                  data-testid="song-checklist-skip-forward-5"
-                  onClick={() => handleSkipSeconds(5)}
-                  title="Skip forward 5 seconds"
-                  aria-label="Skip forward 5 seconds"
+                  data-testid="song-checklist-skip-forward-10"
+                  onClick={() => handleSkipSeconds(10)}
+                  title="Skip forward 10 seconds"
+                  aria-label="Skip forward 10 seconds"
                 >
-                  +5s
+                  +10s
                 </button>
               </div>
             </div>
@@ -4700,8 +4958,9 @@ export function App(): JSX.Element {
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
               <input
                 value={checklistDraftText}
-                onChange={(event) => setChecklistDraftText(event.currentTarget.value)}
+                onChange={(event) => handleChecklistDraftTextChange(event.currentTarget.value)}
                 onFocus={handleChecklistInputFocus}
+                onBlur={handleChecklistInputBlur}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault();
@@ -4717,8 +4976,8 @@ export function App(): JSX.Element {
                     type="button"
                     className="checklist-set-now-button"
                     data-testid="song-checklist-set-now"
-                    onClick={() => setChecklistCapturedTimestamp(captureCurrentPlaybackTimestamp())}
-                    title="Capture current playback time"
+                    onClick={handleChecklistSetNow}
+                    title="Capture the moment just before what you heard"
                     aria-label="Set timestamp to current playback position"
                   >
                     <svg className="checklist-set-now-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -4727,22 +4986,16 @@ export function App(): JSX.Element {
                     </svg>
                     <span>Set now</span>
                   </button>
-                  <span
+                  <button
+                    type="button"
                     className="checklist-timestamp-badge checklist-input-timestamp-preview"
                     title={`Seek to ${formatTime(checklistCapturedTimestamp)}`}
                     data-testid="song-checklist-input-timestamp-preview"
                     onClick={() => handleChecklistTimestampClick(checklistCapturedTimestamp)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleChecklistTimestampClick(checklistCapturedTimestamp);
-                      }
-                    }}
+                    onWheel={handleChecklistTimestampPreviewWheel}
                   >
                     {formatTime(checklistCapturedTimestamp)}
-                  </span>
+                  </button>
                 </div>
               ) : null}
               <button
@@ -4758,7 +5011,10 @@ export function App(): JSX.Element {
             {checklistModalItems.length > 0 ? (
               <ul className="checklist-item-list" data-testid="song-checklist-items">
                 {checklistModalItems.map((item) => (
-                  <li key={item.id} className={`checklist-item-row${item.timestampSeconds !== null ? ' has-timestamp' : ''}`}>
+                  <li
+                    key={item.id}
+                    className={`checklist-item-row${item.timestampSeconds !== null ? ' has-timestamp' : ''}${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}`}
+                  >
                     <label className="checklist-item-toggle">
                       <input
                         type="checkbox"
@@ -4838,8 +5094,18 @@ export function App(): JSX.Element {
           aria-modal="true"
           aria-label="Mastering analysis"
           data-testid="analysis-modal"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setAnalysisExpanded(false);
+            }
+          }}
         >
-          <div className="analysis-overlay-card">
+          <div
+            className="analysis-overlay-card"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
             <div className="analysis-overlay-header">
               <div>
                 <h2>Mastering + Reference</h2>
@@ -4882,9 +5148,19 @@ export function App(): JSX.Element {
                     </div>
                   </div>
                   {soloedBands.size > 0 && (
-                    <p className="spectrum-solo-label" data-testid="spectrum-solo-label">
-                      Soloing: <strong>{Array.from(soloedBands).sort().map(i => FREQUENCY_BANDS[i].label).join(' + ')}</strong>
-                    </p>
+                    <div className="spectrum-solo-summary">
+                      <p className="spectrum-solo-label" data-testid="spectrum-solo-label">
+                        Soloing: <strong>{Array.from(soloedBands).sort().map(i => FREQUENCY_BANDS[i].label).join(' + ')}</strong>
+                      </p>
+                      <button
+                        type="button"
+                        className="ghost spectrum-clear-solo-button"
+                        data-testid="analysis-clear-solo-bands"
+                        onClick={handleClearSoloedBands}
+                      >
+                        Clear selected ranges
+                      </button>
+                    </div>
                   )}
                 </section>
 
@@ -4894,26 +5170,27 @@ export function App(): JSX.Element {
                     <p>
                       <strong>{selectedPlaybackVersion.fileName}</strong>
                     </p>
-                    <p className="muted">{selectedSong ? selectedSong.title : 'Unknown track'}</p>
-                    <p className="muted analysis-loading-line" data-testid="analysis-overlay-status">
-                      {analysisStatus === 'loading'
-                        ? 'Loading mastering analysis…'
-                        : analysisStatus === 'error'
-                          ? 'Analysis failed.'
-                          : 'Ready.'}
-                    </p>
+                    {analysisStatus !== 'ready' ? (
+                      <p className="muted analysis-loading-line" data-testid="analysis-overlay-status">
+                        {analysisStatus === 'loading'
+                          ? 'Loading mastering analysis…'
+                          : analysisStatus === 'error'
+                            ? 'Analysis failed.'
+                            : 'Preparing mastering analysis…'}
+                      </p>
+                    ) : null}
                     {analysisStatus === 'error' ? (
                       <p className="error" data-testid="analysis-overlay-error">
                         {analysisError ?? 'Could not analyse this track preview.'}
                       </p>
                     ) : null}
-                    <p className="muted" data-testid="analysis-overlay-preview-mode">
-                      {referenceTrack
-                        ? playbackPreviewMode === 'reference'
+                    {referenceTrack ? (
+                      <p className="muted" data-testid="analysis-overlay-preview-mode">
+                        {playbackPreviewMode === 'reference'
                           ? `Playing reference: ${referenceTrack.fileName}`
-                          : `Mix loaded · reference ready: ${referenceTrack.fileName}`
-                        : 'Playing your mix'}
-                    </p>
+                          : `Reference ready: ${referenceTrack.fileName}`}
+                      </p>
+                    ) : null}
                   </section>
 
                   <section className="analysis-overlay-section">

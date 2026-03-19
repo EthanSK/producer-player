@@ -833,8 +833,15 @@ test.describe('playback runtime deep dive', () => {
       await cueSongVersion('Warm Master', 'Warm Master v1.wav');
       await expect(page.getByTestId('analysis-panel')).toContainText('Mastering + Reference');
       await expect
-        .poll(async () => ((await page.getByTestId('analysis-status').textContent()) ?? '').trim())
-        .toMatch(/Loading mastering analysis…|Ready\./);
+        .poll(async () => {
+          const status = page.getByTestId('analysis-status');
+          const count = await status.count();
+          if (count === 0) {
+            return '';
+          }
+          return ((await status.textContent()) ?? '').trim();
+        })
+        .toMatch(/^(|Loading mastering analysis…|Preparing mastering analysis…)$/);
 
       const initialPanelHeight = await page.getByTestId('analysis-panel').evaluate((element) => {
         return Math.round(element.getBoundingClientRect().height);
@@ -1079,7 +1086,7 @@ test.describe('playback runtime deep dive', () => {
 
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
-      await expect(page.getByTestId('analysis-overlay-status')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-status')).toHaveCount(0);
       await expect(page.getByTestId('analysis-overlay-preview-mode')).toContainText('reference ready');
       await expect(page.getByTestId('analysis-choose-reference-overlay')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-normalization-change')).toBeVisible();

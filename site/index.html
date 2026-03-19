@@ -737,21 +737,6 @@
         el.style.display = visible ? '' : 'none';
       }
 
-      function detectPrimaryKey() {
-        var nav = window.navigator || {};
-        var platform = (nav.platform || '').toLowerCase();
-        var ua = (nav.userAgent || '').toLowerCase();
-
-        var isMac = platform.indexOf('mac') >= 0 || ua.indexOf('mac os') >= 0;
-        var isWin = platform.indexOf('win') >= 0 || ua.indexOf('windows') >= 0;
-        var isLinux = platform.indexOf('linux') >= 0 || ua.indexOf('linux') >= 0 || ua.indexOf('x11') >= 0;
-
-        if (isMac) return 'mac';
-        if (isWin) return 'win';
-        if (isLinux) return 'linux';
-        return null;
-      }
-
       function applyLinks() {
         var macLabel = 'macOS';
         if (availability.macUniversal) macLabel = 'macOS (Universal)';
@@ -762,17 +747,14 @@
         setButton(elWin, links.win, 'Windows', !links.win);
         setButton(elLinux, links.linux, 'Linux', !links.linux);
 
-        var primaryKey = detectPrimaryKey();
-        setButtonVisible(elMac, primaryKey !== 'mac');
-        setButtonVisible(elWin, primaryKey !== 'win');
-        setButtonVisible(elLinux, primaryKey !== 'linux');
+        setButtonVisible(elMac, false);
+        setButtonVisible(elWin, true);
+        setButtonVisible(elLinux, true);
 
-        var primaryHref = links[primaryKey] || links.mac || links.win || links.linux || fallbackUrl;
-        var primaryLabel = {
-          mac: 'Download for macOS',
-          win: 'Download for Windows',
-          linux: 'Download for Linux',
-        }[primaryKey] || 'Download latest release';
+        var primaryHref = links.mac || fallbackUrl;
+        var primaryLabel = availability.macUniversal
+          ? 'Download for macOS (Universal)'
+          : 'Download for macOS';
 
         if (elPrimary) {
           elPrimary.setAttribute('href', primaryHref);
@@ -780,8 +762,8 @@
         }
 
         if (elSecondaryPrimary) {
-          elSecondaryPrimary.setAttribute('href', primaryHref);
-          elSecondaryPrimary.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' + primaryLabel;
+          elSecondaryPrimary.setAttribute('href', fallbackUrl);
+          elSecondaryPrimary.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Download latest release';
         }
 
         if (elNote) {

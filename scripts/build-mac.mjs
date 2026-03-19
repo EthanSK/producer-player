@@ -102,9 +102,19 @@ if (isMasTarget) {
   buildEnv.PRODUCER_PLAYER_SKIP_BUNDLED_FFMPEG = 'false';
 }
 
+buildEnv.PRODUCER_PLAYER_BUILD_MAC_UNIVERSAL =
+  !isMasTarget && target === 'zip' ? 'true' : 'false';
+
 console.log(`[producer-player] Building macOS target: ${target}`);
 runNpm(['run', 'build'], buildEnv);
-runNpm(['exec', '--', 'electron-builder', '--mac', target, '--publish', 'never'], buildEnv);
+
+const electronBuilderArgs = ['exec', '--', 'electron-builder', '--mac', target, '--publish', 'never'];
+if (!isMasTarget && target === 'zip') {
+  // Ship a single universal macOS artifact (Apple Silicon + Intel) for desktop releases.
+  electronBuilderArgs.push('--universal');
+}
+
+runNpm(electronBuilderArgs, buildEnv);
 
 if (isMasTarget) {
   console.log(

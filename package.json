@@ -64,7 +64,8 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "artifactName": "Producer-Player-${version}-mac-${arch}.${ext}"
+      "artifactName": "Producer-Player-${version}-mac-${arch}.${ext}",
+      "x64ArchFiles": "**/app.asar.unpacked/apps/electron/dist/bin/ffmpeg"
     },
     "mas": {
       "type": "distribution",

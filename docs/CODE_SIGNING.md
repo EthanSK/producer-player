@@ -119,11 +119,11 @@ To verify the result:
 ```bash
 # Check signature
 codesign --verify --deep --strict --verbose=2 \
-  release/mac-arm64/Producer\ Player.app
+  release/mac-universal/Producer\ Player.app
 
 # Check notarization
 spctl --assess --type execute --verbose=2 \
-  release/mac-arm64/Producer\ Player.app
+  release/mac-universal/Producer\ Player.app
 ```
 
 ---

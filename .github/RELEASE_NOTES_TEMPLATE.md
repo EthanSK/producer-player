@@ -2,8 +2,7 @@
 
 Pick the ZIP for your platform, unzip, and run.
 
-- `Producer-Player-<version>-mac-arm64.zip` — macOS (Apple Silicon)
-- `Producer-Player-<version>-mac-x64.zip` — macOS (Intel)
+- `Producer-Player-<version>-mac-universal.zip` — macOS (Universal: Apple Silicon + Intel)
 - `Producer-Player-<version>-linux-x64.zip` — Linux
 - `Producer-Player-<version>-win-x64.zip` — Windows
 

@@ -11,6 +11,20 @@ function hasFfmpeg(): boolean {
   return check.status === 0;
 }
 
+function resolveFfmpegBinaryPath(): string | null {
+  const check = spawnSync('which', ['ffmpeg'], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf8',
+  });
+
+  if (check.status !== 0) {
+    return null;
+  }
+
+  const resolvedPath = check.stdout.trim();
+  return resolvedPath.length > 0 ? resolvedPath : null;
+}
+
 function hasFfprobe(): boolean {
   const check = spawnSync('ffprobe', ['-version'], { stdio: 'ignore' });
   return check.status === 0;
@@ -246,8 +260,9 @@ async function writeRealAudioFixtures(fixtureDirectory: string): Promise<Record<
 test.describe('playback runtime deep dive', () => {
   test.skip(!hasFfmpeg(), 'ffmpeg is required for real codec fixture generation.');
 
-  test('surfaces sample rate in the inspector header and player dock', async () => {
-    test.skip(!hasFfprobe(), 'ffprobe is required for sample-rate verification.');
+  test('surfaces 44.1/48 kHz sample rates in inspector + player even when ffprobe is unavailable', async () => {
+    const ffmpegBinaryPath = resolveFfmpegBinaryPath();
+    test.skip(!ffmpegBinaryPath, 'ffmpeg binary path is required for ffprobe-is-missing simulation.');
 
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-sample-rate-fixture-')
@@ -256,32 +271,75 @@ test.describe('playback runtime deep dive', () => {
       path.join(os.tmpdir(), 'producer-player-e2e-sample-rate-user-data-')
     );
 
-    const sampleRatePath = path.join(fixtureDirectory, 'Sample Rate Check v1.wav');
+    const fixtures = [
+      {
+        songTitle: 'Sample Rate 44.1',
+        fileName: 'Sample Rate 44.1 v1.wav',
+        sampleRateHz: '44100',
+        expectedLabel: '44.1 kHz',
+      },
+      {
+        songTitle: 'Sample Rate 48',
+        fileName: 'Sample Rate 48 v1.wav',
+        sampleRateHz: '48000',
+        expectedLabel: '48 kHz',
+      },
+    ] as const;
 
-    await runFfmpeg([
-      '-y',
-      '-f',
-      'lavfi',
-      '-i',
-      'sine=frequency=440:duration=4',
-      '-ar',
-      '48000',
-      '-c:a',
-      'pcm_s16le',
-      sampleRatePath,
-    ]);
+    for (const fixture of fixtures) {
+      await runFfmpeg([
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=440:duration=4',
+        '-ar',
+        fixture.sampleRateHz,
+        '-c:a',
+        'pcm_s16le',
+        path.join(fixtureDirectory, fixture.fileName),
+      ]);
+    }
 
-    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory, {
+      extraEnv: {
+        PATH: '/usr/bin:/bin',
+        PRODUCER_PLAYER_FFMPEG_PATH: ffmpegBinaryPath!,
+      },
+    });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await page.evaluate(async (targetPath) => {
+        await (window as any).producerPlayer.linkFolder(targetPath);
+      }, fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(fixtures.length);
 
-      await page.getByTestId('main-list-row').first().click();
-      await expect(page.getByTestId('player-track-name')).toContainText('Sample Rate Check v1.wav');
-      await expect(page.getByTestId('inspector-song-sample-rate')).toContainText('48 kHz');
-      await expect(page.getByTestId('player-track-sample-rate')).toContainText('48 kHz');
+      for (const fixture of fixtures) {
+        const escapedTitle = fixture.songTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const row = page.getByTestId('main-list-row').filter({
+          has: page
+            .getByTestId('main-list-row-title')
+            .filter({ hasText: new RegExp(`^${escapedTitle}$`) }),
+        });
+
+        await expect(row).toHaveCount(1);
+        await row.first().click();
+        await page
+          .getByTestId('inspector-version-row')
+          .first()
+          .getByRole('button', { name: 'Cue' })
+          .click();
+
+        await expect(page.getByTestId('player-track-name')).toContainText(fixture.fileName);
+        await expect(page.getByTestId('inspector-song-sample-rate')).not.toContainText('—');
+        await expect(page.getByTestId('player-track-sample-rate')).not.toContainText('—');
+        await expect(page.getByTestId('inspector-song-sample-rate')).toContainText(
+          fixture.expectedLabel
+        );
+        await expect(page.getByTestId('player-track-sample-rate')).toContainText(
+          fixture.expectedLabel
+        );
+      }
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });

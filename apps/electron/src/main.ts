@@ -855,7 +855,7 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
     '-',
   ]);
 
-  const [volumedetectResult, sampleRateHz] = await Promise.all([
+  const [volumedetectResult, probedSampleRateHz] = await Promise.all([
     runProcessCapture(ffmpegCommand, [
       '-hide_banner',
       '-nostats',
@@ -887,6 +887,11 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
       }
     })(),
   ]);
+
+  const sampleRateHz =
+    probedSampleRateHz ??
+    parseSampleRateHzFromDiagnostics(ebur128Result.stderr) ??
+    parseSampleRateHzFromDiagnostics(volumedetectResult.stderr);
 
   const integratedMatches = Array.from(
     ebur128Result.stderr.matchAll(/\bI:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LUFS/gi)
@@ -1009,6 +1014,35 @@ function parseInteger(value: unknown): number | null {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) {
       return Math.trunc(parsed);
+    }
+  }
+
+  return null;
+}
+
+function parseSampleRateHzFromDiagnostics(diagnostics: string): number | null {
+  if (diagnostics.trim().length === 0) {
+    return null;
+  }
+
+  const streamMatches = Array.from(
+    diagnostics.matchAll(
+      /Stream #\d+:\d+(?:\[[^\]]+\])?(?:\([^\)]*\))?: Audio:[^\n]*?(\d{4,6})\s*Hz/gi
+    )
+  );
+
+  if (streamMatches.length > 0) {
+    const parsed = parseInteger(streamMatches[0]?.[1]);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+
+  const genericMatches = Array.from(diagnostics.matchAll(/\b(\d{4,6})\s*Hz\b/gi));
+  if (genericMatches.length > 0) {
+    const parsed = parseInteger(genericMatches[0]?.[1]);
+    if (parsed !== null) {
+      return parsed;
     }
   }
 

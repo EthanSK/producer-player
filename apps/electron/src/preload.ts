@@ -90,6 +90,13 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.PICK_REFERENCE_TRACK);
   },
 
+  async getSharedUserState() {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_SHARED_USER_STATE);
+  },
+
+  async setSharedUserState(state) {
+    return ipcRenderer.invoke(IPC_CHANNELS.SET_SHARED_USER_STATE, state);
+  },
 
   async syncToICloud(data: ICloudBackupData) {
     return ipcRenderer.invoke(IPC_CHANNELS.SYNC_TO_ICLOUD, data);

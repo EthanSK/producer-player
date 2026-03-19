@@ -27,8 +27,9 @@
 
 ## Data Storage
 
-- Checklists + ratings: `localStorage` in renderer
-- App state: `producer-player-electron-state.json` in userData
+- Checklists + ratings (shared across dev + packaged app): `producer-player-shared-user-state.json` in appData (`~/Library/Application Support/Producer Player/` on macOS)
+- Legacy migration source: renderer `localStorage` (imported on startup when keys are missing from shared state)
+- App state (linked folders, order, settings): `producer-player-electron-state.json` in appData
 - iCloud backup: `~/Library/Mobile Documents/com~apple~CloudDocs/Producer Player/` (when enabled)
 
 ## Audio Analysis

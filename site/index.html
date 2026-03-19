@@ -347,23 +347,124 @@
       .download p {
         color: var(--text-muted);
         font-size: 15px;
-        margin-bottom: 28px;
+        margin-bottom: 20px;
         text-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
       }
 
-      .platforms {
-        display: flex;
+      .download-panel {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 22px;
+        border-radius: 16px;
+        border: 1px solid rgba(123, 47, 190, 0.2);
+        background: rgba(13, 18, 24, 0.78);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        text-align: left;
+      }
+
+      .download-recommend {
+        margin-bottom: 18px;
+      }
+
+      .download-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: rgba(95, 210, 143, 0.95);
+        margin-bottom: 10px;
+      }
+
+      .download-primary {
+        width: 100%;
         justify-content: center;
-        gap: 32px;
-        margin-top: 20px;
+      }
+
+      .download-recommend-note {
+        margin-top: 10px;
         color: var(--text-muted);
         font-size: 13px;
       }
 
-      .platforms span {
+      .download-options {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      .download-card {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        background: rgba(17, 24, 32, 0.75);
+        padding: 16px;
+      }
+
+      .download-card h3 {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
+        font-size: 15px;
+        margin-bottom: 10px;
+      }
+
+      .download-links {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .download-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        width: 100%;
+        border-radius: 9px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(9, 14, 19, 0.5);
+        color: var(--text);
+        padding: 9px 12px;
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+        transition: transform 0.12s, border-color 0.12s;
+      }
+
+      .download-link:hover {
+        text-decoration: none;
+        transform: translateY(-1px);
+        border-color: rgba(92, 167, 255, 0.65);
+      }
+
+      .download-link[aria-disabled="true"] {
+        pointer-events: none;
+        opacity: 0.45;
+      }
+
+      .download-caption {
+        display: block;
+        margin-top: 8px;
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .download-meta {
+        margin-top: 14px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .download-meta a {
+        color: var(--text-muted);
+      }
+
+      .download-meta a:hover {
+        color: var(--text);
       }
 
       /* ── Footer ── */
@@ -478,7 +579,7 @@
 
       <section class="hero">
         <div class="wrap">
-          <h1>Finish music,<br />not file management.</h1>
+          <h1>Finish records the right way.</h1>
           <p class="tagline">
             A desktop app for producers who bounce a lot. Version tracking, mastering workspace, album ordering — one window.
           </p>

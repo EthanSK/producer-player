@@ -21,6 +21,7 @@ import type {
   SongVersion,
   SongWithVersions,
   TransportCommand,
+  UpdateCheckResult,
 } from '@producer-player/contracts';
 import {
   analyzeTrackFromUrl,
@@ -874,6 +875,10 @@ export function App(): JSX.Element {
   >('idle');
   const [iCloudSyncError, setICloudSyncError] = useState<string | null>(null);
   const [iCloudInitialLoadDone, setICloudInitialLoadDone] = useState(false);
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<
+    'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error'
+  >('idle');
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null);
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
@@ -3241,6 +3246,39 @@ export function App(): JSX.Element {
     void runVoidTask(() => window.producerPlayer.openExternalUrl(url));
   }
 
+  async function handleCheckForUpdates(): Promise<void> {
+    setUpdateCheckStatus('checking');
+    setUpdateCheckResult(null);
+
+    try {
+      const result = await window.producerPlayer.checkForUpdates();
+      setUpdateCheckResult(result);
+      setUpdateCheckStatus(result.status === 'error' ? 'error' : result.status);
+    } catch (cause: unknown) {
+      setUpdateCheckStatus('error');
+      setUpdateCheckResult({
+        status: 'error',
+        currentVersion: 'Unknown',
+        latestVersion: null,
+        latestTag: null,
+        releaseUrl: `${PUBLIC_REPOSITORY_URL}/releases`,
+        downloadUrl: null,
+        releaseName: null,
+        publishedAt: null,
+        notes: null,
+        message: cause instanceof Error ? cause.message : 'Could not check for updates.',
+      });
+    }
+  }
+
+  async function handleDownloadUpdate(): Promise<void> {
+    await runVoidTask(async () => {
+      await window.producerPlayer.openUpdateDownload(
+        updateCheckResult?.downloadUrl ?? updateCheckResult?.releaseUrl ?? null
+      );
+    });
+  }
+
   function handleSongRatingChange(songId: string, nextRatingValue: number): void {
     const nextRating = getNormalizedSliderRating(nextRatingValue);
 
@@ -3810,6 +3848,13 @@ export function App(): JSX.Element {
     }
   );
   const checklistDraftIsEmpty = checklistDraftText.trim().length === 0;
+  const updateStatusText =
+    updateCheckStatus === 'checking'
+      ? 'Checking for updates…'
+      : updateCheckResult?.message ?? null;
+  const canDownloadUpdate =
+    updateCheckResult?.status === 'update-available' &&
+    Boolean(updateCheckResult.downloadUrl || updateCheckResult.releaseUrl);
 
   transportActionRef.current = {
     toggle: () => {
@@ -4891,7 +4936,38 @@ export function App(): JSX.Element {
               >
                 Request a Feature
               </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  void handleCheckForUpdates();
+                }}
+                data-testid="support-feedback-check-updates"
+                disabled={updateCheckStatus === 'checking'}
+              >
+                {updateCheckStatus === 'checking' ? 'Checking…' : 'Check for Updates'}
+              </button>
+              {canDownloadUpdate ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    void handleDownloadUpdate();
+                  }}
+                  data-testid="support-feedback-download-update"
+                >
+                  Download Update
+                </button>
+              ) : null}
             </div>
+            {updateStatusText ? (
+              <p
+                className={updateCheckResult?.status === 'error' ? 'error' : 'muted'}
+                data-testid="support-feedback-update-status"
+              >
+                {updateStatusText}
+              </p>
+            ) : null}
           </section>
         </div>
       </aside>

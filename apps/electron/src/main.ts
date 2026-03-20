@@ -19,6 +19,7 @@ import type {
   ProducerPlayerEnvironment,
   ReferenceTrackSelection,
   SongVersion,
+  UpdateCheckResult,
   SongWithVersions,
   TransportCommand,
 } from '@producer-player/contracts';
@@ -60,6 +61,13 @@ const TEST_REFERENCE_IMPORT_PATH =
 const ANALYSIS_DELAY_MS = Number(process.env.PRODUCER_PLAYER_ANALYSIS_DELAY_MS ?? '0');
 const PUBLIC_REPOSITORY_ORIGIN = 'https://github.com';
 const PUBLIC_REPOSITORY_PATH = '/EthanSK/producer-player';
+const PUBLIC_RELEASES_URL = `${PUBLIC_REPOSITORY_ORIGIN}${PUBLIC_REPOSITORY_PATH}/releases`;
+const PUBLIC_RELEASES_LATEST_DOWNLOAD_BASE_URL =
+  `${PUBLIC_REPOSITORY_ORIGIN}${PUBLIC_REPOSITORY_PATH}/releases/latest/download`;
+const GITHUB_RELEASES_LATEST_API_URL = 'https://api.github.com/repos/EthanSK/producer-player/releases/latest';
+const UPDATE_CHECK_TIMEOUT_MS = 12_000;
+const AUTO_UPDATE_CHECK_DELAY_MS = 9_000;
+const AUTO_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Trusted external URLs that may be opened from the renderer.
@@ -123,6 +131,521 @@ let playbackProtocolRegistered = false;
 const playbackTranscodeJobs = new Map<string, Promise<string>>();
 const linkedFolderSecurityBookmarks = new Map<string, string>();
 const linkedFolderSecurityAccessStops = new Map<string, () => void>();
+
+interface GithubReleaseAsset {
+  name: string;
+  browserDownloadUrl: string;
+}
+
+interface GithubLatestReleasePayload {
+  tagName: string;
+  htmlUrl: string;
+  name: string | null;
+  body: string | null;
+  publishedAt: string | null;
+  assets: GithubReleaseAsset[];
+}
+
+interface ParsedSemver {
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease: Array<number | string>;
+}
+
+const UPDATE_CHECK_CACHE_MS = 60_000;
+
+let updateCheckInFlight: Promise<UpdateCheckResult> | null = null;
+let latestCachedUpdateCheck: { result: UpdateCheckResult; checkedAtMs: number } | null = null;
+let autoUpdateCheckStartupTimeout: NodeJS.Timeout | null = null;
+let autoUpdateCheckInterval: NodeJS.Timeout | null = null;
+let autoUpdatePromptInFlight = false;
+let autoUpdatePromptedTag: string | null = null;
+
+function parseSemverToken(token: string): number | string {
+  if (/^\d+$/.test(token)) {
+    return Number(token);
+  }
+
+  return token;
+}
+
+function parseSemver(value: string): ParsedSemver | null {
+  const normalized = value.trim().replace(/^v/i, '');
+  const matched = normalized.match(
+    /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
+  );
+
+  if (!matched) {
+    return null;
+  }
+
+  const major = Number(matched[1]);
+  const minor = Number(matched[2]);
+  const patch = Number(matched[3]);
+
+  if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) {
+    return null;
+  }
+
+  const prerelease =
+    matched[4]?.split('.').filter((token) => token.length > 0).map(parseSemverToken) ?? [];
+
+  return {
+    major,
+    minor,
+    patch,
+    prerelease,
+  };
+}
+
+function comparePrereleaseIdentifier(left: number | string, right: number | string): number {
+  if (typeof left === 'number' && typeof right === 'number') {
+    return left - right;
+  }
+
+  if (typeof left === 'number') {
+    return -1;
+  }
+
+  if (typeof right === 'number') {
+    return 1;
+  }
+
+  if (left === right) {
+    return 0;
+  }
+
+  return left > right ? 1 : -1;
+}
+
+function compareSemver(left: ParsedSemver, right: ParsedSemver): number {
+  if (left.major !== right.major) {
+    return left.major - right.major;
+  }
+
+  if (left.minor !== right.minor) {
+    return left.minor - right.minor;
+  }
+
+  if (left.patch !== right.patch) {
+    return left.patch - right.patch;
+  }
+
+  const leftHasPrerelease = left.prerelease.length > 0;
+  const rightHasPrerelease = right.prerelease.length > 0;
+
+  if (!leftHasPrerelease && !rightHasPrerelease) {
+    return 0;
+  }
+
+  if (!leftHasPrerelease) {
+    return 1;
+  }
+
+  if (!rightHasPrerelease) {
+    return -1;
+  }
+
+  const maxLength = Math.max(left.prerelease.length, right.prerelease.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftToken = left.prerelease[index];
+    const rightToken = right.prerelease[index];
+
+    if (leftToken === undefined) {
+      return -1;
+    }
+
+    if (rightToken === undefined) {
+      return 1;
+    }
+
+    const tokenDelta = comparePrereleaseIdentifier(leftToken, rightToken);
+    if (tokenDelta !== 0) {
+      return tokenDelta;
+    }
+  }
+
+  return 0;
+}
+
+function toComparableVersion(value: string): ParsedSemver | null {
+  return parseSemver(value);
+}
+
+function getStableDownloadAssetName(
+  platform: NodeJS.Platform,
+  arch: NodeJS.Architecture
+): string | null {
+  if (platform === 'darwin') {
+    return 'Producer-Player-latest-mac-universal.zip';
+  }
+
+  if (platform === 'linux' && arch === 'x64') {
+    return 'Producer-Player-latest-linux-x64.zip';
+  }
+
+  if (platform === 'win32' && arch === 'x64') {
+    return 'Producer-Player-latest-win-x64.zip';
+  }
+
+  return null;
+}
+
+function getStableDownloadUrlForCurrentPlatform(): string | null {
+  const assetName = getStableDownloadAssetName(process.platform, process.arch);
+  if (!assetName) {
+    return null;
+  }
+
+  return `${PUBLIC_RELEASES_LATEST_DOWNLOAD_BASE_URL}/${assetName}`;
+}
+
+function getReleaseAssetNameCandidatesForCurrentPlatform(): string[] {
+  const stableAssetName = getStableDownloadAssetName(process.platform, process.arch);
+  const candidates = stableAssetName ? [stableAssetName] : [];
+
+  if (process.platform === 'darwin') {
+    candidates.push(
+      'Producer-Player-latest-mac-arm64.zip',
+      'Producer-Player-latest-mac-x64.zip'
+    );
+    return candidates;
+  }
+
+  if (process.platform === 'linux' && process.arch === 'x64') {
+    return candidates;
+  }
+
+  if (process.platform === 'win32' && process.arch === 'x64') {
+    return candidates;
+  }
+
+  return candidates;
+}
+
+function parseGithubLatestReleasePayload(payload: unknown): GithubLatestReleasePayload {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new Error('GitHub release payload is not an object.');
+  }
+
+  const candidate = payload as {
+    tag_name?: unknown;
+    html_url?: unknown;
+    name?: unknown;
+    body?: unknown;
+    published_at?: unknown;
+    assets?: unknown;
+  };
+
+  if (typeof candidate.tag_name !== 'string' || candidate.tag_name.trim().length === 0) {
+    throw new Error('GitHub release payload is missing tag_name.');
+  }
+
+  if (typeof candidate.html_url !== 'string' || candidate.html_url.trim().length === 0) {
+    throw new Error('GitHub release payload is missing html_url.');
+  }
+
+  const assetsRaw = Array.isArray(candidate.assets) ? candidate.assets : [];
+  const assets: GithubReleaseAsset[] = assetsRaw.flatMap((entry) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return [];
+    }
+
+    const asset = entry as { name?: unknown; browser_download_url?: unknown };
+    if (
+      typeof asset.name !== 'string' ||
+      asset.name.length === 0 ||
+      typeof asset.browser_download_url !== 'string' ||
+      asset.browser_download_url.length === 0
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        name: asset.name,
+        browserDownloadUrl: asset.browser_download_url,
+      },
+    ];
+  });
+
+  return {
+    tagName: candidate.tag_name,
+    htmlUrl: candidate.html_url,
+    name: typeof candidate.name === 'string' ? candidate.name : null,
+    body: typeof candidate.body === 'string' ? candidate.body : null,
+    publishedAt: typeof candidate.published_at === 'string' ? candidate.published_at : null,
+    assets,
+  };
+}
+
+async function fetchLatestGithubRelease(): Promise<GithubLatestReleasePayload> {
+  const response = await fetch(GITHUB_RELEASES_LATEST_API_URL, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'Producer-Player-Update-Checker',
+    },
+    signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub API request failed (${response.status} ${response.statusText}).`);
+  }
+
+  const payload = (await response.json()) as unknown;
+  return parseGithubLatestReleasePayload(payload);
+}
+
+function resolveReleaseDownloadUrl(release: GithubLatestReleasePayload): string | null {
+  const candidateAssetNames = getReleaseAssetNameCandidatesForCurrentPlatform();
+
+  for (const assetName of candidateAssetNames) {
+    const matchedAsset = release.assets.find((asset) => asset.name === assetName);
+    if (matchedAsset) {
+      return matchedAsset.browserDownloadUrl;
+    }
+  }
+
+  if (process.platform === 'darwin') {
+    const macVersionedAsset = release.assets.find((asset) =>
+      /Producer-Player-.*-mac-(?:universal|arm64|x64)\.zip$/i.test(asset.name)
+    );
+
+    if (macVersionedAsset) {
+      return macVersionedAsset.browserDownloadUrl;
+    }
+  }
+
+  if (process.platform === 'linux' && process.arch === 'x64') {
+    const linuxVersionedAsset = release.assets.find((asset) =>
+      /Producer-Player-.*-linux-x64\.zip$/i.test(asset.name)
+    );
+
+    if (linuxVersionedAsset) {
+      return linuxVersionedAsset.browserDownloadUrl;
+    }
+  }
+
+  if (process.platform === 'win32' && process.arch === 'x64') {
+    const windowsVersionedAsset = release.assets.find((asset) =>
+      /Producer-Player-.*-win-x64\.zip$/i.test(asset.name)
+    );
+
+    if (windowsVersionedAsset) {
+      return windowsVersionedAsset.browserDownloadUrl;
+    }
+  }
+
+  return getStableDownloadUrlForCurrentPlatform();
+}
+
+function buildUpdateResultMessage(result: {
+  status: UpdateCheckResult['status'];
+  currentVersion: string;
+  latestVersion: string | null;
+  downloadUrl: string | null;
+}): string {
+  if (result.status === 'error') {
+    return 'Could not check for updates right now.';
+  }
+
+  if (result.status === 'up-to-date') {
+    return `You’re already on the latest version (${result.currentVersion}).`;
+  }
+
+  if (result.downloadUrl) {
+    return `Version ${result.latestVersion ?? 'latest'} is available.`;
+  }
+
+  return `Version ${result.latestVersion ?? 'latest'} is available, but no direct download was resolved for this platform.`;
+}
+
+async function checkForUpdates(options: { force?: boolean } = {}): Promise<UpdateCheckResult> {
+  const force = options.force === true;
+  const now = Date.now();
+
+  if (!force && latestCachedUpdateCheck && now - latestCachedUpdateCheck.checkedAtMs < UPDATE_CHECK_CACHE_MS) {
+    return latestCachedUpdateCheck.result;
+  }
+
+  if (!force && updateCheckInFlight) {
+    return updateCheckInFlight;
+  }
+
+  const currentVersion = app.getVersion();
+
+  const runCheck = async (): Promise<UpdateCheckResult> => {
+    try {
+      const release = await fetchLatestGithubRelease();
+      const latestVersion = release.tagName.replace(/^v/i, '').trim();
+
+      const currentComparable = toComparableVersion(currentVersion);
+      const latestComparable = toComparableVersion(latestVersion);
+
+      if (!currentComparable || !latestComparable) {
+        throw new Error(
+          `Version comparison failed (current="${currentVersion}", latest="${latestVersion}").`
+        );
+      }
+
+      const versionDelta = compareSemver(latestComparable, currentComparable);
+      const status: UpdateCheckResult['status'] =
+        versionDelta > 0 ? 'update-available' : 'up-to-date';
+      const downloadUrl = resolveReleaseDownloadUrl(release);
+
+      const result: UpdateCheckResult = {
+        status,
+        currentVersion,
+        latestVersion,
+        latestTag: release.tagName,
+        releaseUrl: release.htmlUrl,
+        downloadUrl,
+        releaseName: release.name,
+        publishedAt: release.publishedAt,
+        notes: release.body,
+        message: buildUpdateResultMessage({
+          status,
+          currentVersion,
+          latestVersion,
+          downloadUrl,
+        }),
+      };
+
+      latestCachedUpdateCheck = {
+        result,
+        checkedAtMs: Date.now(),
+      };
+
+      return result;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      const result: UpdateCheckResult = {
+        status: 'error',
+        currentVersion,
+        latestVersion: null,
+        latestTag: null,
+        releaseUrl: PUBLIC_RELEASES_URL,
+        downloadUrl: getStableDownloadUrlForCurrentPlatform(),
+        releaseName: null,
+        publishedAt: null,
+        notes: null,
+        message,
+      };
+
+      latestCachedUpdateCheck = {
+        result,
+        checkedAtMs: Date.now(),
+      };
+
+      return result;
+    }
+  };
+
+  if (force) {
+    return runCheck();
+  }
+
+  updateCheckInFlight = runCheck().finally(() => {
+    updateCheckInFlight = null;
+  });
+
+  return updateCheckInFlight;
+}
+
+async function openUpdateDownloadUrl(url: string | null | undefined): Promise<void> {
+  const candidate =
+    typeof url === 'string' && url.trim().length > 0
+      ? url.trim()
+      : getStableDownloadUrlForCurrentPlatform() ?? PUBLIC_RELEASES_URL;
+
+  const trustedUrl = parseTrustedExternalUrl(candidate);
+  await shell.openExternal(trustedUrl.toString());
+}
+
+async function maybePromptForAvailableUpdate(): Promise<void> {
+  if (!app.isPackaged || IS_TEST_MODE) {
+    return;
+  }
+
+  if (autoUpdatePromptInFlight) {
+    return;
+  }
+
+  autoUpdatePromptInFlight = true;
+
+  try {
+    const result = await checkForUpdates();
+    if (result.status !== 'update-available') {
+      return;
+    }
+
+    const updateIdentity = result.latestTag ?? result.latestVersion;
+    if (!updateIdentity) {
+      return;
+    }
+
+    if (autoUpdatePromptedTag === updateIdentity) {
+      return;
+    }
+
+    autoUpdatePromptedTag = updateIdentity;
+
+    const messageBoxOptions = {
+      type: 'info' as const,
+      title: 'Update available',
+      message: `Producer Player ${result.latestVersion ?? 'latest'} is available.`,
+      detail: `Current version: ${result.currentVersion}\n\nDownload the update to install it manually.`,
+      buttons: [result.downloadUrl ? 'Download update' : 'View release', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    };
+
+    const response =
+      mainWindow && !mainWindow.isDestroyed()
+        ? await dialog.showMessageBox(mainWindow, messageBoxOptions)
+        : await dialog.showMessageBox(messageBoxOptions);
+
+    if (response.response === 0) {
+      await openUpdateDownloadUrl(result.downloadUrl ?? result.releaseUrl);
+    }
+  } catch (error: unknown) {
+    console.warn('[producer-player:update] automatic update check failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    autoUpdatePromptInFlight = false;
+  }
+}
+
+function clearAutomaticUpdateChecks(): void {
+  if (autoUpdateCheckStartupTimeout) {
+    clearTimeout(autoUpdateCheckStartupTimeout);
+    autoUpdateCheckStartupTimeout = null;
+  }
+
+  if (autoUpdateCheckInterval) {
+    clearInterval(autoUpdateCheckInterval);
+    autoUpdateCheckInterval = null;
+  }
+}
+
+function scheduleAutomaticUpdateChecks(): void {
+  if (!app.isPackaged || IS_TEST_MODE) {
+    return;
+  }
+
+  clearAutomaticUpdateChecks();
+
+  autoUpdateCheckStartupTimeout = setTimeout(() => {
+    void maybePromptForAvailableUpdate();
+
+    autoUpdateCheckInterval = setInterval(() => {
+      void maybePromptForAvailableUpdate();
+    }, AUTO_UPDATE_CHECK_INTERVAL_MS);
+  }, AUTO_UPDATE_CHECK_DELAY_MS);
+}
 
 function emitTransportCommand(command: TransportCommand): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -2294,6 +2817,14 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.LOAD_FROM_ICLOUD, async () => {
     return loadDataFromICloud();
   });
+
+  ipcMain.handle(IPC_CHANNELS.CHECK_FOR_UPDATES, async () => {
+    return checkForUpdates({ force: true });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.OPEN_UPDATE_DOWNLOAD, async (_event, url?: string | null) => {
+    await openUpdateDownloadUrl(url);
+  });
 }
 
 app.whenReady().then(async () => {
@@ -2303,6 +2834,7 @@ app.whenReady().then(async () => {
   registerIpcHandlers(service);
   await createMainWindow();
   registerGlobalMediaShortcuts();
+  scheduleAutomaticUpdateChecks();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2313,6 +2845,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   globalShortcut.unregisterAll();
+  clearAutomaticUpdateChecks();
   releaseAllFolderSecurityScopes();
 
   if (libraryService) {

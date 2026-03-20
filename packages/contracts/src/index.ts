@@ -157,6 +157,8 @@ export const IPC_CHANNELS = {
   SYNC_TO_ICLOUD: 'producer-player:sync-to-icloud',
   LOAD_FROM_ICLOUD: 'producer-player:load-from-icloud',
   CHECK_ICLOUD_AVAILABLE: 'producer-player:check-icloud-available',
+  CHECK_FOR_UPDATES: 'producer-player:check-for-updates',
+  OPEN_UPDATE_DOWNLOAD: 'producer-player:open-update-download',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
@@ -204,6 +206,21 @@ export interface ICloudAvailabilityResult {
   reason?: string;
 }
 
+export type UpdateCheckStatus = 'up-to-date' | 'update-available' | 'error';
+
+export interface UpdateCheckResult {
+  status: UpdateCheckStatus;
+  currentVersion: string;
+  latestVersion: string | null;
+  latestTag: string | null;
+  releaseUrl: string;
+  downloadUrl: string | null;
+  releaseName: string | null;
+  publishedAt: string | null;
+  notes: string | null;
+  message: string;
+}
+
 export interface ProducerPlayerBridge {
   getLibrarySnapshot(): Promise<LibrarySnapshot>;
   getEnvironment(): Promise<ProducerPlayerEnvironment>;
@@ -232,6 +249,8 @@ export interface ProducerPlayerBridge {
   syncToICloud(data: ICloudBackupData): Promise<ICloudSyncResult>;
   loadFromICloud(): Promise<ICloudLoadResult>;
   checkICloudAvailable(): Promise<ICloudAvailabilityResult>;
+  checkForUpdates(): Promise<UpdateCheckResult>;
+  openUpdateDownload(url?: string | null): Promise<void>;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
   onTransportCommand(listener: TransportCommandListener): () => void;
 }

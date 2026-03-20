@@ -311,6 +311,11 @@ test.describe('Producer Player desktop shell', () => {
         'Check vocal ride + mono'
       );
 
+      firstLaunch.page.once('dialog', async (dialog) => {
+        expect(dialog.type()).toBe('confirm');
+        expect(dialog.message()).toContain('Clear 1 completed checklist item?');
+        await dialog.accept();
+      });
       await firstLaunch.page.getByTestId('song-checklist-clear-completed').click();
       await expect(firstLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(1);
       await expect(firstLaunch.page.getByTestId('song-checklist-item-text').first()).toHaveValue(

@@ -21,8 +21,9 @@ test.describe('Checklist and export UX improvements', () => {
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 
       await page.getByTestId('song-checklist-button').click();
@@ -48,8 +49,9 @@ test.describe('Checklist and export UX improvements', () => {
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 
       await page.getByTestId('song-checklist-button').click();
@@ -59,6 +61,128 @@ test.describe('Checklist and export UX improvements', () => {
       await expect(
         page.getByTestId('song-checklist-modal').getByRole('button', { name: 'Done' })
       ).toBeVisible();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('clear completed checklist asks for confirmation and respects cancel/confirm', async () => {
+    const directories = await createE2ETestDirectories('producer-player-checklist-clear-confirm');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      await page.getByTestId('song-checklist-input').fill('Keep this item');
+      await page.getByTestId('song-checklist-add').click();
+      await page.getByTestId('song-checklist-input').fill('Remove this item');
+      await page.getByTestId('song-checklist-add').click();
+
+      await expect(page.getByTestId('song-checklist-item-text')).toHaveCount(2);
+      await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue(
+        'Remove this item'
+      );
+
+      const checklistToggles = page.locator('.checklist-item-row input[type="checkbox"]');
+      await checklistToggles.first().check();
+      await expect(checklistToggles.first()).toBeChecked();
+
+      page.once('dialog', async (dialog) => {
+        expect(dialog.type()).toBe('confirm');
+        expect(dialog.message()).toContain('Clear 1 completed checklist item?');
+        await dialog.dismiss();
+      });
+      await page.getByTestId('song-checklist-clear-completed').click();
+
+      await expect(page.getByTestId('song-checklist-item-text')).toHaveCount(2);
+      await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue(
+        'Remove this item'
+      );
+
+      page.once('dialog', async (dialog) => {
+        expect(dialog.type()).toBe('confirm');
+        expect(dialog.message()).toContain('Clear 1 completed checklist item?');
+        await dialog.accept();
+      });
+      await page.getByTestId('song-checklist-clear-completed').click();
+
+      await expect(page.getByTestId('song-checklist-item-text')).toHaveCount(1);
+      await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue(
+        'Keep this item'
+      );
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('checklist item textarea auto-grows for long notes and shrinks when shortened', async () => {
+    const directories = await createE2ETestDirectories('producer-player-checklist-autogrow');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      await page.getByTestId('song-checklist-input').fill('Short note');
+      await page.getByTestId('song-checklist-add').click();
+
+      const itemField = page.getByTestId('song-checklist-item-text').first();
+      const initialMetrics = await itemField.evaluate((node) => {
+        const textarea = node as HTMLTextAreaElement;
+        return {
+          clientHeight: textarea.clientHeight,
+          styleHeight: Number.parseFloat(textarea.style.height || '0'),
+        };
+      });
+
+      await itemField.fill('Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6');
+
+      const grownMetrics = await itemField.evaluate((node) => {
+        const textarea = node as HTMLTextAreaElement;
+        return {
+          clientHeight: textarea.clientHeight,
+          styleHeight: Number.parseFloat(textarea.style.height || '0'),
+        };
+      });
+
+      expect(grownMetrics.clientHeight).toBeGreaterThan(initialMetrics.clientHeight + 12);
+      expect(grownMetrics.styleHeight).toBeGreaterThan(initialMetrics.styleHeight + 12);
+
+      await itemField.fill('Short note again');
+
+      const shrunkMetrics = await itemField.evaluate((node) => {
+        const textarea = node as HTMLTextAreaElement;
+        return {
+          clientHeight: textarea.clientHeight,
+          styleHeight: Number.parseFloat(textarea.style.height || '0'),
+        };
+      });
+
+      expect(shrunkMetrics.clientHeight).toBeLessThan(grownMetrics.clientHeight);
+      expect(shrunkMetrics.styleHeight).toBeLessThan(grownMetrics.styleHeight);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
@@ -81,8 +205,9 @@ test.describe('Checklist and export UX improvements', () => {
     });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
       await page.getByTestId('export-latest-ordered-button').click();

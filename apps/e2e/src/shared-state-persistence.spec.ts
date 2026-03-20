@@ -73,7 +73,7 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   });
 }
 
-test('ratings survive switching between dev and packaged app', async () => {
+test('ratings and checklist items survive switching between dev and packaged app', async () => {
   const workspaceRoot = path.resolve(__dirname, '../../..');
   const dirs = await createE2ETestDirectories('shared-state-cross-mode');
 
@@ -116,6 +116,23 @@ test('ratings survive switching between dev and packaged app', async () => {
       });
 
       await expect(devLaunch.page.getByTestId('song-rating-slider').first()).toHaveValue('8');
+
+      const devMainRow = devLaunch.page.getByTestId('main-list-row').first();
+      await devMainRow.getByTestId('song-checklist-button').click();
+      await expect(devLaunch.page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      await devLaunch.page.getByTestId('song-checklist-input').fill('Cross-mode checklist note');
+      await devLaunch.page.getByTestId('song-checklist-add').click();
+      await expect(devLaunch.page.getByTestId('song-checklist-item-text')).toHaveValue(
+        'Cross-mode checklist note'
+      );
+
+      await devLaunch.page
+        .getByTestId('song-checklist-modal')
+        .getByRole('button', { name: 'Done' })
+        .click();
+      await expect(devLaunch.page.getByTestId('song-checklist-modal')).toHaveCount(0);
+
       await devLaunch.page.waitForTimeout(1200);
 
     } finally {
@@ -132,9 +149,19 @@ test('ratings survive switching between dev and packaged app', async () => {
     const sharedStateRaw = await fs.readFile(sharedStatePath, 'utf8');
     const sharedState = JSON.parse(sharedStateRaw) as {
       ratings?: Record<string, number>;
+      checklists?: Record<
+        string,
+        Array<{
+          id: string;
+          text: string;
+          completed: boolean;
+          timestampSeconds: number | null;
+        }>
+      >;
     };
 
     expect(sharedState.ratings?.[songId]).toBe(8);
+    expect(sharedState.checklists?.[songId]?.[0]?.text).toBe('Cross-mode checklist note');
 
     const packagedLaunch = await launchProducerPlayer(dirs.userDataDirectory);
 
@@ -144,6 +171,13 @@ test('ratings survive switching between dev and packaged app', async () => {
       });
 
       await expect(packagedLaunch.page.getByTestId('song-rating-slider').first()).toHaveValue('8');
+
+      const packagedMainRow = packagedLaunch.page.getByTestId('main-list-row').first();
+      await packagedMainRow.getByTestId('song-checklist-button').click();
+      await expect(packagedLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(1);
+      await expect(packagedLaunch.page.getByTestId('song-checklist-item-text').first()).toHaveValue(
+        'Cross-mode checklist note'
+      );
     } finally {
       await packagedLaunch.electronApp.close();
     }

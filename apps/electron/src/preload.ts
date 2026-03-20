@@ -110,6 +110,14 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.CHECK_ICLOUD_AVAILABLE);
   },
 
+  async checkForUpdates() {
+    return ipcRenderer.invoke(IPC_CHANNELS.CHECK_FOR_UPDATES);
+  },
+
+  async openUpdateDownload(url?: string | null) {
+    await ipcRenderer.invoke(IPC_CHANNELS.OPEN_UPDATE_DOWNLOAD, url);
+  },
+
   onSnapshotUpdated(listener: SnapshotListener) {
     const wrappedListener = (_event: unknown, snapshot: unknown) => {
       listener(snapshot as Parameters<SnapshotListener>[0]);

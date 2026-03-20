@@ -7,6 +7,9 @@ on:
       - master
     paths:
       - site/**
+      - package.json
+      - scripts/sync-version.mjs
+      - scripts/check-version-consistency.mjs
       - .github/workflows/pages.yml
       - README.md
   workflow_dispatch:
@@ -27,6 +30,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Sync landing page version metadata
+        run: npm run version:sync
+
       - name: Validate landing page files
         run: |
           test -f site/index.html
@@ -41,6 +52,8 @@ jobs:
           test -f site/android-chrome-192x192.png
           test -f site/android-chrome-512x512.png
           test -f site/site.webmanifest
+          test -f site/version.json
+          npm run version:check
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

@@ -83,7 +83,12 @@ See [docs/RELEASING.md](docs/RELEASING.md), [docs/MAC_APP_STORE.md](docs/MAC_APP
 
 ## Downloads
 
-Pushes to `main` publish rolling pre-release snapshots (`desktop-snapshot-*`) with macOS, Linux, and Windows ZIP builds plus SHA-256 checksums.
+Release versioning now uses a single source of truth: `package.json`.
+
+Pushes to `main`/`master` publish macOS, Linux, and Windows ZIP builds plus SHA-256 checksums under:
+
+- `v<package-version>` for the first release of that app version
+- `v<package-version>-build.<run_number>` for additional builds of the same app version
 
 > Current builds are unsigned preview releases. Signed/notarized macOS distribution and Mac App Store submission are pending.
 

@@ -3464,6 +3464,20 @@ export function App(): JSX.Element {
   }
 
   function handleClearCompletedChecklistItems(songId: string): void {
+    const completedCount = (songChecklists[songId] ?? []).filter((item) => item.completed).length;
+
+    if (completedCount === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Clear ${completedCount} completed checklist item${completedCount === 1 ? '' : 's'}?\n\nThis only removes completed items from this song's checklist.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     updateSongChecklistItems(songId, (items) => items.filter((item) => !item.completed));
   }
 

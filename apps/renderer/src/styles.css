@@ -1364,7 +1364,7 @@ input[type='range'] {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
-  align-items: center;
+  align-items: start;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1382,6 +1382,16 @@ input[type='range'] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.checklist-item-text {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  resize: none;
+  overflow: hidden;
+  align-self: stretch;
+  line-height: 1.45;
 }
 
 .checklist-item-text.completed {
@@ -1423,6 +1433,7 @@ input[type='range'] {
 
 .checklist-remove-button {
   white-space: nowrap;
+  align-self: start;
 }
 
 .checklist-empty-state {

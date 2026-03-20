@@ -3356,6 +3356,11 @@ export function App(): JSX.Element {
     checklistInputFocusedRef.current = false;
   }
 
+  function autosizeChecklistTextarea(target: HTMLTextAreaElement): void {
+    target.style.height = 'auto';
+    target.style.height = `${target.scrollHeight}px`;
+  }
+
   function handleChecklistDraftTextChange(nextText: string): void {
     const wasEmpty = checklistDraftTextRef.current.trim().length === 0;
     setChecklistDraftText(nextText);
@@ -5054,15 +5059,25 @@ export function App(): JSX.Element {
                         {formatTime(item.timestampSeconds)}
                       </button>
                     ) : null}
-                    <input
+                    <textarea
                       className={`checklist-item-text${item.completed ? ' completed' : ''}`}
                       value={item.text}
+                      rows={1}
                       onChange={(event) => {
+                        autosizeChecklistTextarea(event.currentTarget);
                         handleChecklistItemTextChange(
                           checklistModalSong.id,
                           item.id,
                           event.currentTarget.value
                         );
+                      }}
+                      onInput={(event) => {
+                        autosizeChecklistTextarea(event.currentTarget);
+                      }}
+                      ref={(node) => {
+                        if (node) {
+                          autosizeChecklistTextarea(node);
+                        }
                       }}
                       data-testid="song-checklist-item-text"
                     />

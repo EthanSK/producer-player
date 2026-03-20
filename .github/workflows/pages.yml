@@ -33,6 +33,13 @@ jobs:
           test -f site/styles.css
           test -f site/robots.txt
           test -f site/sitemap.xml
+          test -f site/favicon.ico
+          test -f site/favicon-16x16.png
+          test -f site/favicon-32x32.png
+          test -f site/apple-touch-icon.png
+          test -f site/android-chrome-192x192.png
+          test -f site/android-chrome-512x512.png
+          test -f site/site.webmanifest
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

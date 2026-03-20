@@ -3,29 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Producer Player</title>
+    <title>Producer Player — Desktop app for music producers</title>
     <meta
       name="description"
-      content="A desktop app for music producers. Version management, mastering workspace, album ordering."
+      content="Producer Player is a desktop app for music producers with version tracking, mastering workspace, and album ordering."
     />
-    <meta name="robots" content="index, follow" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
     <link rel="canonical" href="https://ethansk.github.io/producer-player/" />
+    <meta name="application-name" content="Producer Player" />
+    <meta name="apple-mobile-web-app-title" content="Producer Player" />
     <meta name="theme-color" content="#090e13" />
-    <link rel="icon" type="image/png" href="./assets/icon.png" />
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./favicon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="./assets/icon.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./site.webmanifest" />
 
     <!-- Open Graph -->
     <meta property="og:site_name" content="Producer Player" />
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_GB" />
     <meta property="og:url" content="https://ethansk.github.io/producer-player/" />
-    <meta property="og:title" content="Producer Player" />
-    <meta property="og:description" content="A desktop app for music producers. Version management, mastering workspace, album ordering." />
+    <meta property="og:title" content="Producer Player — Desktop app for music producers" />
+    <meta property="og:description" content="Producer Player is a desktop app for music producers with version tracking, mastering workspace, and album ordering." />
     <meta property="og:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-hero.png" />
+    <meta property="og:image:alt" content="Producer Player app interface screenshot" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Producer Player" />
-    <meta name="twitter:description" content="A desktop app for music producers. Version management, mastering workspace, album ordering." />
+    <meta name="twitter:title" content="Producer Player — Desktop app for music producers" />
+    <meta name="twitter:description" content="Producer Player is a desktop app for music producers with version tracking, mastering workspace, and album ordering." />
     <meta name="twitter:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-hero.png" />
+    <meta name="twitter:image:alt" content="Producer Player app interface screenshot" />
 
     <script type="application/ld+json">
       {
@@ -34,10 +44,23 @@
         "name": "Producer Player",
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "macOS, Linux, Windows",
-        "description": "Desktop app for music producers — version management, mastering workspace, album ordering.",
+        "description": "Producer Player is a desktop app for music producers with version tracking, mastering workspace, and album ordering.",
         "url": "https://ethansk.github.io/producer-player/",
+        "image": "https://ethansk.github.io/producer-player/assets/icon.png",
         "downloadUrl": "https://github.com/EthanSK/producer-player/releases",
+        "sameAs": "https://github.com/EthanSK/producer-player",
         "license": "https://opensource.org/licenses/MIT"
+      }
+    </script>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Producer Player",
+        "url": "https://ethansk.github.io/producer-player/",
+        "description": "Producer Player is a desktop app for music producers with version tracking, mastering workspace, and album ordering.",
+        "inLanguage": "en-GB"
       }
     </script>
 

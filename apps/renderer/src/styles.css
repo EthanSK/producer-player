@@ -1297,7 +1297,7 @@ input[type='range'] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  align-items: center;
+  align-items: start;
 }
 
 .checklist-input-row.has-timestamp-preview {
@@ -1384,14 +1384,28 @@ input[type='range'] {
   justify-content: center;
 }
 
+.checklist-composer-text,
 .checklist-item-text {
   width: 100%;
   min-width: 0;
-  min-height: 36px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  line-height: 1.45;
   resize: none;
   overflow: hidden;
+}
+
+.checklist-composer-text {
+  min-height: 36px;
+}
+
+.checklist-item-text {
+  min-height: 36px;
   align-self: stretch;
-  line-height: 1.45;
 }
 
 .checklist-item-text.completed {

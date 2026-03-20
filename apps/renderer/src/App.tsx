@@ -919,6 +919,7 @@ export function App(): JSX.Element {
   const checklistModalSongIdRef = useRef<string | null>(checklistModalSongId);
   const checklistDraftTextRef = useRef(checklistDraftText);
   const checklistInputFocusedRef = useRef(false);
+  const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const selectedPlaybackSongIdRef = useRef<string | null>(null);
   const queueMoveTargetSongIdRef = useRef<string | null>(null);
   const checklistHighlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
@@ -1021,6 +1022,11 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     checklistDraftTextRef.current = checklistDraftText;
+
+    const composerNode = checklistComposerTextareaRef.current;
+    if (composerNode) {
+      autosizeChecklistTextarea(composerNode);
+    }
   }, [checklistDraftText]);
 
   useEffect(() => {
@@ -5051,13 +5057,28 @@ export function App(): JSX.Element {
             </div>
 
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
-              <input
+              <textarea
+                ref={checklistComposerTextareaRef}
+                className="checklist-composer-text"
                 value={checklistDraftText}
-                onChange={(event) => handleChecklistDraftTextChange(event.currentTarget.value)}
+                rows={1}
+                onChange={(event) => {
+                  autosizeChecklistTextarea(event.currentTarget);
+                  handleChecklistDraftTextChange(event.currentTarget.value);
+                }}
+                onInput={(event) => {
+                  autosizeChecklistTextarea(event.currentTarget);
+                }}
                 onFocus={handleChecklistInputFocus}
                 onBlur={handleChecklistInputBlur}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
+                  if (
+                    event.key === 'Enter' &&
+                    !event.shiftKey &&
+                    !event.metaKey &&
+                    !event.ctrlKey &&
+                    !event.altKey
+                  ) {
                     event.preventDefault();
                     handleAddChecklistItem();
                   }

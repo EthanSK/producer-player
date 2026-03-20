@@ -1,10 +1,22 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   cleanupE2ETestDirectories,
   createE2ETestDirectories,
   launchProducerPlayer,
   writeFixtureFiles,
 } from './helpers/electron-app';
+
+async function linkFixtureFolder(page: Page, fixtureDirectory: string): Promise<void> {
+  await page.evaluate(async (folderPath) => {
+    await (
+      window as typeof window & {
+        producerPlayer: { linkFolder: (path: string) => Promise<unknown> };
+      }
+    ).producerPlayer.linkFolder(folderPath);
+  }, fixtureDirectory);
+
+  await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+}
 
 test.describe('Checklist timestamp feature', () => {
   test('new checklist item stores a timestamp from the playback position', async () => {
@@ -19,9 +31,7 @@ test.describe('Checklist timestamp feature', () => {
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       // Open the checklist modal
       await page.getByTestId('song-checklist-button').click();
@@ -60,9 +70,7 @@ test.describe('Checklist timestamp feature', () => {
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       // Pre-seed a checklist with a timestamped item via localStorage
       await page.evaluate(() => {
@@ -127,9 +135,7 @@ test.describe('Checklist timestamp feature', () => {
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       // Open checklist and add an item
       await page.getByTestId('song-checklist-button').click();
@@ -175,9 +181,7 @@ test.describe('Checklist timestamp feature', () => {
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
-      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       // Open checklist
       await page.getByTestId('song-checklist-button').click();
@@ -233,9 +237,7 @@ test.describe('Checklist timestamp feature', () => {
     let songId: string | null = null;
 
     try {
-      await firstLaunch.page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-button').click();
-      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+      await linkFixtureFolder(firstLaunch.page, directories.fixtureDirectory);
 
       // Get the song ID from the DOM
       songId = await firstLaunch.page.evaluate(() => {

@@ -1,0 +1,22 @@
+{
+  "name": "Producer Player",
+  "short_name": "Producer Player",
+  "description": "Desktop app for music producers with version tracking, mastering workspace, and album ordering.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#090e13",
+  "theme_color": "#090e13",
+  "icons": [
+    {
+      "src": "./android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

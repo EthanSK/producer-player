@@ -1,12 +1,17 @@
 # Releasing Producer Player
 
-This repo now ships downloadable prebuilt desktop artifacts via:
+This repo ships downloadable desktop artifacts via:
 
 - `.github/workflows/release-desktop.yml`
-- Versioned snapshot releases on pushes to `main` / `master`
-- Versioned GitHub Releases on `v*` tags
+- GitHub Releases (macOS/Linux/Windows ZIPs + SHA-256 checksums)
 
-## What the workflow currently publishes
+## Version source of truth
+
+`package.json` is the single source of truth for the app version.
+
+The release workflow reads `package.json` directly and does **not** auto-bump semver from previous tags.
+
+## What the workflow publishes
 
 Unsigned desktop artifacts for immediate testability:
 
@@ -17,44 +22,43 @@ Unsigned desktop artifacts for immediate testability:
 
 Release behavior by trigger:
 
-- Push to `main`/`master` → builds all desktop targets, uploads run artifacts, and publishes a new snapshot GitHub Release (tagged `desktop-snapshot-...`) marked as **Latest**.
-- Push tag `v*` → builds all desktop targets and publishes a versioned GitHub Release for that tag.
+- Push to `main`/`master`:
+  - If `v<package-version>` does **not** exist yet, publishes that canonical tag/release.
+  - If it already exists, publishes `v<package-version>-build.<run_number>`.
+- Push tag `v*`:
+  - Builds and publishes that exact tag, as long as the tag version matches `package.json` (directly or with a build suffix).
 
 > Current default is intentionally unsigned/not notarized.
 
-## Snapshot versioning scheme (main/master)
+## Recommended release flow
 
-On each push to `main`/`master`, the workflow:
-
-- Computes a snapshot version: `<package.json version>-<branch>.<run_number>.<run_attempt>` (example: `0.1.0-main.123.1`)
-- Publishes a GitHub Release tagged: `desktop-snapshot-<snapshot version>`
-- Marks that release as GitHub **Latest** (even though it is still a prerelease), so the newest pushed build shows up as the “proper” latest download on the Releases page
-
-## First release (recommended path)
-
-1. Update `CHANGELOG.md`:
-   - Move important entries from `Unreleased` into a versioned section with a date.
-2. Commit and push your changes to `main`.
-3. Create and push a release tag:
+1. Bump `package.json` version (for example to `1.0.0`, then `1.0.1`, etc.).
+2. Run sync/check locally:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+npm run version:sync
+npm run version:check
 ```
 
-4. Open the release workflow run or Releases page:
-   - Actions workflow: <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
-   - Releases: <https://github.com/EthanSK/producer-player/releases>
-5. Verify assets are attached and downloadable.
-6. Edit release notes using `.github/RELEASE_NOTES_TEMPLATE.md` as the baseline.
+3. Commit and push to `main`.
+4. Let the workflow publish:
+   - First build for that version → `v<package-version>`
+   - Additional builds for the same version → `v<package-version>-build.<run_number>`
 
-## Manual artifact run (no tag)
+Optional explicit tag path:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+## Manual artifact run (no release publish)
 
 Use **Run workflow** on:
 
 - <https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml>
 
-If run on `main`/`master`, it also publishes a snapshot release. On other branches, download artifacts from that run directly.
+Workflow runs outside `main`/`master` still build/upload artifacts, but release publish is restricted to `main`/`master` and tags.
 
 ## Release notes/changelog guidance
 

@@ -14,13 +14,12 @@ permissions:
 
 jobs:
   compute-version:
-    name: Compute build/release version
+    name: Compute release metadata
     runs-on: ubuntu-latest
     outputs:
-      build_version: ${{ steps.meta.outputs.build_version }}
+      app_version: ${{ steps.meta.outputs.app_version }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
       release_name: ${{ steps.meta.outputs.release_name }}
-      is_branch_build: ${{ steps.meta.outputs.is_branch_build }}
       is_tag_release: ${{ steps.meta.outputs.is_tag_release }}
     steps:
       - name: Checkout
@@ -31,82 +30,62 @@ jobs:
         with:
           node-version: 20
 
+      - name: Sync and verify version metadata
+        run: |
+          npm run version:sync
+          npm run version:check
+
       - name: Compute metadata
         id: meta
         shell: bash
         run: |
           set -euo pipefail
 
-          fallback_version="$(node -p "require('./package.json').version")"
-
-          bump_semver() {
-            local version="$1"
-            local level="$2"
-            local major minor patch
-            IFS='.' read -r major minor patch <<< "$version"
-
-            case "$level" in
-              minor)
-                minor=$((minor + 1))
-                patch=0
-                ;;
-              major)
-                major=$((major + 1))
-                minor=0
-                patch=0
-                ;;
-              *)
-                patch=$((patch + 1))
-                ;;
-            esac
-
-            printf '%s.%s.%s' "$major" "$minor" "$patch"
-          }
-
-          latest_tag="$(git ls-remote --tags --refs origin 'v*' | awk -F/ '{print $3}' | sort -V | tail -n 1 || true)"
-          latest_base_version="$(printf '%s' "$latest_tag" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/' || true)"
-
-          if [[ -n "$latest_base_version" ]]; then
-            base_version="$latest_base_version"
-          else
-            base_version="$fallback_version"
+          app_version="$(node -p "require('./package.json').version")"
+          if [[ ! "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::package.json version '$app_version' is not a supported semantic version."
+            exit 1
           fi
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            tag_version="${GITHUB_REF_NAME#v}"
-            echo "build_version=${tag_version}" >> "$GITHUB_OUTPUT"
-            echo "release_tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "release_name=Producer Player ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "is_branch_build=false" >> "$GITHUB_OUTPUT"
+            release_tag="${GITHUB_REF_NAME}"
+            tag_version="${release_tag#v}"
+            tag_base="${tag_version%%-*}"
+            tag_base="${tag_base%%+*}"
+
+            if [[ "$tag_version" != "$app_version" && "$tag_base" != "$app_version" ]]; then
+              echo "::error::Tag '${release_tag}' does not match package.json version '${app_version}'."
+              echo "::error::Use v${app_version} (or v${app_version}-build.<n>) for this commit."
+              exit 1
+            fi
+
+            if [[ "$tag_version" == "$app_version" ]]; then
+              release_name="Producer Player v${app_version}"
+            else
+              release_name="Producer Player ${release_tag}"
+            fi
+
+            echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+            echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
             echo "is_tag_release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          if [[ "${GITHUB_REF}" == "refs/heads/main" || "${GITHUB_REF}" == "refs/heads/master" ]]; then
-            build_num="${GITHUB_RUN_NUMBER}"
-            commit_subject="$(git log -1 --pretty=%s)"
-            commit_body="$(git log -1 --pretty=%b)"
-            commit_text="$(printf '%s\n%s' "$commit_subject" "$commit_body")"
-            bump_level="patch"
+          build_num="${GITHUB_RUN_NUMBER}"
+          canonical_tag="v${app_version}"
 
-            if printf '%s' "$commit_text" | grep -Eiq '(^feat(\(|:))|(\[minor\])'; then
-              bump_level="minor"
-            fi
-
-            next_version="$(bump_semver "$base_version" "$bump_level")"
-
-            echo "build_version=${next_version}" >> "$GITHUB_OUTPUT"
-            echo "release_tag=v${next_version}-${build_num}" >> "$GITHUB_OUTPUT"
-            echo "release_name=Producer Player v${next_version} (build ${build_num})" >> "$GITHUB_OUTPUT"
-            echo "is_branch_build=true" >> "$GITHUB_OUTPUT"
-            echo "is_tag_release=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          if git ls-remote --tags --refs origin "${canonical_tag}" | grep -q .; then
+            release_tag="v${app_version}-build.${build_num}"
+            release_name="Producer Player v${app_version} (build ${build_num})"
+          else
+            release_tag="${canonical_tag}"
+            release_name="Producer Player v${app_version}"
           fi
 
-          echo "build_version=${base_version}" >> "$GITHUB_OUTPUT"
-          echo "release_tag=" >> "$GITHUB_OUTPUT"
-          echo "release_name=" >> "$GITHUB_OUTPUT"
-          echo "is_branch_build=false" >> "$GITHUB_OUTPUT"
+          echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
           echo "is_tag_release=false" >> "$GITHUB_OUTPUT"
 
   build-desktop:
@@ -137,12 +116,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Set build version
-        if: needs.compute-version.outputs.is_branch_build == 'true' || needs.compute-version.outputs.is_tag_release == 'true'
-        shell: bash
+      - name: Verify unified version configuration
         run: |
-          set -euo pipefail
-          npm version "${{ needs.compute-version.outputs.build_version }}" --no-git-tag-version --allow-same-version
+          npm run version:sync
+          npm run version:check
 
       # ─── macOS Code Signing & Notarization ───────────────────────────
       # To enable signed + notarized macOS builds, add these GitHub Actions
@@ -277,7 +254,7 @@ jobs:
           make_latest: true
           generate_release_notes: false
           body: |
-            ## Producer Player v${{ needs.compute-version.outputs.build_version }}
+            ## Producer Player v${{ needs.compute-version.outputs.app_version }}
 
             **Stable direct latest-download links** (auto-follow new releases):
 

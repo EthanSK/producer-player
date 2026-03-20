@@ -24,6 +24,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify unified version source
+        run: |
+          npm run version:sync
+          npm run version:check
+
       - name: Typecheck workspaces
         run: |
           npm run build -w packages/contracts

@@ -1,6 +1,6 @@
 {
   "name": "producer-player",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Producer Player desktop app for producers managing album tracks, exports, and ordering.",
   "author": "EthanSK",
@@ -34,6 +34,8 @@
     "e2e": "npm run build && npm run test -w @producer-player/e2e",
     "e2e:ci": "npm run build && npm run ci -w @producer-player/e2e",
     "clean": "rimraf \"apps/*/dist\" \"packages/*/dist\"",
+    "version:sync": "node ./scripts/sync-version.mjs",
+    "version:check": "node ./scripts/check-version-consistency.mjs",
     "release:desktop:mac": "npm run build:mac",
     "release:desktop:linux": "npm run build && electron-builder --linux zip --publish never",
     "release:desktop:win": "npm run build && electron-builder --win zip --publish never",

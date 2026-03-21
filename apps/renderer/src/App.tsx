@@ -4480,7 +4480,7 @@ export function App(): JSX.Element {
               aria-label="Migrate notes from other apps via LLM"
               title="Migrate notes from other apps (Apple Notes, etc.) into checklists using an LLM to parse your notes."
             >
-              <span aria-hidden="true">📥</span>
+              <span aria-hidden="true">👴</span>
             </button>
           </div>
         </header>

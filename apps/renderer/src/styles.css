@@ -146,6 +146,15 @@ button.ghost {
   background: transparent;
 }
 
+button.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+button.danger:hover:not(:disabled) {
+  background: rgba(255, 125, 125, 0.15);
+}
+
 button.icon-button {
   width: 30px;
   height: 30px;

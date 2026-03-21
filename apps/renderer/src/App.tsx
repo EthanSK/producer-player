@@ -623,6 +623,7 @@ interface MigrationPreviewSong {
   items: Array<{
     text: string;
     completed: boolean;
+    timestampSeconds: number | null;
   }>;
 }
 
@@ -807,7 +808,13 @@ function parseMigrationInput(
       if (!text) return [];
       const completed =
         typeof itemObj.completed === 'boolean' ? itemObj.completed : false;
-      return [{ text, completed }];
+      const timestampSeconds =
+        typeof itemObj.timestampSeconds === 'number' &&
+        Number.isFinite(itemObj.timestampSeconds) &&
+        itemObj.timestampSeconds >= 0
+          ? itemObj.timestampSeconds
+          : null;
+      return [{ text, completed, timestampSeconds }];
     });
 
     if (items.length === 0) continue;
@@ -3574,16 +3581,16 @@ export function App(): JSX.Element {
       currentSongs: songList,
       example: {
         input:
-          'Leaky: needs more bass at the chorus, check high end. Midnight Drive: vocal too loud at verse 2, add reverb to bridge.',
+          'Leaky: at 1:23 needs more bass, check high end. Midnight Drive: vocal too loud at verse 2, at 2:45 add reverb to bridge, 0:30 snare hits too hard.',
         output: {
           songs: [
             {
               songName: 'Leaky',
               checklistItems: [
                 {
-                  text: 'needs more bass at the chorus',
+                  text: 'needs more bass',
                   completed: false,
-                  timestampSeconds: null,
+                  timestampSeconds: 83,
                 },
                 {
                   text: 'check high end',
@@ -3603,12 +3610,19 @@ export function App(): JSX.Element {
                 {
                   text: 'add reverb to bridge',
                   completed: false,
-                  timestampSeconds: null,
+                  timestampSeconds: 165,
+                },
+                {
+                  text: 'snare hits too hard',
+                  completed: false,
+                  timestampSeconds: 30,
                 },
               ],
             },
           ],
         },
+        timestampNote:
+          'When the note text contains a playback timestamp like "1:23", "at 2:45", or "0:30", convert it to total seconds for timestampSeconds (e.g. 1:23 = 83, 2:45 = 165, 0:30 = 30). Remove the timestamp prefix from the text. If no timestamp is present, set timestampSeconds to null.',
       },
     };
 
@@ -3671,7 +3685,7 @@ export function App(): JSX.Element {
           id: createChecklistItemId(),
           text: item.text,
           completed: item.completed,
-          timestampSeconds: null,
+          timestampSeconds: item.timestampSeconds,
         }));
 
         next[entry.matchedSongId] = [...newItems, ...existingItems];
@@ -5204,6 +5218,25 @@ export function App(): JSX.Element {
                 data-testid="song-checklist-clear-completed"
               >
                 Clear Completed
+              </button>
+              <button
+                type="button"
+                className="ghost danger"
+                onClick={() => {
+                  const confirmed = window.confirm(
+                    'Are you sure you want to delete all checklist items for this song?'
+                  );
+                  if (!confirmed) return;
+                  setSongChecklists((current) => {
+                    const next = { ...current };
+                    next[checklistModalSong.id] = [];
+                    return next;
+                  });
+                }}
+                disabled={checklistModalItems.length === 0}
+                data-testid="song-checklist-delete-all"
+              >
+                Delete All
               </button>
               <button type="button" onClick={handleCloseSongChecklist}>
                 Done

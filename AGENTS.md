@@ -40,11 +40,18 @@
 
 ## Release Versioning
 
-- Every meaningful Producer Player code/content change that is intended to ship should advance the app version on the next `main` release.
+- Every meaningful Producer Player code/content change that is intended to ship should advance the app version before it lands on `main`.
+- `package.json` is the single source of truth for the app version.
 - Default bump level: **patch**.
 - Use a **minor** bump for clearly meaningful user-facing feature work or noticeably broader UX/product changes.
 - Commit messages should make that intent legible:
   - `feat:` (or `feat(...)`) → minor bump
   - `fix:`, `chore:`, `refactor:`, `docs:`, `test:` → patch bump by default
   - `[minor]` in the commit subject/body can force a minor bump when needed
-- The release workflow is the source of truth for applying the bump on branch builds; do not leave Producer Player shipping forever at the same app version.
+- Before shipping a meaningful change, run one of:
+  - `npm run version:bump:patch`
+  - `npm run version:bump:minor`
+- Then run:
+  - `npm run version:check`
+  - `npm run version:bump:check`
+- CI now enforces that release-relevant file changes cannot land without a version bump in `package.json`.

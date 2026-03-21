@@ -5823,6 +5823,11 @@ export function App(): JSX.Element {
                         {entry.items.map((item, itemIndex) => (
                           <li key={itemIndex}>
                             <span className="migration-preview-item-text">{item.text}</span>
+                            {item.timestampSeconds !== null && (
+                              <span className="migration-preview-item-timestamp" title={`Timestamp: ${formatTime(item.timestampSeconds)}`}>
+                                {formatTime(item.timestampSeconds)}
+                              </span>
+                            )}
                           </li>
                         ))}
                       </ul>

@@ -32,18 +32,32 @@ Release behavior by trigger:
 
 ## Recommended release flow
 
-1. Bump `package.json` version (for example to `1.0.0`, then `1.0.1`, etc.).
-2. Run sync/check locally:
+1. Bump `package.json` version.
+   - Patch by default:
 
 ```bash
-npm run version:sync
+npm run version:bump:patch
+```
+
+   - Minor for bigger user-facing feature work:
+
+```bash
+npm run version:bump:minor
+```
+
+2. Run the version guards locally:
+
+```bash
 npm run version:check
+npm run version:bump:check
 ```
 
 3. Commit and push to `main`.
 4. Let the workflow publish:
    - First build for that version → `v<package-version>`
    - Additional builds for the same version → `v<package-version>-build.<run_number>`
+
+CI also enforces that release-relevant app/site/package changes cannot land without a `package.json` version bump.
 
 Optional explicit tag path:
 

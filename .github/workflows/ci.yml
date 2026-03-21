@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -28,6 +30,22 @@ jobs:
         run: |
           npm run version:sync
           npm run version:check
+
+      - name: Fetch pull-request base branch
+        if: github.event_name == 'pull_request'
+        run: git fetch origin ${{ github.base_ref }} --depth=1
+
+      - name: Enforce version bump on pull requests
+        if: github.event_name == 'pull_request'
+        env:
+          VERSION_BUMP_BASE: origin/${{ github.base_ref }}
+        run: npm run version:bump:check
+
+      - name: Enforce version bump on main/master pushes
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        env:
+          VERSION_BUMP_BASE: ${{ github.event.before }}
+        run: npm run version:bump:check
 
       - name: Typecheck workspaces
         run: |

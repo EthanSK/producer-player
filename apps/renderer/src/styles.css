@@ -1979,6 +1979,13 @@ button.checklist-play-toggle[data-playing='true'] {
   color: var(--text-muted, rgba(255, 255, 255, 0.4));
 }
 
+.migration-preview-item-timestamp {
+  margin-left: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted, rgba(255, 255, 255, 0.4));
+  font-variant-numeric: tabular-nums;
+}
+
 .migration-preview-actions {
   display: flex;
   gap: 10px;

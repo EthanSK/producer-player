@@ -5222,16 +5222,30 @@ export function App(): JSX.Element {
               <button
                 type="button"
                 className="ghost danger"
-                onClick={() => {
-                  const confirmed = window.confirm(
-                    'Are you sure you want to delete all checklist items for this song?'
-                  );
-                  if (!confirmed) return;
-                  setSongChecklists((current) => {
-                    const next = { ...current };
-                    next[checklistModalSong.id] = [];
-                    return next;
-                  });
+                onClick={(e) => {
+                  if (e.shiftKey) {
+                    const confirmed = window.confirm(
+                      'DEVELOPER MODE: Delete ALL checklist items across ALL songs? This cannot be undone.'
+                    );
+                    if (!confirmed) return;
+                    setSongChecklists((current) => {
+                      const next: Record<string, SongChecklistItem[]> = {};
+                      for (const key of Object.keys(current)) {
+                        next[key] = [];
+                      }
+                      return next;
+                    });
+                  } else {
+                    const confirmed = window.confirm(
+                      'Are you sure you want to delete all checklist items for this song?'
+                    );
+                    if (!confirmed) return;
+                    setSongChecklists((current) => {
+                      const next = { ...current };
+                      next[checklistModalSong.id] = [];
+                      return next;
+                    });
+                  }
                 }}
                 disabled={checklistModalItems.length === 0}
                 data-testid="song-checklist-delete-all"

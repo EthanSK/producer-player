@@ -5279,8 +5279,9 @@ export function App(): JSX.Element {
                       className="ghost checklist-remove-button"
                       onClick={() => handleRemoveChecklistItem(checklistModalSong.id, item.id)}
                       aria-label={`Remove ${item.text}`}
+                      title="Remove checklist item"
                     >
-                      Remove
+                      🗑️
                     </button>
                   </li>
                 ))}

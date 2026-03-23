@@ -252,7 +252,7 @@ function clampTimestampSeconds(
   return Number.isFinite(clamped) ? clamped : null;
 }
 
-const CHECKLIST_CAPTURE_LOOKBACK_SECONDS = 1;
+const CHECKLIST_CAPTURE_LOOKBACK_SECONDS = 3;
 const CHECKLIST_PREVIEW_SCROLL_STEP_SECONDS = 1;
 const CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS = 1200;
 
@@ -5101,12 +5101,12 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="checklist-skip-button checklist-skip-button-small"
-                    data-testid="song-checklist-skip-forward-1"
-                    onClick={() => handleSkipSeconds(1)}
-                    title="Skip forward 1 second"
-                    aria-label="Skip forward 1 second"
+                    data-testid="song-checklist-skip-forward-2"
+                    onClick={() => handleSkipSeconds(2)}
+                    title="Skip forward 2 seconds"
+                    aria-label="Skip forward 2 seconds"
                   >
-                    +1s
+                    +2s
                   </button>
                   <button
                     type="button"
@@ -5338,6 +5338,61 @@ export function App(): JSX.Element {
                 Done
               </button>
             </div>
+
+            {selectedPlaybackVersion ? (
+              <div className="checklist-mini-player" data-testid="song-checklist-mini-player">
+                <div className="checklist-mini-player-scrubber-row">
+                  <span className="muted">{formatTime(currentTimeSeconds)}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={durationSeconds > 0 ? durationSeconds : 0}
+                    step={0.1}
+                    value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
+                    disabled={durationSeconds <= 0}
+                    onChange={(event) => handleSeek(Number(event.target.value))}
+                    data-testid="song-checklist-mini-player-scrubber"
+                    title="Scrub through the selected track while the checklist is open."
+                  />
+                  <span className="muted">{formatTime(durationSeconds)}</span>
+                </div>
+                <div className="checklist-mini-player-transport">
+                  <button
+                    type="button"
+                    className="checklist-mini-player-button"
+                    data-testid="song-checklist-mini-player-prev"
+                    onClick={handlePreviousTrack}
+                    title="Previous track"
+                    aria-label="Previous track"
+                  >
+                    ◀◀
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-mini-player-play-toggle"
+                    data-testid="song-checklist-mini-player-play-toggle"
+                    data-playing={isPlaying ? 'true' : 'false'}
+                    aria-label={isPlaying ? 'Pause' : 'Play'}
+                    onClick={() => {
+                      void handleTogglePlayback();
+                    }}
+                    title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                  >
+                    <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-mini-player-button"
+                    data-testid="song-checklist-mini-player-next"
+                    onClick={handleNextTrack}
+                    title="Next track"
+                    aria-label="Next track"
+                  >
+                    ▶▶
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

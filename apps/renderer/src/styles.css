@@ -256,10 +256,35 @@ input[type='range'] {
   gap: 2px;
 }
 
+.sidebar-branding-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 .sidebar-branding-copy strong {
   font-size: 18px;
   line-height: 1.1;
   letter-spacing: 0.015em;
+}
+
+.sidebar-branding-version {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  opacity: 0.9;
+  white-space: nowrap;
 }
 
 .sidebar-by-line {
@@ -664,6 +689,13 @@ input[type='range'] {
   font-size: 12px;
   font-weight: 600;
   color: #dce8f8;
+}
+
+.analysis-platform-change {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, #9ab6d3);
+  line-height: 1.2;
 }
 
 .analysis-platform-copy .muted {
@@ -1470,6 +1502,21 @@ input[type='range'] {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.checklist-transport-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.checklist-transport-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.82;
+  white-space: nowrap;
 }
 
 .checklist-transport-group {

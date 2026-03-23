@@ -50,8 +50,11 @@ site/            — GitHub Pages landing page
 # Install dependencies
 npm install
 
-# Run in development mode
+# Run in development mode (stable, no hot reload)
 npm run dev
+
+# Run with renderer hot reload explicitly enabled
+npm run dev:hot
 ```
 
 ## Build & Test

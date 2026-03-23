@@ -1504,6 +1504,81 @@ input[type='range'] {
   flex-wrap: wrap;
 }
 
+.checklist-mini-player {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 10px 12px 12px;
+  border: 1px solid rgba(92, 167, 255, 0.18);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(10, 17, 27, 0.94), rgba(10, 17, 27, 0.98));
+  box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.22);
+}
+
+.checklist-mini-player-scrubber-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.checklist-mini-player-scrubber-row .muted {
+  margin: 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.checklist-mini-player-scrubber-row input {
+  width: 100%;
+  min-width: 0;
+}
+
+.checklist-mini-player-transport {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+button.checklist-mini-player-button,
+button.checklist-mini-player-play-toggle {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary, #9ab6d3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+button.checklist-mini-player-button:hover,
+button.checklist-mini-player-play-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary, #e0eaf5);
+}
+
+button.checklist-mini-player-play-toggle {
+  min-width: 42px;
+  height: 34px;
+  border-color: var(--accent);
+  background: rgba(92, 167, 255, 0.15);
+  color: var(--accent);
+  font-size: 15px;
+}
+
+button.checklist-mini-player-play-toggle[data-playing='true'] {
+  background: rgba(95, 210, 143, 0.18);
+  border-color: var(--success);
+  color: var(--success);
+}
+
 .checklist-transport-meta {
   display: flex;
   align-items: center;
@@ -1798,8 +1873,17 @@ button.checklist-play-toggle[data-playing='true'] {
   .producer-reference-toolbar,
   .analysis-normalization-header,
   .checklist-modal-header,
-  .checklist-modal-actions {
+  .checklist-modal-actions,
+  .checklist-transport-meta {
     flex-direction: column;
+  }
+
+  .checklist-mini-player-scrubber-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .checklist-mini-player-scrubber-row .muted {
+    text-align: center;
   }
 
   .checklist-input-row,

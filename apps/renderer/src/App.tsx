@@ -41,6 +41,7 @@ import {
   sanitizeSongRatings,
 } from './sharedUserState';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
+import packageMetadata from '../../../package.json';
 import { SHOW_3000AD_BRANDING } from './featureFlags';
 import { SpectrumAnalyzer } from './SpectrumAnalyzer';
 import { LevelMeter } from './LevelMeter';
@@ -2428,9 +2429,14 @@ export function App(): JSX.Element {
       const active = document.activeElement;
 
       // Only allow space through for genuine text-entry elements where
-      // the user would expect to type a space character.
+      // the user would expect to type a space character, plus native buttons
+      // that should activate when focused.
       if (active instanceof HTMLElement) {
         if (active.isContentEditable) {
+          return;
+        }
+
+        if (active instanceof HTMLButtonElement) {
           return;
         }
 
@@ -3901,7 +3907,16 @@ export function App(): JSX.Element {
             data-testid="producer-player-branding-logo"
           />
           <div className="sidebar-branding-copy">
-            <strong>Producer Player</strong>
+            <div className="sidebar-branding-title-row">
+              <strong>Producer Player</strong>
+              <span
+                className="sidebar-branding-version"
+                data-testid="producer-player-branding-version"
+                title={`Current app version ${APP_DISPLAY_VERSION}`}
+              >
+                {APP_DISPLAY_VERSION}
+              </span>
+            </div>
             {SHOW_3000AD_BRANDING && (
               <a
                 className="sidebar-by-line"
@@ -4143,6 +4158,10 @@ export function App(): JSX.Element {
                   <span className="analysis-stat-label">Integrated LUFS</span>
                   <strong>{measuredIntegratedText}</strong>
                 </div>
+                <div className="analysis-stat-card" data-testid="analysis-short-term-stat" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
+                  <span className="analysis-stat-label">Current loudness</span>
+                  <strong>{shortTermEstimateText}</strong>
+                </div>
                 <div className="analysis-stat-card" data-testid="analysis-lra-stat" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
                   <span className="analysis-stat-label">Loudness range</span>
                   <strong>{measuredLraText}</strong>
@@ -4158,10 +4177,6 @@ export function App(): JSX.Element {
                 <div className="analysis-stat-card" data-testid="analysis-max-momentary-stat" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
                   <span className="analysis-stat-label">Peak momentary</span>
                   <strong>{measuredMaxMomentaryText}</strong>
-                </div>
-                <div className="analysis-stat-card" data-testid="analysis-short-term-stat" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
-                  <span className="analysis-stat-label">Current loudness</span>
-                  <strong>{shortTermEstimateText}</strong>
                 </div>
               </div>
 
@@ -4300,37 +4315,48 @@ export function App(): JSX.Element {
                 </div>
 
                 <div className="analysis-platform-grid" role="group" aria-label="Platform normalization presets">
-                  {NORMALIZATION_PLATFORM_PROFILES.map((platform) => (
-                    <button
-                      key={platform.id}
-                      type="button"
-                      className={`analysis-platform-button${
-                        selectedNormalizationPlatformId === platform.id ? ' selected' : ''
-                      }`}
-                      onClick={() => setSelectedNormalizationPlatformId(platform.id)}
-                      data-testid={`analysis-platform-${platform.id}`}
-                      title={platform.description}
-                      aria-pressed={selectedNormalizationPlatformId === platform.id}
-                    >
-                      <span className="analysis-platform-title">{platform.label}</span>
-                      <span className="analysis-platform-meta-row">
-                        <span
-                          className="analysis-platform-icon"
-                          style={{ '--platform-accent': platform.accentColor } as CSSProperties}
-                        >
-                          <PlatformIcon platformId={platform.id} />
-                        </span>
-                        <span className="analysis-platform-copy">
-                          <span className="analysis-platform-target">
-                            {platform.targetLufs.toFixed(0)} LUFS target
+                  {NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
+                    const platformPreview = normalizationPreviewByPlatformId.get(platform.id) ?? null;
+                    const platformChangeText =
+                      analysisStatus === 'ready' && platformPreview
+                        ? formatSignedLevel(platformPreview.appliedGainDb)
+                        : '—';
+
+                    return (
+                      <button
+                        key={platform.id}
+                        type="button"
+                        className={`analysis-platform-button${
+                          selectedNormalizationPlatformId === platform.id ? ' selected' : ''
+                        }`}
+                        onClick={() => setSelectedNormalizationPlatformId(platform.id)}
+                        data-testid={`analysis-platform-${platform.id}`}
+                        title={platform.description}
+                        aria-pressed={selectedNormalizationPlatformId === platform.id}
+                      >
+                        <span className="analysis-platform-title">{platform.label}</span>
+                        <span className="analysis-platform-meta-row">
+                          <span
+                            className="analysis-platform-icon"
+                            style={{ '--platform-accent': platform.accentColor } as CSSProperties}
+                          >
+                            <PlatformIcon platformId={platform.id} />
                           </span>
-                          <span className="muted">
-                            {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                          <span className="analysis-platform-copy">
+                            <span className="analysis-platform-target">
+                              {platform.targetLufs.toFixed(0)} LUFS target
+                            </span>
+                            <span className="analysis-platform-change">
+                              Applied {platformChangeText}
+                            </span>
+                            <span className="muted">
+                              {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                            </span>
                           </span>
                         </span>
-                      </span>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <div className="analysis-reference-inline analysis-normalization-inline">
@@ -5013,60 +5039,96 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
-              <div className="checklist-transport-group">
-                <button
-                  type="button"
-                  className="checklist-skip-button"
-                  data-testid="song-checklist-skip-back-10"
-                  onClick={() => handleSkipSeconds(-10)}
-                  title="Skip back 10 seconds"
-                  aria-label="Skip back 10 seconds"
-                >
-                  −10s
-                </button>
-                <button
-                  type="button"
-                  className="checklist-skip-button checklist-skip-button-small"
-                  data-testid="song-checklist-skip-back-1"
-                  onClick={() => handleSkipSeconds(-1)}
-                  title="Skip back 1 second"
-                  aria-label="Skip back 1 second"
-                >
-                  −1s
-                </button>
-                <button
-                  type="button"
-                  className="checklist-play-toggle"
-                  data-playing={isPlaying ? 'true' : 'false'}
-                  aria-label={isPlaying ? 'Pause' : 'Play'}
-                  title={isPlaying ? 'Pause playback' : 'Resume playback'}
-                  data-testid="song-checklist-play-toggle"
-                  onClick={() => {
-                    void handleTogglePlayback();
-                  }}
-                >
-                  <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-                </button>
-                <button
-                  type="button"
-                  className="checklist-skip-button checklist-skip-button-small"
-                  data-testid="song-checklist-skip-forward-1"
-                  onClick={() => handleSkipSeconds(1)}
-                  title="Skip forward 1 second"
-                  aria-label="Skip forward 1 second"
-                >
-                  +1s
-                </button>
-                <button
-                  type="button"
-                  className="checklist-skip-button"
-                  data-testid="song-checklist-skip-forward-10"
-                  onClick={() => handleSkipSeconds(10)}
-                  title="Skip forward 10 seconds"
-                  aria-label="Skip forward 10 seconds"
-                >
-                  +10s
-                </button>
+              <div className="checklist-transport-meta">
+                <span className="checklist-transport-hint">Shift+Tab toggles −10s ↔ input</span>
+                <div className="checklist-transport-group">
+                  <button
+                    ref={checklistSkipBackTenButtonRef}
+                    type="button"
+                    className="checklist-skip-button"
+                    data-testid="song-checklist-skip-back-10"
+                    onClick={() => handleSkipSeconds(-10)}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === 'Tab' &&
+                        !event.shiftKey &&
+                        !event.metaKey &&
+                        !event.ctrlKey &&
+                        !event.altKey
+                      ) {
+                        event.preventDefault();
+                        checklistComposerTextareaRef.current?.focus();
+                      }
+                    }}
+                    title="Skip back 10 seconds"
+                    aria-label="Skip back 10 seconds"
+                  >
+                    −10s
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-skip-button checklist-skip-button-small"
+                    data-testid="song-checklist-skip-back-5"
+                    onClick={() => handleSkipSeconds(-5)}
+                    title="Skip back 5 seconds"
+                    aria-label="Skip back 5 seconds"
+                  >
+                    −5s
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-skip-button checklist-skip-button-small"
+                    data-testid="song-checklist-skip-back-2"
+                    onClick={() => handleSkipSeconds(-2)}
+                    title="Skip back 2 seconds"
+                    aria-label="Skip back 2 seconds"
+                  >
+                    −2s
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-play-toggle"
+                    data-playing={isPlaying ? 'true' : 'false'}
+                    aria-label={isPlaying ? 'Pause' : 'Play'}
+                    title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                    data-testid="song-checklist-play-toggle"
+                    onClick={() => {
+                      void handleTogglePlayback();
+                    }}
+                  >
+                    <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-skip-button checklist-skip-button-small"
+                    data-testid="song-checklist-skip-forward-1"
+                    onClick={() => handleSkipSeconds(1)}
+                    title="Skip forward 1 second"
+                    aria-label="Skip forward 1 second"
+                  >
+                    +1s
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-skip-button checklist-skip-button-small"
+                    data-testid="song-checklist-skip-forward-5"
+                    onClick={() => handleSkipSeconds(5)}
+                    title="Skip forward 5 seconds"
+                    aria-label="Skip forward 5 seconds"
+                  >
+                    +5s
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-skip-button"
+                    data-testid="song-checklist-skip-forward-10"
+                    onClick={() => handleSkipSeconds(10)}
+                    title="Skip forward 10 seconds"
+                    aria-label="Skip forward 10 seconds"
+                  >
+                    +10s
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -5086,6 +5148,18 @@ export function App(): JSX.Element {
                 onFocus={handleChecklistInputFocus}
                 onBlur={handleChecklistInputBlur}
                 onKeyDown={(event) => {
+                  if (
+                    event.key === 'Tab' &&
+                    event.shiftKey &&
+                    !event.metaKey &&
+                    !event.ctrlKey &&
+                    !event.altKey
+                  ) {
+                    event.preventDefault();
+                    checklistSkipBackTenButtonRef.current?.focus();
+                    return;
+                  }
+
                   if (
                     event.key === 'Enter' &&
                     !event.shiftKey &&
@@ -5163,6 +5237,14 @@ export function App(): JSX.Element {
                         type="button"
                         className="checklist-timestamp-badge"
                         onClick={() => handleChecklistTimestampClick(item.timestampSeconds!)}
+                        onWheel={(event) =>
+                          handleChecklistItemTimestampWheel(
+                            checklistModalSong.id,
+                            item.id,
+                            item.timestampSeconds!,
+                            event
+                          )
+                        }
                         data-testid="song-checklist-item-timestamp"
                         title={`Jump to ${formatTime(item.timestampSeconds)}`}
                         aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
@@ -5397,6 +5479,10 @@ export function App(): JSX.Element {
                       <span className="analysis-stat-label">Integrated LUFS</span>
                       <strong>{measuredIntegratedText}</strong>
                     </div>
+                    <div className="analysis-stat-card" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
+                      <span className="analysis-stat-label">Current loudness</span>
+                      <strong>{shortTermEstimateText}</strong>
+                    </div>
                     <div className="analysis-stat-card" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
                       <span className="analysis-stat-label">Loudness range</span>
                       <strong>{measuredLraText}</strong>
@@ -5420,10 +5506,6 @@ export function App(): JSX.Element {
                     <div className="analysis-stat-card" title="Average volume level across the entire track (RMS-based), in dBFS.">
                       <span className="analysis-stat-label">Mean volume</span>
                       <strong>{measuredMeanVolumeText}</strong>
-                    </div>
-                    <div className="analysis-stat-card" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
-                      <span className="analysis-stat-label">Current loudness</span>
-                      <strong>{shortTermEstimateText}</strong>
                     </div>
                   </div>
                 </section>

@@ -928,6 +928,7 @@ export function App(): JSX.Element {
   const checklistDraftTextRef = useRef(checklistDraftText);
   const checklistInputFocusedRef = useRef(false);
   const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const checklistSkipBackTenButtonRef = useRef<HTMLButtonElement | null>(null);
   const selectedPlaybackSongIdRef = useRef<string | null>(null);
   const queueMoveTargetSongIdRef = useRef<string | null>(null);
   const checklistHighlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
@@ -2011,6 +2012,13 @@ export function App(): JSX.Element {
     measuredAnalysis,
     selectedNormalizationPlatform
   );
+  const normalizationPreviewByPlatformId = useMemo(() => {
+    const map = new Map<NormalizationPlatformId, ReturnType<typeof computePlatformNormalizationPreview>>();
+    for (const platform of NORMALIZATION_PLATFORM_PROFILES) {
+      map.set(platform.id, computePlatformNormalizationPreview(measuredAnalysis, platform));
+    }
+    return map;
+  }, [measuredAnalysis]);
   const appliedNormalizationGainDb =
     normalizationPreviewEnabled &&
     normalizationPreview !== null &&
@@ -3466,6 +3474,42 @@ export function App(): JSX.Element {
     setChecklistCapturedTimestamp(nextTimestamp);
   }
 
+  function handleChecklistItemTimestampWheel(
+    songId: string,
+    itemId: string,
+    currentSeconds: number,
+    event: WheelEvent<HTMLButtonElement>
+  ): void {
+    event.preventDefault();
+
+    const direction = event.deltaY > 0 ? 1 : event.deltaY < 0 ? -1 : 0;
+    if (direction === 0) {
+      return;
+    }
+
+    const audio = audioRef.current;
+    const duration =
+      audio && Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : undefined;
+    const nextTimestamp = clampTimestampSeconds(
+      currentSeconds + direction * CHECKLIST_PREVIEW_SCROLL_STEP_SECONDS,
+      duration,
+      0
+    );
+
+    if (nextTimestamp === null) {
+      return;
+    }
+
+    updateSongChecklistItems(songId, (items) =>
+      items.map((item) =>
+        item.id === itemId ? { ...item, timestampSeconds: nextTimestamp } : item
+      )
+    );
+    highlightChecklistTimestamp(itemId);
+  }
+
   function highlightChecklistTimestamp(itemId: string): void {
     setActiveChecklistTimestampIds((current) =>
       current.includes(itemId) ? current : [...current, itemId]
@@ -3912,9 +3956,9 @@ export function App(): JSX.Element {
               <span
                 className="sidebar-branding-version"
                 data-testid="producer-player-branding-version"
-                title={`Current app version ${APP_DISPLAY_VERSION}`}
+                title={`Current app version ${packageMetadata.version}`}
               >
-                {APP_DISPLAY_VERSION}
+                {packageMetadata.version}
               </span>
             </div>
             {SHOW_3000AD_BRANDING && (

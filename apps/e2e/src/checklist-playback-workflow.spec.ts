@@ -183,6 +183,67 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('hovered mastering side pane still scrolls while checklist modal is open', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-overlay-hover-scroll-side-pane'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 5_000,
+      frequencyHz: 430,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await cueSongVersion(page, 'Track A', 'Track A v1.wav');
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      await page.evaluate(() => {
+        const analysisPane = document.querySelector('.analysis-panel') as HTMLElement | null;
+        if (!analysisPane) {
+          return;
+        }
+
+        const spacer = document.createElement('div');
+        spacer.setAttribute('data-testid', 'e2e-checklist-overlay-scroll-spacer');
+        spacer.style.height = '1600px';
+        spacer.style.pointerEvents = 'none';
+        analysisPane.appendChild(spacer);
+        analysisPane.scrollTop = 0;
+      });
+
+      const analysisPane = page.locator('.analysis-panel');
+      const analysisPaneBox = await analysisPane.boundingBox();
+      if (!analysisPaneBox) {
+        throw new Error('Could not resolve analysis pane bounds.');
+      }
+
+      await page.mouse.move(
+        analysisPaneBox.x + analysisPaneBox.width * 0.5,
+        analysisPaneBox.y + Math.min(120, analysisPaneBox.height * 0.5)
+      );
+      await page.mouse.wheel(0, 480);
+
+      await expect
+        .poll(async () =>
+          page.evaluate(() => {
+            const scroller = document.querySelector('.analysis-panel') as HTMLElement | null;
+            return scroller?.scrollTop ?? 0;
+          })
+        )
+        .toBeGreaterThan(120);
+
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('typing at track end pauses instead of auto-advancing the checklist modal', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-pause-at-end-while-typing'

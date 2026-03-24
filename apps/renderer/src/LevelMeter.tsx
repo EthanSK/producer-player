@@ -166,6 +166,17 @@ export function LevelMeter({
           ctx.fillStyle = peakHoldNorm > 0.9 ? '#ff4444' : peakHoldNorm > 0.75 ? '#f6b443' : '#ecf2f9';
           ctx.fillRect(meterX, holdY - 1, meterW, 2);
         }
+
+        // dB scale labels for vertical meter
+        const vertTicks = [-48, -36, -24, -12, -6, 0];
+        ctx.font = '8px Inter, sans-serif';
+        ctx.fillStyle = 'rgba(156, 175, 196, 0.5)';
+        ctx.textAlign = 'right';
+        for (const tick of vertTicks) {
+          const tickNorm = dbToNormalized(tick);
+          const tickY = meterY + meterH - tickNorm * meterH;
+          ctx.fillText(`${tick}`, meterX - 2, tickY + 3);
+        }
       }
     };
 

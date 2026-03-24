@@ -442,6 +442,10 @@ input[type='range'] {
 .analysis-overlay-header h2,
 .analysis-overlay-section h3 {
   margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
 }
 
 .analysis-track-summary {
@@ -533,6 +537,10 @@ input[type='range'] {
 .analysis-stat-label {
   color: var(--text-muted);
   font-size: 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
 }
 
 .analysis-tonal-balance {
@@ -619,6 +627,14 @@ input[type='range'] {
   justify-content: space-between;
   align-items: start;
   gap: 10px;
+}
+
+.analysis-normalization-header strong,
+.analysis-reference-toolbar strong {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
 }
 
 .analysis-platform-grid {
@@ -2022,6 +2038,10 @@ button.checklist-play-toggle[data-playing='true'] {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary, #e4ecf5);
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
 }
 
 .analysis-section-subtitle {

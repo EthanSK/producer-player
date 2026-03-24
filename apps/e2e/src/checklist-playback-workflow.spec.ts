@@ -395,6 +395,17 @@ test.describe('checklist playback workflow', () => {
 
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText('Reference track');
+      await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText('Quick A/B');
+
+      const overlaySectionOrder = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('.analysis-overlay-grid > .analysis-overlay-section')).map(
+          (element) => (element as HTMLElement).dataset.testid ?? ''
+        )
+      );
+
+      expect(overlaySectionOrder[0]).toBe('analysis-overlay-visualizations');
+      expect(overlaySectionOrder[1]).toBe('analysis-overlay-reference-panel');
 
       await page.getByTestId('spectrum-analyzer-full').click({ position: { x: 120, y: 60 } });
       await expect(page.getByTestId('analysis-clear-solo-bands')).toBeVisible();

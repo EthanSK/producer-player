@@ -2011,14 +2011,141 @@ button.checklist-play-toggle[data-playing='true'] {
   white-space: nowrap;
 }
 
-/* More Analysis toggle */
-.analysis-more-toggle {
-  cursor: pointer;
-  padding: 8px 0;
+/* Section header with subtitle */
+.analysis-section-header {
+  display: grid;
+  gap: 2px;
 }
 
-.analysis-more-toggle:hover h3 {
-  color: var(--accent);
+.analysis-section-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #e4ecf5);
+}
+
+.analysis-section-subtitle {
+  font-size: 11.5px;
+  color: var(--text-muted, #6b8199);
+  line-height: 1.35;
+  margin: 0;
+}
+
+/* Mastering checklist summary */
+.mastering-checklist-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.mastering-checklist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+}
+
+.mastering-checklist-row .checklist-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+}
+
+.mastering-checklist-row .checklist-label {
+  font-weight: 500;
+  color: var(--text-secondary, #c6d5e8);
+  min-width: 110px;
+}
+
+.mastering-checklist-row .checklist-value {
+  color: var(--text-primary, #e4ecf5);
+}
+
+.mastering-checklist-row.pass {
+  border-color: rgba(74, 222, 128, 0.25);
+  background: rgba(74, 222, 128, 0.04);
+}
+
+.mastering-checklist-row.warn {
+  border-color: rgba(251, 191, 36, 0.25);
+  background: rgba(251, 191, 36, 0.04);
+}
+
+.mastering-checklist-row.fail {
+  border-color: rgba(248, 113, 113, 0.25);
+  background: rgba(248, 113, 113, 0.04);
+}
+
+/* Pro indicators (dynamic range) */
+.analysis-pro-indicators {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.analysis-pro-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.analysis-pro-indicator .indicator-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.analysis-pro-indicator .indicator-content {
+  display: grid;
+  gap: 2px;
+}
+
+.analysis-pro-indicator .indicator-label {
+  font-size: 11px;
+  color: var(--text-muted, #6b8199);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.analysis-pro-indicator .indicator-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #e4ecf5);
+}
+
+.analysis-pro-indicator.pass {
+  border-color: rgba(74, 222, 128, 0.3);
+  background: rgba(74, 222, 128, 0.05);
+}
+
+.analysis-pro-indicator.pass .indicator-value {
+  color: #4ade80;
+}
+
+.analysis-pro-indicator.warn {
+  border-color: rgba(251, 191, 36, 0.3);
+  background: rgba(251, 191, 36, 0.05);
+}
+
+.analysis-pro-indicator.warn .indicator-value {
+  color: #fbbf24;
+}
+
+.analysis-pro-indicator.fail {
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.05);
+}
+
+.analysis-pro-indicator.fail .indicator-value {
+  color: #f87171;
 }
 
 /* Side-by-side: current track (left) + tonal balance (right) */

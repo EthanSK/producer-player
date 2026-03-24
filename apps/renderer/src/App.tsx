@@ -255,6 +255,47 @@ function clampTimestampSeconds(
 const CHECKLIST_CAPTURE_LOOKBACK_SECONDS = 3;
 const CHECKLIST_PREVIEW_SCROLL_STEP_SECONDS = 1;
 const CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS = 1200;
+const CHECKLIST_HISTORY_LIMIT = 100;
+
+function cloneSongChecklistsState(
+  checklists: Record<string, SongChecklistItem[]>
+): Record<string, SongChecklistItem[]> {
+  return Object.fromEntries(
+    Object.entries(checklists).map(([songId, items]) => [
+      songId,
+      items.map((item) => ({ ...item })),
+    ])
+  );
+}
+
+function isTextEntryElement(element: Element | null): boolean {
+  if (!(element instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (element.isContentEditable) {
+    return true;
+  }
+
+  if (element.tagName === 'TEXTAREA') {
+    return true;
+  }
+
+  if (element.tagName !== 'INPUT') {
+    return false;
+  }
+
+  const inputType = (element as HTMLInputElement).type.toLowerCase();
+  return (
+    inputType === 'text' ||
+    inputType === 'search' ||
+    inputType === 'email' ||
+    inputType === 'password' ||
+    inputType === 'url' ||
+    inputType === 'tel' ||
+    inputType === 'number'
+  );
+}
 
 function formatTrackCount(count: number): string {
   return `${count} track${count === 1 ? '' : 's'}`;
@@ -892,6 +933,8 @@ export function App(): JSX.Element {
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
   const [checklistTimestampMode, setChecklistTimestampMode] = useState<'live' | 'frozen'>('live');
   const [activeChecklistTimestampIds, setActiveChecklistTimestampIds] = useState<string[]>([]);
+  const [checklistUndoStack, setChecklistUndoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
+  const [checklistRedoStack, setChecklistRedoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
   const [resolvedAlbumDurationSecondsByVersionId, setResolvedAlbumDurationSecondsByVersionId] = useState<
     Record<string, number>
   >({});
@@ -902,6 +945,7 @@ export function App(): JSX.Element {
   );
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
+  const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(false);
   const [referenceTrack, setReferenceTrack] = useState<LoadedReferenceTrack | null>(null);
   const [referenceStatus, setReferenceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle'
@@ -929,6 +973,12 @@ export function App(): JSX.Element {
   const checklistInputFocusedRef = useRef(false);
   const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const checklistSkipBackTenButtonRef = useRef<HTMLButtonElement | null>(null);
+  const checklistItemsScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const checklistVisibleSongIdRef = useRef<string | null>(null);
+  const checklistVisibleItemCountRef = useRef(0);
+  const songChecklistsRef = useRef(songChecklists);
+  const checklistUndoStackRef = useRef(checklistUndoStack);
+  const checklistRedoStackRef = useRef(checklistRedoStack);
   const selectedPlaybackSongIdRef = useRef<string | null>(null);
   const queueMoveTargetSongIdRef = useRef<string | null>(null);
   const checklistHighlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
@@ -1030,6 +1080,18 @@ export function App(): JSX.Element {
   }, [checklistModalSongId]);
 
   useEffect(() => {
+    songChecklistsRef.current = songChecklists;
+  }, [songChecklists]);
+
+  useEffect(() => {
+    checklistUndoStackRef.current = checklistUndoStack;
+  }, [checklistUndoStack]);
+
+  useEffect(() => {
+    checklistRedoStackRef.current = checklistRedoStack;
+  }, [checklistRedoStack]);
+
+  useEffect(() => {
     checklistDraftTextRef.current = checklistDraftText;
 
     const composerNode = checklistComposerTextareaRef.current;
@@ -1060,8 +1122,34 @@ export function App(): JSX.Element {
       }
       checklistHighlightTimeoutsRef.current.clear();
       previousChecklistPlaybackTimeRef.current = currentTimeSeconds;
+      checklistVisibleSongIdRef.current = null;
+      checklistVisibleItemCountRef.current = 0;
     }
   }, [checklistModalSongId, currentTimeSeconds]);
+
+  useEffect(() => {
+    const visibleItemCount = checklistModalSongId
+      ? songChecklists[checklistModalSongId]?.length ?? 0
+      : 0;
+    const songChanged = checklistVisibleSongIdRef.current !== checklistModalSongId;
+    const itemCountIncreased = visibleItemCount > checklistVisibleItemCountRef.current;
+
+    checklistVisibleSongIdRef.current = checklistModalSongId;
+    checklistVisibleItemCountRef.current = visibleItemCount;
+
+    if (!checklistModalSongId || (!songChanged && !itemCountIncreased)) {
+      return;
+    }
+
+    const scrollRegion = checklistItemsScrollContainerRef.current;
+    if (!scrollRegion) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      scrollRegion.scrollTop = scrollRegion.scrollHeight;
+    });
+  }, [checklistModalSongId, songChecklists]);
 
   useEffect(() => {
     const selectedVersion =
@@ -1126,6 +1214,10 @@ export function App(): JSX.Element {
   }, [mixPlaybackSource?.url, selectedPlaybackVersionId, snapshot.versions]);
 
   useEffect(() => {
+    setAnalysisCompactStatsExpanded(false);
+  }, [selectedPlaybackVersionId]);
+
+  useEffect(() => {
     if (!analysisExpanded) {
       return;
     }
@@ -1185,6 +1277,11 @@ export function App(): JSX.Element {
 
         setSongRatings(merged.ratings);
         setSongChecklists(merged.checklists);
+        songChecklistsRef.current = merged.checklists;
+        setChecklistUndoStack([]);
+        setChecklistRedoStack([]);
+        checklistUndoStackRef.current = [];
+        checklistRedoStackRef.current = [];
         persistSongRatings(merged.ratings);
         persistSongChecklists(merged.checklists);
       })
@@ -1288,6 +1385,11 @@ export function App(): JSX.Element {
       if (result.data.checklists && typeof result.data.checklists === 'object') {
         const parsedChecklists = sanitizeSongChecklists(result.data.checklists);
         setSongChecklists(parsedChecklists);
+        songChecklistsRef.current = parsedChecklists;
+        setChecklistUndoStack([]);
+        setChecklistRedoStack([]);
+        checklistUndoStackRef.current = [];
+        checklistRedoStackRef.current = [];
         persistSongChecklists(parsedChecklists);
       }
 
@@ -2428,45 +2530,39 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const active = document.activeElement;
+      const textEntryFocused = isTextEntryElement(active);
+      const hasUndoModifier = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+
+      if (
+        checklistModalSongIdRef.current &&
+        !textEntryFocused &&
+        hasUndoModifier &&
+        !event.altKey
+      ) {
+        const wantsUndo = key === 'z' && !event.shiftKey;
+        const wantsRedo = key === 'y' || (key === 'z' && event.shiftKey);
+
+        if (wantsUndo || wantsRedo) {
+          const applied = wantsRedo
+            ? handleRedoChecklistChange()
+            : handleUndoChecklistChange();
+
+          if (applied) {
+            event.preventDefault();
+          }
+
+          return;
+        }
+      }
+
       if (event.repeat || event.code !== 'Space') {
         return;
       }
 
-      // Use activeElement to reliably detect what currently has focus,
-      // regardless of event propagation quirks.
-      const active = document.activeElement;
-
-      // Only allow space through for genuine text-entry elements where
-      // the user would expect to type a space character, plus native buttons
-      // that should activate when focused.
-      if (active instanceof HTMLElement) {
-        if (active.isContentEditable) {
-          return;
-        }
-
-        if (active instanceof HTMLButtonElement) {
-          return;
-        }
-
-        if (active.tagName === 'TEXTAREA') {
-          return;
-        }
-
-        if (active.tagName === 'INPUT') {
-          const inputType = (active as HTMLInputElement).type.toLowerCase();
-          // Text-entry input types where space is meaningful content
-          if (
-            inputType === 'text' ||
-            inputType === 'search' ||
-            inputType === 'email' ||
-            inputType === 'password' ||
-            inputType === 'url' ||
-            inputType === 'tel' ||
-            inputType === 'number'
-          ) {
-            return;
-          }
-        }
+      if (active instanceof HTMLButtonElement || textEntryFocused) {
+        return;
       }
 
       // For everything else — range sliders, buttons, divs, timeline,
@@ -3315,11 +3411,48 @@ export function App(): JSX.Element {
     }));
   }
 
+  function updateSongChecklists(
+    updater: (current: Record<string, SongChecklistItem[]>) => Record<string, SongChecklistItem[]>,
+    options?: { recordHistory?: boolean }
+  ): void {
+    const shouldRecordHistory = options?.recordHistory ?? true;
+
+    setSongChecklists((current) => {
+      const next = updater(current);
+
+      if (next === current) {
+        return current;
+      }
+
+      if (shouldRecordHistory) {
+        setChecklistUndoStack((history) => {
+          const snapshot = cloneSongChecklistsState(current);
+          const nextHistory =
+            history.length >= CHECKLIST_HISTORY_LIMIT
+              ? [...history.slice(history.length - CHECKLIST_HISTORY_LIMIT + 1), snapshot]
+              : [...history, snapshot];
+
+          checklistUndoStackRef.current = nextHistory;
+          return nextHistory;
+        });
+
+        setChecklistRedoStack(() => {
+          checklistRedoStackRef.current = [];
+          return [];
+        });
+      }
+
+      songChecklistsRef.current = next;
+      return next;
+    });
+  }
+
   function updateSongChecklistItems(
     songId: string,
-    updater: (items: SongChecklistItem[]) => SongChecklistItem[]
+    updater: (items: SongChecklistItem[]) => SongChecklistItem[],
+    options?: { recordHistory?: boolean }
   ): void {
-    setSongChecklists((current) => {
+    updateSongChecklists((current) => {
       const currentItems = current[songId] ?? [];
       const nextItems = updater(currentItems);
 
@@ -3336,7 +3469,61 @@ export function App(): JSX.Element {
         ...current,
         [songId]: nextItems,
       };
-    });
+    }, options);
+  }
+
+  function handleUndoChecklistChange(): boolean {
+    const history = checklistUndoStackRef.current;
+    const previousSnapshot = history[history.length - 1];
+
+    if (!previousSnapshot) {
+      return false;
+    }
+
+    const currentSnapshot = cloneSongChecklistsState(songChecklistsRef.current);
+    const nextUndoHistory = history.slice(0, -1);
+    const nextRedoHistory = [currentSnapshot, ...checklistRedoStackRef.current].slice(
+      0,
+      CHECKLIST_HISTORY_LIMIT
+    );
+    const restoredState = cloneSongChecklistsState(previousSnapshot);
+
+    checklistUndoStackRef.current = nextUndoHistory;
+    checklistRedoStackRef.current = nextRedoHistory;
+    songChecklistsRef.current = restoredState;
+
+    setChecklistUndoStack(nextUndoHistory);
+    setChecklistRedoStack(nextRedoHistory);
+    setSongChecklists(restoredState);
+
+    return true;
+  }
+
+  function handleRedoChecklistChange(): boolean {
+    const history = checklistRedoStackRef.current;
+    const nextSnapshot = history[0];
+
+    if (!nextSnapshot) {
+      return false;
+    }
+
+    const currentSnapshot = cloneSongChecklistsState(songChecklistsRef.current);
+    const nextRedoHistory = history.slice(1);
+    const nextUndoHistory = [
+      ...checklistUndoStackRef.current,
+      currentSnapshot,
+    ].slice(-CHECKLIST_HISTORY_LIMIT);
+    const restoredState = cloneSongChecklistsState(nextSnapshot);
+
+    checklistUndoStackRef.current = nextUndoHistory;
+    checklistRedoStackRef.current = nextRedoHistory;
+    songChecklistsRef.current = restoredState;
+
+    setChecklistUndoStack(nextUndoHistory);
+    setChecklistRedoStack(nextRedoHistory);
+    setSongChecklists(restoredState);
+
+    return true;
   }
 
   function captureCurrentPlaybackTimestamp(
@@ -3375,7 +3562,7 @@ export function App(): JSX.Element {
     clearChecklistTimestampHighlights();
   }
 
-  function freezeChecklistTimestampAtCurrentPlayback(): void {
+  function freezeChecklistTimestampAtCurrentPlayback(options?: { seekPlayback?: boolean }): void {
     const timestamp = captureCurrentPlaybackTimestamp(CHECKLIST_CAPTURE_LOOKBACK_SECONDS);
     if (timestamp === null) {
       return;
@@ -3383,6 +3570,10 @@ export function App(): JSX.Element {
 
     setChecklistTimestampMode('frozen');
     setChecklistCapturedTimestamp(timestamp);
+
+    if (options?.seekPlayback) {
+      handleSeek(timestamp);
+    }
   }
 
   function handleOpenSongChecklist(songId: string): void {
@@ -3437,7 +3628,7 @@ export function App(): JSX.Element {
     }
 
     if (wasEmpty && checklistTimestampMode === 'live') {
-      freezeChecklistTimestampAtCurrentPlayback();
+      freezeChecklistTimestampAtCurrentPlayback({ seekPlayback: true });
     }
   }
 
@@ -3560,8 +3751,10 @@ export function App(): JSX.Element {
     itemId: string,
     nextText: string
   ): void {
-    updateSongChecklistItems(songId, (items) =>
-      items.map((item) => (item.id === itemId ? { ...item, text: nextText } : item))
+    updateSongChecklistItems(
+      songId,
+      (items) => items.map((item) => (item.id === itemId ? { ...item, text: nextText } : item)),
+      { recordHistory: false }
     );
   }
 
@@ -3724,7 +3917,7 @@ export function App(): JSX.Element {
   function handleConfirmMigrationImport(): void {
     if (!migrationPreview) return;
 
-    setSongChecklists((current) => {
+    updateSongChecklists((current) => {
       const next = { ...current };
 
       for (const entry of migrationPreview) {
@@ -3754,6 +3947,10 @@ export function App(): JSX.Element {
   const checklistModalItems = checklistModalSongId
     ? songChecklists[checklistModalSongId] ?? []
     : [];
+  const checklistModalItemsChronological = useMemo(
+    () => [...checklistModalItems].reverse(),
+    [checklistModalItems]
+  );
   const checklistCompletedCount = checklistModalItems.filter((item) => item.completed).length;
 
   useEffect(() => {
@@ -4160,8 +4357,7 @@ export function App(): JSX.Element {
         <section className="analysis-panel" data-testid="analysis-panel">
           <div className="analysis-panel-header">
             <div>
-              <h3>Mastering + Reference</h3>
-              <p className="muted">LUFS · peaks · tone · refs · normalization</p>
+              <h3>Mastering</h3>
             </div>
             <button
               type="button"
@@ -4178,7 +4374,9 @@ export function App(): JSX.Element {
           {selectedPlaybackVersion ? (
             <>
               <div className="analysis-track-summary">
-                <strong data-testid="analysis-track-label">{selectedPlaybackVersion.fileName}</strong>
+                <strong className="analysis-track-label" data-testid="analysis-track-label">
+                  {selectedPlaybackVersion.fileName}
+                </strong>
               </div>
 
               {analysisStatus !== 'ready' ? (
@@ -4198,141 +4396,81 @@ export function App(): JSX.Element {
               ) : null}
 
               <div className="analysis-stat-grid compact">
-                <div className="analysis-stat-card" data-testid="analysis-integrated-stat" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
+                <div
+                  className="analysis-stat-card"
+                  data-testid="analysis-integrated-stat"
+                  title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file."
+                >
                   <span className="analysis-stat-label">Integrated LUFS</span>
                   <strong>{measuredIntegratedText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-short-term-stat" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
+                <div
+                  className="analysis-stat-card"
+                  data-testid="analysis-short-term-stat"
+                  title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback."
+                >
                   <span className="analysis-stat-label">Current loudness</span>
                   <strong>{shortTermEstimateText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-lra-stat" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
+              </div>
+
+              <button
+                type="button"
+                className={`ghost analysis-stats-expander${
+                  analysisCompactStatsExpanded ? ' expanded' : ''
+                }`}
+                onClick={() => setAnalysisCompactStatsExpanded((current) => !current)}
+                aria-expanded={analysisCompactStatsExpanded}
+                aria-controls="analysis-side-extra-stats"
+                data-testid="analysis-stats-expander"
+                title="Show or hide additional loudness metrics."
+              >
+                <span className="analysis-stats-expander-caret" aria-hidden="true">
+                  {analysisCompactStatsExpanded ? '▾' : '▸'}
+                </span>
+                <span>
+                  {analysisCompactStatsExpanded ? 'Hide extra metrics' : 'More metrics'}
+                </span>
+              </button>
+
+              <div
+                id="analysis-side-extra-stats"
+                className="analysis-stat-grid compact analysis-stat-grid-extra"
+                data-testid="analysis-extra-stat-grid"
+                hidden={!analysisCompactStatsExpanded}
+              >
+                <div
+                  className="analysis-stat-card"
+                  data-testid="analysis-lra-stat"
+                  title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units."
+                >
                   <span className="analysis-stat-label">Loudness range</span>
                   <strong>{measuredLraText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-true-peak-stat" title="True Peak — the highest inter-sample peak level in the track, measured via oversampling.">
+                <div
+                  className="analysis-stat-card"
+                  data-testid="analysis-true-peak-stat"
+                  title="True Peak — the highest inter-sample peak level in the track, measured via oversampling."
+                >
                   <span className="analysis-stat-label">True Peak</span>
                   <strong>{measuredTruePeakText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-max-short-term-stat" title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time.">
+                <div
+                  className="analysis-stat-card"
+                  data-testid="analysis-max-short-term-stat"
+                  title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time."
+                >
                   <span className="analysis-stat-label">Peak short-term</span>
                   <strong>{measuredMaxShortTermText}</strong>
                 </div>
-                <div className="analysis-stat-card" data-testid="analysis-max-momentary-stat" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
+                <div
+                  className="analysis-stat-card"
+                  data-testid="analysis-max-momentary-stat"
+                  title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time."
+                >
                   <span className="analysis-stat-label">Peak momentary</span>
                   <strong>{measuredMaxMomentaryText}</strong>
                 </div>
-              </div>
-
-              <div className="analysis-reference-toolbar producer-reference-toolbar">
-                <div>
-                  <strong>Reference</strong>
-                  <p className="muted" data-testid="analysis-reference-summary">
-                    {referenceTrack
-                      ? `${referenceTrack.fileName} · ${
-                          referenceTrack.sourceType === 'external-file' ? 'external' : 'linked'
-                        }`
-                      : referenceStatus === 'loading'
-                        ? 'Loading…'
-                        : 'No reference'}
-                  </p>
-                </div>
-                <div className="analysis-reference-actions">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleChooseReferenceTrack();
-                    }}
-                    data-testid="analysis-choose-reference"
-                    title="Choose an external reference file."
-                  >
-                    Choose File…
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleUseCurrentTrackAsReference();
-                    }}
-                    data-testid="analysis-use-current-reference"
-                    disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion}
-                    title="Use the current track as the reference."
-                  >
-                    Use Current
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={handleClearReferenceTrack}
-                    data-testid="analysis-clear-reference"
-                    disabled={!referenceTrack && referenceStatus !== 'error'}
-                    title="Clear the reference."
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-
-              <div className="analysis-ab-toggle" data-testid="analysis-ab-toggle">
-                <span className="analysis-ab-label">Quick A/B</span>
-                <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
-                  <button
-                    type="button"
-                    className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
-                    onClick={() => handleReferencePreviewModeChange('mix')}
-                    data-testid="analysis-ab-mix"
-                  >
-                    Mix
-                  </button>
-                  <button
-                    type="button"
-                    className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
-                    onClick={() => handleReferencePreviewModeChange('reference')}
-                    data-testid="analysis-ab-reference"
-                    disabled={!referenceTrack}
-                  >
-                    Reference
-                  </button>
-                </div>
-                <p className="muted">
-                  {referenceTrack
-                    ? playbackPreviewMode === 'reference'
-                      ? `Playing reference: ${referenceTrack.fileName}`
-                      : `Tap Reference to A/B against ${referenceTrack.fileName}`
-                    : 'Load a reference track to A/B from here.'}
-                </p>
-              </div>
-
-              {referenceError ? (
-                <p className="error" data-testid="analysis-reference-error">
-                  {referenceError}
-                </p>
-              ) : null}
-
-              <div className="analysis-reference-inline" data-testid="analysis-active-reference-inline">
-                {referenceTrack && activeReferenceComparison ? (
-                  <>
-                    <div className="analysis-stat-card compact">
-                      <span className="analysis-stat-label">Reference loudness</span>
-                      <strong>{referenceIntegratedText}</strong>
-                    </div>
-                    <div className="analysis-stat-card compact">
-                      <span className="analysis-stat-label">Reference true peak</span>
-                      <strong>{referenceTruePeakText}</strong>
-                    </div>
-                    <div className="analysis-stat-card compact">
-                      <span className="analysis-stat-label">Loudness difference</span>
-                      <strong>{formatSignedLevel(activeReferenceComparison.integratedDeltaDb)}</strong>
-                    </div>
-                  </>
-                ) : (
-                  <div className="analysis-stat-card compact analysis-empty-card">
-                    <span className="analysis-stat-label">Reference comparison</span>
-                    <strong>No reference loaded</strong>
-                    <span className="muted">
-                      Load a reference to compare against.
-                    </span>
-                  </div>
-                )}
               </div>
 
               <section
@@ -4450,6 +4588,117 @@ export function App(): JSX.Element {
                     </strong>
                   </div>
                 ))}
+              </div>
+
+              <div className="analysis-reference-toolbar producer-reference-toolbar">
+                <div>
+                  <strong>Reference</strong>
+                  <p className="muted" data-testid="analysis-reference-summary">
+                    {referenceTrack
+                      ? `${referenceTrack.fileName} · ${
+                          referenceTrack.sourceType === 'external-file' ? 'external' : 'linked'
+                        }`
+                      : referenceStatus === 'loading'
+                        ? 'Loading…'
+                        : 'No reference'}
+                  </p>
+                </div>
+                <div className="analysis-reference-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleChooseReferenceTrack();
+                    }}
+                    data-testid="analysis-choose-reference"
+                    title="Choose an external reference file."
+                  >
+                    Choose File…
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleUseCurrentTrackAsReference();
+                    }}
+                    data-testid="analysis-use-current-reference"
+                    disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion}
+                    title="Use the current track as the reference."
+                  >
+                    Use Current
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={handleClearReferenceTrack}
+                    data-testid="analysis-clear-reference"
+                    disabled={!referenceTrack && referenceStatus !== 'error'}
+                    title="Clear the reference."
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              <div className="analysis-ab-toggle" data-testid="analysis-ab-toggle">
+                <span className="analysis-ab-label">Quick A/B</span>
+                <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
+                  <button
+                    type="button"
+                    className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
+                    onClick={() => handleReferencePreviewModeChange('mix')}
+                    data-testid="analysis-ab-mix"
+                  >
+                    Mix
+                  </button>
+                  <button
+                    type="button"
+                    className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
+                    onClick={() => handleReferencePreviewModeChange('reference')}
+                    data-testid="analysis-ab-reference"
+                    disabled={!referenceTrack}
+                  >
+                    Reference
+                  </button>
+                </div>
+                <p className="muted">
+                  {referenceTrack
+                    ? playbackPreviewMode === 'reference'
+                      ? `Playing reference: ${referenceTrack.fileName}`
+                      : `Tap Reference to A/B against ${referenceTrack.fileName}`
+                    : 'Load a reference track to A/B from here.'}
+                </p>
+              </div>
+
+              {referenceError ? (
+                <p className="error" data-testid="analysis-reference-error">
+                  {referenceError}
+                </p>
+              ) : null}
+
+              <div className="analysis-reference-inline" data-testid="analysis-active-reference-inline">
+                {referenceTrack && activeReferenceComparison ? (
+                  <>
+                    <div className="analysis-stat-card compact">
+                      <span className="analysis-stat-label">Reference loudness</span>
+                      <strong>{referenceIntegratedText}</strong>
+                    </div>
+                    <div className="analysis-stat-card compact">
+                      <span className="analysis-stat-label">Reference true peak</span>
+                      <strong>{referenceTruePeakText}</strong>
+                    </div>
+                    <div className="analysis-stat-card compact">
+                      <span className="analysis-stat-label">Loudness difference</span>
+                      <strong>{formatSignedLevel(activeReferenceComparison.integratedDeltaDb)}</strong>
+                    </div>
+                  </>
+                ) : (
+                  <div className="analysis-stat-card compact analysis-empty-card">
+                    <span className="analysis-stat-label">Reference comparison</span>
+                    <strong>No reference loaded</strong>
+                    <span className="muted">
+                      Load a reference to compare against.
+                    </span>
+                  </div>
+                )}
               </div>
             </>
           ) : (
@@ -5083,98 +5332,227 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
-              <div className="checklist-transport-meta">
-                <span className="checklist-transport-hint">Shift+Tab toggles −10s ↔ input</span>
-                <div className="checklist-transport-group">
+              <span className="checklist-transport-hint">Shift+Tab toggles −10s ↔ input</span>
+            </div>
+
+            <div
+              ref={checklistItemsScrollContainerRef}
+              className="checklist-item-scroll-region"
+              data-testid="song-checklist-scroll-region"
+            >
+              {checklistModalItemsChronological.length > 0 ? (
+                <ul className="checklist-item-list" data-testid="song-checklist-items">
+                  {checklistModalItemsChronological.map((item) => (
+                    <li
+                      key={item.id}
+                      className={`checklist-item-row${
+                        item.timestampSeconds !== null ? ' has-timestamp' : ''
+                      }${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}`}
+                    >
+                      <label className="checklist-item-toggle">
+                        <input
+                          type="checkbox"
+                          checked={item.completed}
+                          onChange={(event) => {
+                            handleToggleChecklistItem(
+                              checklistModalSong.id,
+                              item.id,
+                              event.currentTarget.checked
+                            );
+                          }}
+                        />
+                      </label>
+                      {item.timestampSeconds !== null ? (
+                        <button
+                          type="button"
+                          className="checklist-timestamp-badge"
+                          onClick={() => handleChecklistTimestampClick(item.timestampSeconds!)}
+                          onWheel={(event) =>
+                            handleChecklistItemTimestampWheel(
+                              checklistModalSong.id,
+                              item.id,
+                              item.timestampSeconds!,
+                              event
+                            )
+                          }
+                          data-testid="song-checklist-item-timestamp"
+                          title={`Jump to ${formatTime(item.timestampSeconds)}`}
+                          aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
+                        >
+                          {formatTime(item.timestampSeconds)}
+                        </button>
+                      ) : null}
+                      <textarea
+                        className={`checklist-item-text${item.completed ? ' completed' : ''}`}
+                        value={item.text}
+                        rows={1}
+                        onChange={(event) => {
+                          autosizeChecklistTextarea(event.currentTarget);
+                          handleChecklistItemTextChange(
+                            checklistModalSong.id,
+                            item.id,
+                            event.currentTarget.value
+                          );
+                        }}
+                        onInput={(event) => {
+                          autosizeChecklistTextarea(event.currentTarget);
+                        }}
+                        ref={(node) => {
+                          if (node) {
+                            autosizeChecklistTextarea(node);
+                          }
+                        }}
+                        data-testid="song-checklist-item-text"
+                      />
+                      <button
+                        type="button"
+                        className="ghost checklist-remove-button"
+                        onClick={() => handleRemoveChecklistItem(checklistModalSong.id, item.id)}
+                        aria-label={`Remove ${item.text}`}
+                        title="Remove checklist item"
+                      >
+                        🗑️
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted checklist-empty-state" data-testid="song-checklist-empty">
+                  No checklist items yet.
+                </p>
+              )}
+            </div>
+
+            {selectedPlaybackVersion ? (
+              <div className="checklist-mini-player" data-testid="song-checklist-mini-player">
+                <div className="checklist-mini-player-scrubber-row">
+                  <span className="muted">{formatTime(currentTimeSeconds)}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={durationSeconds > 0 ? durationSeconds : 0}
+                    step={0.1}
+                    value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
+                    disabled={durationSeconds <= 0}
+                    onChange={(event) => handleSeek(Number(event.target.value))}
+                    data-testid="song-checklist-mini-player-scrubber"
+                    title="Scrub through the selected track while the checklist is open."
+                  />
+                  <span className="muted">{formatTime(durationSeconds)}</span>
+                </div>
+                <div className="checklist-mini-player-transport">
                   <button
-                    ref={checklistSkipBackTenButtonRef}
                     type="button"
-                    className="checklist-skip-button"
-                    data-testid="song-checklist-skip-back-10"
-                    onClick={() => handleSkipSeconds(-10)}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === 'Tab' &&
-                        !event.shiftKey &&
-                        !event.metaKey &&
-                        !event.ctrlKey &&
-                        !event.altKey
-                      ) {
-                        event.preventDefault();
-                        checklistComposerTextareaRef.current?.focus();
-                      }
-                    }}
-                    title="Skip back 10 seconds"
-                    aria-label="Skip back 10 seconds"
+                    className="checklist-mini-player-button"
+                    data-testid="song-checklist-mini-player-prev"
+                    onClick={handlePreviousTrack}
+                    title="Previous track"
+                    aria-label="Previous track"
                   >
-                    −10s
+                    ◀◀
                   </button>
+
+                  <div className="checklist-transport-group">
+                    <button
+                      ref={checklistSkipBackTenButtonRef}
+                      type="button"
+                      className="checklist-skip-button"
+                      data-testid="song-checklist-skip-back-10"
+                      onClick={() => handleSkipSeconds(-10)}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === 'Tab' &&
+                          !event.metaKey &&
+                          !event.ctrlKey &&
+                          !event.altKey
+                        ) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                        }
+                      }}
+                      title="Skip back 10 seconds"
+                      aria-label="Skip back 10 seconds"
+                    >
+                      −10s
+                    </button>
+                    <button
+                      type="button"
+                      className="checklist-skip-button checklist-skip-button-small"
+                      data-testid="song-checklist-skip-back-5"
+                      onClick={() => handleSkipSeconds(-5)}
+                      title="Skip back 5 seconds"
+                      aria-label="Skip back 5 seconds"
+                    >
+                      −5s
+                    </button>
+                    <button
+                      type="button"
+                      className="checklist-skip-button checklist-skip-button-small"
+                      data-testid="song-checklist-skip-back-2"
+                      onClick={() => handleSkipSeconds(-2)}
+                      title="Skip back 2 seconds"
+                      aria-label="Skip back 2 seconds"
+                    >
+                      −2s
+                    </button>
+                    <button
+                      type="button"
+                      className="checklist-play-toggle"
+                      data-playing={isPlaying ? 'true' : 'false'}
+                      aria-label={isPlaying ? 'Pause' : 'Play'}
+                      title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                      data-testid="song-checklist-play-toggle"
+                      onClick={() => {
+                        void handleTogglePlayback();
+                      }}
+                    >
+                      <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="checklist-skip-button checklist-skip-button-small"
+                      data-testid="song-checklist-skip-forward-2"
+                      onClick={() => handleSkipSeconds(2)}
+                      title="Skip forward 2 seconds"
+                      aria-label="Skip forward 2 seconds"
+                    >
+                      +2s
+                    </button>
+                    <button
+                      type="button"
+                      className="checklist-skip-button checklist-skip-button-small"
+                      data-testid="song-checklist-skip-forward-5"
+                      onClick={() => handleSkipSeconds(5)}
+                      title="Skip forward 5 seconds"
+                      aria-label="Skip forward 5 seconds"
+                    >
+                      +5s
+                    </button>
+                    <button
+                      type="button"
+                      className="checklist-skip-button"
+                      data-testid="song-checklist-skip-forward-10"
+                      onClick={() => handleSkipSeconds(10)}
+                      title="Skip forward 10 seconds"
+                      aria-label="Skip forward 10 seconds"
+                    >
+                      +10s
+                    </button>
+                  </div>
+
                   <button
                     type="button"
-                    className="checklist-skip-button checklist-skip-button-small"
-                    data-testid="song-checklist-skip-back-5"
-                    onClick={() => handleSkipSeconds(-5)}
-                    title="Skip back 5 seconds"
-                    aria-label="Skip back 5 seconds"
+                    className="checklist-mini-player-button"
+                    data-testid="song-checklist-mini-player-next"
+                    onClick={handleNextTrack}
+                    title="Next track"
+                    aria-label="Next track"
                   >
-                    −5s
-                  </button>
-                  <button
-                    type="button"
-                    className="checklist-skip-button checklist-skip-button-small"
-                    data-testid="song-checklist-skip-back-2"
-                    onClick={() => handleSkipSeconds(-2)}
-                    title="Skip back 2 seconds"
-                    aria-label="Skip back 2 seconds"
-                  >
-                    −2s
-                  </button>
-                  <button
-                    type="button"
-                    className="checklist-play-toggle"
-                    data-playing={isPlaying ? 'true' : 'false'}
-                    aria-label={isPlaying ? 'Pause' : 'Play'}
-                    title={isPlaying ? 'Pause playback' : 'Resume playback'}
-                    data-testid="song-checklist-play-toggle"
-                    onClick={() => {
-                      void handleTogglePlayback();
-                    }}
-                  >
-                    <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="checklist-skip-button checklist-skip-button-small"
-                    data-testid="song-checklist-skip-forward-2"
-                    onClick={() => handleSkipSeconds(2)}
-                    title="Skip forward 2 seconds"
-                    aria-label="Skip forward 2 seconds"
-                  >
-                    +2s
-                  </button>
-                  <button
-                    type="button"
-                    className="checklist-skip-button checklist-skip-button-small"
-                    data-testid="song-checklist-skip-forward-5"
-                    onClick={() => handleSkipSeconds(5)}
-                    title="Skip forward 5 seconds"
-                    aria-label="Skip forward 5 seconds"
-                  >
-                    +5s
-                  </button>
-                  <button
-                    type="button"
-                    className="checklist-skip-button"
-                    data-testid="song-checklist-skip-forward-10"
-                    onClick={() => handleSkipSeconds(10)}
-                    title="Skip forward 10 seconds"
-                    aria-label="Skip forward 10 seconds"
-                  >
-                    +10s
+                    ▶▶
                   </button>
                 </div>
               </div>
-            </div>
+            ) : null}
 
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
               <textarea
@@ -5256,86 +5634,6 @@ export function App(): JSX.Element {
               </button>
             </div>
 
-            {checklistModalItems.length > 0 ? (
-              <ul className="checklist-item-list" data-testid="song-checklist-items">
-                {checklistModalItems.map((item) => (
-                  <li
-                    key={item.id}
-                    className={`checklist-item-row${item.timestampSeconds !== null ? ' has-timestamp' : ''}${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}`}
-                  >
-                    <label className="checklist-item-toggle">
-                      <input
-                        type="checkbox"
-                        checked={item.completed}
-                        onChange={(event) => {
-                          handleToggleChecklistItem(
-                            checklistModalSong.id,
-                            item.id,
-                            event.currentTarget.checked
-                          );
-                        }}
-                      />
-                    </label>
-                    {item.timestampSeconds !== null ? (
-                      <button
-                        type="button"
-                        className="checklist-timestamp-badge"
-                        onClick={() => handleChecklistTimestampClick(item.timestampSeconds!)}
-                        onWheel={(event) =>
-                          handleChecklistItemTimestampWheel(
-                            checklistModalSong.id,
-                            item.id,
-                            item.timestampSeconds!,
-                            event
-                          )
-                        }
-                        data-testid="song-checklist-item-timestamp"
-                        title={`Jump to ${formatTime(item.timestampSeconds)}`}
-                        aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
-                      >
-                        {formatTime(item.timestampSeconds)}
-                      </button>
-                    ) : null}
-                    <textarea
-                      className={`checklist-item-text${item.completed ? ' completed' : ''}`}
-                      value={item.text}
-                      rows={1}
-                      onChange={(event) => {
-                        autosizeChecklistTextarea(event.currentTarget);
-                        handleChecklistItemTextChange(
-                          checklistModalSong.id,
-                          item.id,
-                          event.currentTarget.value
-                        );
-                      }}
-                      onInput={(event) => {
-                        autosizeChecklistTextarea(event.currentTarget);
-                      }}
-                      ref={(node) => {
-                        if (node) {
-                          autosizeChecklistTextarea(node);
-                        }
-                      }}
-                      data-testid="song-checklist-item-text"
-                    />
-                    <button
-                      type="button"
-                      className="ghost checklist-remove-button"
-                      onClick={() => handleRemoveChecklistItem(checklistModalSong.id, item.id)}
-                      aria-label={`Remove ${item.text}`}
-                      title="Remove checklist item"
-                    >
-                      🗑️
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted checklist-empty-state" data-testid="song-checklist-empty">
-                No checklist items yet.
-              </p>
-            )}
-
             <div className="checklist-modal-actions">
               <button
                 type="button"
@@ -5355,21 +5653,15 @@ export function App(): JSX.Element {
                       'DEVELOPER MODE: Delete ALL checklist items across ALL songs? This cannot be undone.'
                     );
                     if (!confirmed) return;
-                    setSongChecklists((current) => {
-                      const next: Record<string, SongChecklistItem[]> = {};
-                      for (const key of Object.keys(current)) {
-                        next[key] = [];
-                      }
-                      return next;
-                    });
+                    updateSongChecklists(() => ({}));
                   } else {
                     const confirmed = window.confirm(
                       'Are you sure you want to delete all checklist items for this song?'
                     );
                     if (!confirmed) return;
-                    setSongChecklists((current) => {
+                    updateSongChecklists((current) => {
                       const next = { ...current };
-                      next[checklistModalSong.id] = [];
+                      delete next[checklistModalSong.id];
                       return next;
                     });
                   }
@@ -5383,61 +5675,6 @@ export function App(): JSX.Element {
                 Done
               </button>
             </div>
-
-            {selectedPlaybackVersion ? (
-              <div className="checklist-mini-player" data-testid="song-checklist-mini-player">
-                <div className="checklist-mini-player-scrubber-row">
-                  <span className="muted">{formatTime(currentTimeSeconds)}</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={durationSeconds > 0 ? durationSeconds : 0}
-                    step={0.1}
-                    value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
-                    disabled={durationSeconds <= 0}
-                    onChange={(event) => handleSeek(Number(event.target.value))}
-                    data-testid="song-checklist-mini-player-scrubber"
-                    title="Scrub through the selected track while the checklist is open."
-                  />
-                  <span className="muted">{formatTime(durationSeconds)}</span>
-                </div>
-                <div className="checklist-mini-player-transport">
-                  <button
-                    type="button"
-                    className="checklist-mini-player-button"
-                    data-testid="song-checklist-mini-player-prev"
-                    onClick={handlePreviousTrack}
-                    title="Previous track"
-                    aria-label="Previous track"
-                  >
-                    ◀◀
-                  </button>
-                  <button
-                    type="button"
-                    className="checklist-mini-player-play-toggle"
-                    data-testid="song-checklist-mini-player-play-toggle"
-                    data-playing={isPlaying ? 'true' : 'false'}
-                    aria-label={isPlaying ? 'Pause' : 'Play'}
-                    onClick={() => {
-                      void handleTogglePlayback();
-                    }}
-                    title={isPlaying ? 'Pause playback' : 'Resume playback'}
-                  >
-                    <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="checklist-mini-player-button"
-                    data-testid="song-checklist-mini-player-next"
-                    onClick={handleNextTrack}
-                    title="Next track"
-                    aria-label="Next track"
-                  >
-                    ▶▶
-                  </button>
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
       ) : null}
@@ -5463,7 +5700,7 @@ export function App(): JSX.Element {
           >
             <div className="analysis-overlay-header">
               <div>
-                <h2>Mastering + Reference</h2>
+                <h2>Mastering</h2>
                 <p className="muted">LUFS · peaks · tone · refs · normalization</p>
               </div>
               <button

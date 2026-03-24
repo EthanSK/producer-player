@@ -61,6 +61,36 @@ test.describe('Checklist textarea UX', () => {
     }
   });
 
+  test('Shift+Tab toggles focus between the composer and the -10s skip button', async () => {
+    const directories = await createE2ETestDirectories('producer-player-checklist-shift-tab-toggle');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkSingleSongAndOpenChecklist(page, directories.fixtureDirectory);
+
+      const composer = page.getByTestId('song-checklist-input');
+      const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
+
+      await composer.focus();
+      await composer.press('Shift+Tab');
+      await expect(skipBackTen).toBeFocused();
+
+      await skipBackTen.press('Shift+Tab');
+      await expect(composer).toBeFocused();
+
+      await composer.press('Shift+Tab');
+      await expect(skipBackTen).toBeFocused();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('checklist composer and item textareas match input styling and auto-grow', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-textarea-style-autogrow'

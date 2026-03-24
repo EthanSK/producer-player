@@ -21,6 +21,11 @@ function makeTrackAnalysis(
     frameDurationSeconds: 0.25,
     durationSeconds: 3,
     tonalBalance: { low: 0.33, mid: 0.34, high: 0.33 },
+    rmsDbfs: -15,
+    crestFactorDb: 4,
+    dcOffset: 0,
+    clipCount: 0,
+    waveformPeaks: new Float32Array([0.2, 0.4, 0.1]),
     ...overrides,
   };
 }

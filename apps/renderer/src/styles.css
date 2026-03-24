@@ -1858,6 +1858,16 @@ button.checklist-play-toggle[data-playing='true'] {
   white-space: nowrap;
 }
 
+/* More Analysis toggle */
+.analysis-more-toggle {
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.analysis-more-toggle:hover h3 {
+  color: var(--accent);
+}
+
 /* Side-by-side: current track (left) + tonal balance (right) */
 .analysis-overlay-side-by-side {
   display: grid;

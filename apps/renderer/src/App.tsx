@@ -4969,6 +4969,23 @@ export function App(): JSX.Element {
                           : 'Within headroom'}
                     </span>
                   </div>
+                  <div className="analysis-stat-card compact" data-testid="analysis-normalization-target">
+                    <span className="analysis-stat-label">Target &amp; peak ceiling</span>
+                    <strong>
+                      {selectedNormalizationPlatform.targetLufs.toFixed(0)} LUFS ·{' '}
+                      {selectedNormalizationPlatform.truePeakCeilingDbtp.toFixed(0)} dBTP
+                    </strong>
+                    <span className="muted">Platform target</span>
+                  </div>
+                  <div className="analysis-stat-card compact" data-testid="analysis-normalization-policy">
+                    <span className="analysis-stat-label">Gain policy</span>
+                    <strong>
+                      {selectedNormalizationPlatform.policy === 'down-only'
+                        ? 'Turn down only'
+                        : 'Turn up & down'}
+                    </strong>
+                    <span className="muted">{selectedNormalizationPlatform.description}</span>
+                  </div>
                 </div>
               </section>
 

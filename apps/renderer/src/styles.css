@@ -491,6 +491,10 @@ input[type='range'] {
   margin-top: -2px;
 }
 
+.analysis-stat-grid-extra[hidden] {
+  display: none;
+}
+
 .analysis-phase-note,
 .analysis-loading-line {
   min-height: 16px;

@@ -377,6 +377,40 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('checklist and mastering fullscreen buttons let you jump between both views', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-mastering-fullscreen-jump'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 3_600,
+      frequencyHz: 420,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await cueSongVersion(page, 'Track A', 'Track A v1.wav');
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      await page.getByTestId('song-checklist-open-mastering').click();
+      await expect(page.getByTestId('song-checklist-modal')).toHaveCount(0);
+      await expect(page.getByTestId('analysis-modal')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-reference-panel')).toBeVisible();
+
+      await page.getByTestId('analysis-open-checklist-button').click();
+      await expect(page.getByTestId('analysis-modal')).toHaveCount(0);
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.locator('.checklist-modal-header h2')).toContainText('Track A Checklist');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('analysis overlay closes on outside click and selected spectrum bands can be cleared', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-analysis-overlay-click-outside-clear-bands'
@@ -395,7 +429,7 @@ test.describe('checklist playback workflow', () => {
 
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
-      await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText('Reference track');
+      await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText(/Reference track/i);
       await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText('Quick A/B');
 
       const overlaySectionOrder = await page.evaluate(() =>

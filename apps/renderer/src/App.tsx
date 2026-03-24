@@ -67,6 +67,15 @@ interface LoadedReferenceTrack {
   measuredAnalysis: AudioFileAnalysis;
 }
 
+interface SavedReferenceTrack {
+  sourceType: ReferenceTrackSource;
+  filePath: string;
+  fileName: string;
+  subtitle: string;
+  integratedLufs: number | null;
+  dateLastUsed: string;
+}
+
 const EMPTY_SNAPSHOT: LibrarySnapshot = {
   linkedFolders: [],
   songs: [],
@@ -228,6 +237,31 @@ function formatDate(value: string | null): string {
   }
 
   return parsed.toLocaleString();
+}
+
+function formatSavedReferenceDate(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Unknown date';
+  }
+
+  const now = new Date();
+  const isSameDay =
+    parsed.getFullYear() === now.getFullYear() &&
+    parsed.getMonth() === now.getMonth() &&
+    parsed.getDate() === now.getDate();
+
+  if (isSameDay) {
+    return parsed.toLocaleTimeString([], {
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }
+
+  return parsed.toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 function formatTime(seconds: number): string {
@@ -570,6 +604,92 @@ function persistSongChecklists(checklists: Record<string, SongChecklistItem[]>):
   }
 
   window.localStorage.setItem(SONG_CHECKLISTS_STORAGE_KEY, JSON.stringify(checklists));
+}
+
+function sanitizeSavedReferenceTracks(value: unknown): SavedReferenceTrack[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seenFilePaths = new Set<string>();
+  const sanitized: SavedReferenceTrack[] = [];
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const candidate = entry as Partial<SavedReferenceTrack>;
+    const filePath =
+      typeof candidate.filePath === 'string' ? candidate.filePath.trim() : '';
+    if (!filePath || seenFilePaths.has(filePath)) {
+      continue;
+    }
+
+    const sourceType: ReferenceTrackSource =
+      candidate.sourceType === 'linked-track' ? 'linked-track' : 'external-file';
+    const fileName =
+      typeof candidate.fileName === 'string' && candidate.fileName.trim().length > 0
+        ? candidate.fileName.trim()
+        : getPathTail(filePath);
+    const subtitle =
+      typeof candidate.subtitle === 'string' && candidate.subtitle.trim().length > 0
+        ? candidate.subtitle.trim()
+        : sourceType === 'linked-track'
+          ? 'Linked track'
+          : 'External reference file';
+    const integratedLufs =
+      typeof candidate.integratedLufs === 'number' && Number.isFinite(candidate.integratedLufs)
+        ? candidate.integratedLufs
+        : null;
+    const parsedDate =
+      typeof candidate.dateLastUsed === 'string'
+        ? new Date(candidate.dateLastUsed).getTime()
+        : Number.NaN;
+
+    seenFilePaths.add(filePath);
+    sanitized.push({
+      sourceType,
+      filePath,
+      fileName,
+      subtitle,
+      integratedLufs,
+      dateLastUsed: Number.isFinite(parsedDate)
+        ? new Date(parsedDate).toISOString()
+        : new Date(0).toISOString(),
+    });
+  }
+
+  return sanitized
+    .sort(
+      (a, b) => new Date(b.dateLastUsed).getTime() - new Date(a.dateLastUsed).getTime()
+    )
+    .slice(0, MAX_SAVED_REFERENCE_TRACKS);
+}
+
+function readStoredSavedReferenceTracks(): SavedReferenceTrack[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SAVED_REFERENCE_TRACKS_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    return sanitizeSavedReferenceTracks(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedReferenceTracks(savedTracks: SavedReferenceTrack[]): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(SAVED_REFERENCE_TRACKS_KEY, JSON.stringify(savedTracks));
 }
 
 function readICloudBackupEnabled(): boolean {
@@ -997,6 +1117,9 @@ export function App(): JSX.Element {
     'idle'
   );
   const [referenceError, setReferenceError] = useState<string | null>(null);
+  const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrack[]>(() =>
+    readStoredSavedReferenceTracks()
+  );
   const [selectedNormalizationPlatformId, setSelectedNormalizationPlatformId] =
     useState<NormalizationPlatformId>('spotify');
   const [normalizationPreviewEnabled, setNormalizationPreviewEnabled] = useState(false);
@@ -1359,6 +1482,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     persistSongChecklists(songChecklists);
   }, [songChecklists]);
+
+  useEffect(() => {
+    persistSavedReferenceTracks(savedReferenceTracks);
+  }, [savedReferenceTracks]);
 
   useEffect(() => {
     if (!sharedUserStateReady) {
@@ -3467,6 +3594,24 @@ export function App(): JSX.Element {
         previewAnalysis,
         measuredAnalysis: nextMeasuredAnalysis,
       });
+      setSavedReferenceTracks((current) => {
+        const nowIso = new Date().toISOString();
+        const withoutCurrent = current.filter(
+          (savedTrack) => savedTrack.filePath !== selection.filePath
+        );
+
+        return [
+          {
+            sourceType,
+            filePath: selection.filePath,
+            fileName: selection.fileName,
+            subtitle: selection.subtitle,
+            integratedLufs: nextMeasuredAnalysis.integratedLufs,
+            dateLastUsed: nowIso,
+          },
+          ...withoutCurrent,
+        ].slice(0, MAX_SAVED_REFERENCE_TRACKS);
+      });
       setReferenceStatus('ready');
     } catch (cause: unknown) {
       setReferenceStatus('error');
@@ -3516,6 +3661,36 @@ export function App(): JSX.Element {
       subtitle: 'External reference file',
       playbackSource: pickedReference.playbackSource,
     });
+  }
+
+  async function handleLoadSavedReferenceTrack(savedReference: SavedReferenceTrack): Promise<void> {
+    setReferenceError(null);
+
+    try {
+      const playbackSource = await window.producerPlayer.resolvePlaybackSource(
+        savedReference.filePath
+      );
+
+      await loadReferenceTrack(savedReference.sourceType, {
+        filePath: savedReference.filePath,
+        fileName: savedReference.fileName,
+        subtitle: savedReference.subtitle,
+        playbackSource,
+      });
+    } catch (cause: unknown) {
+      setReferenceStatus('error');
+      setReferenceError(
+        cause instanceof Error
+          ? cause.message
+          : `Could not load ${savedReference.fileName}.`
+      );
+    }
+  }
+
+  function handleRemoveSavedReferenceTrack(filePath: string): void {
+    setSavedReferenceTracks((current) =>
+      current.filter((savedReference) => savedReference.filePath !== filePath)
+    );
   }
 
   function handleClearReferenceTrack(): void {
@@ -3754,6 +3929,32 @@ export function App(): JSX.Element {
     setChecklistCapturedTimestamp(null);
     setChecklistTimestampMode('live');
     clearChecklistTimestampHighlights();
+  }
+
+  function handleOpenMasteringFromChecklist(): void {
+    const modalSongId = checklistModalSongIdRef.current;
+    if (modalSongId) {
+      const modalSong = snapshot.songs.find((song) => song.id === modalSongId) ?? null;
+      if (modalSong) {
+        const nextPlaybackVersionId = getPreferredPlaybackVersionId(modalSong);
+        setSelectedSongId(modalSong.id);
+        if (nextPlaybackVersionId) {
+          setSelectedPlaybackVersionId(nextPlaybackVersionId);
+        }
+      }
+    }
+
+    handleCloseSongChecklist();
+    setAnalysisExpanded(true);
+  }
+
+  function handleOpenChecklistFromMastering(): void {
+    if (!selectedPlaybackSongId) {
+      return;
+    }
+
+    setAnalysisExpanded(false);
+    handleOpenSongChecklist(selectedPlaybackSongId);
   }
 
   function handleChecklistOverlayWheel(event: WheelEvent<HTMLDivElement>): void {
@@ -4180,6 +4381,9 @@ export function App(): JSX.Element {
     [checklistModalItems]
   );
   const checklistCompletedCount = checklistModalItems.filter((item) => item.completed).length;
+  const checklistModalCanOpenMastering = checklistModalSong
+    ? getPreferredPlaybackVersionId(checklistModalSong) !== null
+    : false;
 
   useEffect(() => {
     if (
@@ -5921,6 +6125,16 @@ export function App(): JSX.Element {
               >
                 Delete All
               </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={handleOpenMasteringFromChecklist}
+                disabled={!checklistModalCanOpenMastering}
+                data-testid="song-checklist-open-mastering"
+                title="Open this song in full-screen mastering."
+              >
+                Mastering <span aria-hidden="true">⤢</span>
+              </button>
               <button type="button" onClick={handleCloseSongChecklist} title="Close checklist.">
                 Done
               </button>
@@ -6009,6 +6223,16 @@ export function App(): JSX.Element {
                   />
                 </div>
               ) : null}
+              <button
+                type="button"
+                className="ghost"
+                onClick={handleOpenChecklistFromMastering}
+                disabled={!selectedPlaybackSongId}
+                data-testid="analysis-open-checklist-button"
+                title="Open this track's checklist."
+              >
+                Checklist
+              </button>
               <button
                 type="button"
                 className="ghost"

@@ -1540,10 +1540,23 @@ export function App(): JSX.Element {
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setChecklistModalSongId(null);
-        setChecklistDraftText('');
+      if (event.key !== 'Escape') {
+        return;
       }
+
+      const activeElement = document.activeElement;
+      const activeNode = activeElement instanceof HTMLElement ? activeElement : null;
+      const insideChecklistModal =
+        activeNode?.closest('[data-testid="song-checklist-modal"]') !== null;
+
+      if (activeNode && insideChecklistModal && isTextEntryElement(activeNode)) {
+        event.preventDefault();
+        activeNode.blur();
+        return;
+      }
+
+      setChecklistModalSongId(null);
+      setChecklistDraftText('');
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -3244,6 +3257,15 @@ export function App(): JSX.Element {
     });
 
     if (movedToPrevious) {
+      if (
+        checklistModalSongIdRef.current !== null &&
+        checklistModalSongIdRef.current === selectedPlaybackSongIdRef.current &&
+        queueMoveTargetSongIdRef.current
+      ) {
+        setChecklistModalSongId(queueMoveTargetSongIdRef.current);
+        resetChecklistComposer(0);
+      }
+
       logPlaybackEvent('transport-previous-move-queue', {
         currentTimeSeconds: currentTime,
       });
@@ -3259,10 +3281,20 @@ export function App(): JSX.Element {
   }
 
   function handleNextTrack(): void {
-    void moveInQueueRef.current(1, {
+    const movedToNext = moveInQueueRef.current(1, {
       wrap: repeatMode === 'all',
       autoplay: shouldAutoplayOnTransport(),
     });
+
+    if (
+      movedToNext &&
+      checklistModalSongIdRef.current !== null &&
+      checklistModalSongIdRef.current === selectedPlaybackSongIdRef.current &&
+      queueMoveTargetSongIdRef.current
+    ) {
+      setChecklistModalSongId(queueMoveTargetSongIdRef.current);
+      resetChecklistComposer(0);
+    }
   }
 
   function handleCycleRepeatMode(): void {
@@ -5570,7 +5602,7 @@ export function App(): JSX.Element {
             {selectedPlaybackVersion ? (
               <>
                 <p className="checklist-transport-hint checklist-transport-hint-inline">
-                  Tab: input → −10s → controls · Shift+Tab on −10s returns to input
+                  Tab moves right through controls · Shift+Tab moves left · Shift+Tab on −10s returns to input
                 </p>
                 <div className="checklist-mini-player" data-testid="song-checklist-mini-player">
                   <div className="checklist-mini-player-scrubber-row">

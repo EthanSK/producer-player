@@ -165,7 +165,7 @@ test.describe('checklist playback workflow', () => {
       const skipBackTwo = page.getByTestId('song-checklist-skip-back-2');
       const playToggle = page.getByTestId('song-checklist-play-toggle');
       const transportHint = page.getByText(
-        'Tab: input → −10s → controls · Shift+Tab on −10s returns to input'
+        'Tab moves right through controls · Shift+Tab moves left · Shift+Tab on −10s returns to input'
       );
 
       const [inputBox, hintBox, miniPlayerBox] = await Promise.all([
@@ -206,6 +206,86 @@ test.describe('checklist playback workflow', () => {
 
       await page.keyboard.press('Shift+Tab');
       await expect(input).toBeFocused();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('escape first blurs focused checklist input, then closes modal on second press', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-escape-blur-then-close'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 4_500,
+      frequencyHz: 480,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await cueSongVersion(page, 'Track A', 'Track A v1.wav');
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const input = page.getByTestId('song-checklist-input');
+      await input.focus();
+      await expect(input).toBeFocused();
+
+      await page.keyboard.press('Escape');
+      await expect(input).not.toBeFocused();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('song-checklist-modal')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('checklist prev/next transport updates checklist panel to the newly selected song', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-transport-follows-song'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 2_800,
+      frequencyHz: 420,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
+      durationMs: 2_800,
+      frequencyHz: 680,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const queueTitles = await page.getByTestId('main-list-row-title').allTextContents();
+      const [firstSongTitle, secondSongTitle] = queueTitles.map((title) => title.trim());
+
+      await cueSongVersion(page, firstSongTitle, `${firstSongTitle} v1.wav`);
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${firstSongTitle} Checklist`
+      );
+
+      await page.getByTestId('song-checklist-mini-player-next').click();
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${secondSongTitle} Checklist`
+      );
+
+      await page.getByTestId('song-checklist-mini-player-prev').click();
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${firstSongTitle} Checklist`
+      );
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

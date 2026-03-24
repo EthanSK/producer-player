@@ -4,8 +4,12 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:core": "playwright test src/runtime-smoke.spec.ts src/checklist-and-export-ux.spec.ts src/checklist-textarea-ux.spec.ts src/checklist-timestamps.spec.ts",
     "test:headed": "playwright test --headed",
     "ci": "node ./scripts/run-ci.mjs",
+    "ci:smoke": "node ./scripts/run-ci.mjs --grep @smoke",
+    "ci:core": "node ./scripts/run-ci.mjs src/runtime-smoke.spec.ts src/checklist-and-export-ux.spec.ts src/checklist-textarea-ux.spec.ts src/checklist-timestamps.spec.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {

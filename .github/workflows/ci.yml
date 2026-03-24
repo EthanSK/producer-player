@@ -82,11 +82,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build app for Electron runtime tests
-        run: npm run build
-
       - name: Run runtime smoke tests
         env:
           PLAYWRIGHT_WORKERS: 2
-          PLAYWRIGHT_GREP: '@smoke'
-        run: npm run ci -w @producer-player/e2e
+        run: npm run e2e:smoke

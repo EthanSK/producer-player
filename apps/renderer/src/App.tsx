@@ -5397,7 +5397,6 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
-              <span className="checklist-transport-hint">Shift+Tab toggles −10s ↔ input</span>
             </div>
 
             <div
@@ -5488,137 +5487,6 @@ export function App(): JSX.Element {
               )}
             </div>
 
-            {selectedPlaybackVersion ? (
-              <div className="checklist-mini-player" data-testid="song-checklist-mini-player">
-                <div className="checklist-mini-player-scrubber-row">
-                  <span className="muted">{formatTime(currentTimeSeconds)}</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={durationSeconds > 0 ? durationSeconds : 0}
-                    step={0.1}
-                    value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
-                    disabled={durationSeconds <= 0}
-                    onChange={(event) => handleSeek(Number(event.target.value))}
-                    data-testid="song-checklist-mini-player-scrubber"
-                    title="Scrub through the selected track while the checklist is open."
-                  />
-                  <span className="muted">{formatTime(durationSeconds)}</span>
-                </div>
-                <div className="checklist-mini-player-transport">
-                  <button
-                    type="button"
-                    className="checklist-mini-player-button"
-                    data-testid="song-checklist-mini-player-prev"
-                    onClick={handlePreviousTrack}
-                    title="Previous track"
-                    aria-label="Previous track"
-                  >
-                    ◀◀
-                  </button>
-
-                  <div className="checklist-transport-group">
-                    <button
-                      ref={checklistSkipBackTenButtonRef}
-                      type="button"
-                      className="checklist-skip-button"
-                      data-testid="song-checklist-skip-back-10"
-                      onClick={() => handleSkipSeconds(-10)}
-                      onKeyDown={(event) => {
-                        if (
-                          event.key === 'Tab' &&
-                          !event.metaKey &&
-                          !event.ctrlKey &&
-                          !event.altKey
-                        ) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
-                        }
-                      }}
-                      title="Skip back 10 seconds"
-                      aria-label="Skip back 10 seconds"
-                    >
-                      −10s
-                    </button>
-                    <button
-                      type="button"
-                      className="checklist-skip-button checklist-skip-button-small"
-                      data-testid="song-checklist-skip-back-5"
-                      onClick={() => handleSkipSeconds(-5)}
-                      title="Skip back 5 seconds"
-                      aria-label="Skip back 5 seconds"
-                    >
-                      −5s
-                    </button>
-                    <button
-                      type="button"
-                      className="checklist-skip-button checklist-skip-button-small"
-                      data-testid="song-checklist-skip-back-2"
-                      onClick={() => handleSkipSeconds(-2)}
-                      title="Skip back 2 seconds"
-                      aria-label="Skip back 2 seconds"
-                    >
-                      −2s
-                    </button>
-                    <button
-                      type="button"
-                      className="checklist-play-toggle"
-                      data-playing={isPlaying ? 'true' : 'false'}
-                      aria-label={isPlaying ? 'Pause' : 'Play'}
-                      title={isPlaying ? 'Pause playback' : 'Resume playback'}
-                      data-testid="song-checklist-play-toggle"
-                      onClick={() => {
-                        void handleTogglePlayback();
-                      }}
-                    >
-                      <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="checklist-skip-button checklist-skip-button-small"
-                      data-testid="song-checklist-skip-forward-2"
-                      onClick={() => handleSkipSeconds(2)}
-                      title="Skip forward 2 seconds"
-                      aria-label="Skip forward 2 seconds"
-                    >
-                      +2s
-                    </button>
-                    <button
-                      type="button"
-                      className="checklist-skip-button checklist-skip-button-small"
-                      data-testid="song-checklist-skip-forward-5"
-                      onClick={() => handleSkipSeconds(5)}
-                      title="Skip forward 5 seconds"
-                      aria-label="Skip forward 5 seconds"
-                    >
-                      +5s
-                    </button>
-                    <button
-                      type="button"
-                      className="checklist-skip-button"
-                      data-testid="song-checklist-skip-forward-10"
-                      onClick={() => handleSkipSeconds(10)}
-                      title="Skip forward 10 seconds"
-                      aria-label="Skip forward 10 seconds"
-                    >
-                      +10s
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="checklist-mini-player-button"
-                    data-testid="song-checklist-mini-player-next"
-                    onClick={handleNextTrack}
-                    title="Next track"
-                    aria-label="Next track"
-                  >
-                    ▶▶
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
               <textarea
                 ref={checklistComposerTextareaRef}
@@ -5637,7 +5505,7 @@ export function App(): JSX.Element {
                 onKeyDown={(event) => {
                   if (
                     event.key === 'Tab' &&
-                    event.shiftKey &&
+                    !event.shiftKey &&
                     !event.metaKey &&
                     !event.ctrlKey &&
                     !event.altKey
@@ -5698,6 +5566,143 @@ export function App(): JSX.Element {
                 Add
               </button>
             </div>
+
+            {selectedPlaybackVersion ? (
+              <>
+                <p className="checklist-transport-hint checklist-transport-hint-inline">
+                  Tab: input → −10s → controls · Shift+Tab on −10s returns to input
+                </p>
+                <div className="checklist-mini-player" data-testid="song-checklist-mini-player">
+                  <div className="checklist-mini-player-scrubber-row">
+                    <span className="muted">{formatTime(currentTimeSeconds)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={durationSeconds > 0 ? durationSeconds : 0}
+                      step={0.1}
+                      value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
+                      disabled={durationSeconds <= 0}
+                      onChange={(event) => handleSeek(Number(event.target.value))}
+                      data-testid="song-checklist-mini-player-scrubber"
+                      title="Scrub through the selected track while the checklist is open."
+                    />
+                    <span className="muted">{formatTime(durationSeconds)}</span>
+                  </div>
+                  <div className="checklist-mini-player-transport">
+                    <button
+                      type="button"
+                      className="checklist-mini-player-button"
+                      data-testid="song-checklist-mini-player-prev"
+                      onClick={handlePreviousTrack}
+                      title="Previous track"
+                      aria-label="Previous track"
+                    >
+                      ◀◀
+                    </button>
+
+                    <div className="checklist-transport-group">
+                      <button
+                        ref={checklistSkipBackTenButtonRef}
+                        type="button"
+                        className="checklist-skip-button"
+                        data-testid="song-checklist-skip-back-10"
+                        onClick={() => handleSkipSeconds(-10)}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === 'Tab' &&
+                            event.shiftKey &&
+                            !event.metaKey &&
+                            !event.ctrlKey &&
+                            !event.altKey
+                          ) {
+                            event.preventDefault();
+                            checklistComposerTextareaRef.current?.focus();
+                          }
+                        }}
+                        title="Skip back 10 seconds"
+                        aria-label="Skip back 10 seconds"
+                      >
+                        −10s
+                      </button>
+                      <button
+                        type="button"
+                        className="checklist-skip-button checklist-skip-button-small"
+                        data-testid="song-checklist-skip-back-5"
+                        onClick={() => handleSkipSeconds(-5)}
+                        title="Skip back 5 seconds"
+                        aria-label="Skip back 5 seconds"
+                      >
+                        −5s
+                      </button>
+                      <button
+                        type="button"
+                        className="checklist-skip-button checklist-skip-button-small"
+                        data-testid="song-checklist-skip-back-2"
+                        onClick={() => handleSkipSeconds(-2)}
+                        title="Skip back 2 seconds"
+                        aria-label="Skip back 2 seconds"
+                      >
+                        −2s
+                      </button>
+                      <button
+                        type="button"
+                        className="checklist-play-toggle"
+                        data-playing={isPlaying ? 'true' : 'false'}
+                        aria-label={isPlaying ? 'Pause' : 'Play'}
+                        title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                        data-testid="song-checklist-play-toggle"
+                        onClick={() => {
+                          void handleTogglePlayback();
+                        }}
+                      >
+                        <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="checklist-skip-button checklist-skip-button-small"
+                        data-testid="song-checklist-skip-forward-2"
+                        onClick={() => handleSkipSeconds(2)}
+                        title="Skip forward 2 seconds"
+                        aria-label="Skip forward 2 seconds"
+                      >
+                        +2s
+                      </button>
+                      <button
+                        type="button"
+                        className="checklist-skip-button checklist-skip-button-small"
+                        data-testid="song-checklist-skip-forward-5"
+                        onClick={() => handleSkipSeconds(5)}
+                        title="Skip forward 5 seconds"
+                        aria-label="Skip forward 5 seconds"
+                      >
+                        +5s
+                      </button>
+                      <button
+                        type="button"
+                        className="checklist-skip-button"
+                        data-testid="song-checklist-skip-forward-10"
+                        onClick={() => handleSkipSeconds(10)}
+                        title="Skip forward 10 seconds"
+                        aria-label="Skip forward 10 seconds"
+                      >
+                        +10s
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="checklist-mini-player-button"
+                      data-testid="song-checklist-mini-player-next"
+                      onClick={handleNextTrack}
+                      title="Next track"
+                      aria-label="Next track"
+                    >
+                      ▶▶
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : null}
 
             <div className="checklist-modal-actions">
               <button

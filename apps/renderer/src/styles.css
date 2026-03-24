@@ -1350,7 +1350,7 @@ input[type='range'] {
 
 .checklist-modal-card {
   width: min(640px, 100%);
-  max-height: min(80vh, 760px);
+  max-height: min(88vh, 860px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1375,8 +1375,8 @@ input[type='range'] {
 
 .checklist-item-scroll-region {
   flex: 1;
-  min-height: 140px;
-  max-height: 48vh;
+  min-height: 160px;
+  max-height: 56vh;
   overflow-y: auto;
   padding-right: 2px;
   display: flex;
@@ -1626,10 +1626,15 @@ button.checklist-mini-player-button:hover {
 }
 
 .checklist-transport-hint {
+  margin: 0;
   font-size: 11px;
   color: var(--text-muted);
   opacity: 0.82;
-  text-align: right;
+  text-align: left;
+}
+
+.checklist-transport-hint-inline {
+  padding: 0 2px;
 }
 
 .checklist-transport-group {
@@ -1919,7 +1924,7 @@ button.checklist-play-toggle[data-playing='true'] {
   }
 
   .checklist-item-scroll-region {
-    max-height: 42vh;
+    max-height: 50vh;
   }
 
   .checklist-mini-player-scrubber-row {

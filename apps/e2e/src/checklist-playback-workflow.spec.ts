@@ -140,6 +140,78 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('tab flow starts from the input, advances across transport controls, and shift+tab from −10s returns to input', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-keyboard-focus-flow'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 5_000,
+      frequencyHz: 500,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await cueSongVersion(page, 'Track A', 'Track A v1.wav');
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const input = page.getByTestId('song-checklist-input');
+      const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
+      const skipBackFive = page.getByTestId('song-checklist-skip-back-5');
+      const skipBackTwo = page.getByTestId('song-checklist-skip-back-2');
+      const playToggle = page.getByTestId('song-checklist-play-toggle');
+      const transportHint = page.getByText(
+        'Tab: input → −10s → controls · Shift+Tab on −10s returns to input'
+      );
+
+      const [inputBox, hintBox, miniPlayerBox] = await Promise.all([
+        input.boundingBox(),
+        transportHint.boundingBox(),
+        page.getByTestId('song-checklist-mini-player').boundingBox(),
+      ]);
+
+      expect(inputBox).not.toBeNull();
+      expect(hintBox).not.toBeNull();
+      expect(miniPlayerBox).not.toBeNull();
+      expect((hintBox?.y ?? 0) + (hintBox?.height ?? 0)).toBeLessThanOrEqual(miniPlayerBox?.y ?? 0);
+      expect(inputBox?.y ?? 0).toBeLessThanOrEqual(hintBox?.y ?? 0);
+
+      await input.focus();
+      await expect(input).toBeFocused();
+
+      await page.keyboard.press('Tab');
+      await expect(skipBackTen).toBeFocused();
+
+      await page.keyboard.press('Tab');
+      await expect(skipBackFive).toBeFocused();
+
+      await page.keyboard.press('Tab');
+      await expect(skipBackTwo).toBeFocused();
+
+      await page.keyboard.press('Tab');
+      await expect(playToggle).toBeFocused();
+
+      await page.keyboard.press('Shift+Tab');
+      await expect(skipBackTwo).toBeFocused();
+
+      await page.keyboard.press('Shift+Tab');
+      await expect(skipBackFive).toBeFocused();
+
+      await page.keyboard.press('Shift+Tab');
+      await expect(skipBackTen).toBeFocused();
+
+      await page.keyboard.press('Shift+Tab');
+      await expect(input).toBeFocused();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('paused preview wheel scrubs the checklist timestamp and matching items flash when playback reaches them', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-preview-scroll-highlight'

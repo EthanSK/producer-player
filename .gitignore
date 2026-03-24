@@ -19,6 +19,3 @@ apps/e2e/test-results/
 /release/
 *.tsbuildinfo
 *.log
-
-# Development planning log (contains raw voice note transcripts)
-PLAN.md

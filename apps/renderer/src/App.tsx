@@ -50,6 +50,7 @@ import { WaveformDisplay } from './WaveformDisplay';
 import { StereoCorrelationMeter } from './StereoCorrelationMeter';
 import { Vectorscope } from './Vectorscope';
 import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
+import { HelpTooltip } from './HelpTooltip';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
@@ -4631,7 +4632,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-integrated-stat"
                   title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file."
                 >
-                  <span className="analysis-stat-label">Integrated LUFS</span>
+                  <span className="analysis-stat-label">Integrated LUFS <HelpTooltip text="The overall perceived loudness of your track, measured using the EBU R128 standard. This is what streaming platforms use to normalize your music. Target: -14 LUFS for Spotify, -16 for Apple Music." /></span>
                   <strong>{measuredIntegratedText}</strong>
                 </div>
                 <div
@@ -4639,7 +4640,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-short-term-stat"
                   title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback."
                 >
-                  <span className="analysis-stat-label">Current loudness</span>
+                  <span className="analysis-stat-label">Current loudness <HelpTooltip text="Real-time loudness estimate based on a 3-second window. Useful for monitoring loudness during playback." /></span>
                   <strong>{shortTermEstimateText}</strong>
                 </div>
               </div>
@@ -4674,7 +4675,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-lra-stat"
                   title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units."
                 >
-                  <span className="analysis-stat-label">Loudness range</span>
+                  <span className="analysis-stat-label">Loudness range <HelpTooltip text="How much the loudness varies throughout your track, measured in LU (Loudness Units). Higher = more dynamic. Typical pop: 5-8 LU. Classical: 10-20 LU." /></span>
                   <strong>{measuredLraText}</strong>
                 </div>
                 <div
@@ -4682,7 +4683,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-true-peak-stat"
                   title="True Peak — the highest inter-sample peak level in the track, measured via oversampling."
                 >
-                  <span className="analysis-stat-label">True Peak</span>
+                  <span className="analysis-stat-label">True Peak <HelpTooltip text="The absolute highest peak in your audio, measured with oversampling to detect inter-sample peaks. Keep below -1 dBTP for streaming, -2 dBTP for safety." /></span>
                   <strong>{measuredTruePeakText}</strong>
                 </div>
                 <div
@@ -4690,7 +4691,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-max-short-term-stat"
                   title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time."
                 >
-                  <span className="analysis-stat-label">Peak short-term</span>
+                  <span className="analysis-stat-label">Peak short-term <HelpTooltip text="The loudest 3-second window in your track. Useful for finding the loudest section." /></span>
                   <strong>{measuredMaxShortTermText}</strong>
                 </div>
                 <div
@@ -4698,7 +4699,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-max-momentary-stat"
                   title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time."
                 >
-                  <span className="analysis-stat-label">Peak momentary</span>
+                  <span className="analysis-stat-label">Peak momentary <HelpTooltip text="The loudest 400ms moment in your track. Shows the most extreme short burst of loudness." /></span>
                   <strong>{measuredMaxMomentaryText}</strong>
                 </div>
               </div>
@@ -4709,7 +4710,7 @@ export function App(): JSX.Element {
               >
                 <div className="analysis-normalization-header">
                   <div>
-                    <strong>Platform normalization preview</strong>
+                    <strong>Platform normalization preview <HelpTooltip text="Shows exactly how each streaming platform will adjust your track's volume. Toggle 'Preview' to hear what your track will sound like on that platform." /></strong>
                     <p className="muted" data-testid="analysis-normalization-summary">
                       {normalizationSummaryText}
                     </p>
@@ -6001,6 +6002,8 @@ export function App(): JSX.Element {
 
                 <section className="analysis-overlay-section" data-testid="analysis-overlay-reference-panel">
                   <h3>Reference track</h3>
+                  <div className="reference-panel-layout">
+                  <div className="reference-panel-controls">
                   <p className="muted">
                     Load a reference track to A/B against your mix.
                   </p>
@@ -6107,6 +6110,52 @@ export function App(): JSX.Element {
                   </div>
 
                   {referenceError ? <p className="error">{referenceError}</p> : null}
+                  </div>
+                  {savedReferenceTracks.length > 0 ? (
+                    <div className="saved-reference-tracks">
+                      <h4>Saved References</h4>
+                      <div className="saved-reference-tracks-list">
+                        {savedReferenceTracks.map((saved) => (
+                          <div
+                            key={saved.filePath}
+                            className={
+                              'saved-reference-track-row' +
+                              (referenceTrack?.filePath === saved.filePath ? ' active' : '')
+                            }
+                          >
+                            <button
+                              type="button"
+                              className="saved-reference-track-load"
+                              onClick={() => {
+                                void handleLoadSavedReferenceTrack(saved);
+                              }}
+                              disabled={referenceStatus === 'loading'}
+                              title={saved.filePath}
+                            >
+                              <span className="saved-reference-track-name">{saved.fileName}</span>
+                              <span className="saved-reference-track-meta">
+                                {saved.integratedLufs !== null
+                                  ? saved.integratedLufs.toFixed(1) + ' LUFS'
+                                  : ''}
+                                {saved.integratedLufs !== null ? ' · ' : ''}
+                                {formatSavedReferenceDate(saved.dateLastUsed)}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="saved-reference-track-remove ghost"
+                              onClick={() => handleRemoveSavedReferenceTrack(saved.filePath)}
+                              title="Remove from saved references"
+                              aria-label={"Remove " + saved.fileName}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  </div>
                 </section>
 
                 {/* Loudness History Graph */}
@@ -6367,7 +6416,10 @@ export function App(): JSX.Element {
                 </section>
 
                 <section className="analysis-overlay-section analysis-comparison-panel">
-                  <h3>Your mix vs reference</h3>
+                  <div className="analysis-section-header">
+                    <h4>Your Mix vs Reference</h4>
+                    <p className="analysis-section-subtitle">Compare loudness and tonal balance against your reference track</p>
+                  </div>
                   {referenceTrack && activeReferenceComparison ? (
                     <div data-testid="analysis-active-reference">
                       <p>

@@ -244,6 +244,61 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('checklist mini-player next/previous reinitialize the checklist to the moved song', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-mini-player-reinitialize-on-track-nav'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 2_800,
+      frequencyHz: 440,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
+      durationMs: 2_800,
+      frequencyHz: 660,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const queueTitles = await page.getByTestId('main-list-row-title').allTextContents();
+      const [firstSongTitle, secondSongTitle] = queueTitles.map((title) => title.trim());
+
+      expect(firstSongTitle).toBeTruthy();
+      expect(secondSongTitle).toBeTruthy();
+      expect(secondSongTitle).not.toBe(firstSongTitle);
+
+      await cueSongVersion(page, firstSongTitle, `${firstSongTitle} v1.wav`);
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const checklistInput = page.getByTestId('song-checklist-input');
+      await checklistInput.fill('draft for current song');
+
+      await page.getByTestId('song-checklist-mini-player-next').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(`${secondSongTitle} v1.wav`);
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${secondSongTitle} Checklist`
+      );
+      await expect(checklistInput).toHaveValue('');
+
+      await checklistInput.fill('draft for moved song');
+
+      await page.getByTestId('song-checklist-mini-player-prev').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(`${firstSongTitle} v1.wav`);
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${firstSongTitle} Checklist`
+      );
+      await expect(checklistInput).toHaveValue('');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('typing at track end pauses instead of auto-advancing the checklist modal', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-pause-at-end-while-typing'

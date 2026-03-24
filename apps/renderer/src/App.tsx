@@ -5471,12 +5471,12 @@ export function App(): JSX.Element {
                       />
                       <button
                         type="button"
-                        className="ghost checklist-remove-button"
+                        className="icon-button checklist-remove-button"
                         onClick={() => handleRemoveChecklistItem(checklistModalSong.id, item.id)}
                         aria-label={`Remove ${item.text}`}
                         title="Remove checklist item"
                       >
-                        🗑️
+                        <span aria-hidden="true">✕</span>
                       </button>
                     </li>
                   ))}

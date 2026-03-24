@@ -4824,7 +4824,7 @@ export function App(): JSX.Element {
 
               <div className="analysis-reference-toolbar producer-reference-toolbar">
                 <div>
-                  <strong>Reference</strong>
+                  <strong>Reference <HelpTooltip text="Compare your mix against a reference track. Level matching automatically adjusts volume so you're comparing quality, not loudness." /></strong>
                   <p className="muted" data-testid="analysis-reference-summary">
                     {referenceTrack
                       ? `${referenceTrack.fileName} · ${
@@ -6277,7 +6277,7 @@ export function App(): JSX.Element {
 
                   <section className="analysis-overlay-section">
                     <div className="analysis-section-header">
-                      <h4>Tonal Balance{isRefMode ? " (Reference)" : ""}</h4>
+                      <h4>Tonal Balance{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Breakdown of energy across frequency ranges. Low (20-250 Hz), Mid (250-4000 Hz), High (4000-20000 Hz). Helps check if your mix is bass-heavy or too bright." /></h4>
                       <p className="analysis-section-subtitle">Low/mid/high energy distribution</p>
                     </div>
                     <div className="analysis-tonal-balance detailed">
@@ -6306,31 +6306,31 @@ export function App(): JSX.Element {
                   <h3>Loudness &amp; peaks{isRefMode ? " (Reference)" : ""}</h3>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
-                      <span className="analysis-stat-label">Integrated LUFS{refSuffix}</span>
+                      <span className="analysis-stat-label">Integrated LUFS{refSuffix} <HelpTooltip text="The overall perceived loudness of your track, measured using the EBU R128 standard. This is what streaming platforms use to normalize your music. Target: -14 LUFS for Spotify, -16 for Apple Music." /></span>
                       <strong>{measuredIntegratedText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
-                      <span className="analysis-stat-label">Current loudness{refSuffix}</span>
+                      <span className="analysis-stat-label">Current loudness{refSuffix} <HelpTooltip text="Real-time loudness estimate based on a 3-second window. Useful for monitoring loudness during playback." /></span>
                       <strong>{shortTermEstimateText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
-                      <span className="analysis-stat-label">Loudness range{refSuffix}</span>
+                      <span className="analysis-stat-label">Loudness range{refSuffix} <HelpTooltip text="How much the loudness varies throughout your track, measured in LU (Loudness Units). Higher = more dynamic. Typical pop: 5-8 LU. Classical: 10-20 LU." /></span>
                       <strong>{measuredLraText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="True Peak — the highest inter-sample peak level in the track, measured via oversampling.">
-                      <span className="analysis-stat-label">True Peak{refSuffix}</span>
+                      <span className="analysis-stat-label">True Peak{refSuffix} <HelpTooltip text="The absolute highest peak in your audio, measured with oversampling to detect inter-sample peaks. Keep below -1 dBTP for streaming, -2 dBTP for safety." /></span>
                       <strong>{measuredTruePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Sample Peak — the highest digital sample value in the track, without oversampling.">
-                      <span className="analysis-stat-label">Sample peak{refSuffix}</span>
+                      <span className="analysis-stat-label">Sample peak{refSuffix} <HelpTooltip text="The highest sample value in the file. Unlike true peak, this doesn't account for inter-sample peaks that can occur during D/A conversion." /></span>
                       <strong>{measuredSamplePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time.">
-                      <span className="analysis-stat-label">Peak short-term{refSuffix}</span>
+                      <span className="analysis-stat-label">Peak short-term{refSuffix} <HelpTooltip text="The loudest 3-second window in your track. Useful for finding the loudest section." /></span>
                       <strong>{measuredMaxShortTermText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
-                      <span className="analysis-stat-label">Peak momentary{refSuffix}</span>
+                      <span className="analysis-stat-label">Peak momentary{refSuffix} <HelpTooltip text="The loudest 400ms moment in your track. Shows the most extreme short burst of loudness." /></span>
                       <strong>{measuredMaxMomentaryText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Average volume level across the entire track (RMS-based), in dBFS.">
@@ -6338,7 +6338,7 @@ export function App(): JSX.Element {
                       <strong>{measuredMeanVolumeText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Crest Factor — difference between peak and RMS levels. Higher values indicate more dynamic range.">
-                      <span className="analysis-stat-label">Crest Factor{refSuffix}</span>
+                      <span className="analysis-stat-label">Crest Factor{refSuffix} <HelpTooltip text="Difference between peak and RMS (average) levels. Higher = more dynamic/punchy transients. Typical: 10-15 dB for unmastered, 4-8 dB for heavily limited masters." /></span>
                       <strong>
                         {analysisStatus === 'ready' && analysis
                           ? `${analysis.crestFactorDb.toFixed(1)} dB`
@@ -6346,7 +6346,7 @@ export function App(): JSX.Element {
                       </strong>
                     </div>
                     <div className="analysis-stat-card" title="Number of samples at or above 0 dBFS (digital clipping).">
-                      <span className="analysis-stat-label">Clip Count{refSuffix}</span>
+                      <span className="analysis-stat-label">Clip Count{refSuffix} <HelpTooltip text="Number of samples that hit or exceed 0 dBFS (digital ceiling). Any clips above 0 indicate digital distortion. Ideally should be 0." /></span>
                       <strong>
                         {analysisStatus === 'ready' && analysis
                           ? analysis.clipCount > 0
@@ -6356,7 +6356,7 @@ export function App(): JSX.Element {
                       </strong>
                     </div>
                     <div className="analysis-stat-card" title="DC Offset — mean sample value. Non-zero DC offset wastes headroom.">
-                      <span className="analysis-stat-label">DC Offset{refSuffix}</span>
+                      <span className="analysis-stat-label">DC Offset{refSuffix} <HelpTooltip text="Whether the waveform is shifted above or below the zero line. Even small offsets waste headroom and can cause clicks. Should be as close to 0 as possible." /></span>
                       <strong>
                         {analysisStatus === 'ready' && analysis
                           ? Math.abs(analysis.dcOffset) > 0.001
@@ -6373,7 +6373,7 @@ export function App(): JSX.Element {
                   className="analysis-overlay-section"
                   data-testid="analysis-overlay-normalization-panel"
                 >
-                  <h3>Platform normalization preview</h3>
+                  <h3>Platform normalization preview <HelpTooltip text="Shows exactly how each streaming platform will adjust your track's volume. Toggle 'Preview' to hear what your track will sound like on that platform." /></h3>
                   <div className="analysis-normalization-header">
                     <div>
                       <strong>Streaming loudness preview</strong>
@@ -6482,7 +6482,7 @@ export function App(): JSX.Element {
 
                 <section className="analysis-overlay-section analysis-comparison-panel">
                   <div className="analysis-section-header">
-                    <h4>Your Mix vs Reference</h4>
+                    <h4>Your Mix vs Reference <HelpTooltip text="Compare your mix against a reference track. Level matching automatically adjusts volume so you're comparing quality, not loudness." /></h4>
                     <p className="analysis-section-subtitle">Compare loudness and tonal balance against your reference track</p>
                   </div>
                   {referenceTrack && activeReferenceComparison ? (
@@ -6528,7 +6528,7 @@ export function App(): JSX.Element {
                 <div className="analysis-overlay-side-by-side">
                   <section className="analysis-overlay-section" data-testid="analysis-vectorscope">
                     <div className="analysis-section-header">
-                      <h4>Vectorscope{isRefMode ? " (Reference)" : ""}</h4>
+                      <h4>Vectorscope{isRefMode ? " (Reference)" : ""} <HelpTooltip text="XY display of your stereo image. Vertical line = mono signal. Wider spread = wider stereo. If it leans left or right, your mix is panned. A full circle means heavy stereo processing." /></h4>
                       <p className="analysis-section-subtitle">Stereo image — wider spread = wider stereo field, vertical = mono</p>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -6543,7 +6543,7 @@ export function App(): JSX.Element {
 
                   <section className="analysis-overlay-section" data-testid="analysis-midside">
                     <div className="analysis-section-header">
-                      <h4>Mid/Side Monitoring</h4>
+                      <h4>Mid/Side Monitoring <HelpTooltip text="Listen to just the center (Mid) or sides (Side) of your stereo mix separately. Mid = vocals, bass, kick. Side = reverb, width, panning. Useful for checking stereo balance." /></h4>
                       <p className="analysis-section-subtitle">Listen to Mid (center) or Side (stereo width) in isolation</p>
                     </div>
                     <div className="analysis-ab-actions" role="group" aria-label="Mid/Side toggle" style={{ display: 'flex', gap: 6 }}>
@@ -6580,7 +6580,7 @@ export function App(): JSX.Element {
                 {/* K-Metering */}
                 <section className="analysis-overlay-section" data-testid="analysis-k-metering">
                   <div className="analysis-section-header">
-                    <h4>K-Metering</h4>
+                    <h4>K-Metering <HelpTooltip text="Bob Katz's metering standard. K-14: 0 dB on the meter = -14 dBFS (good for most music). K-20: 0 dB = -20 dBFS (good for film/classical). Helps calibrate your monitoring." /></h4>
                     <p className="analysis-section-subtitle">K-weighted meter scales calibrated for different content types — 0 dB on the K-scale represents the reference listening level</p>
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
@@ -6609,7 +6609,7 @@ export function App(): JSX.Element {
                 {analysisStatus === 'ready' && analysis ? (
                   <section className="analysis-overlay-section" data-testid="analysis-pro-indicators">
                     <div className="analysis-section-header">
-                      <h4>Quick Diagnostics</h4>
+                      <h4>Quick Diagnostics <HelpTooltip text="Classification of how dynamic your track is based on Loudness Range. High DR = very dynamic. Low DR = heavily compressed/limited." /></h4>
                       <p className="analysis-section-subtitle">At-a-glance health checks for your master</p>
                     </div>
                     <div className="analysis-pro-indicators">

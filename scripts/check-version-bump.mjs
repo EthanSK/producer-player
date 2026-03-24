@@ -18,6 +18,7 @@ const IGNORE_EXACT = new Set([
   'README.md',
   'AGENTS.md',
   'CLAUDE.md',
+  'PLAN.md',
   '.gitignore',
   'site/version.json',
   'scripts/check-version-consistency.mjs',

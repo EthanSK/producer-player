@@ -2270,6 +2270,7 @@ export function App(): JSX.Element {
   const referencePlaybackKey = getReferencePlaybackKey(referenceTrack);
   const isRefMode = playbackPreviewMode === 'reference' && referenceTrack !== null;
   const refSuffix = isRefMode ? ' (Reference)' : '';
+  const refTrackSuffix = isRefMode ? ' (Reference Track)' : '';
   const desiredPlaybackSource =
     playbackPreviewMode === 'reference'
       ? referenceTrack?.playbackSource ?? null
@@ -4442,7 +4443,11 @@ export function App(): JSX.Element {
       error: 'Error',
     }
   );
-  const tonalBalanceAvailable = analysisStatus === 'ready' && analysis !== null;
+  const activeTonalBalance = isRefMode
+    ? referenceTrack?.previewAnalysis.tonalBalance ?? null
+    : analysis?.tonalBalance ?? null;
+  const tonalBalanceStatus = isRefMode ? referenceStatus : analysisStatus;
+  const tonalBalanceReady = tonalBalanceStatus === 'ready' && activeTonalBalance !== null;
   const referenceIntegratedText =
     referenceStatus === 'ready' && referenceTrack
       ? formatMeasuredStat(referenceTrack.measuredAnalysis.integratedLufs, 'LUFS')
@@ -4964,24 +4969,37 @@ export function App(): JSX.Element {
                 </div>
               </section>
 
-              <div className="analysis-tonal-balance" data-testid="analysis-tonal-balance">
-                {(
-                  [
-                    ['Low', tonalBalanceAvailable ? analysis?.tonalBalance.low ?? 0 : 0],
-                    ['Mid', tonalBalanceAvailable ? analysis?.tonalBalance.mid ?? 0 : 0],
-                    ['High', tonalBalanceAvailable ? analysis?.tonalBalance.high ?? 0 : 0],
-                  ] as Array<[string, number]>
-                ).map(([label, value]) => (
-                  <div key={label} className="analysis-band-row" data-testid={`analysis-band-${label.toLowerCase()}`}>
-                    <span>{label}</span>
-                    <div className="analysis-band-meter" aria-hidden="true">
-                      <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
+              <div className="analysis-tonal-balance-wrapper">
+                <p className="analysis-tonal-balance-heading" data-testid="analysis-tonal-balance-heading">
+                  Tonal balance{refTrackSuffix}
+                </p>
+                <div
+                  className="analysis-tonal-balance"
+                  data-testid="analysis-tonal-balance"
+                  data-source={isRefMode ? "reference-track" : "mix-track"}
+                >
+                  {(
+                    [
+                      ['Low', activeTonalBalance?.low ?? 0],
+                      ['Mid', activeTonalBalance?.mid ?? 0],
+                      ['High', activeTonalBalance?.high ?? 0],
+                    ] as Array<[string, number]>
+                  ).map(([label, value]) => (
+                    <div key={label} className="analysis-band-row" data-testid={`analysis-band-${label.toLowerCase()}`}>
+                      <span>{label}</span>
+                      <div className="analysis-band-meter" aria-hidden="true">
+                        <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
+                      </div>
+                      <strong>
+                        {tonalBalanceReady
+                          ? formatPercent(value)
+                          : tonalBalanceStatus === 'error'
+                            ? 'Error'
+                            : 'Loading…'}
+                      </strong>
                     </div>
-                    <strong>
-                      {analysisStatus === 'ready' && analysis ? formatPercent(value) : 'Loading…'}
-                    </strong>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
 
               <div className="analysis-reference-toolbar producer-reference-toolbar">
@@ -6186,7 +6204,7 @@ export function App(): JSX.Element {
               <div className="analysis-overlay-grid">
                 <section className="analysis-overlay-section analysis-overlay-visualizations" data-testid="analysis-overlay-visualizations">
                   <div className="analysis-section-header">
-                    <h4>Spectrum Analyzer &amp; Level Meter {isRefMode ? " (Reference)" : ""} <HelpTooltip text="Shows the frequency content of your audio in real-time. Click bands to solo specific frequency ranges. The level meter on the right shows real-time RMS and peak levels." links={SPECTRUM_ANALYZER_LINKS} /></h4>
+                    <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer &amp; Level Meter{refTrackSuffix} <HelpTooltip text="Shows the frequency content of your audio in real-time. Click bands to solo specific frequency ranges. The level meter on the right shows real-time RMS and peak levels." links={SPECTRUM_ANALYZER_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Real-time frequency content and peak/RMS levels — click bands to solo frequency ranges</p>
                   </div>
                   <div className="analysis-overlay-viz-row">
@@ -6256,6 +6274,7 @@ export function App(): JSX.Element {
                       onClick={() => {
                         void handleUseCurrentTrackAsReference();
                       }}
+                      data-testid="analysis-overlay-set-current-reference"
                       disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
                       title="Use the current track as the reference."
                     >
@@ -6279,6 +6298,7 @@ export function App(): JSX.Element {
                         type="button"
                         className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
                         onClick={() => handleReferencePreviewModeChange('mix')}
+                        data-testid="analysis-overlay-ab-mix"
                         title="Listen to your mix."
                       >
                         Mix
@@ -6287,6 +6307,7 @@ export function App(): JSX.Element {
                         type="button"
                         className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
                         onClick={() => handleReferencePreviewModeChange('reference')}
+                        data-testid="analysis-overlay-ab-reference"
                         disabled={!referenceTrack || referenceStatus === 'loading'}
                         title="Listen to the reference track."
                       >
@@ -6455,24 +6476,32 @@ export function App(): JSX.Element {
 
                   <section className="analysis-overlay-section">
                     <div className="analysis-section-header">
-                      <h4>Tonal Balance{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Breakdown of energy across frequency ranges. Low (20-250 Hz), Mid (250-4000 Hz), High (4000-20000 Hz). Helps check if your mix is bass-heavy or too bright." links={TONAL_BALANCE_LINKS} /></h4>
+                      <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{refTrackSuffix} <HelpTooltip text="Breakdown of energy across frequency ranges. Low (20-250 Hz), Mid (250-4000 Hz), High (4000-20000 Hz). Helps check if your mix is bass-heavy or too bright." links={TONAL_BALANCE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Low/mid/high energy distribution</p>
                     </div>
-                    <div className="analysis-tonal-balance detailed">
+                    <div
+                      className="analysis-tonal-balance detailed"
+                      data-testid="analysis-overlay-tonal-balance"
+                      data-source={isRefMode ? "reference-track" : "mix-track"}
+                    >
                       {(
                         [
-                          ['Low', analysis?.tonalBalance.low ?? 0],
-                          ['Mid', analysis?.tonalBalance.mid ?? 0],
-                          ['High', analysis?.tonalBalance.high ?? 0],
+                          ['Low', activeTonalBalance?.low ?? 0],
+                          ['Mid', activeTonalBalance?.mid ?? 0],
+                          ['High', activeTonalBalance?.high ?? 0],
                         ] as Array<[string, number]>
                       ).map(([label, value]) => (
-                        <div key={label} className="analysis-band-row">
+                        <div key={label} className="analysis-band-row" data-testid={`analysis-overlay-band-${label.toLowerCase()}`}>
                           <span>{label}</span>
                           <div className="analysis-band-meter" aria-hidden="true">
                             <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
                           </div>
                           <strong>
-                            {analysisStatus === 'ready' && analysis ? formatPercent(value) : 'Loading…'}
+                            {tonalBalanceReady
+                              ? formatPercent(value)
+                              : tonalBalanceStatus === 'error'
+                                ? 'Error'
+                                : 'Loading…'}
                           </strong>
                         </div>
                       ))}

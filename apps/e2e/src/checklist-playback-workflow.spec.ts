@@ -377,6 +377,69 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('reference listening mode labels tonal/spectrum panels and shows reference tonal balance', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-reference-mode-tonal-balance-labels'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 3_600,
+      frequencyHz: 110,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
+      durationMs: 3_600,
+      frequencyHz: 7200,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const queueTitles = await page.getByTestId('main-list-row-title').allTextContents();
+      const [referenceSongTitle, mixSongTitle] = queueTitles.map((title) => title.trim());
+
+      expect(referenceSongTitle).toBeTruthy();
+      expect(mixSongTitle).toBeTruthy();
+      expect(referenceSongTitle).not.toBe(mixSongTitle);
+
+      await cueSongVersion(page, referenceSongTitle, `${referenceSongTitle} v1.wav`);
+
+      await page.getByTestId('analysis-expand-button').click();
+      await expect(page.getByTestId('analysis-modal')).toBeVisible();
+
+      const setCurrentReferenceButton = page.getByTestId('analysis-overlay-set-current-reference');
+      await expect(setCurrentReferenceButton).toBeEnabled();
+      await setCurrentReferenceButton.click();
+
+      const referenceModeButton = page.getByTestId('analysis-overlay-ab-reference');
+      await expect(referenceModeButton).toBeEnabled();
+
+      await page.getByTestId('analysis-overlay-next').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(`${mixSongTitle} v1.wav`);
+
+      await expect(page.getByTestId('analysis-overlay-tonal-balance')).toHaveAttribute(
+        'data-source',
+        'mix-track'
+      );
+
+      await referenceModeButton.click();
+      await expect(page.getByTestId('analysis-overlay-tonal-balance-heading')).toContainText(
+        'Reference Track'
+      );
+      await expect(page.getByTestId('analysis-overlay-spectrum-heading')).toContainText(
+        'Reference Track'
+      );
+      await expect(page.getByTestId('analysis-overlay-tonal-balance')).toHaveAttribute(
+        'data-source',
+        'reference-track'
+      );
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('analysis overlay closes on outside click and selected spectrum bands can be cleared', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-analysis-overlay-click-outside-clear-bands'

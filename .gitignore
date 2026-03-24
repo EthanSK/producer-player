@@ -19,6 +19,3 @@ apps/e2e/test-results/
 /release/
 *.tsbuildinfo
 *.log
-
-PLAN.md
-plan.md

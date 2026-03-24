@@ -804,7 +804,52 @@ input[type='range'] {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  align-items: start;
+  align-items: center;
+}
+
+.analysis-overlay-transport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+button.analysis-overlay-transport-button {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary, #9cafc4);
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+button.analysis-overlay-transport-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary, #e0eaf5);
+}
+
+button.analysis-overlay-play-toggle {
+  min-width: 40px;
+  font-size: 16px;
+}
+
+.analysis-overlay-transport-time {
+  font-size: 11px;
+  white-space: nowrap;
+  margin: 0 4px;
+}
+
+.analysis-overlay-transport-scrubber {
+  width: 120px;
+  min-width: 60px;
+  cursor: pointer;
 }
 
 .analysis-overlay-grid {

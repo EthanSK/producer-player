@@ -1000,7 +1000,6 @@ export function App(): JSX.Element {
   const [selectedNormalizationPlatformId, setSelectedNormalizationPlatformId] =
     useState<NormalizationPlatformId>('spotify');
   const [normalizationPreviewEnabled, setNormalizationPreviewEnabled] = useState(false);
-  const [moreAnalysisExpanded, setMoreAnalysisExpanded] = useState(false);
   const [midSideMode, setMidSideMode] = useState<'stereo' | 'mid' | 'side'>('stereo');
   const [analyserNodeL, setAnalyserNodeL] = useState<AnalyserNode | null>(null);
   const [analyserNodeR, setAnalyserNodeR] = useState<AnalyserNode | null>(null);
@@ -2149,6 +2148,8 @@ export function App(): JSX.Element {
       ? mixPlaybackSource
       : null;
   const referencePlaybackKey = getReferencePlaybackKey(referenceTrack);
+  const isRefMode = playbackPreviewMode === 'reference' && referenceTrack !== null;
+  const refSuffix = isRefMode ? ' (Reference)' : '';
   const desiredPlaybackSource =
     playbackPreviewMode === 'reference'
       ? referenceTrack?.playbackSource ?? null
@@ -5947,6 +5948,58 @@ export function App(): JSX.Element {
                   <p className="muted">LUFS · peaks · tone · refs · normalization</p>
                 )}
               </div>
+              {selectedPlaybackVersion ? (
+                <div className="analysis-overlay-transport" data-testid="analysis-overlay-transport">
+                  <button
+                    type="button"
+                    className="analysis-overlay-transport-button"
+                    data-testid="analysis-overlay-prev"
+                    onClick={() => handlePreviousTrack()}
+                    title="Previous track"
+                    aria-label="Previous track"
+                  >
+                    ◀◀
+                  </button>
+                  <button
+                    type="button"
+                    className="analysis-overlay-transport-button analysis-overlay-play-toggle"
+                    data-testid="analysis-overlay-play-toggle"
+                    data-playing={isPlaying ? 'true' : 'false'}
+                    aria-label={isPlaying ? 'Pause' : 'Play'}
+                    title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                    onClick={() => {
+                      void handleTogglePlayback();
+                    }}
+                  >
+                    <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="analysis-overlay-transport-button"
+                    data-testid="analysis-overlay-next"
+                    onClick={() => handleNextTrack()}
+                    title="Next track"
+                    aria-label="Next track"
+                  >
+                    ▶▶
+                  </button>
+                  <span className="analysis-overlay-transport-time muted" data-testid="analysis-overlay-time">
+                    {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
+                  </span>
+                  <input
+                    type="range"
+                    className="analysis-overlay-transport-scrubber"
+                    min={0}
+                    max={durationSeconds > 0 ? durationSeconds : 0}
+                    step={0.1}
+                    value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
+                    disabled={durationSeconds <= 0}
+                    onChange={(event) => handleSeek(Number(event.target.value))}
+                    data-testid="analysis-overlay-scrubber"
+                    title="Scrub through the track"
+                  />
+                </div>
+              ) : null}
               <button
                 type="button"
                 className="ghost"
@@ -5960,7 +6013,7 @@ export function App(): JSX.Element {
             {selectedPlaybackVersion ? (
               <div className="analysis-overlay-grid">
                 <section className="analysis-overlay-section analysis-overlay-visualizations" data-testid="analysis-overlay-visualizations">
-                  <h3>Real-time Spectrum &amp; Level</h3>
+                  <h3>Real-time Spectrum &amp; Level <HelpTooltip text="Shows the frequency content of your audio in real-time. Click bands to solo specific frequency ranges. The level meter on the right shows real-time RMS and peak levels." /></h3>
                   <div className="analysis-overlay-viz-row">
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
                       <SpectrumAnalyzer
@@ -6001,7 +6054,10 @@ export function App(): JSX.Element {
                 </section>
 
                 <section className="analysis-overlay-section" data-testid="analysis-overlay-reference-panel">
-                  <h3>Reference track</h3>
+                  <div className="analysis-section-header">
+                    <h4>Reference Track <HelpTooltip text="Compare your mix against a reference track. Level matching automatically adjusts volume so you're comparing quality, not loudness." /></h4>
+                    <p className="analysis-section-subtitle">Load a reference track to A/B compare against your mix</p>
+                  </div>
                   <div className="reference-panel-layout">
                   <div className="reference-panel-controls">
                   <p className="muted">
@@ -6160,7 +6216,7 @@ export function App(): JSX.Element {
 
                 {/* Loudness History Graph */}
                 <section className="analysis-overlay-section" data-testid="analysis-loudness-history">
-                  <h3>Loudness History</h3>
+                  <h3>Loudness History <HelpTooltip text="Shows how the loudness (LUFS) changes over time throughout your track. The horizontal line shows your integrated (overall) loudness. Helps identify sections that are too loud or quiet." /></h3>
                   <LoudnessHistoryGraph
                     analysis={analysis}
                     currentTimeSeconds={currentTimeSeconds}
@@ -6172,7 +6228,7 @@ export function App(): JSX.Element {
 
                 {/* Waveform Display */}
                 <section className="analysis-overlay-section" data-testid="analysis-waveform">
-                  <h3>Waveform</h3>
+                  <h3>Waveform <HelpTooltip text="Visual representation of your audio's amplitude over time. Shows dynamics, silence gaps, and potential clipping. The playback position is shown as a moving cursor." /></h3>
                   <WaveformDisplay
                     waveformPeaks={analysis?.waveformPeaks ?? null}
                     analysis={analysis}
@@ -6186,7 +6242,7 @@ export function App(): JSX.Element {
 
                 {/* Stereo Correlation Meter */}
                 <section className="analysis-overlay-section" data-testid="analysis-stereo-correlation">
-                  <h3>Stereo Correlation</h3>
+                  <h3>Stereo Correlation <HelpTooltip text="Shows the phase relationship between your left and right channels. +1 = perfectly correlated (mono). 0 = completely unrelated. -1 = out of phase (will cancel in mono). Stay above +0.3 for mono compatibility." /></h3>
                   <StereoCorrelationMeter
                     analyserNodeL={analyserNodeL}
                     analyserNodeR={analyserNodeR}
@@ -6459,100 +6515,169 @@ export function App(): JSX.Element {
                   )}
                 </section>
 
-                {/* More Analysis — expandable section at the bottom */}
-                <section className="analysis-overlay-section" data-testid="analysis-more-section">
-                  <button
-                    type="button"
-                    className="ghost analysis-more-toggle"
-                    onClick={() => setMoreAnalysisExpanded((v) => !v)}
-                    data-testid="analysis-more-toggle"
-                    style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                  >
-                    <h3 style={{ margin: 0 }}>More Analysis</h3>
-                    <span style={{ fontSize: 12, color: '#9cafc4' }}>
-                      {moreAnalysisExpanded ? 'Collapse' : 'Expand'}
-                    </span>
-                  </button>
-
-                  {moreAnalysisExpanded ? (
-                    <div className="analysis-overlay-grid" style={{ marginTop: 10 }}>
-                      {/* Vectorscope */}
-                      <div className="analysis-overlay-side-by-side">
-                        <section className="analysis-overlay-section" data-testid="analysis-vectorscope">
-                          <h3>Vectorscope</h3>
-                          <div style={{ display: 'flex', justifyContent: 'center' }}>
-                            <Vectorscope
-                              analyserNodeL={analyserNodeL}
-                              analyserNodeR={analyserNodeR}
-                              size={200}
-                              isPlaying={isPlaying}
-                            />
-                          </div>
-                        </section>
-
-                        {/* Mid/Side Monitoring */}
-                        <section className="analysis-overlay-section" data-testid="analysis-midside">
-                          <h3>Mid/Side Monitoring</h3>
-                          <p className="muted">Listen to Mid (center) or Side (stereo width) in isolation.</p>
-                          <div className="analysis-ab-actions" role="group" aria-label="Mid/Side toggle" style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              type="button"
-                              className={midSideMode === 'stereo' ? '' : 'ghost'}
-                              onClick={() => setMidSideMode('stereo')}
-                            >
-                              Stereo
-                            </button>
-                            <button
-                              type="button"
-                              className={midSideMode === 'mid' ? '' : 'ghost'}
-                              onClick={() => setMidSideMode('mid')}
-                            >
-                              Mid
-                            </button>
-                            <button
-                              type="button"
-                              className={midSideMode === 'side' ? '' : 'ghost'}
-                              onClick={() => setMidSideMode('side')}
-                            >
-                              Side
-                            </button>
-                          </div>
-                          {midSideMode !== 'stereo' ? (
-                            <p className="muted" style={{ fontSize: 12 }}>
-                              Listening in <strong>{midSideMode === 'mid' ? 'Mid (L+R)/2' : 'Side (L-R)/2'}</strong> mode
-                            </p>
-                          ) : null}
-                        </section>
-                      </div>
-
-                      {/* K-Metering */}
-                      <section className="analysis-overlay-section" data-testid="analysis-k-metering">
-                        <h3>K-Metering</h3>
-                        <p className="muted">K-weighted meter scales for different content types.</p>
-                        <div className="analysis-detail-grid analysis-detail-grid-wide">
-                          <div className="analysis-stat-card" title="K-14: 0 dB on meter = -14 dBFS. Best for most music.">
-                            <span className="analysis-stat-label">K-14 Reading</span>
-                            <strong>
-                              {analysisStatus === 'ready' && analysis
-                                ? `${(analysis.rmsDbfs + 14).toFixed(1)} dB`
-                                : 'Loading…'}
-                            </strong>
-                            <span className="muted">0 dB = -14 dBFS (music)</span>
-                          </div>
-                          <div className="analysis-stat-card" title="K-20: 0 dB on meter = -20 dBFS. Best for film/classical.">
-                            <span className="analysis-stat-label">K-20 Reading</span>
-                            <strong>
-                              {analysisStatus === 'ready' && analysis
-                                ? `${(analysis.rmsDbfs + 20).toFixed(1)} dB`
-                                : 'Loading…'}
-                            </strong>
-                            <span className="muted">0 dB = -20 dBFS (film/classical)</span>
-                          </div>
-                        </div>
-                      </section>
+                {/* Vectorscope & Mid/Side Monitoring */}
+                <div className="analysis-overlay-side-by-side">
+                  <section className="analysis-overlay-section" data-testid="analysis-vectorscope">
+                    <div className="analysis-section-header">
+                      <h4>Vectorscope</h4>
+                      <p className="analysis-section-subtitle">Stereo image — wider spread = wider stereo field, vertical = mono</p>
                     </div>
-                  ) : null}
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                      <Vectorscope
+                        analyserNodeL={analyserNodeL}
+                        analyserNodeR={analyserNodeR}
+                        size={200}
+                        isPlaying={isPlaying}
+                      />
+                    </div>
+                  </section>
+
+                  <section className="analysis-overlay-section" data-testid="analysis-midside">
+                    <div className="analysis-section-header">
+                      <h4>Mid/Side Monitoring</h4>
+                      <p className="analysis-section-subtitle">Listen to Mid (center) or Side (stereo width) in isolation</p>
+                    </div>
+                    <div className="analysis-ab-actions" role="group" aria-label="Mid/Side toggle" style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        className={midSideMode === 'stereo' ? '' : 'ghost'}
+                        onClick={() => setMidSideMode('stereo')}
+                      >
+                        Stereo
+                      </button>
+                      <button
+                        type="button"
+                        className={midSideMode === 'mid' ? '' : 'ghost'}
+                        onClick={() => setMidSideMode('mid')}
+                      >
+                        Mid
+                      </button>
+                      <button
+                        type="button"
+                        className={midSideMode === 'side' ? '' : 'ghost'}
+                        onClick={() => setMidSideMode('side')}
+                      >
+                        Side
+                      </button>
+                    </div>
+                    {midSideMode !== 'stereo' ? (
+                      <p className="muted" style={{ fontSize: 12 }}>
+                        Listening in <strong>{midSideMode === 'mid' ? 'Mid (L+R)/2' : 'Side (L-R)/2'}</strong> mode
+                      </p>
+                    ) : null}
+                  </section>
+                </div>
+
+                {/* K-Metering */}
+                <section className="analysis-overlay-section" data-testid="analysis-k-metering">
+                  <div className="analysis-section-header">
+                    <h4>K-Metering</h4>
+                    <p className="analysis-section-subtitle">K-weighted meter scales calibrated for different content types — 0 dB on the K-scale represents the reference listening level</p>
+                  </div>
+                  <div className="analysis-detail-grid analysis-detail-grid-wide">
+                    <div className="analysis-stat-card" title="K-14: 0 dB on meter = -14 dBFS. Best for most music.">
+                      <span className="analysis-stat-label">K-14 Metering</span>
+                      <strong>
+                        {analysisStatus === 'ready' && analysis
+                          ? `${(analysis.rmsDbfs + 14).toFixed(1)} dB`
+                          : 'Loading…'}
+                      </strong>
+                      <span className="muted">Reference: 0 dB = -14 dBFS (pop/rock/electronic)</span>
+                    </div>
+                    <div className="analysis-stat-card" title="K-20: 0 dB on meter = -20 dBFS. Best for film/classical.">
+                      <span className="analysis-stat-label">K-20 Metering</span>
+                      <strong>
+                        {analysisStatus === 'ready' && analysis
+                          ? `${(analysis.rmsDbfs + 20).toFixed(1)} dB`
+                          : 'Loading…'}
+                      </strong>
+                      <span className="muted">Reference: 0 dB = -20 dBFS (film/classical/broadcast)</span>
+                    </div>
+                  </div>
                 </section>
+
+                {/* Pro Indicators: Dynamic Range */}
+                {analysisStatus === 'ready' && analysis ? (
+                  <section className="analysis-overlay-section" data-testid="analysis-pro-indicators">
+                    <div className="analysis-section-header">
+                      <h4>Quick Diagnostics</h4>
+                      <p className="analysis-section-subtitle">At-a-glance health checks for your master</p>
+                    </div>
+                    <div className="analysis-pro-indicators">
+                      <div className={`analysis-pro-indicator ${
+                        (analysis.crestFactorDb) > 10 ? 'pass' : (analysis.crestFactorDb) >= 6 ? 'warn' : 'fail'
+                      }`} data-testid="analysis-dynamic-range-indicator">
+                        <span className="indicator-icon">{(analysis.crestFactorDb) > 10 ? '\u2728' : (analysis.crestFactorDb) >= 6 ? '\u26a0\ufe0f' : '\u26d4'}</span>
+                        <div className="indicator-content">
+                          <span className="indicator-label">Dynamic Range</span>
+                          <span className="indicator-value">
+                            {(analysis.crestFactorDb) > 10
+                              ? `High DR (${analysis.crestFactorDb.toFixed(1)} dB)`
+                              : (analysis.crestFactorDb) >= 6
+                                ? `Medium DR (${analysis.crestFactorDb.toFixed(1)} dB)`
+                                : `Low DR (${analysis.crestFactorDb.toFixed(1)} dB)`}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
+
+                {/* Mastering Checklist Summary */}
+                {analysisStatus === 'ready' && analysis && measuredAnalysis ? (
+                  <section className="analysis-overlay-section" data-testid="analysis-mastering-checklist">
+                    <div className="analysis-section-header">
+                      <h4>Mastering Checklist</h4>
+                      <p className="analysis-section-subtitle">Auto-generated summary of your master&apos;s technical health</p>
+                    </div>
+                    <div className="mastering-checklist-summary">
+                      <div className={`mastering-checklist-row ${
+                        measuredAnalysis.integratedLufs !== null && measuredAnalysis.integratedLufs >= -16 && measuredAnalysis.integratedLufs <= -6 ? 'pass' : 'warn'
+                      }`}>
+                        <span className="checklist-icon">{measuredAnalysis.integratedLufs !== null && measuredAnalysis.integratedLufs >= -16 && measuredAnalysis.integratedLufs <= -6 ? '\u2713' : '\u26a0'}</span>
+                        <span className="checklist-label">LUFS</span>
+                        <span className="checklist-value">
+                          {measuredAnalysis.integratedLufs !== null
+                            ? `${measuredAnalysis.integratedLufs.toFixed(1)} LUFS${measuredAnalysis.integratedLufs >= -16 && measuredAnalysis.integratedLufs <= -6 ? ' \u2014 within streaming range' : ' \u2014 outside typical range (-16 to -6)'}`
+                            : 'Not measured'}
+                        </span>
+                      </div>
+                      <div className={`mastering-checklist-row ${
+                        measuredAnalysis.truePeakDbfs !== null && measuredAnalysis.truePeakDbfs < -1 ? 'pass' : measuredAnalysis.truePeakDbfs !== null && measuredAnalysis.truePeakDbfs < 0 ? 'warn' : 'fail'
+                      }`}>
+                        <span className="checklist-icon">{measuredAnalysis.truePeakDbfs !== null && measuredAnalysis.truePeakDbfs < -1 ? '\u2713' : '\u26a0'}</span>
+                        <span className="checklist-label">True Peak</span>
+                        <span className="checklist-value">
+                          {measuredAnalysis.truePeakDbfs !== null
+                            ? `${measuredAnalysis.truePeakDbfs.toFixed(1)} dBTP${measuredAnalysis.truePeakDbfs < -1 ? ' \u2014 below -1 dBTP ceiling' : ' \u2014 above -1 dBTP, may clip on playback'}`
+                            : 'Not measured'}
+                        </span>
+                      </div>
+                      <div className={`mastering-checklist-row ${
+                        Math.abs(analysis.dcOffset) <= 0.001 ? 'pass' : 'warn'
+                      }`}>
+                        <span className="checklist-icon">{Math.abs(analysis.dcOffset) <= 0.001 ? '\u2713' : '\u26a0'}</span>
+                        <span className="checklist-label">DC Offset</span>
+                        <span className="checklist-value">
+                          {Math.abs(analysis.dcOffset) <= 0.001
+                            ? 'None detected'
+                            : `${(analysis.dcOffset * 100).toFixed(3)}% \u2014 wastes headroom, consider removing`}
+                        </span>
+                      </div>
+                      <div className={`mastering-checklist-row ${
+                        analysis.clipCount === 0 ? 'pass' : 'fail'
+                      }`}>
+                        <span className="checklist-icon">{analysis.clipCount === 0 ? '\u2713' : '\u26a0'}</span>
+                        <span className="checklist-label">Clipping</span>
+                        <span className="checklist-value">
+                          {analysis.clipCount === 0
+                            ? 'No clipped samples detected'
+                            : `${analysis.clipCount} clipped sample${analysis.clipCount === 1 ? '' : 's'} \u2014 reduce gain to avoid distortion`}
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
               </div>
             ) : (
               <p className="muted">Pick a track to see mastering analysis.</p>

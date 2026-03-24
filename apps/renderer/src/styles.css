@@ -543,6 +543,20 @@ input[type='range'] {
   gap: 2px;
 }
 
+.analysis-tonal-balance-wrapper {
+  display: grid;
+  gap: 6px;
+}
+
+.analysis-tonal-balance-heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .analysis-tonal-balance {
   display: grid;
   gap: 8px;

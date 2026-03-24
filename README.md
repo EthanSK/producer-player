@@ -8,20 +8,88 @@
 
 # Producer Player
 
-A desktop app for music producers who keep exporting new passes and need one clear place to track versions, compare mixes, and keep album order locked.
+**A free, open-source mastering analysis suite and production companion for music producers and mastering engineers.**
+
+Stop paying for expensive metering plugins. Producer Player gives you broadcast-grade loudness metering, stereo imaging analysis, platform normalization preview, reference A/B comparison, and version tracking -- all in one app.
 
 ![Producer Player](docs/assets/readme/app-hero.png)
 
-## Features
+## Mastering Analysis Suite
 
-- **Version Tracking** — Drag in a folder of bounces and Producer Player groups versions automatically (`Track v1`, `Track v2`, etc.), with archive-aware handling for older exports.
-- **A/B Mastering Workspace** — Compare your master against reference tracks with measured loudness, peak stats, tonal balance, and sample-rate visibility. Quick A/B with mix playhead restore after reference auditioning.
-- **Platform Normalization** — Hear what Spotify, Apple Music, YouTube, and TIDAL will do to your track with headroom-aware gain limits.
-- **Album Ordering** — Drag and reorder songs into your album sequence. Order persists through rescans, restarts, and relink flows.
-- **Checklists & Ratings** — Per-song checklist workflow and 1–10 rating slider to annotate and evaluate tracks.
-- **Time-Stamped Checklist Notes** — Add a checklist item and it captures the exact playback position. Click the timestamp to jump right back.
-- **Export Latest** — Exports the latest version of every song as numbered, album-sequenced files with ordering JSON for handoff.
-- **Playback Controls** — Play/pause, next/previous, repeat, scrub, and volume with per-song playhead continuity.
+Everything you need to evaluate and polish your masters, completely free.
+
+### Loudness Metering
+
+- **Integrated LUFS** -- The standard measurement for streaming platforms and broadcast compliance.
+- **Short-term LUFS** -- 3-second window for tracking dynamic changes during a track.
+- **Momentary LUFS** -- 400ms window for catching transient peaks and loud passages.
+- **Loudness Range (LRA)** -- Quantifies the dynamic range of your master.
+- **Loudness History Graph** -- Visualize loudness over the full duration of your track.
+
+### Peak Analysis
+
+- **True Peak (dBTP)** -- Inter-sample peak detection to prevent clipping on D/A conversion.
+- **Sample Peak** -- Per-sample peak level for quick headroom checks.
+- **Clip Count** -- Instantly see how many clipped samples exist in your bounce.
+- **Crest Factor** -- Peak-to-RMS ratio showing how much headroom your transients use.
+- **DC Offset** -- Detect unwanted DC bias that wastes headroom.
+
+### Stereo Imaging
+
+- **Vectorscope** -- Real-time Lissajous display of your stereo field.
+- **Stereo Correlation Meter** -- Verify mono compatibility at a glance. Catch phase issues before they ruin your mix on club systems and phone speakers.
+
+### Spectral Analysis
+
+- **Spectrum Analyzer** -- Full-spectrum frequency display.
+- **Band Soloing** -- Isolate frequency bands to hear exactly what's happening in each range.
+
+### Platform Normalization Preview
+
+Hear exactly what the streaming platforms will do to your master before you upload:
+
+- **Spotify** (-14 LUFS)
+- **Apple Music** (-16 LUFS)
+- **YouTube** (-14 LUFS)
+- **TIDAL** (-14 LUFS)
+- **Amazon Music** (-14 LUFS)
+
+Headroom-aware gain limits ensure the preview is accurate -- if the platform would clip your track, you'll hear it.
+
+### Reference A/B Comparison
+
+- Load a reference track alongside your master.
+- **Automatic level matching** so you're comparing tone, not volume.
+- Playhead restore after reference auditioning -- switch back and pick up exactly where you left off.
+
+### Monitoring Tools
+
+- **Mid/Side Monitoring** -- Solo the mid or side signal to evaluate stereo width and center content independently.
+- **K-Metering (K-14, K-20)** -- Bob Katz's K-System metering for calibrated monitoring at different target levels.
+
+## Production Features
+
+### Version Tracking
+
+Drag in a folder of bounces and Producer Player groups versions automatically (`Track v1`, `Track v2`, etc.), with archive-aware handling for older exports. Never lose track of which bounce is which.
+
+### Album Ordering
+
+Drag and reorder songs into your album sequence. Order persists through rescans, restarts, and relink flows.
+
+### Checklists & Ratings
+
+- Per-song checklist workflow to track your mix/master to-do items.
+- 1-10 rating slider to annotate and evaluate tracks.
+- **Time-stamped checklist notes** -- add a checklist item and it captures the exact playback position. Click the timestamp to jump right back.
+
+### Export Latest
+
+Exports the latest version of every song as numbered, album-sequenced files with ordering JSON for handoff.
+
+### Playback Controls
+
+Play/pause, next/previous, repeat, scrub, and volume with per-song playhead continuity.
 
 ## Tech Stack
 
@@ -36,12 +104,12 @@ A desktop app for music producers who keep exporting new passes and need one cle
 Monorepo with npm workspaces:
 
 ```
-apps/electron    — main process + preload bridge
-apps/renderer    — React UI
-apps/e2e         — Playwright desktop tests
-packages/contracts — shared IPC types
-packages/domain  — folder scanning, grouping, ordering logic
-site/            — GitHub Pages landing page
+apps/electron    -- main process + preload bridge
+apps/renderer    -- React UI
+apps/e2e         -- Playwright desktop tests
+packages/contracts -- shared IPC types
+packages/domain  -- folder scanning, grouping, ordering logic
+site/            -- GitHub Pages landing page
 ```
 
 ## Getting Started
@@ -102,7 +170,7 @@ Pushes to `main`/`master` publish macOS, Linux, and Windows ZIP builds plus SHA-
 
 > Current builds are unsigned preview releases. Signed/notarized macOS distribution and Mac App Store submission are pending.
 
-**→ [Latest release](https://github.com/EthanSK/producer-player/releases)**
+**-> [Latest release](https://github.com/EthanSK/producer-player/releases)**
 
 ## Links
 
@@ -113,4 +181,4 @@ Pushes to `main`/`master` publish macOS, Linux, and Windows ZIP builds plus SHA-
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT -- see [LICENSE](LICENSE).

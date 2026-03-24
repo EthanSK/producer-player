@@ -487,6 +487,10 @@ input[type='range'] {
   margin-top: -2px;
 }
 
+.analysis-stat-grid.analysis-stat-grid-extra[hidden] {
+  display: none;
+}
+
 .analysis-phase-note,
 .analysis-loading-line {
   min-height: 16px;
@@ -670,12 +674,13 @@ input[type='range'] {
   line-height: 1.25;
   color: var(--text-main);
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .analysis-platform-meta-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: 8px;
   width: 100%;
   min-width: 0;

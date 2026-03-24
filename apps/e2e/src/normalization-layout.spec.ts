@@ -75,7 +75,7 @@ type OverflowIssue = {
 };
 
 test.describe('normalization layout', () => {
-  test('uses full-width platform titles and avoids overflow in panel + overlay', async () => {
+  test('keeps platform icon/title on one top row and avoids overflow in panel + overlay', async () => {
     const workspaceRoot = path.resolve(__dirname, '../../..');
     const proofDir = path.join(
       workspaceRoot,
@@ -124,7 +124,7 @@ test.describe('normalization layout', () => {
         page.getByTestId('analysis-normalization-projected').locator('strong')
       ).not.toContainText('Loading', { timeout: 12_000 });
 
-      // Platform title should be the first row and effectively full width.
+      // Icon should stay top-left, with title on the same top row.
       const platformTitleLayout = await page.evaluate(() => {
         const button = document.querySelector(
           '[data-testid="analysis-platform-spotify"]'
@@ -141,15 +141,16 @@ test.describe('normalization layout', () => {
         const iconRect = icon.getBoundingClientRect();
 
         return {
-          titleAboveIcon: titleRect.top <= iconRect.top,
-          titleCoverageRatio:
-            buttonRect.width > 0 ? Number((titleRect.width / buttonRect.width).toFixed(3)) : 0,
+          sameTopRow: Math.abs(titleRect.top - iconRect.top) <= 6,
+          titleToRightOfIcon: titleRect.left >= iconRect.right - 2,
+          iconNearLeftEdge: iconRect.left - buttonRect.left <= 14,
         };
       });
 
       expect(platformTitleLayout).not.toBeNull();
-      expect(platformTitleLayout?.titleAboveIcon).toBe(true);
-      expect(platformTitleLayout?.titleCoverageRatio ?? 0).toBeGreaterThan(0.7);
+      expect(platformTitleLayout?.sameTopRow).toBe(true);
+      expect(platformTitleLayout?.titleToRightOfIcon).toBe(true);
+      expect(platformTitleLayout?.iconNearLeftEdge).toBe(true);
 
       const panelGridColumns = await page.evaluate(() => {
         const platformGrid = document.querySelector(

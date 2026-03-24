@@ -4723,7 +4723,6 @@ export function App(): JSX.Element {
                         title={platform.description}
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
                       >
-                        <span className="analysis-platform-title">{platform.label}</span>
                         <span className="analysis-platform-meta-row">
                           <span
                             className="analysis-platform-icon"
@@ -4731,16 +4730,17 @@ export function App(): JSX.Element {
                           >
                             <PlatformIcon platformId={platform.id} />
                           </span>
-                          <span className="analysis-platform-copy">
-                            <span className="analysis-platform-target">
-                              {platform.targetLufs.toFixed(0)} LUFS target
-                            </span>
-                            <span className="analysis-platform-change">
-                              Applied {platformChangeText}
-                            </span>
-                            <span className="muted">
-                              {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
-                            </span>
+                          <span className="analysis-platform-title">{platform.label}</span>
+                        </span>
+                        <span className="analysis-platform-copy">
+                          <span className="analysis-platform-target">
+                            {platform.targetLufs.toFixed(0)} LUFS target
+                          </span>
+                          <span className="analysis-platform-change">
+                            Applied {platformChangeText}
+                          </span>
+                          <span className="muted">
+                            {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
                           </span>
                         </span>
                       </button>
@@ -6271,7 +6271,6 @@ export function App(): JSX.Element {
                         title={platform.description}
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
                       >
-                        <span className="analysis-platform-title">{platform.label}</span>
                         <span className="analysis-platform-meta-row">
                           <span
                             className="analysis-platform-icon"
@@ -6279,13 +6278,14 @@ export function App(): JSX.Element {
                           >
                             <PlatformIcon platformId={platform.id} />
                           </span>
-                          <span className="analysis-platform-copy">
-                            <span className="analysis-platform-target">
-                              {platform.targetLufs.toFixed(0)} LUFS target
-                            </span>
-                            <span className="muted">
-                              {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
-                            </span>
+                          <span className="analysis-platform-title">{platform.label}</span>
+                        </span>
+                        <span className="analysis-platform-copy">
+                          <span className="analysis-platform-target">
+                            {platform.targetLufs.toFixed(0)} LUFS target
+                          </span>
+                          <span className="muted">
+                            {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
                           </span>
                         </span>
                       </button>

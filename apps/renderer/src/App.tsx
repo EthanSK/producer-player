@@ -45,6 +45,10 @@ import packageMetadata from '../../../package.json';
 import { SHOW_3000AD_BRANDING } from './featureFlags';
 import { SpectrumAnalyzer } from './SpectrumAnalyzer';
 import { LevelMeter } from './LevelMeter';
+import { LoudnessHistoryGraph } from './LoudnessHistoryGraph';
+import { WaveformDisplay } from './WaveformDisplay';
+import { StereoCorrelationMeter } from './StereoCorrelationMeter';
+import { Vectorscope } from './Vectorscope';
 import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
 
 type RepeatMode = 'off' | 'one' | 'all';
@@ -295,6 +299,45 @@ function isTextEntryElement(element: Element | null): boolean {
     inputType === 'tel' ||
     inputType === 'number'
   );
+}
+
+function canElementScroll(element: HTMLElement): boolean {
+  const style = window.getComputedStyle(element);
+  const canScrollY =
+    (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflowY === 'overlay') &&
+    element.scrollHeight > element.clientHeight + 1;
+  const canScrollX =
+    (style.overflowX === 'auto' || style.overflowX === 'scroll' || style.overflowX === 'overlay') &&
+    element.scrollWidth > element.clientWidth + 1;
+
+  return canScrollY || canScrollX;
+}
+
+function isPointWithinElementBounds(element: HTMLElement, clientX: number, clientY: number): boolean {
+  const rect = element.getBoundingClientRect();
+
+  return (
+    clientX >= rect.left &&
+    clientX <= rect.right &&
+    clientY >= rect.top &&
+    clientY <= rect.bottom
+  );
+}
+
+function findNearestScrollableElement(element: Element | null): HTMLElement | null {
+  let currentElement = element instanceof HTMLElement ? element : null;
+
+  while (currentElement) {
+    if (canElementScroll(currentElement)) {
+      return currentElement;
+    }
+
+    currentElement = currentElement.parentElement;
+  }
+
+  return document.scrollingElement instanceof HTMLElement
+    ? document.scrollingElement
+    : null;
 }
 
 function formatTrackCount(count: number): string {
@@ -954,6 +997,12 @@ export function App(): JSX.Element {
   const [selectedNormalizationPlatformId, setSelectedNormalizationPlatformId] =
     useState<NormalizationPlatformId>('spotify');
   const [normalizationPreviewEnabled, setNormalizationPreviewEnabled] = useState(false);
+  const [moreAnalysisExpanded, setMoreAnalysisExpanded] = useState(false);
+  const [midSideMode, setMidSideMode] = useState<'stereo' | 'mid' | 'side'>('stereo');
+  const [analyserNodeL, setAnalyserNodeL] = useState<AnalyserNode | null>(null);
+  const [analyserNodeR, setAnalyserNodeR] = useState<AnalyserNode | null>(null);
+  const [referenceLevelMatchEnabled, setReferenceLevelMatchEnabled] = useState(false);
+  const midSideProcessorRef = useRef<ScriptProcessorNode | null>(null);
 
   const [migrationModalOpen, setMigrationModalOpen] = useState(false);
   const [migrationJsonInput, setMigrationJsonInput] = useState('');
@@ -971,6 +1020,10 @@ export function App(): JSX.Element {
   const checklistModalSongIdRef = useRef<string | null>(checklistModalSongId);
   const checklistDraftTextRef = useRef(checklistDraftText);
   const checklistInputFocusedRef = useRef(false);
+  const checklistOverlayRef = useRef<HTMLDivElement | null>(null);
+  const checklistModalCardRef = useRef<HTMLDivElement | null>(null);
+  const checklistUnderlyingAnalysisPaneRef = useRef<HTMLElement | null>(null);
+  const checklistUnderlyingSidePaneScrollRef = useRef<HTMLDivElement | null>(null);
   const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const checklistSkipBackTenButtonRef = useRef<HTMLButtonElement | null>(null);
   const checklistItemsScrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1675,21 +1728,39 @@ export function App(): JSX.Element {
         playbackAnalyserNode.minDecibels = -90;
         playbackAnalyserNode.maxDecibels = -10;
 
+        // Create stereo channel splitter + per-channel analysers
+        const channelSplitter = playbackAudioContext.createChannelSplitter(2);
+        const analyserL = playbackAudioContext.createAnalyser();
+        analyserL.fftSize = 2048;
+        analyserL.smoothingTimeConstant = 0.8;
+        const analyserR = playbackAudioContext.createAnalyser();
+        analyserR.fftSize = 2048;
+        analyserR.smoothingTimeConstant = 0.8;
+
         // Audio chain: source → analyser → gain → destination
         playbackSourceNode.connect(playbackAnalyserNode);
         playbackAnalyserNode.connect(playbackGainNode);
         playbackGainNode.connect(playbackAudioContext.destination);
         playbackGainNode.gain.value = DEFAULT_PLAYBACK_VOLUME;
 
+        // Stereo split branch (tapped after analyser, before gain)
+        playbackAnalyserNode.connect(channelSplitter);
+        channelSplitter.connect(analyserL, 0);
+        channelSplitter.connect(analyserR, 1);
+
         playbackAudioContextRef.current = playbackAudioContext;
         playbackGainNodeRef.current = playbackGainNode;
         playbackAnalyserNodeRef.current = playbackAnalyserNode;
         setAnalyserNode(playbackAnalyserNode);
+        setAnalyserNodeL(analyserL);
+        setAnalyserNodeR(analyserR);
       } catch {
         playbackAudioContextRef.current = null;
         playbackGainNodeRef.current = null;
         playbackAnalyserNodeRef.current = null;
         setAnalyserNode(null);
+        setAnalyserNodeL(null);
+        setAnalyserNodeR(null);
       }
     }
 
@@ -2121,12 +2192,27 @@ export function App(): JSX.Element {
     }
     return map;
   }, [measuredAnalysis]);
+  const referenceLevelMatchGainDb = (() => {
+    if (
+      !referenceLevelMatchEnabled ||
+      playbackPreviewMode !== 'reference' ||
+      !analysis ||
+      !referenceTrack
+    ) {
+      return 0;
+    }
+    const mixLufs = analysis.integratedLufsEstimate;
+    const refLufs = referenceTrack.previewAnalysis.integratedLufsEstimate;
+    if (!Number.isFinite(mixLufs) || !Number.isFinite(refLufs)) return 0;
+    return mixLufs - refLufs;
+  })();
+
   const appliedNormalizationGainDb =
-    normalizationPreviewEnabled &&
+    (normalizationPreviewEnabled &&
     normalizationPreview !== null &&
     normalizationPreview.appliedGainDb !== null
       ? normalizationPreview.appliedGainDb
-      : 0;
+      : 0) + referenceLevelMatchGainDb;
   const activeReferenceComparison =
     analysis && measuredAnalysis && referenceTrack
       ? {
@@ -2155,6 +2241,62 @@ export function App(): JSX.Element {
   useEffect(() => {
     applyPlaybackGain(volume, appliedNormalizationGainDb);
   }, [appliedNormalizationGainDb, applyPlaybackGain, volume]);
+
+  // Mid/Side monitoring processor
+  useEffect(() => {
+    const audioContext = playbackAudioContextRef.current;
+    const gainNode = playbackGainNodeRef.current;
+    if (!audioContext || !gainNode) return;
+
+    // Clean up previous processor
+    if (midSideProcessorRef.current) {
+      try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
+      midSideProcessorRef.current = null;
+    }
+
+    if (midSideMode === 'stereo') {
+      // Reconnect gain directly to destination
+      try { gainNode.disconnect(); } catch { /* ignore */ }
+      gainNode.connect(audioContext.destination);
+      return;
+    }
+
+    // Create ScriptProcessorNode for mid or side
+    const bufferSize = 4096;
+    const processor = audioContext.createScriptProcessor(bufferSize, 2, 2);
+    processor.onaudioprocess = (event) => {
+      const inputL = event.inputBuffer.getChannelData(0);
+      const inputR = event.inputBuffer.getChannelData(1);
+      const outputL = event.outputBuffer.getChannelData(0);
+      const outputR = event.outputBuffer.getChannelData(1);
+
+      for (let i = 0; i < bufferSize; i++) {
+        if (midSideMode === 'mid') {
+          const mid = (inputL[i] + inputR[i]) / 2;
+          outputL[i] = mid;
+          outputR[i] = mid;
+        } else {
+          // side
+          const side = (inputL[i] - inputR[i]) / 2;
+          outputL[i] = side;
+          outputR[i] = side;
+        }
+      }
+    };
+
+    try { gainNode.disconnect(); } catch { /* ignore */ }
+    gainNode.connect(processor);
+    processor.connect(audioContext.destination);
+    midSideProcessorRef.current = processor;
+
+    return () => {
+      try { processor.disconnect(); } catch { /* ignore */ }
+      try {
+        gainNode.disconnect();
+        gainNode.connect(audioContext.destination);
+      } catch { /* ignore */ }
+    };
+  }, [midSideMode]);
 
   async function resumePlaybackContextIfNeeded(): Promise<void> {
     const playbackAudioContext = playbackAudioContextRef.current;
@@ -3589,6 +3731,67 @@ export function App(): JSX.Element {
     clearChecklistTimestampHighlights();
   }
 
+  function handleChecklistOverlayWheel(event: WheelEvent<HTMLDivElement>): void {
+    const checklistModalCardNode = checklistModalCardRef.current;
+    const eventTarget = event.target instanceof Node ? event.target : null;
+
+    if (checklistModalCardNode && eventTarget && checklistModalCardNode.contains(eventTarget)) {
+      return;
+    }
+
+    const preferredScrollTarget = [
+      checklistUnderlyingAnalysisPaneRef.current,
+      checklistUnderlyingSidePaneScrollRef.current,
+    ].find((candidate): candidate is HTMLElement => {
+      if (!candidate || !canElementScroll(candidate)) {
+        return false;
+      }
+
+      return isPointWithinElementBounds(candidate, event.clientX, event.clientY);
+    });
+
+    let scrollTarget = preferredScrollTarget ?? null;
+
+    if (!scrollTarget) {
+      const checklistOverlayNode = checklistOverlayRef.current;
+      if (!checklistOverlayNode) {
+        return;
+      }
+
+      const previousPointerEvents = checklistOverlayNode.style.pointerEvents;
+      let underlyingElement: Element | null = null;
+
+      try {
+        checklistOverlayNode.style.pointerEvents = 'none';
+        underlyingElement = document.elementFromPoint(event.clientX, event.clientY);
+      } finally {
+        checklistOverlayNode.style.pointerEvents = previousPointerEvents;
+      }
+
+      scrollTarget = findNearestScrollableElement(underlyingElement);
+    }
+
+    if (!scrollTarget) {
+      return;
+    }
+
+    const previousScrollTop = scrollTarget.scrollTop;
+    const previousScrollLeft = scrollTarget.scrollLeft;
+
+    scrollTarget.scrollBy({
+      top: event.deltaY,
+      left: event.deltaX,
+      behavior: 'auto',
+    });
+
+    if (
+      scrollTarget.scrollTop !== previousScrollTop ||
+      scrollTarget.scrollLeft !== previousScrollLeft
+    ) {
+      event.preventDefault();
+    }
+  }
+
   function handleChecklistTimestampClick(seconds: number): void {
     const audio = audioRef.current;
     if (!audio) {
@@ -4354,7 +4557,11 @@ export function App(): JSX.Element {
           )}
         </ul>
 
-        <section className="analysis-panel" data-testid="analysis-panel">
+        <section
+          ref={checklistUnderlyingAnalysisPaneRef}
+          className="analysis-panel"
+          data-testid="analysis-panel"
+        >
           <div className="analysis-panel-header">
             <div>
               <h3>Mastering</h3>
@@ -5191,7 +5398,11 @@ export function App(): JSX.Element {
           <h2>Inspector</h2>
         </header>
 
-        <div className="panel-right-scroll" data-testid="inspector-scroll-region">
+        <div
+          ref={checklistUnderlyingSidePaneScrollRef}
+          className="panel-right-scroll"
+          data-testid="inspector-scroll-region"
+        >
           {selectedSong ? (
             <section className="inspector-card">
               <h3 data-testid="inspector-song-title">{getSongDisplayFileName(selectedSong)}</h3>
@@ -5313,18 +5524,20 @@ export function App(): JSX.Element {
 
       {checklistModalSong ? (
         <div
+          ref={checklistOverlayRef}
           className="checklist-overlay"
           role="dialog"
           aria-modal="true"
           aria-label="Song checklist"
           data-testid="song-checklist-modal"
+          onWheel={handleChecklistOverlayWheel}
           onClick={(event) => {
             if (event.target === event.currentTarget) {
               handleCloseSongChecklist();
             }
           }}
         >
-          <div className="checklist-modal-card">
+          <div ref={checklistModalCardRef} className="checklist-modal-card">
             <div className="checklist-modal-header">
               <div>
                 <h2>{getSongDisplayTitle(checklistModalSong)} Checklist</h2>
@@ -5700,8 +5913,12 @@ export function App(): JSX.Element {
           >
             <div className="analysis-overlay-header">
               <div>
-                <h2>Mastering</h2>
-                <p className="muted">LUFS · peaks · tone · refs · normalization</p>
+                <h2>Mastering{selectedPlaybackVersion ? ` — ${selectedPlaybackVersion.fileName}` : ''}</h2>
+                {playbackPreviewMode === 'reference' && referenceTrack ? (
+                  <p className="muted">Playing Reference: {referenceTrack.fileName}</p>
+                ) : (
+                  <p className="muted">LUFS · peaks · tone · refs · normalization</p>
+                )}
               </div>
               <button
                 type="button"
@@ -5756,34 +5973,60 @@ export function App(): JSX.Element {
                   )}
                 </section>
 
+                {/* Loudness History Graph */}
+                <section className="analysis-overlay-section" data-testid="analysis-loudness-history">
+                  <h3>Loudness History</h3>
+                  <LoudnessHistoryGraph
+                    analysis={analysis}
+                    currentTimeSeconds={currentTimeSeconds}
+                    isPlaying={isPlaying}
+                    width={Math.max(400, spectrumFullWidth)}
+                    height={140}
+                  />
+                </section>
+
+                {/* Waveform Display */}
+                <section className="analysis-overlay-section" data-testid="analysis-waveform">
+                  <h3>Waveform</h3>
+                  <WaveformDisplay
+                    waveformPeaks={analysis?.waveformPeaks ?? null}
+                    analysis={analysis}
+                    currentTimeSeconds={currentTimeSeconds}
+                    durationSeconds={durationSeconds}
+                    isPlaying={isPlaying}
+                    width={Math.max(400, spectrumFullWidth)}
+                    height={100}
+                  />
+                </section>
+
+                {/* Stereo Correlation Meter */}
+                <section className="analysis-overlay-section" data-testid="analysis-stereo-correlation">
+                  <h3>Stereo Correlation</h3>
+                  <StereoCorrelationMeter
+                    analyserNodeL={analyserNodeL}
+                    analyserNodeR={analyserNodeR}
+                    width={Math.max(400, spectrumFullWidth)}
+                    height={44}
+                    isPlaying={isPlaying}
+                  />
+                </section>
+
+                {analysisStatus !== 'ready' ? (
+                  <p className="muted analysis-loading-line" data-testid="analysis-overlay-status">
+                    {analysisStatus === 'loading'
+                      ? 'Loading mastering analysis…'
+                      : analysisStatus === 'error'
+                        ? 'Analysis failed.'
+                        : 'Preparing mastering analysis…'}
+                  </p>
+                ) : null}
+                {analysisStatus === 'error' ? (
+                  <p className="error" data-testid="analysis-overlay-error">
+                    {analysisError ?? 'Could not analyse this track preview.'}
+                  </p>
+                ) : null}
+
                 <div className="analysis-overlay-side-by-side">
-                  <section className="analysis-overlay-section">
-                    <h3>Current track</h3>
-                    <p>
-                      <strong>{selectedPlaybackVersion.fileName}</strong>
-                    </p>
-                    {analysisStatus !== 'ready' ? (
-                      <p className="muted analysis-loading-line" data-testid="analysis-overlay-status">
-                        {analysisStatus === 'loading'
-                          ? 'Loading mastering analysis…'
-                          : analysisStatus === 'error'
-                            ? 'Analysis failed.'
-                            : 'Preparing mastering analysis…'}
-                      </p>
-                    ) : null}
-                    {analysisStatus === 'error' ? (
-                      <p className="error" data-testid="analysis-overlay-error">
-                        {analysisError ?? 'Could not analyse this track preview.'}
-                      </p>
-                    ) : null}
-                    {referenceTrack ? (
-                      <p className="muted" data-testid="analysis-overlay-preview-mode">
-                        {playbackPreviewMode === 'reference'
-                          ? `Playing reference: ${referenceTrack.fileName}`
-                          : `Reference ready: ${referenceTrack.fileName}`}
-                      </p>
-                    ) : null}
-                  </section>
 
                   <section className="analysis-overlay-section">
                     <h3>Tonal balance</h3>
@@ -5844,6 +6087,34 @@ export function App(): JSX.Element {
                       <span className="analysis-stat-label">Mean volume</span>
                       <strong>{measuredMeanVolumeText}</strong>
                     </div>
+                    <div className="analysis-stat-card" title="Crest Factor — difference between peak and RMS levels. Higher values indicate more dynamic range.">
+                      <span className="analysis-stat-label">Crest Factor</span>
+                      <strong>
+                        {analysisStatus === 'ready' && analysis
+                          ? `${analysis.crestFactorDb.toFixed(1)} dB`
+                          : 'Loading…'}
+                      </strong>
+                    </div>
+                    <div className="analysis-stat-card" title="Number of samples at or above 0 dBFS (digital clipping).">
+                      <span className="analysis-stat-label">Clip Count</span>
+                      <strong>
+                        {analysisStatus === 'ready' && analysis
+                          ? analysis.clipCount > 0
+                            ? `${analysis.clipCount} sample${analysis.clipCount === 1 ? '' : 's'}`
+                            : 'None'
+                          : 'Loading…'}
+                      </strong>
+                    </div>
+                    <div className="analysis-stat-card" title="DC Offset — mean sample value. Non-zero DC offset wastes headroom.">
+                      <span className="analysis-stat-label">DC Offset</span>
+                      <strong>
+                        {analysisStatus === 'ready' && analysis
+                          ? Math.abs(analysis.dcOffset) > 0.001
+                            ? `${(analysis.dcOffset * 100).toFixed(3)}% ⚠`
+                            : 'Clean'
+                          : 'Loading…'}
+                      </strong>
+                    </div>
                   </div>
                 </section>
 
@@ -5899,6 +6170,27 @@ export function App(): JSX.Element {
                       >
                         Reference
                       </button>
+                    </div>
+                  </div>
+
+                  <div className="analysis-ab-toggle">
+                    <span className="analysis-ab-label">Level Match</span>
+                    <div className="analysis-ab-actions" role="group" aria-label="Level match toggle">
+                      <button
+                        type="button"
+                        className={referenceLevelMatchEnabled ? '' : 'ghost'}
+                        onClick={() => setReferenceLevelMatchEnabled((v) => !v)}
+                        disabled={!referenceTrack}
+                        title="Automatically adjust reference playback gain to match your mix's integrated LUFS"
+                        data-testid="analysis-level-match-toggle"
+                      >
+                        {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
+                      </button>
+                      {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
+                        <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                          {referenceLevelMatchGainDb > 0 ? '+' : ''}{referenceLevelMatchGainDb.toFixed(1)} dB
+                        </span>
+                      ) : null}
                     </div>
                   </div>
 
@@ -6085,6 +6377,101 @@ export function App(): JSX.Element {
                       Load a reference track to compare.
                     </p>
                   )}
+                </section>
+
+                {/* More Analysis — expandable section at the bottom */}
+                <section className="analysis-overlay-section" data-testid="analysis-more-section">
+                  <button
+                    type="button"
+                    className="ghost analysis-more-toggle"
+                    onClick={() => setMoreAnalysisExpanded((v) => !v)}
+                    data-testid="analysis-more-toggle"
+                    style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <h3 style={{ margin: 0 }}>More Analysis</h3>
+                    <span style={{ fontSize: 12, color: '#9cafc4' }}>
+                      {moreAnalysisExpanded ? 'Collapse' : 'Expand'}
+                    </span>
+                  </button>
+
+                  {moreAnalysisExpanded ? (
+                    <div className="analysis-overlay-grid" style={{ marginTop: 10 }}>
+                      {/* Vectorscope */}
+                      <div className="analysis-overlay-side-by-side">
+                        <section className="analysis-overlay-section" data-testid="analysis-vectorscope">
+                          <h3>Vectorscope</h3>
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <Vectorscope
+                              analyserNodeL={analyserNodeL}
+                              analyserNodeR={analyserNodeR}
+                              size={200}
+                              isPlaying={isPlaying}
+                            />
+                          </div>
+                        </section>
+
+                        {/* Mid/Side Monitoring */}
+                        <section className="analysis-overlay-section" data-testid="analysis-midside">
+                          <h3>Mid/Side Monitoring</h3>
+                          <p className="muted">Listen to Mid (center) or Side (stereo width) in isolation.</p>
+                          <div className="analysis-ab-actions" role="group" aria-label="Mid/Side toggle" style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              type="button"
+                              className={midSideMode === 'stereo' ? '' : 'ghost'}
+                              onClick={() => setMidSideMode('stereo')}
+                            >
+                              Stereo
+                            </button>
+                            <button
+                              type="button"
+                              className={midSideMode === 'mid' ? '' : 'ghost'}
+                              onClick={() => setMidSideMode('mid')}
+                            >
+                              Mid
+                            </button>
+                            <button
+                              type="button"
+                              className={midSideMode === 'side' ? '' : 'ghost'}
+                              onClick={() => setMidSideMode('side')}
+                            >
+                              Side
+                            </button>
+                          </div>
+                          {midSideMode !== 'stereo' ? (
+                            <p className="muted" style={{ fontSize: 12 }}>
+                              Listening in <strong>{midSideMode === 'mid' ? 'Mid (L+R)/2' : 'Side (L-R)/2'}</strong> mode
+                            </p>
+                          ) : null}
+                        </section>
+                      </div>
+
+                      {/* K-Metering */}
+                      <section className="analysis-overlay-section" data-testid="analysis-k-metering">
+                        <h3>K-Metering</h3>
+                        <p className="muted">K-weighted meter scales for different content types.</p>
+                        <div className="analysis-detail-grid analysis-detail-grid-wide">
+                          <div className="analysis-stat-card" title="K-14: 0 dB on meter = -14 dBFS. Best for most music.">
+                            <span className="analysis-stat-label">K-14 Reading</span>
+                            <strong>
+                              {analysisStatus === 'ready' && analysis
+                                ? `${(analysis.rmsDbfs + 14).toFixed(1)} dB`
+                                : 'Loading…'}
+                            </strong>
+                            <span className="muted">0 dB = -14 dBFS (music)</span>
+                          </div>
+                          <div className="analysis-stat-card" title="K-20: 0 dB on meter = -20 dBFS. Best for film/classical.">
+                            <span className="analysis-stat-label">K-20 Reading</span>
+                            <strong>
+                              {analysisStatus === 'ready' && analysis
+                                ? `${(analysis.rmsDbfs + 20).toFixed(1)} dB`
+                                : 'Loading…'}
+                            </strong>
+                            <span className="muted">0 dB = -20 dBFS (film/classical)</span>
+                          </div>
+                        </div>
+                      </section>
+                    </div>
+                  ) : null}
                 </section>
               </div>
             ) : (

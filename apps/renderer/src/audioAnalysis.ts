@@ -11,6 +11,11 @@ export interface TrackAnalysisResult {
   frameDurationSeconds: number;
   durationSeconds: number;
   tonalBalance: TonalBalanceSnapshot;
+  rmsDbfs: number;
+  crestFactorDb: number;
+  dcOffset: number;
+  clipCount: number;
+  waveformPeaks: Float32Array;
 }
 
 const MIN_DECIBELS = -96;
@@ -201,6 +206,55 @@ function calculateTonalBalance(mono: Float32Array, sampleRate: number): TonalBal
   };
 }
 
+function calculateRmsDbfs(mono: Float32Array): number {
+  let sumSquares = 0;
+  for (let i = 0; i < mono.length; i++) {
+    sumSquares += mono[i] * mono[i];
+  }
+  const rms = mono.length > 0 ? Math.sqrt(sumSquares / mono.length) : 0;
+  return amplitudeToDbfs(rms);
+}
+
+function calculateDcOffset(mono: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < mono.length; i++) {
+    sum += mono[i];
+  }
+  return mono.length > 0 ? sum / mono.length : 0;
+}
+
+function countClips(mono: Float32Array): number {
+  let count = 0;
+  for (let i = 0; i < mono.length; i++) {
+    if (mono[i] >= 1.0 || mono[i] <= -1.0) {
+      count++;
+    }
+  }
+  return count;
+}
+
+const WAVEFORM_BUCKET_COUNT = 800;
+
+function computeWaveformPeaks(mono: Float32Array, bucketCount: number): Float32Array {
+  const peaks = new Float32Array(bucketCount);
+  const samplesPerBucket = mono.length / bucketCount;
+
+  for (let b = 0; b < bucketCount; b++) {
+    const start = Math.floor(b * samplesPerBucket);
+    const end = Math.min(Math.floor((b + 1) * samplesPerBucket), mono.length);
+    let maxAbs = 0;
+
+    for (let i = start; i < end; i++) {
+      const abs = Math.abs(mono[i]);
+      if (abs > maxAbs) maxAbs = abs;
+    }
+
+    peaks[b] = maxAbs;
+  }
+
+  return peaks;
+}
+
 export async function analyzeTrackFromUrl(
   url: string,
   signal?: AbortSignal
@@ -215,6 +269,11 @@ export async function analyzeTrackFromUrl(
     buffer.sampleRate
   );
   const tonalBalance = calculateTonalBalance(mono, buffer.sampleRate);
+  const rmsDbfs = calculateRmsDbfs(mono);
+  const crestFactorDb = peakDbfs - rmsDbfs;
+  const dcOffset = calculateDcOffset(mono);
+  const clipCount = countClips(mono);
+  const waveformPeaks = computeWaveformPeaks(mono, WAVEFORM_BUCKET_COUNT);
 
   return {
     peakDbfs,
@@ -223,6 +282,11 @@ export async function analyzeTrackFromUrl(
     frameDurationSeconds,
     durationSeconds: buffer.duration,
     tonalBalance,
+    rmsDbfs,
+    crestFactorDb,
+    dcOffset,
+    clipCount,
+    waveformPeaks,
   };
 }
 

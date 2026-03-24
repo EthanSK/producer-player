@@ -1,68 +1,68 @@
-# Electron E2E Test Setup
+# Electron E2E Validation
 
 ## Test framework
 
 - Playwright (`@playwright/test`)
-- Electron test target via `@playwright/test` `_electron` launcher
-- Tests located in: `apps/e2e/src`
+- Electron target via Playwright `_electron` launcher
+- Tests live in `apps/e2e/src` (currently 13 spec files / 87 tests)
 
-## Commands
+## Validation ladder (repo root)
+
+The repository now uses a lean-by-default validation split:
+
+```bash
+npm run validate:quick   # routine local pass (default recommendation)
+npm run validate:core    # broader local confidence pass
+npm run validate:full    # full release-confidence pass
+```
+
+### What each level runs
+
+- `validate:quick`
+  1. `npm run typecheck:app`
+  2. `npm run e2e:smoke`
+
+- `validate:core`
+  1. `npm run typecheck:app`
+  2. `npm run e2e:core`
+     - Core spec set: `runtime-smoke`, `checklist-and-export-ux`, `checklist-textarea-ux`, `checklist-timestamps`
+
+- `validate:full`
+  1. `npm run typecheck`
+  2. `npm run e2e:full`
+
+## E2E command map
 
 From repo root:
 
 ```bash
-npm run e2e
-npm run e2e:ci
+npm run e2e              # lean default (same behavior as e2e:smoke)
+npm run e2e:smoke        # build + @smoke tests
+npm run e2e:core         # build + core specs (runtime smoke + checklist UX/timestamps)
+npm run e2e:full         # build + full E2E suite (all specs)
+npm run e2e:ci           # legacy-compatible full-suite entrypoint (same behavior as e2e:full)
 ```
 
-Direct workspace commands:
+Direct workspace commands (`apps/e2e`):
 
 ```bash
 npm run test -w @producer-player/e2e
+npm run test:smoke -w @producer-player/e2e
+npm run test:core -w @producer-player/e2e
+
 npm run ci -w @producer-player/e2e
+npm run ci:smoke -w @producer-player/e2e
+npm run ci:core -w @producer-player/e2e
 ```
 
-## CI-friendly command behavior
-
-`npm run e2e:ci` runs:
-
-1. full build (`contracts`, `domain`, `renderer`, `electron`)
-2. `apps/e2e/scripts/run-ci.mjs`
-   - on Linux: uses `xvfb-run -a` if available
-   - on macOS/Windows: runs Playwright directly
-
-## Current status (latest run)
-
-- Date: 2026-03-09
-- `npm run test -w @producer-player/e2e` → **PASS** (9 passed)
-
-## Current coverage
-
-### `library-linking.spec.ts`
-
-- folder link + watcher refresh loop
-- top-level + `old/` scanning behavior
-- naming guidance visibility
-- state persistence in user data (linked folders + song order)
-- reinstall-like recovery via sidecar ordering restoration
-- baseline transport controls with valid WAV fixtures
-
-### `folder-structure-hardening.spec.ts`
-
-- ignores nested junk folders
-- stable grouping across `v` suffix variants
-- deterministic archive naming under `old/`
-- custom ordering preservation through organize/rescan + unlink/relink (sidecar path)
-
-### `playback-runtime.spec.ts`
-
-- real fixture matrix (wav/mp3/m4a/flac/aiff)
-- validates `producer-media://` source resolution + MIME metadata
-- asserts either real playback or actionable fallback error guidance
-- stress flow: play/pause, rapid next/prev switching, rescan, relink, archived-old selection
-- dev-mode regression: no `file://` local-resource block when renderer is hosted at `http://127.0.0.1:4207`
+Notes:
+- Root-level `e2e:*` scripts include a full app build first.
+- Workspace `ci*` scripts execute `apps/e2e/scripts/run-ci.mjs`, which:
+  - sets `CI=1` by default
+  - uses `xvfb-run -a` on Linux if available
+  - runs Playwright directly on macOS/Windows
 
 ## Fixture notes
 
-- Codec fixtures are generated via `ffmpeg` in test runtime.
+- Codec fixtures are generated via `ffmpeg` during test runtime.
 - If `ffmpeg` is unavailable, playback-runtime tests are skipped with an explicit reason.

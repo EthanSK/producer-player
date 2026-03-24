@@ -38,6 +38,17 @@
 - Web Audio API for real-time spectrum, level metering, band soloing
 - Platform normalization values must be verified against authoritative sources before changing
 
+## Validation Ladder (Lean Default)
+
+- For routine local iteration, run `npm run validate:quick`.
+- For broader pre-PR confidence, run `npm run validate:core`.
+- For release confidence, run `npm run validate:full` (full suite; prefer CI for this level).
+- `npm run e2e` is intentionally lean (same behavior as `e2e:smoke`).
+- Explicit E2E levels:
+  - `npm run e2e:smoke`
+  - `npm run e2e:core`
+  - `npm run e2e:full` (same coverage as legacy `e2e:ci`)
+
 ## Release Versioning
 
 - Every meaningful Producer Player code/content change that is intended to ship should advance the app version before it lands on `main`.

@@ -57,13 +57,20 @@ npm run dev
 npm run dev:hot
 ```
 
-## Build & Test
+## Build & Validate
 
 ```bash
-npm run build        # full production build
-npm run typecheck    # type-check all workspaces
-npm run e2e          # build + run Playwright tests
-npm run e2e:ci       # CI-optimised E2E run
+npm run build            # full production build
+npm run typecheck        # full typecheck (all workspaces)
+
+npm run validate:quick   # default local pass: app typecheck + smoke E2E
+npm run validate:core    # broader local pass: app typecheck + core E2E
+npm run validate:full    # release-confidence pass: full typecheck + full E2E
+
+npm run e2e              # lean default (same behavior as e2e:smoke)
+npm run e2e:smoke        # build + smoke tests (@smoke)
+npm run e2e:core         # build + core E2E specs
+npm run e2e:full         # build + full E2E suite (previous e2e:ci behavior)
 ```
 
 ## Desktop Packaging

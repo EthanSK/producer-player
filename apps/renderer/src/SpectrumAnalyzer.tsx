@@ -24,6 +24,11 @@ const DB_MAX = -10;
 const FREQ_GRID_LINES = [50, 100, 200, 500, 1000, 2000, 5000, 10000];
 const DB_GRID_LINES = [-80, -60, -40, -20];
 
+const MINI_SPECTRUM_POINT_COUNT = 128;
+const FULLSCREEN_SPECTRUM_POINT_DENSITY = 0.6;
+const FULLSCREEN_SPECTRUM_MIN_POINT_COUNT = 384;
+const FULLSCREEN_SPECTRUM_MAX_POINT_COUNT = 768;
+
 function formatFrequency(freq: number): string {
   if (freq >= 1000) {
     return `${(freq / 1000).toFixed(freq >= 10000 ? 0 : freq % 1000 === 0 ? 0 : 1)}k`;
@@ -68,6 +73,14 @@ export function SpectrumAnalyzer({
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
+
+    const fullScreenPointCount = Math.min(
+      FULLSCREEN_SPECTRUM_MAX_POINT_COUNT,
+      Math.max(
+        FULLSCREEN_SPECTRUM_MIN_POINT_COUNT,
+        Math.round(width * dpr * FULLSCREEN_SPECTRUM_POINT_DENSITY)
+      )
+    );
 
     if (!analyserNode) {
       // Draw empty state
@@ -198,7 +211,7 @@ export function SpectrumAnalyzer({
       }
 
       // Build spectrum curve path using logarithmic frequency mapping
-      const numPoints = isFullScreen ? 256 : 128;
+      const numPoints = isFullScreen ? fullScreenPointCount : MINI_SPECTRUM_POINT_COUNT;
       const points: Array<{ x: number; y: number }> = [];
 
       for (let i = 0; i < numPoints; i++) {

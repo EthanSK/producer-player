@@ -102,6 +102,8 @@ const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
 const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
 const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
+const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
+const MAX_SAVED_REFERENCE_TRACKS = 20;
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
 const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
 const PUBLIC_PAGES_URL = 'https://ethansk.github.io/producer-player/';
@@ -4839,8 +4841,9 @@ export function App(): JSX.Element {
                     }}
                     data-testid="analysis-choose-reference"
                     title="Choose an external reference file."
+                    disabled={referenceStatus === 'loading'}
                   >
-                    Choose File…
+                    {referenceStatus === 'loading' ? 'Loading…' : 'Choose File…'}
                   </button>
                   <button
                     type="button"
@@ -4848,10 +4851,10 @@ export function App(): JSX.Element {
                       void handleUseCurrentTrackAsReference();
                     }}
                     data-testid="analysis-use-current-reference"
-                    disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion}
+                    disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
                     title="Use the current track as the reference."
                   >
-                    Use Current
+                    {referenceStatus === 'loading' ? 'Loading…' : 'Use Current'}
                   </button>
                   <button
                     type="button"
@@ -4882,17 +4885,19 @@ export function App(): JSX.Element {
                     className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
                     onClick={() => handleReferencePreviewModeChange('reference')}
                     data-testid="analysis-ab-reference"
-                    disabled={!referenceTrack}
+                    disabled={!referenceTrack || referenceStatus === 'loading'}
                   >
                     Reference
                   </button>
                 </div>
                 <p className="muted">
-                  {referenceTrack
-                    ? playbackPreviewMode === 'reference'
-                      ? `Playing reference: ${referenceTrack.fileName}`
-                      : `Tap Reference to A/B against ${referenceTrack.fileName}`
-                    : 'Load a reference track to A/B from here.'}
+                  {referenceStatus === 'loading'
+                    ? 'Loading reference…'
+                    : referenceTrack
+                      ? playbackPreviewMode === 'reference'
+                        ? `Playing reference: ${referenceTrack.fileName}`
+                        : `Tap Reference to A/B against ${referenceTrack.fileName}`
+                      : 'Load a reference track to A/B from here.'}
                 </p>
               </div>
 
@@ -5994,6 +5999,116 @@ export function App(): JSX.Element {
                   )}
                 </section>
 
+                <section className="analysis-overlay-section" data-testid="analysis-overlay-reference-panel">
+                  <h3>Reference track</h3>
+                  <p className="muted">
+                    Load a reference track to A/B against your mix.
+                  </p>
+                  <div className="analysis-reference-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleChooseReferenceTrack();
+                      }}
+                      data-testid="analysis-choose-reference-overlay"
+                      disabled={referenceStatus === 'loading'}
+                    >
+                      {referenceStatus === 'loading' ? 'Loading reference…' : 'Choose Reference File…'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleUseCurrentTrackAsReference();
+                      }}
+                      disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
+                    >
+                      {referenceStatus === 'loading' ? 'Loading reference…' : 'Set Current Track as Reference'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={handleClearReferenceTrack}
+                      disabled={!referenceTrack && referenceStatus !== 'error'}
+                    >
+                      Clear Reference
+                    </button>
+                  </div>
+
+                  <div className="analysis-ab-toggle">
+                    <span className="analysis-ab-label">Quick A/B</span>
+                    <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
+                      <button
+                        type="button"
+                        className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
+                        onClick={() => handleReferencePreviewModeChange('mix')}
+                      >
+                        Mix
+                      </button>
+                      <button
+                        type="button"
+                        className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
+                        onClick={() => handleReferencePreviewModeChange('reference')}
+                        disabled={!referenceTrack || referenceStatus === 'loading'}
+                      >
+                        Reference
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="analysis-ab-toggle">
+                    <span className="analysis-ab-label">Level Match</span>
+                    <div className="analysis-ab-actions" role="group" aria-label="Level match toggle">
+                      <button
+                        type="button"
+                        className={referenceLevelMatchEnabled ? '' : 'ghost'}
+                        onClick={() => setReferenceLevelMatchEnabled((v) => !v)}
+                        disabled={!referenceTrack}
+                        title="Automatically adjust reference playback gain to match your mix's integrated LUFS"
+                        data-testid="analysis-level-match-toggle"
+                      >
+                        {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
+                      </button>
+                      {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
+                        <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                          {referenceLevelMatchGainDb > 0 ? '+' : ''}{referenceLevelMatchGainDb.toFixed(1)} dB
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="analysis-reference-slot active" data-testid="analysis-reference-slot-a">
+                    {referenceTrack ? (
+                      <>
+                        <div className="analysis-reference-slot-header">
+                          <strong>Active reference track</strong>
+                          <span className="muted">
+                            {referenceTrack.sourceType === 'external-file'
+                              ? 'External file'
+                              : 'Linked track'}
+                          </span>
+                        </div>
+                        <p>
+                          <strong>{referenceTrack.fileName}</strong>
+                        </p>
+                        <p className="muted">{referenceTrack.subtitle}</p>
+                        <div className="analysis-reference-metrics">
+                          <span>Loudness: {referenceIntegratedText}</span>
+                          <span>True peak: {referenceTruePeakText}</span>
+                          <span>
+                            Current loudness: {formatMeasuredStat(referenceShortTermEstimate, 'LUFS est.')}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="muted">
+                        No reference loaded.
+                      </p>
+                    )}
+                  </div>
+
+                  {referenceError ? <p className="error">{referenceError}</p> : null}
+                </section>
+
                 {/* Loudness History Graph */}
                 <section className="analysis-overlay-section" data-testid="analysis-loudness-history">
                   <h3>Loudness History</h3>
@@ -6139,114 +6254,6 @@ export function App(): JSX.Element {
                   </div>
                 </section>
 
-                <section className="analysis-overlay-section">
-                  <h3>Reference track</h3>
-                  <p className="muted">
-                    Load a reference track to A/B against your mix.
-                  </p>
-                  <div className="analysis-reference-actions">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleChooseReferenceTrack();
-                      }}
-                      data-testid="analysis-choose-reference-overlay"
-                    >
-                      Choose Reference File…
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleUseCurrentTrackAsReference();
-                      }}
-                      disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion}
-                    >
-                      Set Current Track as Reference
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={handleClearReferenceTrack}
-                      disabled={!referenceTrack && referenceStatus !== 'error'}
-                    >
-                      Clear Reference
-                    </button>
-                  </div>
-
-                  <div className="analysis-ab-toggle">
-                    <span className="analysis-ab-label">Quick A/B</span>
-                    <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
-                      <button
-                        type="button"
-                        className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
-                        onClick={() => handleReferencePreviewModeChange('mix')}
-                      >
-                        Mix
-                      </button>
-                      <button
-                        type="button"
-                        className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
-                        onClick={() => handleReferencePreviewModeChange('reference')}
-                        disabled={!referenceTrack}
-                      >
-                        Reference
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="analysis-ab-toggle">
-                    <span className="analysis-ab-label">Level Match</span>
-                    <div className="analysis-ab-actions" role="group" aria-label="Level match toggle">
-                      <button
-                        type="button"
-                        className={referenceLevelMatchEnabled ? '' : 'ghost'}
-                        onClick={() => setReferenceLevelMatchEnabled((v) => !v)}
-                        disabled={!referenceTrack}
-                        title="Automatically adjust reference playback gain to match your mix's integrated LUFS"
-                        data-testid="analysis-level-match-toggle"
-                      >
-                        {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
-                      </button>
-                      {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
-                        <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-                          {referenceLevelMatchGainDb > 0 ? '+' : ''}{referenceLevelMatchGainDb.toFixed(1)} dB
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="analysis-reference-slot active" data-testid="analysis-reference-slot-a">
-                    {referenceTrack ? (
-                      <>
-                        <div className="analysis-reference-slot-header">
-                          <strong>Active reference track</strong>
-                          <span className="muted">
-                            {referenceTrack.sourceType === 'external-file'
-                              ? 'External file'
-                              : 'Linked track'}
-                          </span>
-                        </div>
-                        <p>
-                          <strong>{referenceTrack.fileName}</strong>
-                        </p>
-                        <p className="muted">{referenceTrack.subtitle}</p>
-                        <div className="analysis-reference-metrics">
-                          <span>Loudness: {referenceIntegratedText}</span>
-                          <span>True peak: {referenceTruePeakText}</span>
-                          <span>
-                            Current loudness: {formatMeasuredStat(referenceShortTermEstimate, 'LUFS est.')}
-                          </span>
-                        </div>
-                      </>
-                    ) : (
-                      <p className="muted">
-                        No reference loaded.
-                      </p>
-                    )}
-                  </div>
-
-                  {referenceError ? <p className="error">{referenceError}</p> : null}
-                </section>
 
                 <section
                   className="analysis-overlay-section"

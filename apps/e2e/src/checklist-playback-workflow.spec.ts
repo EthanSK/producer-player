@@ -322,6 +322,66 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('checklist prev/next transport reinitializes the open checklist for the newly selected song', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-prev-next-reinitializes-song'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 2_600,
+      frequencyHz: 300,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
+      durationMs: 2_600,
+      frequencyHz: 700,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const queueTitles = await page.getByTestId('main-list-row-title').allTextContents();
+      const [firstSongTitle, secondSongTitle] = queueTitles.map((title) => title.trim());
+      expect(firstSongTitle).toBeTruthy();
+      expect(secondSongTitle).toBeTruthy();
+
+      await cueSongVersion(page, firstSongTitle, `${firstSongTitle} v1.wav`);
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${firstSongTitle} Checklist`
+      );
+
+      await page.getByTestId('song-checklist-input').fill('A item only');
+      await page.getByTestId('song-checklist-add').click();
+      await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue('A item only');
+
+      await page.getByTestId('song-checklist-mini-player-next').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(`${secondSongTitle} v1.wav`);
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${secondSongTitle} Checklist`
+      );
+      await expect(page.getByTestId('song-checklist-item-text')).toHaveCount(0);
+
+      await page.getByTestId('song-checklist-input').fill('B item only');
+      await page.getByTestId('song-checklist-add').click();
+      await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue('B item only');
+
+      await page.getByTestId('song-checklist-mini-player-prev').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(`${firstSongTitle} v1.wav`);
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${firstSongTitle} Checklist`
+      );
+      await expect(page.getByTestId('song-checklist-item-text')).toHaveCount(1);
+      await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue('A item only');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('analysis overlay closes on outside click and selected spectrum bands can be cleared', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-analysis-overlay-click-outside-clear-bands'

@@ -61,7 +61,7 @@ test.describe('Checklist textarea UX', () => {
     }
   });
 
-  test('Shift+Tab toggles focus between the composer and the -10s skip button', async () => {
+  test('composer tab flow enters transport at -10s and Shift+Tab from -10s returns to the composer', async () => {
     const directories = await createE2ETestDirectories('producer-player-checklist-shift-tab-toggle');
 
     await writeFixtureFiles(directories.fixtureDirectory, [
@@ -75,16 +75,47 @@ test.describe('Checklist textarea UX', () => {
 
       const composer = page.getByTestId('song-checklist-input');
       const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
+      const skipBackFive = page.getByTestId('song-checklist-skip-back-5');
 
       await composer.focus();
-      await composer.press('Shift+Tab');
+      await composer.press('Tab');
+      await expect(skipBackTen).toBeFocused();
+
+      await skipBackTen.press('Tab');
+      await expect(skipBackFive).toBeFocused();
+
+      await skipBackFive.press('Shift+Tab');
       await expect(skipBackTen).toBeFocused();
 
       await skipBackTen.press('Shift+Tab');
       await expect(composer).toBeFocused();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
 
-      await composer.press('Shift+Tab');
-      await expect(skipBackTen).toBeFocused();
+  test('Escape blurs checklist text input first, then closes the modal once no text input is focused', async () => {
+    const directories = await createE2ETestDirectories('producer-player-checklist-escape-blur-then-close');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkSingleSongAndOpenChecklist(page, directories.fixtureDirectory);
+
+      const composer = page.getByTestId('song-checklist-input');
+      await composer.focus();
+
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(composer).not.toBeFocused();
+
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('song-checklist-modal')).toHaveCount(0);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

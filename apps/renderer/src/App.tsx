@@ -1528,10 +1528,18 @@ export function App(): JSX.Element {
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setChecklistModalSongId(null);
-        setChecklistDraftText('');
+      if (event.key !== 'Escape') {
+        return;
       }
+
+      const activeElement = document.activeElement;
+      if (isTextEntryElement(activeElement)) {
+        (activeElement as HTMLElement).blur();
+        event.preventDefault();
+        return;
+      }
+
+      handleCloseSongChecklist();
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -1874,14 +1882,8 @@ export function App(): JSX.Element {
         autoplay: true,
       });
 
-      if (
-        advanced &&
-        checklistModalSongIdRef.current !== null &&
-        checklistModalSongIdRef.current === selectedPlaybackSongIdRef.current &&
-        queueMoveTargetSongIdRef.current
-      ) {
-        setChecklistModalSongId(queueMoveTargetSongIdRef.current);
-        resetChecklistComposer(0);
+      if (advanced) {
+        handleChecklistQueueMoveReinitialize();
       }
 
       if (!advanced) {
@@ -3303,6 +3305,16 @@ export function App(): JSX.Element {
     });
   }
 
+  function handleChecklistQueueMoveReinitialize(): void {
+    const nextChecklistSongId = queueMoveTargetSongIdRef.current;
+    if (!nextChecklistSongId || checklistModalSongIdRef.current === null) {
+      return;
+    }
+
+    setChecklistModalSongId(nextChecklistSongId);
+    resetChecklistComposer(0);
+  }
+
   function handlePreviousTrack(): void {
     const audio = audioRef.current;
     const currentTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
@@ -3321,6 +3333,7 @@ export function App(): JSX.Element {
     });
 
     if (movedToPrevious) {
+      handleChecklistQueueMoveReinitialize();
       logPlaybackEvent('transport-previous-move-queue', {
         currentTimeSeconds: currentTime,
       });
@@ -3336,10 +3349,14 @@ export function App(): JSX.Element {
   }
 
   function handleNextTrack(): void {
-    void moveInQueueRef.current(1, {
+    const movedToNext = moveInQueueRef.current(1, {
       wrap: repeatMode === 'all',
       autoplay: shouldAutoplayOnTransport(),
     });
+
+    if (movedToNext) {
+      handleChecklistQueueMoveReinitialize();
+    }
   }
 
   function handleCycleRepeatMode(): void {
@@ -5545,7 +5562,6 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
-              <span className="checklist-transport-hint">Shift+Tab toggles −10s ↔ input</span>
             </div>
 
             <div
@@ -5624,7 +5640,7 @@ export function App(): JSX.Element {
                         aria-label={`Remove ${item.text}`}
                         title="Remove checklist item"
                       >
-                        🗑️
+                        Remove
                       </button>
                     </li>
                   ))}
@@ -5675,6 +5691,7 @@ export function App(): JSX.Element {
                       onKeyDown={(event) => {
                         if (
                           event.key === 'Tab' &&
+                          event.shiftKey &&
                           !event.metaKey &&
                           !event.ctrlKey &&
                           !event.altKey
@@ -5773,6 +5790,7 @@ export function App(): JSX.Element {
                 className="checklist-composer-text"
                 value={checklistDraftText}
                 rows={1}
+                autoFocus
                 onChange={(event) => {
                   autosizeChecklistTextarea(event.currentTarget);
                   handleChecklistDraftTextChange(event.currentTarget.value);
@@ -5785,7 +5803,6 @@ export function App(): JSX.Element {
                 onKeyDown={(event) => {
                   if (
                     event.key === 'Tab' &&
-                    event.shiftKey &&
                     !event.metaKey &&
                     !event.ctrlKey &&
                     !event.altKey
@@ -5846,6 +5863,12 @@ export function App(): JSX.Element {
                 Add
               </button>
             </div>
+
+            {selectedPlaybackVersion ? (
+              <p className="checklist-transport-hint" data-testid="song-checklist-transport-hint">
+                Tab from input enters transport at −10s. Shift+Tab from −10s returns to input.
+              </p>
+            ) : null}
 
             <div className="checklist-modal-actions">
               <button

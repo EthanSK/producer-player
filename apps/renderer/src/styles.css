@@ -1350,11 +1350,11 @@ input[type='range'] {
 
 .checklist-modal-card {
   width: min(640px, 100%);
-  max-height: min(80vh, 760px);
+  max-height: min(86vh, 820px);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 18px;
+  gap: 14px;
+  padding: 20px;
   border-radius: 18px;
   border: 1px solid var(--border);
   background: var(--bg-1);
@@ -1384,6 +1384,7 @@ input[type='range'] {
 }
 
 .checklist-input-row {
+  order: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
@@ -1538,6 +1539,9 @@ input[type='range'] {
 .checklist-remove-button {
   white-space: nowrap;
   align-self: start;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .checklist-empty-state {
@@ -1550,6 +1554,7 @@ input[type='range'] {
 }
 
 .checklist-modal-actions {
+  order: 4;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1558,6 +1563,7 @@ input[type='range'] {
 }
 
 .checklist-mini-player {
+  order: 3;
   display: grid;
   gap: 8px;
   padding: 10px 12px 12px;
@@ -1613,10 +1619,12 @@ button.checklist-mini-player-button:hover {
 }
 
 .checklist-transport-hint {
+  order: 2;
+  margin: -2px 0 0;
   font-size: 11px;
   color: var(--text-muted);
   opacity: 0.82;
-  text-align: right;
+  text-align: left;
 }
 
 .checklist-transport-group {

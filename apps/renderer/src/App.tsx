@@ -4879,6 +4879,7 @@ export function App(): JSX.Element {
                     className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
                     onClick={() => handleReferencePreviewModeChange('mix')}
                     data-testid="analysis-ab-mix"
+                    title="Listen to your mix."
                   >
                     Mix
                   </button>
@@ -4888,6 +4889,7 @@ export function App(): JSX.Element {
                     onClick={() => handleReferencePreviewModeChange('reference')}
                     data-testid="analysis-ab-reference"
                     disabled={!referenceTrack || referenceStatus === 'loading'}
+                    title="Listen to the reference track."
                   >
                     Reference
                   </button>
@@ -5503,6 +5505,7 @@ export function App(): JSX.Element {
                 className="ghost"
                 onClick={() => handleOpenSupportLink(BUG_REPORT_URL)}
                 data-testid="support-feedback-bug"
+                title="Open the bug report page."
               >
                 Report a Bug
               </button>
@@ -5511,6 +5514,7 @@ export function App(): JSX.Element {
                 className="ghost"
                 onClick={() => handleOpenSupportLink(FEATURE_REQUEST_URL)}
                 data-testid="support-feedback-feature"
+                title="Open the feature request page."
               >
                 Request a Feature
               </button>
@@ -5522,6 +5526,7 @@ export function App(): JSX.Element {
                 }}
                 data-testid="support-feedback-check-updates"
                 disabled={updateCheckStatus === 'checking'}
+                title="Check if a newer version is available."
               >
                 {updateCheckStatus === 'checking' ? 'Checking…' : 'Check for Updates'}
               </button>
@@ -5533,6 +5538,7 @@ export function App(): JSX.Element {
                     void handleDownloadUpdate();
                   }}
                   data-testid="support-feedback-download-update"
+                  title="Download the latest update."
                 >
                   Download Update
                 </button>
@@ -5870,6 +5876,7 @@ export function App(): JSX.Element {
                 onClick={handleAddChecklistItem}
                 disabled={checklistDraftIsEmpty}
                 data-testid="song-checklist-add"
+                title="Add this checklist item."
               >
                 Add
               </button>
@@ -5882,6 +5889,7 @@ export function App(): JSX.Element {
                 onClick={() => handleClearCompletedChecklistItems(checklistModalSong.id)}
                 disabled={checklistCompletedCount === 0}
                 data-testid="song-checklist-clear-completed"
+                title="Remove all completed checklist items."
               >
                 Clear Completed
               </button>
@@ -5909,10 +5917,11 @@ export function App(): JSX.Element {
                 }}
                 disabled={checklistModalItems.length === 0}
                 data-testid="song-checklist-delete-all"
+                title="Delete all checklist items for this song."
               >
                 Delete All
               </button>
-              <button type="button" onClick={handleCloseSongChecklist}>
+              <button type="button" onClick={handleCloseSongChecklist} title="Close checklist.">
                 Done
               </button>
             </div>
@@ -6005,6 +6014,7 @@ export function App(): JSX.Element {
                 className="ghost"
                 onClick={() => setAnalysisExpanded(false)}
                 data-testid="analysis-close-button"
+                title="Close the full-screen mastering view."
               >
                 Close
               </button>
@@ -6049,6 +6059,7 @@ export function App(): JSX.Element {
                         className="ghost spectrum-clear-solo-button"
                         data-testid="analysis-clear-solo-bands"
                         onClick={handleClearSoloedBands}
+                        title="Stop soloing and return to full-spectrum playback."
                       >
                         Clear selected ranges
                       </button>
@@ -6074,6 +6085,7 @@ export function App(): JSX.Element {
                       }}
                       data-testid="analysis-choose-reference-overlay"
                       disabled={referenceStatus === 'loading'}
+                      title="Choose an external reference file."
                     >
                       {referenceStatus === 'loading' ? 'Loading reference…' : 'Choose Reference File…'}
                     </button>
@@ -6083,6 +6095,7 @@ export function App(): JSX.Element {
                         void handleUseCurrentTrackAsReference();
                       }}
                       disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
+                      title="Use the current track as the reference."
                     >
                       {referenceStatus === 'loading' ? 'Loading reference…' : 'Set Current Track as Reference'}
                     </button>
@@ -6091,6 +6104,7 @@ export function App(): JSX.Element {
                       className="ghost"
                       onClick={handleClearReferenceTrack}
                       disabled={!referenceTrack && referenceStatus !== 'error'}
+                      title="Clear the reference."
                     >
                       Clear Reference
                     </button>
@@ -6103,6 +6117,7 @@ export function App(): JSX.Element {
                         type="button"
                         className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
                         onClick={() => handleReferencePreviewModeChange('mix')}
+                        title="Listen to your mix."
                       >
                         Mix
                       </button>
@@ -6111,6 +6126,7 @@ export function App(): JSX.Element {
                         className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
                         onClick={() => handleReferencePreviewModeChange('reference')}
                         disabled={!referenceTrack || referenceStatus === 'loading'}
+                        title="Listen to the reference track."
                       >
                         Reference
                       </button>
@@ -6551,6 +6567,7 @@ export function App(): JSX.Element {
                         type="button"
                         className={midSideMode === 'stereo' ? '' : 'ghost'}
                         onClick={() => setMidSideMode('stereo')}
+                        title="Normal stereo playback."
                       >
                         Stereo
                       </button>
@@ -6558,6 +6575,7 @@ export function App(): JSX.Element {
                         type="button"
                         className={midSideMode === 'mid' ? '' : 'ghost'}
                         onClick={() => setMidSideMode('mid')}
+                        title="Listen to just the center (mid) channel."
                       >
                         Mid
                       </button>
@@ -6565,6 +6583,7 @@ export function App(): JSX.Element {
                         type="button"
                         className={midSideMode === 'side' ? '' : 'ghost'}
                         onClick={() => setMidSideMode('side')}
+                        title="Listen to just the side (stereo width) channel."
                       >
                         Side
                       </button>
@@ -6716,7 +6735,7 @@ export function App(): JSX.Element {
                   Import checklist items from other note apps using an LLM to parse your notes.
                 </p>
               </div>
-              <button type="button" className="ghost" onClick={handleCloseMigrationModal}>
+              <button type="button" className="ghost" onClick={handleCloseMigrationModal} title="Close the migration dialog.">
                 Close
               </button>
             </div>
@@ -6734,6 +6753,7 @@ export function App(): JSX.Element {
                     onClick={handleCopyMigrationSchema}
                     data-testid="migration-copy-schema"
                     className={migrationSchemaCopied ? 'migration-copied-button' : ''}
+                    title="Copy the JSON schema and song list to clipboard for pasting into an LLM."
                   >
                     {migrationSchemaCopied ? '✓ Copied to Clipboard' : 'Copy Schema to Clipboard'}
                   </button>
@@ -6782,6 +6802,7 @@ export function App(): JSX.Element {
                 onClick={handleParseMigrationJson}
                 disabled={migrationJsonInput.trim().length === 0}
                 data-testid="migration-parse-button"
+                title="Parse the pasted JSON and show a preview of what will be imported."
               >
                 Parse &amp; Preview
               </button>

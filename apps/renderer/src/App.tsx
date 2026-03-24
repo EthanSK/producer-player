@@ -2620,6 +2620,8 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     moveInQueueRef.current = (direction, { wrap, autoplay }) => {
+      queueMoveTargetSongIdRef.current = null;
+
       if (playbackQueue.length === 0) {
         return false;
       }
@@ -3303,7 +3305,18 @@ export function App(): JSX.Element {
     });
   }
 
-  function handlePreviousTrack(): void {
+  function syncChecklistModalToQueueMoveTarget(): void {
+    const nextSongId = queueMoveTargetSongIdRef.current;
+
+    if (!nextSongId || !checklistModalSongIdRef.current) {
+      return;
+    }
+
+    setChecklistModalSongId(nextSongId);
+    resetChecklistComposer(0);
+  }
+
+  function handlePreviousTrack(options?: { syncChecklistModal?: boolean }): void {
     const audio = audioRef.current;
     const currentTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
 
@@ -3321,6 +3334,10 @@ export function App(): JSX.Element {
     });
 
     if (movedToPrevious) {
+      if (options?.syncChecklistModal) {
+        syncChecklistModalToQueueMoveTarget();
+      }
+
       logPlaybackEvent('transport-previous-move-queue', {
         currentTimeSeconds: currentTime,
       });
@@ -3335,11 +3352,15 @@ export function App(): JSX.Element {
     }
   }
 
-  function handleNextTrack(): void {
-    void moveInQueueRef.current(1, {
+  function handleNextTrack(options?: { syncChecklistModal?: boolean }): void {
+    const movedToNext = moveInQueueRef.current(1, {
       wrap: repeatMode === 'all',
       autoplay: shouldAutoplayOnTransport(),
     });
+
+    if (movedToNext && options?.syncChecklistModal) {
+      syncChecklistModalToQueueMoveTarget();
+    }
   }
 
   function handleCycleRepeatMode(): void {
@@ -5275,7 +5296,7 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     data-testid="player-prev"
-                    onClick={handlePreviousTrack}
+                    onClick={() => handlePreviousTrack()}
                     title="Restart current track when past 0:02; otherwise go to previous track."
                   >
                     ◀◀
@@ -5296,7 +5317,7 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     data-testid="player-next"
-                    onClick={handleNextTrack}
+                    onClick={() => handleNextTrack()}
                     title="Jump to next track in the current queue."
                   >
                     ▶▶
@@ -5658,7 +5679,7 @@ export function App(): JSX.Element {
                     type="button"
                     className="checklist-mini-player-button"
                     data-testid="song-checklist-mini-player-prev"
-                    onClick={handlePreviousTrack}
+                    onClick={() => handlePreviousTrack({ syncChecklistModal: true })}
                     title="Previous track"
                     aria-label="Previous track"
                   >
@@ -5757,7 +5778,7 @@ export function App(): JSX.Element {
                     type="button"
                     className="checklist-mini-player-button"
                     data-testid="song-checklist-mini-player-next"
-                    onClick={handleNextTrack}
+                    onClick={() => handleNextTrack({ syncChecklistModal: true })}
                     title="Next track"
                     aria-label="Next track"
                   >

@@ -256,6 +256,28 @@ const CHECKLIST_CAPTURE_LOOKBACK_SECONDS = 3;
 const CHECKLIST_PREVIEW_SCROLL_STEP_SECONDS = 1;
 const CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS = 1200;
 const CHECKLIST_HISTORY_LIMIT = 100;
+const CHECKLIST_BOTTOM_PIN_THRESHOLD_PX = 24;
+
+function getChecklistScrollBottomGap(scrollRegion: HTMLElement): number {
+  return Math.max(0, scrollRegion.scrollHeight - scrollRegion.clientHeight - scrollRegion.scrollTop);
+}
+
+function isChecklistScrollNearBottom(
+  scrollRegion: HTMLElement,
+  thresholdPx = CHECKLIST_BOTTOM_PIN_THRESHOLD_PX
+): boolean {
+  return getChecklistScrollBottomGap(scrollRegion) <= thresholdPx;
+}
+
+function scheduleChecklistScrollToBottom(scrollRegion: HTMLElement): void {
+  requestAnimationFrame(() => {
+    scrollRegion.scrollTop = scrollRegion.scrollHeight;
+
+    requestAnimationFrame(() => {
+      scrollRegion.scrollTop = scrollRegion.scrollHeight;
+    });
+  });
+}
 
 function cloneSongChecklistsState(
   checklists: Record<string, SongChecklistItem[]>
@@ -976,6 +998,7 @@ export function App(): JSX.Element {
   const checklistItemsScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const checklistVisibleSongIdRef = useRef<string | null>(null);
   const checklistVisibleItemCountRef = useRef(0);
+  const checklistShouldPinToBottomRef = useRef(true);
   const songChecklistsRef = useRef(songChecklists);
   const checklistUndoStackRef = useRef(checklistUndoStack);
   const checklistRedoStackRef = useRef(checklistRedoStack);
@@ -1124,8 +1147,34 @@ export function App(): JSX.Element {
       previousChecklistPlaybackTimeRef.current = currentTimeSeconds;
       checklistVisibleSongIdRef.current = null;
       checklistVisibleItemCountRef.current = 0;
+      checklistShouldPinToBottomRef.current = true;
     }
   }, [checklistModalSongId, currentTimeSeconds]);
+
+  useEffect(() => {
+    if (!checklistModalSongId) {
+      checklistShouldPinToBottomRef.current = true;
+      return;
+    }
+
+    const scrollRegion = checklistItemsScrollContainerRef.current;
+    if (!scrollRegion) {
+      checklistShouldPinToBottomRef.current = true;
+      return;
+    }
+
+    checklistShouldPinToBottomRef.current = isChecklistScrollNearBottom(scrollRegion);
+
+    const handleScroll = (): void => {
+      checklistShouldPinToBottomRef.current = isChecklistScrollNearBottom(scrollRegion);
+    };
+
+    scrollRegion.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      scrollRegion.removeEventListener('scroll', handleScroll);
+    };
+  }, [checklistModalSongId]);
 
   useEffect(() => {
     const visibleItemCount = checklistModalSongId
@@ -1146,10 +1195,26 @@ export function App(): JSX.Element {
       return;
     }
 
-    requestAnimationFrame(() => {
-      scrollRegion.scrollTop = scrollRegion.scrollHeight;
-    });
+    checklistShouldPinToBottomRef.current = true;
+    scheduleChecklistScrollToBottom(scrollRegion);
   }, [checklistModalSongId, songChecklists]);
+
+  useEffect(() => {
+    if (!checklistModalSongId || !checklistShouldPinToBottomRef.current) {
+      return;
+    }
+
+    const scrollRegion = checklistItemsScrollContainerRef.current;
+    if (!scrollRegion) {
+      return;
+    }
+
+    if (!isChecklistScrollNearBottom(scrollRegion, CHECKLIST_BOTTOM_PIN_THRESHOLD_PX * 2)) {
+      return;
+    }
+
+    scheduleChecklistScrollToBottom(scrollRegion);
+  }, [checklistModalSongId, isPlaying]);
 
   useEffect(() => {
     const selectedVersion =

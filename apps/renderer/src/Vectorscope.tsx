@@ -69,13 +69,14 @@ export function Vectorscope({
       ctx.lineTo(cx, cy + radius);
       ctx.stroke();
 
-      // Labels
+      // Labels — M (top), S (right), and L/R on diagonals
       ctx.font = '9px Inter, sans-serif';
       ctx.fillStyle = '#6b8199';
       ctx.textAlign = 'center';
-      ctx.fillText('L+R', cx, cy - radius - 4);
-      ctx.fillText('L-R', cx + radius + 2, cy + 3);
-      ctx.textBaseline = 'top';
+      ctx.fillText('M', cx, cy - radius - 4);
+      ctx.fillText('S', cx + radius + 4, cy + 3);
+      ctx.fillText('L', cx - radius * 0.7 - 8, cy - radius * 0.7 - 2);
+      ctx.fillText('R', cx + radius * 0.7 + 6, cy - radius * 0.7 - 2);
       ctx.textBaseline = 'alphabetic';
 
       if (!analyserNodeL || !analyserNodeR) {

@@ -14,7 +14,7 @@ const DB_MAX = 0;
 const PADDING_LEFT = 44;
 const PADDING_RIGHT = 12;
 const PADDING_TOP = 8;
-const PADDING_BOTTOM = 22;
+const PADDING_BOTTOM = 30;
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -87,8 +87,20 @@ export function LoudnessHistoryGraph({
     for (let i = 0; i <= timeSteps; i++) {
       const t = i * timeInterval;
       const x = PADDING_LEFT + (t / totalDur) * plotW;
-      ctx.fillText(formatTime(t), x, height - 4);
+      ctx.fillText(formatTime(t), x, height - 14);
     }
+
+    // Axis title labels
+    ctx.fillStyle = 'rgba(156, 175, 196, 0.5)';
+    ctx.font = '10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Time', PADDING_LEFT + plotW / 2, height - 2);
+    ctx.save();
+    ctx.translate(10, PADDING_TOP + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('LUFS', 0, 0);
+    ctx.restore();
 
     // Integrated LUFS reference line
     const intLufs = analysis.integratedLufsEstimate;

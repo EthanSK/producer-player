@@ -293,12 +293,26 @@ export function SpectrumAnalyzer({
         ctx.shadowBlur = 0;
       }
 
+      // Axis title labels in full screen
+      if (isFullScreen) {
+        ctx.fillStyle = 'rgba(156, 175, 196, 0.45)';
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Frequency (Hz)', width / 2, height - 4);
+        ctx.save();
+        ctx.translate(10, height / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center';
+        ctx.fillText('dB', 0, 0);
+        ctx.restore();
+      }
+
       // Instruction / status text in full screen
       if (isFullScreen && !hasActiveBands) {
         ctx.fillStyle = 'rgba(156, 175, 196, 0.3)';
         ctx.font = '11px Inter, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText('Click a band to solo', width - 8, height - 4);
+        ctx.fillText('Click a band to solo', width - 8, height - 16);
       } else if (isFullScreen && hasActiveBands) {
         const activeLabels = Array.from(activeBands!)
           .sort((a, b) => a - b)
@@ -307,7 +321,7 @@ export function SpectrumAnalyzer({
         ctx.fillStyle = 'rgba(92, 167, 255, 0.9)';
         ctx.font = 'bold 12px Inter, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(`Soloing: ${activeLabels}`, width - 8, height - 4);
+        ctx.fillText(`Soloing: ${activeLabels}`, width - 8, height - 16);
       }
     };
 

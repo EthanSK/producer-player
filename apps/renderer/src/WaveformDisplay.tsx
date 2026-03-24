@@ -12,10 +12,10 @@ interface WaveformDisplayProps {
   height: number;
 }
 
-const PADDING_LEFT = 4;
+const PADDING_LEFT = 30;
 const PADDING_RIGHT = 4;
 const PADDING_TOP = 4;
-const PADDING_BOTTOM = 4;
+const PADDING_BOTTOM = 18;
 
 /**
  * Downsample an AudioBuffer's channel data to a fixed number of visual peaks.
@@ -91,6 +91,41 @@ export function WaveformDisplay({
     ctx.moveTo(PADDING_LEFT, centerY);
     ctx.lineTo(PADDING_LEFT + plotW, centerY);
     ctx.stroke();
+
+    // Amplitude scale labels on Y axis
+    ctx.font = '9px Inter, sans-serif';
+    ctx.fillStyle = 'rgba(156, 175, 196, 0.5)';
+    ctx.textAlign = 'right';
+    ctx.fillText('1.0', PADDING_LEFT - 3, PADDING_TOP + 6);
+    ctx.fillText('0', PADDING_LEFT - 3, centerY + 3);
+    ctx.fillText('-1.0', PADDING_LEFT - 3, PADDING_TOP + plotH);
+
+    // Time labels on X axis
+    const effectiveDurationForLabels = durationSeconds > 0 ? durationSeconds : (analysis?.durationSeconds ?? 0);
+    if (effectiveDurationForLabels > 0) {
+      ctx.textAlign = 'center';
+      const timeSteps = Math.max(1, Math.ceil(effectiveDurationForLabels / 30));
+      const timeInterval = effectiveDurationForLabels / timeSteps;
+      for (let i = 0; i <= timeSteps; i++) {
+        const t = i * timeInterval;
+        const x = PADDING_LEFT + (t / effectiveDurationForLabels) * plotW;
+        const m = Math.floor(t / 60);
+        const s = Math.floor(t % 60);
+        ctx.fillText(`${m}:${s.toString().padStart(2, '0')}`, x, height - 6);
+      }
+    }
+
+    // Axis title labels
+    ctx.fillStyle = 'rgba(156, 175, 196, 0.45)';
+    ctx.font = '10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Time', PADDING_LEFT + plotW / 2, height - 0);
+    ctx.save();
+    ctx.translate(8, PADDING_TOP + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('Amplitude', 0, 0);
+    ctx.restore();
 
     // Determine playback position ratio
     const effectiveDuration = durationSeconds > 0 ? durationSeconds : (analysis?.durationSeconds ?? 0);

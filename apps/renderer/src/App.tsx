@@ -69,6 +69,8 @@ import {
   TONAL_BALANCE_LINKS,
   LOUDNESS_HISTORY_LINKS,
   CLIP_COUNT_LINKS,
+  MEAN_VOLUME_LINKS,
+  MASTERING_CHECKLIST_LINKS,
 } from './helpTooltipLinks';
 
 type RepeatMode = 'off' | 'one' | 'all';
@@ -5129,7 +5131,7 @@ export function App(): JSX.Element {
       <main className="panel panel-main">
         <header className="panel-header">
           <div className="panel-title">
-            <h2>Album</h2>
+            <h2>Album <HelpTooltip text={"What this is: Your song list — all the tracks in the currently linked folder, organized as an album. Songs are auto-grouped by name, with versions nested under each title.\n\nHow to use it: Click a song to select it. Double-click to start playback. Drag songs up or down to reorder the tracklist. Use the search bar to filter by name.\n\nWhy you'd want to: Arrange your album's running order and keep all your mixes organized in one place.\n\nTip: The order you set here is preserved across sessions and used when you export — so arrange it like your final tracklist."} /></h2>
             <p className="muted">{formatTrackCount(songs.length)}</p>
             <p className="muted album-duration-label" data-testid="album-duration-label">
               {formatAlbumDuration(albumDurationSeconds)}
@@ -5628,7 +5630,7 @@ export function App(): JSX.Element {
           )}
 
           <section className="inspector-card">
-            <h3>Version History</h3>
+            <h3>Version History <HelpTooltip text={"What this is: A timeline of every exported version of this song — each time you bounce/export from your DAW with a version number (e.g. v1, v2, v3), it shows up here.\n\nHow to use it: Click 'Cue' on any version to load it into the player. Click 'Open in Finder' to locate the file on disk. The newest version is selected by default.\n\nWhy you'd want to: Quickly A/B your latest mix against an older version to hear if your changes actually improved the track.\n\nTip: Name your exports with version suffixes (e.g. 'My Song v3.wav') — Producer Player groups them automatically."} /></h3>
             <ul className="version-list">
               {inspectorVersions.map((version) => (
                 <li
@@ -5754,7 +5756,7 @@ export function App(): JSX.Element {
           <div ref={checklistModalCardRef} className="checklist-modal-card">
             <div className="checklist-modal-header">
               <div>
-                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist</h2>
+                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, and revisions you need to make for this track.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song.\n\nWhy you'd want to: Keep a structured record of what needs fixing in each song so nothing slips through the cracks between sessions.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the skip-back button and the text input."} /></h2>
                 <p className="muted">
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
@@ -6204,7 +6206,7 @@ export function App(): JSX.Element {
               <div className="analysis-overlay-grid">
                 <section className="analysis-overlay-section analysis-overlay-visualizations" data-testid="analysis-overlay-visualizations">
                   <div className="analysis-section-header">
-                    <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer &amp; Level Meter{refTrackSuffix} <HelpTooltip text="Shows the frequency content of your audio in real-time. Click bands to solo specific frequency ranges. The level meter on the right shows real-time RMS and peak levels." links={SPECTRUM_ANALYZER_LINKS} /></h4>
+                    <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer &amp; Level Meter{refTrackSuffix} <HelpTooltip text={"What you're seeing: Two tools in one. The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high). The Level Meter beside it shows a colored bar for RMS level (the average loudness you perceive) with a gradient from green (safe) through yellow to red (hot). A thin line marks the peak hold — the loudest moment, which lingers for 1.5 seconds before falling.\n\nWhat to look for: A balanced spectrum curve gently slopes downward from low to high frequencies — roughly 3 dB per octave. A big hump in the lows means your mix is bass-heavy; a rising high end means it's too bright. On the level meter, the bar should mostly stay in the green/yellow zone. If the peak hold line hits red (above -6 dB), you're running hot.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Real-time frequency content and peak/RMS levels — click bands to solo frequency ranges</p>
                   </div>
                   <div className="analysis-overlay-viz-row">
@@ -6418,7 +6420,7 @@ export function App(): JSX.Element {
 
                 {/* Loudness History Graph */}
                 <section className="analysis-overlay-section" data-testid="analysis-loudness-history">
-                  <h3>Loudness History{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Shows how the loudness (LUFS) changes over time throughout your track. The horizontal line shows your integrated (overall) loudness. Helps identify sections that are too loud or quiet." links={LOUDNESS_HISTORY_LINKS} /></h3>
+                  <h3>Loudness History{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A blue curve showing your track's loudness (LUFS) over time, from start to finish. The dashed horizontal line is your integrated (overall) loudness — the single number streaming platforms care about. A white vertical line tracks the current playback position. The shaded area under the curve helps visualize loudness density.\n\nWhat to look for: A relatively consistent curve means well-controlled loudness. Big dips may be unintentionally quiet sections. Sudden spikes could be harsh peaks that need taming. The gap between the curve and the dashed line shows how much each section deviates from your average loudness.\n\nTip: Compare your dashed reference line against platform targets (-14 LUFS for Spotify, -16 for Apple Music). If your curve is very flat with no variation, your track may be over-compressed."} links={LOUDNESS_HISTORY_LINKS} /></h3>
                   <LoudnessHistoryGraph
                     analysis={analysis}
                     currentTimeSeconds={currentTimeSeconds}
@@ -6430,7 +6432,7 @@ export function App(): JSX.Element {
 
                 {/* Waveform Display */}
                 <section className="analysis-overlay-section" data-testid="analysis-waveform">
-                  <h3>Waveform{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Visual representation of your audio's amplitude over time. Shows dynamics, silence gaps, and potential clipping. The playback position is shown as a moving cursor." links={WAVEFORM_LINKS} /></h3>
+                  <h3>Waveform{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: Symmetrical bars showing the peak amplitude of your audio at each moment in time. Taller bars = louder moments, shorter bars = quieter. Bars to the left of the white playback cursor are bright blue (already played), bars to the right are dimmer (upcoming). The Y-axis goes from -1.0 to +1.0 (full digital scale).\n\nWhat to look for: A healthy waveform has visible variation — loud choruses and quieter verses. If the bars are all maxed out at 1.0 with no variation, your track is likely over-compressed or clipping. Gaps (no bars) indicate silence.\n\nTip: Compare the height of your loudest and quietest sections. If there's barely any difference, consider backing off your limiter to restore dynamics."} links={WAVEFORM_LINKS} /></h3>
                   <WaveformDisplay
                     waveformPeaks={analysis?.waveformPeaks ?? null}
                     analysis={analysis}
@@ -6445,7 +6447,7 @@ export function App(): JSX.Element {
                 {/* Stereo Correlation Meter */}
                 <section className="analysis-overlay-section" data-testid="analysis-stereo-correlation">
                   <div className="analysis-section-header">
-                    <h4>Stereo Correlation{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Shows the phase relationship between your left and right channels. +1 = perfectly correlated (mono). 0 = completely unrelated. -1 = out of phase (will cancel in mono). Stay above +0.3 for mono compatibility." links={STEREO_CORRELATION_LINKS} /></h4>
+                    <h4>Stereo Correlation{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A horizontal meter with a glowing indicator that moves between -1 (left) and +1 (right). The background fades from red on the left, through yellow in the center, to green on the right. The numeric value is shown in the top-right corner, colored to match the zone.\n\nWhat to look for: Green zone (+0.5 to +1) = great mono compatibility — your track sounds solid on phone speakers and mono systems. Yellow zone (0 to +0.5) = some stereo content, generally fine. Red zone (below 0) = phase issues — left and right channels are canceling each other, which sounds thin or hollow in mono.\n\nTip: If the indicator dips into the red during certain parts, check for over-widened stereo effects, poorly set up chorus/phaser plugins, or samples that were accidentally phase-inverted."} links={STEREO_CORRELATION_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Phase relationship between L/R channels (+1 = mono compatible, -1 = out of phase)</p>
                   </div>
                   <StereoCorrelationMeter
@@ -6735,7 +6737,7 @@ export function App(): JSX.Element {
                 <div className="analysis-overlay-side-by-side">
                   <section className="analysis-overlay-section" data-testid="analysis-vectorscope">
                     <div className="analysis-section-header">
-                      <h4>Vectorscope{isRefMode ? " (Reference)" : ""} <HelpTooltip text="XY display of your stereo image. Vertical line = mono signal. Wider spread = wider stereo. If it leans left or right, your mix is panned. A full circle means heavy stereo processing." links={VECTORSCOPE_LINKS} /></h4>
+                      <h4>Vectorscope{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A circular display where blue dots trace your stereo signal in real-time, with a fading trail so you can see the shape over time. The vertical axis (M) is the Mid/mono signal (L+R), and the horizontal axis (S) is the Side signal (L-R). L and R labels mark the diagonal directions for pure left and pure right.\n\nWhat to look for: A tall, narrow vertical shape = mostly mono content (centered vocals, bass). A wider spread = more stereo width. A roughly even shape = balanced stereo image. If it leans consistently toward L or R, your mix is off-center. A thin horizontal line means the signal is pure side information with no center — usually a problem.\n\nTip: Bass and kick should appear mostly vertical (centered). If your low end spreads wide on the vectorscope, consider narrowing it with a mid/side EQ. A natural, full mix typically looks like a fuzzy vertical oval."} links={VECTORSCOPE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Stereo image — wider spread = wider stereo field, vertical = mono</p>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'center' }}>

@@ -33,6 +33,7 @@ const SHARED_USER_STATE_FILE_NAME = 'producer-player-shared-user-state.json';
 const STATE_DIRECTORY_NAME = 'Producer Player';
 const ORDER_SIDECAR_DIRECTORY = '.producer-player';
 const ORDER_SIDECAR_FILE = 'order-state.json';
+const STATE_DIRECTORY_SYMLINK_NAME = 'state';
 const PLAYBACK_PROTOCOL = 'producer-media';
 const PLAYBACK_PROTOCOL_HOST = 'file';
 const PLAYBACK_CACHE_DIRECTORY = 'playback-cache';
@@ -707,6 +708,10 @@ function getFolderOrderSidecarPath(folderPath: string): string {
   return join(folderPath, ORDER_SIDECAR_DIRECTORY, ORDER_SIDECAR_FILE);
 }
 
+function getFolderStateDirectorySymlinkPath(folderPath: string): string {
+  return join(folderPath, ORDER_SIDECAR_DIRECTORY, STATE_DIRECTORY_SYMLINK_NAME);
+}
+
 interface PersistedState {
   version: number;
   linkedFolderPaths: string[];
@@ -1255,13 +1260,55 @@ function buildFolderOrderSidecar(
   };
 }
 
+async function ensureFolderStateDirectorySymlink(folderPath: string): Promise<void> {
+  const symlinkPath = getFolderStateDirectorySymlinkPath(folderPath);
+  const targetPath = resolve(getStateDirectoryPath());
+
+  try {
+    await fs.mkdir(dirname(symlinkPath), { recursive: true });
+
+    try {
+      const existing = await fs.lstat(symlinkPath);
+
+      if (!existing.isSymbolicLink()) {
+        return;
+      }
+
+      const existingTarget = await fs.readlink(symlinkPath);
+      const resolvedExistingTarget = resolve(dirname(symlinkPath), existingTarget);
+
+      if (resolvedExistingTarget === targetPath) {
+        return;
+      }
+
+      await fs.rm(symlinkPath, { force: true });
+    } catch (error: unknown) {
+      const code =
+        typeof error === 'object' && error && 'code' in error
+          ? String((error as { code?: unknown }).code)
+          : null;
+
+      if (code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
+    await fs.symlink(targetPath, symlinkPath, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch {
+    // Keep canonical storage untouched even if sidecar symlink creation fails.
+  }
+}
+
 async function writeFolderOrderSidecars(snapshot: LibrarySnapshot): Promise<void> {
   await Promise.all(
     snapshot.linkedFolders.map(async (folder) => {
       const sidecarPath = getFolderOrderSidecarPath(folder.path);
       const payload = buildFolderOrderSidecar(snapshot, folder.id, folder.path);
 
-      await writeJsonAtomic(sidecarPath, payload).catch(() => undefined);
+      await Promise.all([
+        writeJsonAtomic(sidecarPath, payload).catch(() => undefined),
+        ensureFolderStateDirectorySymlink(folder.path),
+      ]);
     })
   );
 }
@@ -2326,6 +2373,13 @@ async function ensureLibraryService(): Promise<FileLibraryService> {
       // Keep going so one bad folder does not block startup.
     }
   }
+
+  await Promise.all(
+    service
+      .getSnapshot()
+      .linkedFolders
+      .map((folder) => ensureFolderStateDirectorySymlink(folder.path))
+  );
 
   if (shouldAttemptSidecarOrderRestore) {
     await restoreSongOrderFromSidecars(service);

@@ -734,6 +734,11 @@ test.describe('Producer Player desktop shell', () => {
       '.producer-player',
       'order-state.json'
     );
+    const stateDirectorySymlinkPath = path.join(
+      fixtureDirectory,
+      '.producer-player',
+      'state'
+    );
 
     const sidecarRaw = await fs.readFile(sidecarPath, 'utf8');
     const sidecar = JSON.parse(sidecarRaw) as {
@@ -746,6 +751,22 @@ test.describe('Producer Player desktop shell', () => {
     );
     expect((sidecar.songOrder ?? []).length).toBeGreaterThan(0);
 
+    await expect
+      .poll(async () => {
+        try {
+          const stats = await fs.lstat(stateDirectorySymlinkPath);
+          return stats.isSymbolicLink() ? 'symlink' : 'non-symlink';
+        } catch {
+          return 'missing';
+        }
+      })
+      .toBe('symlink');
+
+    const initialSymlinkTarget = await fs.readlink(stateDirectorySymlinkPath);
+    expect(path.resolve(path.dirname(stateDirectorySymlinkPath), initialSymlinkTarget)).toBe(
+      path.resolve(firstUserDataDirectory)
+    );
+
     await fs.rm(firstUserDataDirectory, { recursive: true, force: true });
 
     let secondLaunch: LaunchedApp | null = null;
@@ -757,6 +778,17 @@ test.describe('Producer Player desktop shell', () => {
 
       await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(secondLaunch.page.getByTestId('main-list-row').first()).toContainText('Alpha');
+
+      await expect
+        .poll(async () => {
+          try {
+            const target = await fs.readlink(stateDirectorySymlinkPath);
+            return path.resolve(path.dirname(stateDirectorySymlinkPath), target);
+          } catch {
+            return null;
+          }
+        })
+        .toBe(path.resolve(secondUserDataDirectory));
 
       const newStatePath = path.join(secondUserDataDirectory, STATE_FILE_NAME);
       const stateRaw = await fs.readFile(newStatePath, 'utf8');

@@ -51,6 +51,25 @@ import { StereoCorrelationMeter } from './StereoCorrelationMeter';
 import { Vectorscope } from './Vectorscope';
 import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
 import { HelpTooltip } from './HelpTooltip';
+import {
+  LUFS_LINKS,
+  TRUE_PEAK_LINKS,
+  LRA_LINKS,
+  STEREO_CORRELATION_LINKS,
+  SPECTRUM_ANALYZER_LINKS,
+  WAVEFORM_LINKS,
+  VECTORSCOPE_LINKS,
+  PLATFORM_NORMALIZATION_LINKS,
+  REFERENCE_TRACK_LINKS,
+  MID_SIDE_LINKS,
+  K_METERING_LINKS,
+  CREST_FACTOR_LINKS,
+  DC_OFFSET_LINKS,
+  DYNAMIC_RANGE_LINKS,
+  TONAL_BALANCE_LINKS,
+  LOUDNESS_HISTORY_LINKS,
+  CLIP_COUNT_LINKS,
+} from './helpTooltipLinks';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
@@ -65,6 +84,13 @@ interface LoadedReferenceTrack {
   playbackSource: PlaybackSourceInfo;
   previewAnalysis: TrackAnalysisResult;
   measuredAnalysis: AudioFileAnalysis;
+}
+
+interface SavedReferenceTrackEntry {
+  filePath: string;
+  fileName: string;
+  dateLastUsed: string;
+  integratedLufs: number | null;
 }
 
 const EMPTY_SNAPSHOT: LibrarySnapshot = {
@@ -612,6 +638,97 @@ function persistICloudLastSync(timestamp: string): void {
   window.localStorage.setItem(ICLOUD_LAST_SYNC_KEY, timestamp);
 }
 
+function readSavedReferenceTracks(): SavedReferenceTrackEntry[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SAVED_REFERENCE_TRACKS_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((entry: unknown) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+        return [];
+      }
+
+      const candidate = entry as Partial<SavedReferenceTrackEntry>;
+      if (
+        typeof candidate.filePath !== 'string' ||
+        candidate.filePath.length === 0 ||
+        typeof candidate.fileName !== 'string' ||
+        candidate.fileName.length === 0 ||
+        typeof candidate.dateLastUsed !== 'string'
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          filePath: candidate.filePath,
+          fileName: candidate.fileName,
+          dateLastUsed: candidate.dateLastUsed,
+          integratedLufs:
+            typeof candidate.integratedLufs === 'number' && Number.isFinite(candidate.integratedLufs)
+              ? candidate.integratedLufs
+              : null,
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedReferenceTracks(tracks: SavedReferenceTrackEntry[]): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(SAVED_REFERENCE_TRACKS_KEY, JSON.stringify(tracks));
+}
+
+function addToSavedReferenceTracks(
+  existing: SavedReferenceTrackEntry[],
+  entry: SavedReferenceTrackEntry
+): SavedReferenceTrackEntry[] {
+  const filtered = existing.filter((track) => track.filePath !== entry.filePath);
+  const updated = [entry, ...filtered];
+  return updated.slice(0, MAX_SAVED_REFERENCE_TRACKS);
+}
+
+function formatSavedReferenceDate(isoString: string): string {
+  try {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      return 'Today';
+    }
+
+    if (diffDays === 1) {
+      return 'Yesterday';
+    }
+
+    if (diffDays < 7) {
+      return `${diffDays}d ago`;
+    }
+
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
 function formatAlbumDuration(totalSeconds: number | null): string {
   if (totalSeconds === null || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
     return 'Album length unavailable';
@@ -992,6 +1109,9 @@ export function App(): JSX.Element {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
   const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(false);
+  const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrackEntry[]>(() =>
+    readSavedReferenceTracks()
+  );
   const [referenceTrack, setReferenceTrack] = useState<LoadedReferenceTrack | null>(null);
   const [referenceStatus, setReferenceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle'
@@ -3467,6 +3587,23 @@ export function App(): JSX.Element {
         previewAnalysis,
         measuredAnalysis: nextMeasuredAnalysis,
       });
+
+      setSavedReferenceTracks((current) => {
+        const next = addToSavedReferenceTracks(current, {
+          filePath: selection.filePath,
+          fileName: selection.fileName,
+          dateLastUsed: new Date().toISOString(),
+          integratedLufs:
+            typeof nextMeasuredAnalysis.integratedLufs === 'number' &&
+            Number.isFinite(nextMeasuredAnalysis.integratedLufs)
+              ? nextMeasuredAnalysis.integratedLufs
+              : null,
+        });
+
+        persistSavedReferenceTracks(next);
+        return next;
+      });
+
       setReferenceStatus('ready');
     } catch (cause: unknown) {
       setReferenceStatus('error');
@@ -3515,6 +3652,31 @@ export function App(): JSX.Element {
       fileName: pickedReference.fileName,
       subtitle: 'External reference file',
       playbackSource: pickedReference.playbackSource,
+    });
+  }
+
+  async function handleLoadSavedReferenceTrack(
+    savedReference: SavedReferenceTrackEntry
+  ): Promise<void> {
+    setReferenceError(null);
+
+    const resolvedPlaybackSource = await window.producerPlayer.resolvePlaybackSource(
+      savedReference.filePath
+    );
+
+    await loadReferenceTrack('external-file', {
+      filePath: savedReference.filePath,
+      fileName: savedReference.fileName,
+      subtitle: 'Saved reference file',
+      playbackSource: resolvedPlaybackSource,
+    });
+  }
+
+  function handleRemoveSavedReferenceTrack(filePath: string): void {
+    setSavedReferenceTracks((current) => {
+      const next = current.filter((savedReference) => savedReference.filePath !== filePath);
+      persistSavedReferenceTracks(next);
+      return next;
     });
   }
 
@@ -4633,7 +4795,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-integrated-stat"
                   title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file."
                 >
-                  <span className="analysis-stat-label">Integrated LUFS{refSuffix} <HelpTooltip text="The overall perceived loudness of your track, measured using the EBU R128 standard. This is what streaming platforms use to normalize your music. Target: -14 LUFS for Spotify, -16 for Apple Music." /></span>
+                  <span className="analysis-stat-label">Integrated LUFS{refSuffix} <HelpTooltip text="The overall perceived loudness of your track, measured using the EBU R128 standard. This is what streaming platforms use to normalize your music. Target: -14 LUFS for Spotify, -16 for Apple Music." links={LUFS_LINKS} /></span>
                   <strong>{measuredIntegratedText}</strong>
                 </div>
                 <div
@@ -4641,7 +4803,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-short-term-stat"
                   title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback."
                 >
-                  <span className="analysis-stat-label">Current loudness{refSuffix} <HelpTooltip text="Real-time loudness estimate based on a 3-second window. Useful for monitoring loudness during playback." /></span>
+                  <span className="analysis-stat-label">Current loudness{refSuffix} <HelpTooltip text="Real-time loudness estimate based on a 3-second window. Useful for monitoring loudness during playback." links={LUFS_LINKS} /></span>
                   <strong>{shortTermEstimateText}</strong>
                 </div>
               </div>
@@ -4676,7 +4838,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-lra-stat"
                   title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units."
                 >
-                  <span className="analysis-stat-label">Loudness range{refSuffix} <HelpTooltip text="How much the loudness varies throughout your track, measured in LU (Loudness Units). Higher = more dynamic. Typical pop: 5-8 LU. Classical: 10-20 LU." /></span>
+                  <span className="analysis-stat-label">Loudness range{refSuffix} <HelpTooltip text="How much the loudness varies throughout your track, measured in LU (Loudness Units). Higher = more dynamic. Typical pop: 5-8 LU. Classical: 10-20 LU." links={LRA_LINKS} /></span>
                   <strong>{measuredLraText}</strong>
                 </div>
                 <div
@@ -4684,7 +4846,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-true-peak-stat"
                   title="True Peak — the highest inter-sample peak level in the track, measured via oversampling."
                 >
-                  <span className="analysis-stat-label">True Peak{refSuffix} <HelpTooltip text="The absolute highest peak in your audio, measured with oversampling to detect inter-sample peaks. Keep below -1 dBTP for streaming, -2 dBTP for safety." /></span>
+                  <span className="analysis-stat-label">True Peak{refSuffix} <HelpTooltip text="The absolute highest peak in your audio, measured with oversampling to detect inter-sample peaks. Keep below -1 dBTP for streaming, -2 dBTP for safety." links={TRUE_PEAK_LINKS} /></span>
                   <strong>{measuredTruePeakText}</strong>
                 </div>
                 <div
@@ -4692,7 +4854,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-max-short-term-stat"
                   title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time."
                 >
-                  <span className="analysis-stat-label">Peak short-term{refSuffix} <HelpTooltip text="The loudest 3-second window in your track. Useful for finding the loudest section." /></span>
+                  <span className="analysis-stat-label">Peak short-term{refSuffix} <HelpTooltip text="The loudest 3-second window in your track. Useful for finding the loudest section." links={LUFS_LINKS} /></span>
                   <strong>{measuredMaxShortTermText}</strong>
                 </div>
                 <div
@@ -4700,7 +4862,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-max-momentary-stat"
                   title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time."
                 >
-                  <span className="analysis-stat-label">Peak momentary{refSuffix} <HelpTooltip text="The loudest 400ms moment in your track. Shows the most extreme short burst of loudness." /></span>
+                  <span className="analysis-stat-label">Peak momentary{refSuffix} <HelpTooltip text="The loudest 400ms moment in your track. Shows the most extreme short burst of loudness." links={LUFS_LINKS} /></span>
                   <strong>{measuredMaxMomentaryText}</strong>
                 </div>
               </div>
@@ -4711,7 +4873,7 @@ export function App(): JSX.Element {
               >
                 <div className="analysis-normalization-header">
                   <div>
-                    <strong>Platform normalization preview <HelpTooltip text="Shows exactly how each streaming platform will adjust your track's volume. Toggle 'Preview' to hear what your track will sound like on that platform." /></strong>
+                    <strong>Platform normalization preview <HelpTooltip text="Shows exactly how each streaming platform will adjust your track's volume. Toggle 'Preview' to hear what your track will sound like on that platform." links={PLATFORM_NORMALIZATION_LINKS} /></strong>
                     <p className="muted" data-testid="analysis-normalization-summary">
                       {normalizationSummaryText}
                     </p>
@@ -4824,7 +4986,7 @@ export function App(): JSX.Element {
 
               <div className="analysis-reference-toolbar producer-reference-toolbar">
                 <div>
-                  <strong>Reference <HelpTooltip text="Compare your mix against a reference track. Level matching automatically adjusts volume so you're comparing quality, not loudness." /></strong>
+                  <strong>Reference <HelpTooltip text="Compare your mix against a reference track. Level matching automatically adjusts volume so you're comparing quality, not loudness." links={REFERENCE_TRACK_LINKS} /></strong>
                   <p className="muted" data-testid="analysis-reference-summary">
                     {referenceTrack
                       ? `${referenceTrack.fileName} · ${
@@ -6024,7 +6186,7 @@ export function App(): JSX.Element {
               <div className="analysis-overlay-grid">
                 <section className="analysis-overlay-section analysis-overlay-visualizations" data-testid="analysis-overlay-visualizations">
                   <div className="analysis-section-header">
-                    <h4>Spectrum Analyzer &amp; Level Meter {isRefMode ? " (Reference)" : ""} <HelpTooltip text="Shows the frequency content of your audio in real-time. Click bands to solo specific frequency ranges. The level meter on the right shows real-time RMS and peak levels." /></h4>
+                    <h4>Spectrum Analyzer &amp; Level Meter {isRefMode ? " (Reference)" : ""} <HelpTooltip text="Shows the frequency content of your audio in real-time. Click bands to solo specific frequency ranges. The level meter on the right shows real-time RMS and peak levels." links={SPECTRUM_ANALYZER_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Real-time frequency content and peak/RMS levels — click bands to solo frequency ranges</p>
                   </div>
                   <div className="analysis-overlay-viz-row">
@@ -6032,7 +6194,7 @@ export function App(): JSX.Element {
                       <SpectrumAnalyzer
                         analyserNode={analyserNode}
                         width={spectrumFullWidth}
-                        height={220}
+                        height={260}
                         isFullScreen
                         activeBands={soloedBands}
                         onBandToggle={handleBandToggle}
@@ -6044,7 +6206,7 @@ export function App(): JSX.Element {
                         analyserNode={analyserNode}
                         orientation="vertical"
                         width={40}
-                        height={220}
+                        height={260}
                         isPlaying={isPlaying}
                       />
                     </div>
@@ -6069,7 +6231,7 @@ export function App(): JSX.Element {
 
                 <section className="analysis-overlay-section" data-testid="analysis-overlay-reference-panel">
                   <div className="analysis-section-header">
-                    <h4>Reference Track <HelpTooltip text="Compare your mix against a reference track. Level matching automatically adjusts volume so you're comparing quality, not loudness." /></h4>
+                    <h4>Reference Track <HelpTooltip text="Compare your mix against a reference track. Level matching automatically adjusts volume so you're comparing quality, not loudness." links={REFERENCE_TRACK_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Load a reference track to A/B compare against your mix</p>
                   </div>
                   <div className="reference-panel-layout">
@@ -6235,7 +6397,7 @@ export function App(): JSX.Element {
 
                 {/* Loudness History Graph */}
                 <section className="analysis-overlay-section" data-testid="analysis-loudness-history">
-                  <h3>Loudness History{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Shows how the loudness (LUFS) changes over time throughout your track. The horizontal line shows your integrated (overall) loudness. Helps identify sections that are too loud or quiet." /></h3>
+                  <h3>Loudness History{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Shows how the loudness (LUFS) changes over time throughout your track. The horizontal line shows your integrated (overall) loudness. Helps identify sections that are too loud or quiet." links={LOUDNESS_HISTORY_LINKS} /></h3>
                   <LoudnessHistoryGraph
                     analysis={analysis}
                     currentTimeSeconds={currentTimeSeconds}
@@ -6247,7 +6409,7 @@ export function App(): JSX.Element {
 
                 {/* Waveform Display */}
                 <section className="analysis-overlay-section" data-testid="analysis-waveform">
-                  <h3>Waveform{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Visual representation of your audio's amplitude over time. Shows dynamics, silence gaps, and potential clipping. The playback position is shown as a moving cursor." /></h3>
+                  <h3>Waveform{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Visual representation of your audio's amplitude over time. Shows dynamics, silence gaps, and potential clipping. The playback position is shown as a moving cursor." links={WAVEFORM_LINKS} /></h3>
                   <WaveformDisplay
                     waveformPeaks={analysis?.waveformPeaks ?? null}
                     analysis={analysis}
@@ -6262,7 +6424,7 @@ export function App(): JSX.Element {
                 {/* Stereo Correlation Meter */}
                 <section className="analysis-overlay-section" data-testid="analysis-stereo-correlation">
                   <div className="analysis-section-header">
-                    <h4>Stereo Correlation{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Shows the phase relationship between your left and right channels. +1 = perfectly correlated (mono). 0 = completely unrelated. -1 = out of phase (will cancel in mono). Stay above +0.3 for mono compatibility." /></h4>
+                    <h4>Stereo Correlation{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Shows the phase relationship between your left and right channels. +1 = perfectly correlated (mono). 0 = completely unrelated. -1 = out of phase (will cancel in mono). Stay above +0.3 for mono compatibility." links={STEREO_CORRELATION_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Phase relationship between L/R channels (+1 = mono compatible, -1 = out of phase)</p>
                   </div>
                   <StereoCorrelationMeter
@@ -6293,7 +6455,7 @@ export function App(): JSX.Element {
 
                   <section className="analysis-overlay-section">
                     <div className="analysis-section-header">
-                      <h4>Tonal Balance{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Breakdown of energy across frequency ranges. Low (20-250 Hz), Mid (250-4000 Hz), High (4000-20000 Hz). Helps check if your mix is bass-heavy or too bright." /></h4>
+                      <h4>Tonal Balance{isRefMode ? " (Reference)" : ""} <HelpTooltip text="Breakdown of energy across frequency ranges. Low (20-250 Hz), Mid (250-4000 Hz), High (4000-20000 Hz). Helps check if your mix is bass-heavy or too bright." links={TONAL_BALANCE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Low/mid/high energy distribution</p>
                     </div>
                     <div className="analysis-tonal-balance detailed">
@@ -6322,31 +6484,31 @@ export function App(): JSX.Element {
                   <h3>Loudness &amp; peaks{isRefMode ? " (Reference)" : ""}</h3>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
-                      <span className="analysis-stat-label">Integrated LUFS{refSuffix} <HelpTooltip text="The overall perceived loudness of your track, measured using the EBU R128 standard. This is what streaming platforms use to normalize your music. Target: -14 LUFS for Spotify, -16 for Apple Music." /></span>
+                      <span className="analysis-stat-label">Integrated LUFS{refSuffix} <HelpTooltip text="The overall perceived loudness of your track, measured using the EBU R128 standard. This is what streaming platforms use to normalize your music. Target: -14 LUFS for Spotify, -16 for Apple Music." links={LUFS_LINKS} /></span>
                       <strong>{measuredIntegratedText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
-                      <span className="analysis-stat-label">Current loudness{refSuffix} <HelpTooltip text="Real-time loudness estimate based on a 3-second window. Useful for monitoring loudness during playback." /></span>
+                      <span className="analysis-stat-label">Current loudness{refSuffix} <HelpTooltip text="Real-time loudness estimate based on a 3-second window. Useful for monitoring loudness during playback." links={LUFS_LINKS} /></span>
                       <strong>{shortTermEstimateText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
-                      <span className="analysis-stat-label">Loudness range{refSuffix} <HelpTooltip text="How much the loudness varies throughout your track, measured in LU (Loudness Units). Higher = more dynamic. Typical pop: 5-8 LU. Classical: 10-20 LU." /></span>
+                      <span className="analysis-stat-label">Loudness range{refSuffix} <HelpTooltip text="How much the loudness varies throughout your track, measured in LU (Loudness Units). Higher = more dynamic. Typical pop: 5-8 LU. Classical: 10-20 LU." links={LRA_LINKS} /></span>
                       <strong>{measuredLraText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="True Peak — the highest inter-sample peak level in the track, measured via oversampling.">
-                      <span className="analysis-stat-label">True Peak{refSuffix} <HelpTooltip text="The absolute highest peak in your audio, measured with oversampling to detect inter-sample peaks. Keep below -1 dBTP for streaming, -2 dBTP for safety." /></span>
+                      <span className="analysis-stat-label">True Peak{refSuffix} <HelpTooltip text="The absolute highest peak in your audio, measured with oversampling to detect inter-sample peaks. Keep below -1 dBTP for streaming, -2 dBTP for safety." links={TRUE_PEAK_LINKS} /></span>
                       <strong>{measuredTruePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Sample Peak — the highest digital sample value in the track, without oversampling.">
-                      <span className="analysis-stat-label">Sample peak{refSuffix} <HelpTooltip text="The highest sample value in the file. Unlike true peak, this doesn't account for inter-sample peaks that can occur during D/A conversion." /></span>
+                      <span className="analysis-stat-label">Sample peak{refSuffix} <HelpTooltip text="The highest sample value in the file. Unlike true peak, this doesn't account for inter-sample peaks that can occur during D/A conversion." links={TRUE_PEAK_LINKS} /></span>
                       <strong>{measuredSamplePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time.">
-                      <span className="analysis-stat-label">Peak short-term{refSuffix} <HelpTooltip text="The loudest 3-second window in your track. Useful for finding the loudest section." /></span>
+                      <span className="analysis-stat-label">Peak short-term{refSuffix} <HelpTooltip text="The loudest 3-second window in your track. Useful for finding the loudest section." links={LUFS_LINKS} /></span>
                       <strong>{measuredMaxShortTermText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
-                      <span className="analysis-stat-label">Peak momentary{refSuffix} <HelpTooltip text="The loudest 400ms moment in your track. Shows the most extreme short burst of loudness." /></span>
+                      <span className="analysis-stat-label">Peak momentary{refSuffix} <HelpTooltip text="The loudest 400ms moment in your track. Shows the most extreme short burst of loudness." links={LUFS_LINKS} /></span>
                       <strong>{measuredMaxMomentaryText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Average volume level across the entire track (RMS-based), in dBFS.">
@@ -6354,7 +6516,7 @@ export function App(): JSX.Element {
                       <strong>{measuredMeanVolumeText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Crest Factor — difference between peak and RMS levels. Higher values indicate more dynamic range.">
-                      <span className="analysis-stat-label">Crest Factor{refSuffix} <HelpTooltip text="Difference between peak and RMS (average) levels. Higher = more dynamic/punchy transients. Typical: 10-15 dB for unmastered, 4-8 dB for heavily limited masters." /></span>
+                      <span className="analysis-stat-label">Crest Factor{refSuffix} <HelpTooltip text="Difference between peak and RMS (average) levels. Higher = more dynamic/punchy transients. Typical: 10-15 dB for unmastered, 4-8 dB for heavily limited masters." links={CREST_FACTOR_LINKS} /></span>
                       <strong>
                         {analysisStatus === 'ready' && analysis
                           ? `${analysis.crestFactorDb.toFixed(1)} dB`
@@ -6362,7 +6524,7 @@ export function App(): JSX.Element {
                       </strong>
                     </div>
                     <div className="analysis-stat-card" title="Number of samples at or above 0 dBFS (digital clipping).">
-                      <span className="analysis-stat-label">Clip Count{refSuffix} <HelpTooltip text="Number of samples that hit or exceed 0 dBFS (digital ceiling). Any clips above 0 indicate digital distortion. Ideally should be 0." /></span>
+                      <span className="analysis-stat-label">Clip Count{refSuffix} <HelpTooltip text="Number of samples that hit or exceed 0 dBFS (digital ceiling). Any clips above 0 indicate digital distortion. Ideally should be 0." links={CLIP_COUNT_LINKS} /></span>
                       <strong>
                         {analysisStatus === 'ready' && analysis
                           ? analysis.clipCount > 0
@@ -6372,7 +6534,7 @@ export function App(): JSX.Element {
                       </strong>
                     </div>
                     <div className="analysis-stat-card" title="DC Offset — mean sample value. Non-zero DC offset wastes headroom.">
-                      <span className="analysis-stat-label">DC Offset{refSuffix} <HelpTooltip text="Whether the waveform is shifted above or below the zero line. Even small offsets waste headroom and can cause clicks. Should be as close to 0 as possible." /></span>
+                      <span className="analysis-stat-label">DC Offset{refSuffix} <HelpTooltip text="Whether the waveform is shifted above or below the zero line. Even small offsets waste headroom and can cause clicks. Should be as close to 0 as possible." links={DC_OFFSET_LINKS} /></span>
                       <strong>
                         {analysisStatus === 'ready' && analysis
                           ? Math.abs(analysis.dcOffset) > 0.001
@@ -6389,7 +6551,7 @@ export function App(): JSX.Element {
                   className="analysis-overlay-section"
                   data-testid="analysis-overlay-normalization-panel"
                 >
-                  <h3>Platform normalization preview <HelpTooltip text="Shows exactly how each streaming platform will adjust your track's volume. Toggle 'Preview' to hear what your track will sound like on that platform." /></h3>
+                  <h3>Platform normalization preview <HelpTooltip text="Shows exactly how each streaming platform will adjust your track's volume. Toggle 'Preview' to hear what your track will sound like on that platform." links={PLATFORM_NORMALIZATION_LINKS} /></h3>
                   <div className="analysis-normalization-header">
                     <div>
                       <strong>Streaming loudness preview</strong>
@@ -6498,7 +6660,7 @@ export function App(): JSX.Element {
 
                 <section className="analysis-overlay-section analysis-comparison-panel">
                   <div className="analysis-section-header">
-                    <h4>Your Mix vs Reference <HelpTooltip text="Compare your mix against a reference track. Level matching automatically adjusts volume so you're comparing quality, not loudness." /></h4>
+                    <h4>Your Mix vs Reference <HelpTooltip text="Compare your mix against a reference track. Level matching automatically adjusts volume so you're comparing quality, not loudness." links={REFERENCE_TRACK_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Compare loudness and tonal balance against your reference track</p>
                   </div>
                   {referenceTrack && activeReferenceComparison ? (
@@ -6544,7 +6706,7 @@ export function App(): JSX.Element {
                 <div className="analysis-overlay-side-by-side">
                   <section className="analysis-overlay-section" data-testid="analysis-vectorscope">
                     <div className="analysis-section-header">
-                      <h4>Vectorscope{isRefMode ? " (Reference)" : ""} <HelpTooltip text="XY display of your stereo image. Vertical line = mono signal. Wider spread = wider stereo. If it leans left or right, your mix is panned. A full circle means heavy stereo processing." /></h4>
+                      <h4>Vectorscope{isRefMode ? " (Reference)" : ""} <HelpTooltip text="XY display of your stereo image. Vertical line = mono signal. Wider spread = wider stereo. If it leans left or right, your mix is panned. A full circle means heavy stereo processing." links={VECTORSCOPE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Stereo image — wider spread = wider stereo field, vertical = mono</p>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -6559,7 +6721,7 @@ export function App(): JSX.Element {
 
                   <section className="analysis-overlay-section" data-testid="analysis-midside">
                     <div className="analysis-section-header">
-                      <h4>Mid/Side Monitoring <HelpTooltip text="Listen to just the center (Mid) or sides (Side) of your stereo mix separately. Mid = vocals, bass, kick. Side = reverb, width, panning. Useful for checking stereo balance." /></h4>
+                      <h4>Mid/Side Monitoring <HelpTooltip text="Listen to just the center (Mid) or sides (Side) of your stereo mix separately. Mid = vocals, bass, kick. Side = reverb, width, panning. Useful for checking stereo balance." links={MID_SIDE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Listen to Mid (center) or Side (stereo width) in isolation</p>
                     </div>
                     <div className="analysis-ab-actions" role="group" aria-label="Mid/Side toggle" style={{ display: 'flex', gap: 6 }}>
@@ -6599,7 +6761,7 @@ export function App(): JSX.Element {
                 {/* K-Metering */}
                 <section className="analysis-overlay-section" data-testid="analysis-k-metering">
                   <div className="analysis-section-header">
-                    <h4>K-Metering <HelpTooltip text="Bob Katz's metering standard. K-14: 0 dB on the meter = -14 dBFS (good for most music). K-20: 0 dB = -20 dBFS (good for film/classical). Helps calibrate your monitoring." /></h4>
+                    <h4>K-Metering <HelpTooltip text="Bob Katz's metering standard. K-14: 0 dB on the meter = -14 dBFS (good for most music). K-20: 0 dB = -20 dBFS (good for film/classical). Helps calibrate your monitoring." links={K_METERING_LINKS} /></h4>
                     <p className="analysis-section-subtitle">K-weighted meter scales calibrated for different content types — 0 dB on the K-scale represents the reference listening level</p>
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
@@ -6628,7 +6790,7 @@ export function App(): JSX.Element {
                 {analysisStatus === 'ready' && analysis ? (
                   <section className="analysis-overlay-section" data-testid="analysis-pro-indicators">
                     <div className="analysis-section-header">
-                      <h4>Quick Diagnostics <HelpTooltip text="Classification of how dynamic your track is based on Loudness Range. High DR = very dynamic. Low DR = heavily compressed/limited." /></h4>
+                      <h4>Quick Diagnostics <HelpTooltip text="Classification of how dynamic your track is based on Loudness Range. High DR = very dynamic. Low DR = heavily compressed/limited." links={DYNAMIC_RANGE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">At-a-glance health checks for your master</p>
                     </div>
                     <div className="analysis-pro-indicators">

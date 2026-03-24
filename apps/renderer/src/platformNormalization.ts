@@ -59,7 +59,7 @@ export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProf
     truePeakCeilingDbtp: -1,
     policy: 'peak-limited-upward',
     accentColor: '#1ed760',
-    description: 'Spotify normalizes to -14 LUFS. Quiet tracks get boosted (capped at -1 dBTP); loud tracks are turned down.',
+    description: 'Spotify normalizes to -14 LUFS. If your track is louder, Spotify turns it down. If quieter, Spotify boosts it — but only as far as the -1 dBTP peak ceiling allows, so your peaks never clip.',
   },
   {
     id: 'appleMusic',
@@ -69,7 +69,7 @@ export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProf
     truePeakCeilingDbtp: -1,
     policy: 'peak-limited-upward',
     accentColor: '#fa243c',
-    description: 'Apple Music Sound Check targets -16 LUFS. Adjusts both up and down, limited by true peak headroom.',
+    description: 'Apple Music Sound Check targets -16 LUFS — quieter than Spotify, which preserves more dynamics. Both boosts and cuts are applied, but boosts are limited by the -1 dBTP peak ceiling.',
   },
   {
     id: 'youtube',
@@ -79,7 +79,7 @@ export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProf
     truePeakCeilingDbtp: -1,
     policy: 'down-only',
     accentColor: '#ff0033',
-    description: 'YouTube turns down loud tracks to -14 LUFS but will not boost quiet ones.',
+    description: 'YouTube targets -14 LUFS but only turns loud tracks down. If your track is quieter than -14 LUFS, YouTube leaves it at its original volume — it never boosts.',
   },
   {
     id: 'tidal',
@@ -89,7 +89,7 @@ export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProf
     truePeakCeilingDbtp: -1,
     policy: 'down-only',
     accentColor: '#ffffff',
-    description: 'Tidal turns down loud tracks to -14 LUFS. Quiet tracks stay at their original level.',
+    description: 'Tidal targets -14 LUFS and only turns loud tracks down. Quiet tracks stay at their original level — Tidal never boosts playback volume.',
   },
   {
     id: 'amazon',
@@ -99,7 +99,7 @@ export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProf
     truePeakCeilingDbtp: -2,
     policy: 'down-only',
     accentColor: '#25d1da',
-    description: 'Amazon Music targets -14 LUFS with a stricter -2 dBTP ceiling. Loud tracks are turned down.',
+    description: 'Amazon Music targets -14 LUFS with a stricter -2 dBTP peak ceiling. Only turns loud tracks down. The lower peak ceiling means you should leave extra headroom when mastering for Amazon.',
   },
 ] as const;
 

@@ -92,12 +92,15 @@ test.describe('Checklist and export UX improvements', () => {
 
       await expect(page.getByTestId('song-checklist-item-text')).toHaveCount(2);
       await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue(
+        'Keep this item'
+      );
+      await expect(page.getByTestId('song-checklist-item-text').last()).toHaveValue(
         'Remove this item'
       );
 
       const checklistToggles = page.locator('.checklist-item-row input[type="checkbox"]');
-      await checklistToggles.first().check();
-      await expect(checklistToggles.first()).toBeChecked();
+      await checklistToggles.last().check();
+      await expect(checklistToggles.last()).toBeChecked();
 
       page.once('dialog', async (dialog) => {
         expect(dialog.type()).toBe('confirm');
@@ -108,7 +111,7 @@ test.describe('Checklist and export UX improvements', () => {
 
       await expect(page.getByTestId('song-checklist-item-text')).toHaveCount(2);
       await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue(
-        'Remove this item'
+        'Keep this item'
       );
 
       page.once('dialog', async (dialog) => {
@@ -122,6 +125,56 @@ test.describe('Checklist and export UX improvements', () => {
       await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue(
         'Keep this item'
       );
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('keyboard undo/redo restores checklist removals when text input is not focused', async () => {
+    const directories = await createE2ETestDirectories('producer-player-checklist-command-z-undo');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      await page.getByTestId('song-checklist-input').fill('First item');
+      await page.getByTestId('song-checklist-add').click();
+      await page.getByTestId('song-checklist-input').fill('Second item');
+      await page.getByTestId('song-checklist-add').click();
+
+      const items = page.getByTestId('song-checklist-item-text');
+      await expect(items).toHaveCount(2);
+
+      await page.locator('.checklist-remove-button').last().click();
+      await expect(items).toHaveCount(1);
+      await expect(items.first()).toHaveValue('First item');
+
+      const composer = page.getByTestId('song-checklist-input');
+      await composer.focus();
+      await composer.type('x');
+      await page.keyboard.press('Control+z');
+      await expect(items).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-skip-back-10').focus();
+      await page.keyboard.press('Control+z');
+      await expect(items).toHaveCount(2);
+      await expect(items.last()).toHaveValue('Second item');
+
+      await page.keyboard.press('Control+Shift+z');
+      await expect(items).toHaveCount(1);
+      await expect(items.first()).toHaveValue('First item');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

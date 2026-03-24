@@ -1069,12 +1069,19 @@ test.describe('playback runtime deep dive', () => {
 
       await expect(page.getByTestId('analysis-track-label')).toContainText('Coverage Mix v1.wav');
       await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading');
-      await expect(page.getByTestId('analysis-ab-toggle')).toBeVisible();
+      await expect(page.getByTestId('analysis-short-term-stat')).toContainText('LUFS');
+      await expect(page.getByTestId('analysis-lra-stat')).toBeHidden();
+      await expect(page.getByTestId('analysis-max-short-term-stat')).toBeHidden();
+      await expect(page.getByTestId('analysis-max-momentary-stat')).toBeHidden();
+
+      await page.getByTestId('analysis-stats-expander').click();
+      await expect(page.getByTestId('analysis-lra-stat')).toBeVisible();
       await expect(page.getByTestId('analysis-lra-stat')).toContainText('LU');
       await expect(page.getByTestId('analysis-max-short-term-stat')).toContainText('LUFS');
       await expect(page.getByTestId('analysis-max-momentary-stat')).toContainText('LUFS');
-      await expect(page.getByTestId('analysis-short-term-stat')).toContainText('LUFS');
+
       await expect(page.getByTestId('analysis-tonal-balance')).toContainText('Low');
+      await expect(page.getByTestId('analysis-ab-toggle')).toBeVisible();
       await expect(page.getByTestId('analysis-normalization-cap')).toBeVisible();
       await expect(page.getByTestId('analysis-use-current-reference')).toBeEnabled();
 

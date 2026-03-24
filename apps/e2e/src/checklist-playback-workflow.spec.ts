@@ -99,12 +99,12 @@ async function waitForPlaybackSeconds(
 }
 
 test.describe('checklist playback workflow', () => {
-  test('typing freezes the preview timestamp about one second earlier than the paused playback moment', async () => {
+  test('typing freezes the preview timestamp and rewinds playback by roughly three seconds', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-typing-freeze'
     );
     await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
-      durationMs: 4_200,
+      durationMs: 7_200,
       frequencyHz: 330,
     });
 
@@ -119,15 +119,21 @@ test.describe('checklist playback workflow', () => {
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 
       await page.getByTestId('song-checklist-play-toggle').click();
-      await waitForPlaybackSeconds(page, 2.2);
+      await waitForPlaybackSeconds(page, 3.4);
       await page.getByTestId('song-checklist-play-toggle').click();
 
-      const scrubberSeconds = Number(await page.getByTestId('player-scrubber').inputValue());
-      const expectedTimestamp = formatTime(Math.max(0, Math.floor(scrubberSeconds - 1)));
+      const scrubber = page.getByTestId('player-scrubber');
+      const pausedSeconds = Number(await scrubber.inputValue());
+      const expectedSeconds = Math.max(0, Math.floor(pausedSeconds - 3));
+      const expectedTimestamp = formatTime(expectedSeconds);
 
       const previewBadge = page.getByTestId('song-checklist-input-timestamp-preview');
       await page.getByTestId('song-checklist-input').fill('A');
       await expect(previewBadge).toHaveText(expectedTimestamp);
+
+      await expect
+        .poll(async () => Number(await scrubber.inputValue()))
+        .toBeLessThanOrEqual(expectedSeconds + 0.2);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

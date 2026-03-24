@@ -259,3 +259,33 @@ export const CLIP_COUNT_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=q2gatFLOzGM',
   },
 ];
+
+export const MEAN_VOLUME_LINKS: HelpTooltipLink[] = [
+  {
+    label: 'RMS vs Peak Levels Explained - iZotope',
+    url: 'https://www.youtube.com/watch?v=oHVMNmhTnqE',
+  },
+  {
+    label: 'Understanding dBFS & RMS - Produce Like A Pro',
+    url: 'https://www.youtube.com/watch?v=5v5qLPBiSYE',
+  },
+  {
+    label: 'Loudness Metering Tutorial - Behind The Speakers',
+    url: 'https://www.youtube.com/watch?v=--EyiNpGFzg',
+  },
+];
+
+export const MASTERING_CHECKLIST_LINKS: HelpTooltipLink[] = [
+  {
+    label: 'Mastering Checklist: Before You Release - iZotope',
+    url: 'https://www.youtube.com/watch?v=yJk3ONs6__s',
+  },
+  {
+    label: 'Pre-Release Mastering Checks - Produce Like A Pro',
+    url: 'https://www.youtube.com/watch?v=1OuIMi_AKCE',
+  },
+  {
+    label: 'Final Checks Before Mastering - Sage Audio',
+    url: 'https://www.youtube.com/watch?v=a1wDGTBAkwU',
+  },
+];

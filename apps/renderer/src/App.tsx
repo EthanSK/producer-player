@@ -5894,6 +5894,7 @@ export function App(): JSX.Element {
                       onKeyDown={(event) => {
                         if (
                           event.key === 'Tab' &&
+                          event.shiftKey &&
                           !event.metaKey &&
                           !event.ctrlKey &&
                           !event.altKey

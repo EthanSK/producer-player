@@ -395,8 +395,15 @@ test.describe('checklist playback workflow', () => {
 
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
-      await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText('Reference track');
+      await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText(/Reference Track/i);
       await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText('Quick A/B');
+
+      const fullScreenSpectrum = page.getByTestId('spectrum-analyzer-full');
+      await expect(fullScreenSpectrum).toBeVisible();
+      const fullScreenSpectrumHeight = await fullScreenSpectrum.evaluate((element) =>
+        Math.round(element.getBoundingClientRect().height)
+      );
+      expect(fullScreenSpectrumHeight).toBeGreaterThanOrEqual(250);
 
       const overlaySectionOrder = await page.evaluate(() =>
         Array.from(document.querySelectorAll('.analysis-overlay-grid > .analysis-overlay-section')).map(

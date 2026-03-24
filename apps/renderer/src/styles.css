@@ -1536,11 +1536,12 @@ input[type='range'] {
 }
 
 .checklist-remove-button {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: 999px;
   align-self: start;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.2;
   color: var(--text-muted);
   border-color: rgba(156, 175, 196, 0.38);
   background: transparent;

@@ -1503,7 +1503,7 @@ button.analysis-overlay-play-toggle {
 
 .checklist-modal-card {
   width: min(640px, 100%);
-  max-height: min(80vh, 760px);
+  max-height: min(95vh, 960px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1529,7 +1529,7 @@ button.analysis-overlay-play-toggle {
 .checklist-item-scroll-region {
   flex: 1;
   min-height: 140px;
-  max-height: 48vh;
+  max-height: 64vh;
   overflow-y: auto;
   padding-right: 2px;
   display: flex;
@@ -2200,7 +2200,7 @@ button.checklist-play-toggle[data-playing='true'] {
   }
 
   .checklist-item-scroll-region {
-    max-height: 42vh;
+    max-height: 56vh;
   }
 
   .checklist-mini-player-scrubber-row {

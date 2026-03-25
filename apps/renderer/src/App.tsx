@@ -1416,7 +1416,9 @@ export function App(): JSX.Element {
   }, [mixPlaybackSource?.url, selectedPlaybackVersionId, snapshot.versions]);
 
   useEffect(() => {
-    setAnalysisCompactStatsExpanded(false);
+    setAnalysisCompactStatsExpanded(
+      window.localStorage.getItem(MORE_METRICS_EXPANDED_KEY) === 'true'
+    );
   }, [selectedPlaybackVersionId]);
 
   useEffect(() => {
@@ -6077,7 +6079,7 @@ export function App(): JSX.Element {
                         aria-label={`Remove ${item.text}`}
                         title="Remove checklist item"
                       >
-                        🗑️
+                        <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
                       </button>
                     </li>
                   ))}

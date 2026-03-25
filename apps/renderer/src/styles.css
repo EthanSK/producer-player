@@ -761,6 +761,31 @@ input[type='range'] {
   stroke: none;
 }
 
+/* Platform normalization preview indicator in mastering headers */
+.normalization-preview-header-badge {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 6px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+.normalization-preview-header-badge:hover {
+  opacity: 1;
+}
+.normalization-preview-header-icon.analysis-platform-icon {
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+}
+h3 .normalization-preview-header-icon.analysis-platform-icon {
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+}
+
 .analysis-platform-copy {
   display: grid;
   gap: 2px;

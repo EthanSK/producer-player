@@ -135,6 +135,7 @@ const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
 const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
 const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
+const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
 const MAX_SAVED_REFERENCE_TRACKS = 20;
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
 const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
@@ -1113,7 +1114,9 @@ export function App(): JSX.Element {
   );
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
-  const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(false);
+  const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(() =>
+    window.localStorage.getItem(MORE_METRICS_EXPANDED_KEY) === 'true'
+  );
   const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrackEntry[]>(() =>
     readSavedReferenceTracks()
   );
@@ -4848,7 +4851,22 @@ export function App(): JSX.Element {
         >
           <div className="analysis-panel-header">
             <div>
-              <h3>Mastering</h3>
+              <h3>
+                Mastering
+                {normalizationPreviewEnabled && (
+                  <button
+                    type="button"
+                    className="normalization-preview-header-badge"
+                    onClick={() => setNormalizationPreviewEnabled(false)}
+                    title={`Platform normalization preview: ${selectedNormalizationPlatform.label} — click to turn off`}
+                    aria-label={`Platform normalization preview active: ${selectedNormalizationPlatform.label}. Click to disable.`}
+                  >
+                    <span className="normalization-preview-header-icon analysis-platform-icon" style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as React.CSSProperties}>
+                      <PlatformIcon platformId={selectedNormalizationPlatformId} />
+                    </span>
+                  </button>
+                )}
+              </h3>
             </div>
             <button
               type="button"
@@ -4910,7 +4928,11 @@ export function App(): JSX.Element {
                 className={`ghost analysis-stats-expander${
                   analysisCompactStatsExpanded ? ' expanded' : ''
                 }`}
-                onClick={() => setAnalysisCompactStatsExpanded((current) => !current)}
+                onClick={() => setAnalysisCompactStatsExpanded((current) => {
+                  const next = !current;
+                  window.localStorage.setItem(MORE_METRICS_EXPANDED_KEY, String(next));
+                  return next;
+                })}
                 aria-expanded={analysisCompactStatsExpanded}
                 aria-controls="analysis-side-extra-stats"
                 data-testid="analysis-stats-expander"
@@ -6288,7 +6310,22 @@ export function App(): JSX.Element {
           >
             <div className="analysis-overlay-header">
               <div>
-                <h2>Mastering{selectedPlaybackVersion ? ` — ${selectedPlaybackVersion.fileName}` : ''}</h2>
+                <h2>
+                  Mastering{selectedPlaybackVersion ? ` — ${selectedPlaybackVersion.fileName}` : ''}
+                  {normalizationPreviewEnabled && (
+                    <button
+                      type="button"
+                      className="normalization-preview-header-badge"
+                      onClick={() => setNormalizationPreviewEnabled(false)}
+                      title={`Platform normalization preview: ${selectedNormalizationPlatform.label} — click to turn off`}
+                      aria-label={`Platform normalization preview active: ${selectedNormalizationPlatform.label}. Click to disable.`}
+                    >
+                      <span className="normalization-preview-header-icon analysis-platform-icon" style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as React.CSSProperties}>
+                        <PlatformIcon platformId={selectedNormalizationPlatformId} />
+                      </span>
+                    </button>
+                  )}
+                </h2>
                 {playbackPreviewMode === 'reference' && referenceTrack ? (
                   <p className="muted">Playing Reference: {referenceTrack.fileName}</p>
                 ) : (

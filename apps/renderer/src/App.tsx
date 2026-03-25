@@ -1331,6 +1331,11 @@ export function App(): JSX.Element {
       return;
     }
 
+    // Don't auto-scroll during playback — it fights with user scrolling
+    if (isPlayingRef.current) {
+      return;
+    }
+
     const scrollRegion = checklistItemsScrollContainerRef.current;
     if (!scrollRegion) {
       return;

@@ -152,7 +152,12 @@ export function drawCrosshair(
     if (yLabelY < plotTop) yLabelY = plotTop;
     if (yLabelY + yLabelH > plotBottom) yLabelY = plotBottom - yLabelH;
 
-    const yLabelX = plotLeft - yLabelW - 2;
+    // Place label to the left of the plot area; if it would be clipped,
+    // render it to the right of the crosshair line instead.
+    let yLabelX = plotLeft - yLabelW - 2;
+    if (yLabelX < 0) {
+      yLabelX = cx + 4;
+    }
 
     ctx.fillStyle = 'rgba(20, 28, 38, 0.9)';
     ctx.beginPath();

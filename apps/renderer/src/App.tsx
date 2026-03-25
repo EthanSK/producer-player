@@ -4917,7 +4917,7 @@ export function App(): JSX.Element {
                     type="button"
                     className="normalization-preview-header-badge"
                     onClick={() => setNormalizationPreviewEnabled(false)}
-                    title={`Platform normalization preview: ${selectedNormalizationPlatform.label} — click to turn off`}
+                    title={`${selectedNormalizationPlatform.label} normalization preview active — click to disable`}
                     aria-label={`Platform normalization preview active: ${selectedNormalizationPlatform.label}. Click to disable.`}
                   >
                     <span className="normalization-preview-header-icon analysis-platform-icon" style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as React.CSSProperties}>
@@ -6288,10 +6288,10 @@ export function App(): JSX.Element {
                     ▶▶
                   </button>
                 </div>
+                <span className="checklist-transport-hint">Shift+Tab to jump between text input and time jump buttons</span>
               </div>
             ) : null}
 
-            <span className="checklist-transport-hint">Shift+Tab toggles transport ↔ input</span>
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
               <textarea
                 ref={checklistComposerTextareaRef}
@@ -6448,7 +6448,7 @@ export function App(): JSX.Element {
                       type="button"
                       className="normalization-preview-header-badge"
                       onClick={() => setNormalizationPreviewEnabled(false)}
-                      title={`Platform normalization preview: ${selectedNormalizationPlatform.label} — click to turn off`}
+                      title={`${selectedNormalizationPlatform.label} normalization preview active — click to disable`}
                       aria-label={`Platform normalization preview active: ${selectedNormalizationPlatform.label}. Click to disable.`}
                     >
                       <span className="normalization-preview-header-icon analysis-platform-icon" style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as React.CSSProperties}>

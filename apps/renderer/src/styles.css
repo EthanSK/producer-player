@@ -1872,12 +1872,13 @@ button.checklist-mini-player-button:hover {
 }
 
 .checklist-transport-hint {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-muted);
-  opacity: 0.82;
-  text-align: left;
+  opacity: 0.7;
+  text-align: center;
   display: block;
-  margin-bottom: 4px;
+  margin: 2px 0 0;
+  line-height: 1;
 }
 
 .checklist-transport-group {

@@ -5,6 +5,7 @@ import {
   xToFrequency,
   getBandIndexForFrequency,
 } from './audioEngine';
+import { useCrosshairOverlay, drawCrosshair } from './useCrosshairOverlay';
 
 interface SpectrumAnalyzerProps {
   analyserNode: AnalyserNode | null;
@@ -50,6 +51,14 @@ export function SpectrumAnalyzer({
   const frequencyDataRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const smoothedDataRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const hasReceivedDataRef = useRef(false);
+  const needsRedrawRef = useRef(false);
+
+  const { mousePosRef } = useCrosshairOverlay({
+    canvasRef,
+    width,
+    height,
+    enabled: isFullScreen,
+  });
 
   const dbToY = useCallback(
     (db: number, h: number): number => {
@@ -336,7 +345,41 @@ export function SpectrumAnalyzer({
         ctx.textAlign = 'right';
         ctx.fillText(`Soloing: ${activeLabels}`, width - 8, height - 16);
       }
+
+      // Crosshair overlay (fullscreen only)
+      if (isFullScreen) {
+        const mPos = mousePosRef.current;
+        if (mPos) {
+          const freq = xToFrequency(mPos.x, width, MIN_FREQ, MAX_FREQ);
+          const freqLabel = freq >= 1000
+            ? `${(freq / 1000).toFixed(2)}kHz`
+            : `${Math.round(freq)}Hz`;
+
+          const dbAtCursor = DB_MAX - (mPos.y / height) * (DB_MAX - DB_MIN);
+          const dbLabel = `${dbAtCursor.toFixed(1)}dB`;
+
+          drawCrosshair(ctx, mPos, {
+            plotLeft: 0,
+            plotTop: 0,
+            plotRight: width,
+            plotBottom: height,
+            xLabel: freqLabel,
+            yLabel: dbLabel,
+          });
+        }
+      }
     };
+
+    // Handle mouse-triggered redraws when paused
+    const handleMouseRedraw = () => {
+      if (!isPlaying && hasReceivedDataRef.current) {
+        renderFrame();
+      }
+    };
+    if (isFullScreen && canvas) {
+      canvas.addEventListener('mousemove', handleMouseRedraw);
+      canvas.addEventListener('mouseleave', handleMouseRedraw);
+    }
 
     // If not playing, draw a single frozen frame (or empty state if never played)
     if (!isPlaying) {
@@ -383,9 +426,13 @@ export function SpectrumAnalyzer({
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
       }
+      if (isFullScreen && canvas) {
+        canvas.removeEventListener('mousemove', handleMouseRedraw);
+        canvas.removeEventListener('mouseleave', handleMouseRedraw);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyserNode, width, height, isFullScreen, isPlaying, activeBandsKey, dbToY]);
+  }, [analyserNode, width, height, isFullScreen, isPlaying, activeBandsKey, dbToY, mousePosRef]);
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {

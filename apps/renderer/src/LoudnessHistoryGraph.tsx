@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { TrackAnalysisResult } from './audioAnalysis';
+import { useCrosshairOverlay, drawCrosshair } from './useCrosshairOverlay';
 
 interface LoudnessHistoryGraphProps {
   analysis: TrackAnalysisResult | null;
@@ -31,6 +32,12 @@ export function LoudnessHistoryGraph({
 }: LoudnessHistoryGraphProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
+
+  const { mousePosRef } = useCrosshairOverlay({
+    canvasRef,
+    width,
+    height,
+  });
 
   const drawGraph = useCallback(() => {
     const canvas = canvasRef.current;
@@ -163,7 +170,33 @@ export function LoudnessHistoryGraph({
       ctx.lineTo(posX, PADDING_TOP + plotH);
       ctx.stroke();
     }
-  }, [analysis, currentTimeSeconds, width, height]);
+
+    // Crosshair overlay
+    const mPos = mousePosRef.current;
+    if (mPos) {
+      const clampedX = Math.max(PADDING_LEFT, Math.min(PADDING_LEFT + plotW, mPos.x));
+      const clampedY = Math.max(PADDING_TOP, Math.min(PADDING_TOP + plotH, mPos.y));
+
+      // Compute precise time from x position (with tenths of seconds for precision)
+      const timeAtCursor = ((clampedX - PADDING_LEFT) / plotW) * totalDur;
+      const tm = Math.floor(timeAtCursor / 60);
+      const ts = (timeAtCursor % 60).toFixed(1);
+      const timeLabel = `${tm}:${parseFloat(ts) < 10 ? '0' : ''}${ts}`;
+
+      // Compute dB value from y position
+      const dbAtCursor = DB_MIN + (1 - (clampedY - PADDING_TOP) / plotH) * (DB_MAX - DB_MIN);
+      const dbLabel = `${dbAtCursor.toFixed(1)} LUFS`;
+
+      drawCrosshair(ctx, mPos, {
+        plotLeft: PADDING_LEFT,
+        plotTop: PADDING_TOP,
+        plotRight: PADDING_LEFT + plotW,
+        plotBottom: PADDING_TOP + plotH,
+        xLabel: timeLabel,
+        yLabel: dbLabel,
+      });
+    }
+  }, [analysis, currentTimeSeconds, width, height, mousePosRef]);
 
   useEffect(() => {
     if (animFrameRef.current) {
@@ -189,7 +222,9 @@ export function LoudnessHistoryGraph({
   return (
     <canvas
       ref={canvasRef}
-      style={{ width, height, display: 'block', borderRadius: 8 }}
+      style={{ width, height, display: 'block', borderRadius: 8, cursor: 'crosshair' }}
+      onMouseMove={() => drawGraph()}
+      onMouseLeave={() => drawGraph()}
       data-testid="loudness-history-graph"
     />
   );

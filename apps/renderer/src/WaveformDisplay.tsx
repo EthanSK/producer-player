@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { TrackAnalysisResult } from './audioAnalysis';
+import { useCrosshairOverlay, drawCrosshair } from './useCrosshairOverlay';
 
 interface WaveformDisplayProps {
   /** Pre-computed waveform peaks (downsampled) */
@@ -55,6 +56,12 @@ export function WaveformDisplay({
 }: WaveformDisplayProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
+
+  const { mousePosRef } = useCrosshairOverlay({
+    canvasRef,
+    width,
+    height,
+  });
 
   const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
@@ -160,7 +167,35 @@ export function WaveformDisplay({
       ctx.lineTo(playX, PADDING_TOP + plotH);
       ctx.stroke();
     }
-  }, [waveformPeaks, analysis, currentTimeSeconds, durationSeconds, width, height]);
+
+    // Crosshair overlay
+    const mPos = mousePosRef.current;
+    if (mPos) {
+      const clampedX = Math.max(PADDING_LEFT, Math.min(PADDING_LEFT + plotW, mPos.x));
+
+      // Compute precise time from x position
+      const timeAtCursor = effectiveDuration > 0
+        ? ((clampedX - PADDING_LEFT) / plotW) * effectiveDuration
+        : 0;
+      const m = Math.floor(timeAtCursor / 60);
+      const s = Math.floor(timeAtCursor % 60);
+      const timeLabel = `${m}:${s.toString().padStart(2, '0')}`;
+
+      // Compute amplitude from y position
+      const ampAtCursor = 1 - 2 * ((mPos.y - PADDING_TOP) / plotH);
+      const ampClamped = Math.max(-1, Math.min(1, ampAtCursor));
+      const ampLabel = ampClamped.toFixed(2);
+
+      drawCrosshair(ctx, mPos, {
+        plotLeft: PADDING_LEFT,
+        plotTop: PADDING_TOP,
+        plotRight: PADDING_LEFT + plotW,
+        plotBottom: PADDING_TOP + plotH,
+        xLabel: timeLabel,
+        yLabel: ampLabel,
+      });
+    }
+  }, [waveformPeaks, analysis, currentTimeSeconds, durationSeconds, width, height, mousePosRef]);
 
   useEffect(() => {
     if (animFrameRef.current) {
@@ -186,7 +221,9 @@ export function WaveformDisplay({
   return (
     <canvas
       ref={canvasRef}
-      style={{ width, height, display: 'block', borderRadius: 8 }}
+      style={{ width, height, display: 'block', borderRadius: 8, cursor: 'crosshair' }}
+      onMouseMove={() => drawWaveform()}
+      onMouseLeave={() => drawWaveform()}
       data-testid="waveform-display"
     />
   );

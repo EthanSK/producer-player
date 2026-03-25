@@ -6462,6 +6462,100 @@ ${iCloudPathLine}
               )}
             </div>
 
+            <div
+              className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}
+              data-testid="song-checklist-input-row"
+            >
+              <textarea
+                ref={checklistComposerTextareaRef}
+                className="checklist-composer-text"
+                value={checklistDraftText}
+                rows={1}
+                onChange={(event) => {
+                  autosizeChecklistTextarea(event.currentTarget);
+                  handleChecklistDraftTextChange(event.currentTarget.value);
+                }}
+                onInput={(event) => {
+                  autosizeChecklistTextarea(event.currentTarget);
+                }}
+                onFocus={handleChecklistInputFocus}
+                onBlur={handleChecklistInputBlur}
+                onKeyDown={(event) => {
+                  if (isUnmodifiedShiftTab(event)) {
+                    event.preventDefault();
+
+                    const lastFocusedTransport = lastFocusedChecklistTransportRef.current;
+                    const hasUsableLastFocusedTransport =
+                      lastFocusedTransport &&
+                      lastFocusedTransport.isConnected &&
+                      checklistModalCardRef.current?.contains(lastFocusedTransport);
+
+                    const fallbackTransportButton =
+                      checklistSkipBackTenButtonRef.current ??
+                      checklistSkipBackFiveButtonRef.current;
+                    const targetTransportButton = hasUsableLastFocusedTransport
+                      ? lastFocusedTransport
+                      : fallbackTransportButton;
+
+                    targetTransportButton?.focus();
+                    if (targetTransportButton) {
+                      lastFocusedChecklistTransportRef.current = targetTransportButton;
+                    }
+                    return;
+                  }
+
+                  if (
+                    event.key === 'Enter' &&
+                    !event.shiftKey &&
+                    !event.metaKey &&
+                    !event.ctrlKey &&
+                    !event.altKey
+                  ) {
+                    event.preventDefault();
+                    handleAddChecklistItem();
+                  }
+                }}
+                placeholder="Add a checklist item"
+                data-testid="song-checklist-input"
+              />
+              {checklistCapturedTimestamp !== null ? (
+                <div className="checklist-timestamp-preview-group">
+                  <button
+                    type="button"
+                    className="checklist-set-now-button"
+                    data-testid="song-checklist-set-now"
+                    onClick={handleChecklistSetNow}
+                    title="Capture the moment just before what you heard"
+                    aria-label="Set timestamp to current playback position"
+                  >
+                    <svg className="checklist-set-now-icon" viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="8" cy="8" r="6.5" />
+                      <path d="M8 4v4.5l3 1.5" />
+                    </svg>
+                    <span>Set now</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-timestamp-badge checklist-input-timestamp-preview"
+                    title={`Seek to ${formatTime(checklistCapturedTimestamp)}`}
+                    data-testid="song-checklist-input-timestamp-preview"
+                    onClick={() => handleChecklistTimestampClick(checklistCapturedTimestamp)}
+                  >
+                    {formatTime(checklistCapturedTimestamp)}
+                  </button>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={handleAddChecklistItem}
+                disabled={checklistDraftIsEmpty}
+                data-testid="song-checklist-add"
+                title="Add this checklist item."
+              >
+                Add
+              </button>
+            </div>
+
             {selectedPlaybackVersion ? (
               <div className="checklist-mini-player" data-testid="song-checklist-mini-player">
                 <div className="checklist-mini-player-scrubber-row">
@@ -6637,97 +6731,6 @@ ${iCloudPathLine}
                 </div>
               </div>
             ) : null}
-
-            <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
-              <textarea
-                ref={checklistComposerTextareaRef}
-                className="checklist-composer-text"
-                value={checklistDraftText}
-                rows={1}
-                onChange={(event) => {
-                  autosizeChecklistTextarea(event.currentTarget);
-                  handleChecklistDraftTextChange(event.currentTarget.value);
-                }}
-                onInput={(event) => {
-                  autosizeChecklistTextarea(event.currentTarget);
-                }}
-                onFocus={handleChecklistInputFocus}
-                onBlur={handleChecklistInputBlur}
-                onKeyDown={(event) => {
-                  if (isUnmodifiedShiftTab(event)) {
-                    event.preventDefault();
-
-                    const lastFocusedTransport = lastFocusedChecklistTransportRef.current;
-                    const hasUsableLastFocusedTransport =
-                      lastFocusedTransport &&
-                      lastFocusedTransport.isConnected &&
-                      checklistModalCardRef.current?.contains(lastFocusedTransport);
-
-                    const fallbackTransportButton =
-                      checklistSkipBackTenButtonRef.current ??
-                      checklistSkipBackFiveButtonRef.current;
-                    const targetTransportButton = hasUsableLastFocusedTransport
-                      ? lastFocusedTransport
-                      : fallbackTransportButton;
-
-                    targetTransportButton?.focus();
-                    if (targetTransportButton) {
-                      lastFocusedChecklistTransportRef.current = targetTransportButton;
-                    }
-                    return;
-                  }
-
-                  if (
-                    event.key === 'Enter' &&
-                    !event.shiftKey &&
-                    !event.metaKey &&
-                    !event.ctrlKey &&
-                    !event.altKey
-                  ) {
-                    event.preventDefault();
-                    handleAddChecklistItem();
-                  }
-                }}
-                placeholder="Add a checklist item"
-                data-testid="song-checklist-input"
-              />
-              {checklistCapturedTimestamp !== null ? (
-                <div className="checklist-timestamp-preview-group">
-                  <button
-                    type="button"
-                    className="checklist-set-now-button"
-                    data-testid="song-checklist-set-now"
-                    onClick={handleChecklistSetNow}
-                    title="Capture the moment just before what you heard"
-                    aria-label="Set timestamp to current playback position"
-                  >
-                    <svg className="checklist-set-now-icon" viewBox="0 0 16 16" aria-hidden="true">
-                      <circle cx="8" cy="8" r="6.5" />
-                      <path d="M8 4v4.5l3 1.5" />
-                    </svg>
-                    <span>Set now</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="checklist-timestamp-badge checklist-input-timestamp-preview"
-                    title={`Seek to ${formatTime(checklistCapturedTimestamp)}`}
-                    data-testid="song-checklist-input-timestamp-preview"
-                    onClick={() => handleChecklistTimestampClick(checklistCapturedTimestamp)}
-                  >
-                    {formatTime(checklistCapturedTimestamp)}
-                  </button>
-                </div>
-              ) : null}
-              <button
-                type="button"
-                onClick={handleAddChecklistItem}
-                disabled={checklistDraftIsEmpty}
-                data-testid="song-checklist-add"
-                title="Add this checklist item."
-              >
-                Add
-              </button>
-            </div>
 
             <div className="checklist-modal-actions">
               <button

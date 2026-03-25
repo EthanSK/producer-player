@@ -94,6 +94,65 @@ test.describe('Checklist textarea UX', () => {
     }
   });
 
+  test('new checklist input row stays above the checklist mini-player controls', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-input-row-above-mini-player'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkSingleSongAndOpenChecklist(page, directories.fixtureDirectory);
+
+      const inputRow = page.getByTestId('song-checklist-input-row');
+      const miniPlayer = page.getByTestId('song-checklist-mini-player');
+      await expect(inputRow).toBeVisible();
+      await expect(miniPlayer).toBeVisible();
+
+      const layoutOrder = await page.evaluate(() => {
+        const inputNode = document.querySelector('[data-testid="song-checklist-input-row"]');
+        const miniPlayerNode = document.querySelector('[data-testid="song-checklist-mini-player"]');
+        const itemsRegionNode = document.querySelector('[data-testid="song-checklist-scroll-region"]');
+
+        if (
+          !(inputNode instanceof HTMLElement) ||
+          !(miniPlayerNode instanceof HTMLElement) ||
+          !(itemsRegionNode instanceof HTMLElement)
+        ) {
+          return null;
+        }
+
+        const followsFlag = Node.DOCUMENT_POSITION_FOLLOWING;
+        const inputVsMini = inputNode.compareDocumentPosition(miniPlayerNode);
+        const itemsVsInput = itemsRegionNode.compareDocumentPosition(inputNode);
+
+        const inputRect = inputNode.getBoundingClientRect();
+        const miniRect = miniPlayerNode.getBoundingClientRect();
+        const itemsRect = itemsRegionNode.getBoundingClientRect();
+
+        return {
+          domInputBeforeMini: (inputVsMini & followsFlag) === followsFlag,
+          domItemsBeforeInput: (itemsVsInput & followsFlag) === followsFlag,
+          visualInputAboveMini: inputRect.top < miniRect.top,
+          visualItemsAboveInput: itemsRect.top < inputRect.top,
+        };
+      });
+
+      expect(layoutOrder).not.toBeNull();
+      expect(layoutOrder?.domInputBeforeMini).toBe(true);
+      expect(layoutOrder?.domItemsBeforeInput).toBe(true);
+      expect(layoutOrder?.visualInputAboveMini).toBe(true);
+      expect(layoutOrder?.visualItemsAboveInput).toBe(true);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('Shift+Tab reverses inside transport controls and resets after reopening checklist', async () => {
     const directories = await createE2ETestDirectories('producer-player-checklist-shift-tab-toggle');
 

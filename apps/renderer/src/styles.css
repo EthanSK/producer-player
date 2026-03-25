@@ -695,9 +695,15 @@ input[type='range'] {
   transform: translateY(1px);
 }
 
+.analysis-platform-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .analysis-platform-title {
   display: block;
-  width: 100%;
   min-width: 0;
   font-size: 13px;
   font-weight: 700;
@@ -1803,7 +1809,9 @@ button.checklist-mini-player-button:hover {
   font-size: 11px;
   color: var(--text-muted);
   opacity: 0.82;
-  text-align: right;
+  text-align: left;
+  display: block;
+  margin-bottom: 4px;
 }
 
 .checklist-transport-group {
@@ -2254,9 +2262,6 @@ button.checklist-play-toggle[data-playing='true'] {
     justify-items: center;
   }
 
-  .checklist-transport-hint {
-    text-align: left;
-  }
 
   .checklist-input-row,
   .checklist-item-row {

@@ -4974,24 +4974,24 @@ export function App(): JSX.Element {
                         title={platform.description}
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
                       >
-                        <span className="analysis-platform-title">{platform.label}</span>
-                        <span className="analysis-platform-meta-row">
+                        <span className="analysis-platform-header-row">
                           <span
                             className="analysis-platform-icon"
                             style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                           >
                             <PlatformIcon platformId={platform.id} />
                           </span>
-                          <span className="analysis-platform-copy">
-                            <span className="analysis-platform-target">
-                              {platform.targetLufs.toFixed(0)} LUFS target
-                            </span>
-                            <span className="analysis-platform-change">
-                              Applied {platformChangeText}
-                            </span>
-                            <span className="muted">
-                              {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
-                            </span>
+                          <span className="analysis-platform-title">{platform.label}</span>
+                        </span>
+                        <span className="analysis-platform-copy">
+                          <span className="analysis-platform-target">
+                            {platform.targetLufs.toFixed(0)} LUFS target
+                          </span>
+                          <span className="analysis-platform-change">
+                            Applied {platformChangeText}
+                          </span>
+                          <span className="muted">
+                            {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
                           </span>
                         </span>
                       </button>
@@ -5883,7 +5883,6 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
-              <span className="checklist-transport-hint">Shift+Tab toggles −10s ↔ input</span>
             </div>
 
             <div
@@ -6106,6 +6105,7 @@ export function App(): JSX.Element {
               </div>
             ) : null}
 
+            <span className="checklist-transport-hint">Shift+Tab toggles −10s ↔ input</span>
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
               <textarea
                 ref={checklistComposerTextareaRef}
@@ -6745,21 +6745,21 @@ export function App(): JSX.Element {
                         title={platform.description}
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
                       >
-                        <span className="analysis-platform-title">{platform.label}</span>
-                        <span className="analysis-platform-meta-row">
+                        <span className="analysis-platform-header-row">
                           <span
                             className="analysis-platform-icon"
                             style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                           >
                             <PlatformIcon platformId={platform.id} />
                           </span>
-                          <span className="analysis-platform-copy">
-                            <span className="analysis-platform-target">
-                              {platform.targetLufs.toFixed(0)} LUFS target
-                            </span>
-                            <span className="muted">
-                              {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
-                            </span>
+                          <span className="analysis-platform-title">{platform.label}</span>
+                        </span>
+                        <span className="analysis-platform-copy">
+                          <span className="analysis-platform-target">
+                            {platform.targetLufs.toFixed(0)} LUFS target
+                          </span>
+                          <span className="muted">
+                            {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
                           </span>
                         </span>
                       </button>

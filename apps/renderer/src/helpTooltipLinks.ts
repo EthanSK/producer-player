@@ -2,7 +2,7 @@ import type { HelpTooltipLink } from './HelpTooltip';
 
 /**
  * Curated YouTube tutorial links for mastering-related help tooltips.
- * Each array contains 3 videos from well-known audio educators.
+ * Each array should contain only focused, section-relevant videos.
  *
  * IMPORTANT: Every video ID must be verified to return HTTP 200 from
  * https://img.youtube.com/vi/<ID>/mqdefault.jpg — otherwise the
@@ -45,12 +45,12 @@ export const LRA_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=CBTCdDVgpLQ',
   },
   {
-    label: 'Mastering Loudness: Unlocking LUFS for Perfect Mixes - Rapid Flow',
-    url: 'https://www.youtube.com/watch?v=d8WRQu_hjKQ',
+    label: 'What Is Loudness Range (LRA)? - TheModernCreative',
+    url: 'https://www.youtube.com/watch?v=6m02XaDBC6E',
   },
   {
-    label: 'How Loud Should You Master Your Music? - Cableguys',
-    url: 'https://www.youtube.com/watch?v=gFesyL54K2o',
+    label: 'Audio Loudness Range (LRA) Explained - Dana Tucker',
+    url: 'https://www.youtube.com/watch?v=4UC2rlmTXpE',
   },
 ];
 
@@ -105,12 +105,12 @@ export const WAVEFORM_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=pj7tMtpD0jk',
   },
   {
-    label: '2 Golden Rules of Mastering EQ - Streaky',
-    url: 'https://www.youtube.com/watch?v=1VuFSrI_s1s',
+    label: 'Hard Clipping vs Soft Clipping & Oversampling Explained - Radium Records',
+    url: 'https://www.youtube.com/watch?v=yDQ7C92REGo',
   },
   {
-    label: 'Wider & Warmer Masters - Waves Audio',
-    url: 'https://www.youtube.com/watch?v=q_w9rxXL4Bc',
+    label: 'Clipping vs Limiting Explained - Cableguys',
+    url: 'https://www.youtube.com/watch?v=aFe9Gv5YvuI',
   },
 ];
 
@@ -124,8 +124,8 @@ export const VECTORSCOPE_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=Uv8Q-m7RDG8',
   },
   {
-    label: 'Audiophile Stereo Imaging Test - M. Zillch',
-    url: 'https://www.youtube.com/watch?v=N02Y7vaVDNo',
+    label: 'Stop Mixing Out-of-Phase Audio - Martin Rieger',
+    url: 'https://www.youtube.com/watch?v=fOz3sliiC9o',
   },
 ];
 
@@ -154,8 +154,8 @@ export const REFERENCE_TRACK_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=IpjL-hCPBEE',
   },
   {
-    label: 'What Songs Do You Use For Referencing? - Help Me Devvon',
-    url: 'https://www.youtube.com/watch?v=upgTHYrFHTA',
+    label: 'How to Actually Mix with References (Free Tools) - Zahand / LotusTunes',
+    url: 'https://www.youtube.com/watch?v=eh5glnKEjoo',
   },
 ];
 
@@ -169,7 +169,7 @@ export const MID_SIDE_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=peUoYLk2BoQ',
   },
   {
-    label: 'Mid-Side Magic - Streaky',
+    label: 'Mid/Side Magic - Streaky',
     url: 'https://www.youtube.com/watch?v=Q7-vDealMF8',
   },
 ];
@@ -180,12 +180,12 @@ export const K_METERING_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=GnREPzUfUgU',
   },
   {
-    label: 'Bob Katz - Loudness: War & Peace - J Wedel',
-    url: 'https://www.youtube.com/watch?v=u9Fb3rWNWDA',
+    label: 'The Ultimate K-System Tutorial - Hexspa',
+    url: 'https://www.youtube.com/watch?v=_LnicZNgoYI',
   },
   {
-    label: 'Bob Katz on Mastering - SAE Institute',
-    url: 'https://www.youtube.com/watch?v=uCiNSSa2oT8',
+    label: 'Bob Katz K-Metering Setup Tutorial - ADSR Pro',
+    url: 'https://www.youtube.com/watch?v=Wjxs34eEvEU',
   },
 ];
 
@@ -251,7 +251,7 @@ export const TONAL_BALANCE_LINKS: HelpTooltipLink[] = [
 
 export const LOUDNESS_HISTORY_LINKS: HelpTooltipLink[] = [
   {
-    label: 'The Ultimate Loudness Tutorial - SoundOracle',
+    label: 'LUFS Meter Explained - SoundOracle',
     url: 'https://www.youtube.com/watch?v=hbYtzaRhAX0',
   },
   {
@@ -330,18 +330,18 @@ export const MID_SIDE_SPECTRUM_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=kEiILPm1VSc',
   },
   {
-    label: 'Depth Tricks They All Use (Why Your Mix Sounds Flat) - Streaky',
-    url: 'https://www.youtube.com/watch?v=rqMI1w8i3OA',
+    label: 'Voxengo SPAN Mid/Side Frequency Spectrum Analysis - Ableton Live',
+    url: 'https://www.youtube.com/watch?v=TB4hMIpydig',
   },
   {
-    label: 'What is Mid/Side Processing? - Matty Harris',
-    url: 'https://www.youtube.com/watch?v=peUoYLk2BoQ',
+    label: 'Advanced SPAN Setup for Mid/Side Visualization',
+    url: 'https://www.youtube.com/watch?v=wnNgF9uZ_4g',
   },
 ];
 
 export const LOUDNESS_HISTOGRAM_LINKS: HelpTooltipLink[] = [
   {
-    label: 'The Ultimate Loudness Tutorial - SoundOracle',
+    label: 'LUFS Meter Explained - SoundOracle',
     url: 'https://www.youtube.com/watch?v=hbYtzaRhAX0',
   },
   {
@@ -364,7 +364,7 @@ export const SPECTROGRAM_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=_FatxGN3vAM',
   },
   {
-    label: 'Identifying Audio Problems in the Spectrogram - iZotope RX',
-    url: 'https://www.youtube.com/watch?v=O99_U3TnM0E',
+    label: 'Identifying Audio Problems in the RX Spectrogram - iZotope',
+    url: 'https://www.youtube.com/watch?v=UsyRPoCT7Yk',
   },
 ];

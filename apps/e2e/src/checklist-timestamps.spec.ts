@@ -194,7 +194,7 @@ test.describe('Checklist timestamp feature', () => {
     try {
       await linkFixtureFolder(page, directories.fixtureDirectory);
 
-      // Pre-seed a checklist with a timestamped item via localStorage
+      // Pre-seed a checklist with a timestamped+versioned item via localStorage
       await page.evaluate(() => {
         const songs = document.querySelectorAll('[data-song-id]');
         const songId = songs[0]?.getAttribute('data-song-id');
@@ -206,12 +206,14 @@ test.describe('Checklist timestamp feature', () => {
             text: 'Check the bass drop',
             completed: false,
             timestampSeconds: 83,
+            versionNumber: 2,
           },
           {
             id: 'test-ts-item-2',
             text: 'No timestamp item',
             completed: false,
             timestampSeconds: null,
+            versionNumber: null,
           },
         ];
 
@@ -232,11 +234,22 @@ test.describe('Checklist timestamp feature', () => {
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 
       // Should have exactly one timestamp badge (for the 83s item = "1:23")
-      const badges = page.getByTestId('song-checklist-item-timestamp');
-      await expect(badges).toHaveCount(1);
-      await expect(badges.first()).toHaveText('1:23');
+      const timestampBadges = page.getByTestId('song-checklist-item-timestamp');
+      await expect(timestampBadges).toHaveCount(1);
+      await expect(timestampBadges.first()).toHaveText('1:23');
 
-      // Item without timestamp should not show a badge
+      // Version number should be shown under the timestamp badge in the same metadata stack.
+      const versionBadges = page.getByTestId('song-checklist-item-version');
+      await expect(versionBadges).toHaveCount(1);
+      await expect(versionBadges.first()).toHaveText('v2');
+
+      const timestampRect = await timestampBadges.first().boundingBox();
+      const versionRect = await versionBadges.first().boundingBox();
+      expect(timestampRect).not.toBeNull();
+      expect(versionRect).not.toBeNull();
+      expect((versionRect?.y ?? 0) + 0.5).toBeGreaterThan(timestampRect?.y ?? 0);
+
+      // Item without timestamp/version should not render either badge.
       const items = page.getByTestId('song-checklist-item-text');
       await expect(items).toHaveCount(2);
     } finally {
@@ -245,7 +258,7 @@ test.describe('Checklist timestamp feature', () => {
     }
   });
 
-  test('checklist timestamp persists in localStorage with timestampSeconds field', async () => {
+  test('checklist item persists timestampSeconds and captured versionNumber', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-timestamp-persist'
     );
@@ -267,8 +280,9 @@ test.describe('Checklist timestamp feature', () => {
       await page.getByTestId('song-checklist-input').fill('Test persistence');
       await page.getByTestId('song-checklist-add').click();
       await expect(page.getByTestId('song-checklist-item-text')).toHaveCount(1);
+      await expect(page.getByTestId('song-checklist-item-version')).toHaveText('v1');
 
-      // Check localStorage for the timestampSeconds field
+      // Check localStorage for timestampSeconds + versionNumber persistence.
       const stored = await page.evaluate(() => {
         const raw = window.localStorage.getItem('producer-player.song-checklists.v1');
         return raw ? JSON.parse(raw) : null;
@@ -283,8 +297,10 @@ test.describe('Checklist timestamp feature', () => {
       expect(items.length).toBe(1);
       expect(items[0].text).toBe('Test persistence');
       expect('timestampSeconds' in items[0]).toBe(true);
-      // timestampSeconds can be null (no playback) or a number
+      expect('versionNumber' in items[0]).toBe(true);
+      // timestampSeconds can be null (no playback) or a number.
       expect(items[0].timestampSeconds === null || typeof items[0].timestampSeconds === 'number').toBe(true);
+      expect(items[0].versionNumber).toBe(1);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
@@ -335,16 +351,20 @@ test.describe('Checklist timestamp feature', () => {
       // Newest item is prepended (newest-first order)
       expect(items[0].text).toBe('Second note');
       expect(items[1].text).toBe('First note');
-      // Both should have timestampSeconds field
+      // Both should have timestampSeconds + versionNumber fields.
       expect('timestampSeconds' in items[0]).toBe(true);
       expect('timestampSeconds' in items[1]).toBe(true);
+      expect('versionNumber' in items[0]).toBe(true);
+      expect('versionNumber' in items[1]).toBe(true);
+      expect(items[0].versionNumber).toBe(1);
+      expect(items[1].versionNumber).toBe(1);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
     }
   });
 
-  test('old checklist items without timestampSeconds are migrated with null timestamps', async () => {
+  test('old checklist items without timestampSeconds/versionNumber are migrated with null metadata', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-timestamp-migration'
     );
@@ -369,7 +389,7 @@ test.describe('Checklist timestamp feature', () => {
 
       expect(songId).not.toBeNull();
 
-      // Seed with old-format checklist data (no timestampSeconds field)
+      // Seed with old-format checklist data (no timestampSeconds/versionNumber fields)
       await firstLaunch.page.evaluate((id) => {
         const oldItems = [
           { id: 'old-item-1', text: 'Old note', completed: false },
@@ -399,8 +419,9 @@ test.describe('Checklist timestamp feature', () => {
       await expect(secondLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(1);
       await expect(secondLaunch.page.getByTestId('song-checklist-item-text').first()).toHaveValue('Old note');
 
-      // No timestamp badge should be shown for old items
+      // No timestamp/version badges should be shown for old items.
       await expect(secondLaunch.page.getByTestId('song-checklist-item-timestamp')).toHaveCount(0);
+      await expect(secondLaunch.page.getByTestId('song-checklist-item-version')).toHaveCount(0);
     } finally {
       await secondLaunch.electronApp.close();
       await cleanupE2ETestDirectories(directories);

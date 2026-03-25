@@ -156,12 +156,14 @@ test('ratings and checklist items survive switching between dev and packaged app
           text: string;
           completed: boolean;
           timestampSeconds: number | null;
+          versionNumber: number | null;
         }>
       >;
     };
 
     expect(sharedState.ratings?.[songId]).toBe(8);
     expect(sharedState.checklists?.[songId]?.[0]?.text).toBe('Cross-mode checklist note');
+    expect(sharedState.checklists?.[songId]?.[0]?.versionNumber).toBe(1);
 
     const packagedLaunch = await launchProducerPlayer(dirs.userDataDirectory);
 
@@ -177,6 +179,9 @@ test('ratings and checklist items survive switching between dev and packaged app
       await expect(packagedLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(1);
       await expect(packagedLaunch.page.getByTestId('song-checklist-item-text').first()).toHaveValue(
         'Cross-mode checklist note'
+      );
+      await expect(packagedLaunch.page.getByTestId('song-checklist-item-version').first()).toHaveText(
+        'v1'
       );
     } finally {
       await packagedLaunch.electronApp.close();

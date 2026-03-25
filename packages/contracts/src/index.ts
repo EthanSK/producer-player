@@ -188,6 +188,7 @@ export interface SongChecklistItem {
   text: string;
   completed: boolean;
   timestampSeconds: number | null;
+  versionNumber: number | null;
 }
 
 export interface SharedUserState {
@@ -397,6 +398,7 @@ export interface AgentChecklistStatus {
     text: string;
     completed: boolean;
     timestampSeconds: number | null;
+    versionNumber: number | null;
   }>;
   completedCount: number;
   totalCount: number;

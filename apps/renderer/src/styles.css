@@ -1872,8 +1872,15 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   color: var(--text-muted);
 }
 
-.checklist-item-row.has-timestamp {
+.checklist-item-row.has-metadata {
   grid-template-columns: auto auto minmax(0, 1fr) auto;
+}
+
+.checklist-item-meta {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
 }
 
 .checklist-timestamp-badge {
@@ -1902,6 +1909,23 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 
 .checklist-timestamp-badge:active {
   background: rgba(92, 167, 255, 0.32);
+}
+
+.checklist-version-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(170, 170, 170, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .checklist-remove-button {

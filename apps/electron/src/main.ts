@@ -845,6 +845,12 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       candidate.timestampSeconds >= 0
         ? candidate.timestampSeconds
         : null;
+    const versionNumber =
+      typeof candidate.versionNumber === 'number' &&
+      Number.isFinite(candidate.versionNumber) &&
+      candidate.versionNumber >= 1
+        ? Math.trunc(candidate.versionNumber)
+        : null;
 
     return [
       {
@@ -852,6 +858,7 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
         text: candidate.text,
         completed: candidate.completed,
         timestampSeconds,
+        versionNumber,
       },
     ];
   });

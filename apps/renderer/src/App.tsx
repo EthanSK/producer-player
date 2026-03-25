@@ -548,15 +548,24 @@ function getSongDisplayTitle(song: SongWithVersions): string {
   return stem.trim() || song.title;
 }
 
-function getVersionTagFromFileName(fileName: string): string | null {
+function getVersionNumberFromFileName(fileName: string): number | null {
   const stem = fileName.replace(/\.[^.]+$/, '');
-  const match = stem.match(/(?:^|[\s_-])(v\d+)(?:[\s_-]*archived[\s_-]*\d+)?$/i);
+  const match = stem.match(/(?:[\s_-]?v(\d+))(?:[\s_-]*archived[\s_-]*\d+)?$/i);
   if (!match) {
     return null;
   }
 
-  const versionTag = (match[1] ?? '').trim();
-  return versionTag ? versionTag.toLowerCase() : null;
+  const versionNumber = Number.parseInt(match[1] ?? '', 10);
+  if (!Number.isFinite(versionNumber) || versionNumber < 1) {
+    return null;
+  }
+
+  return versionNumber;
+}
+
+function getVersionTagFromFileName(fileName: string): string | null {
+  const versionNumber = getVersionNumberFromFileName(fileName);
+  return versionNumber === null ? null : `v${versionNumber}`;
 }
 
 function getSongRowMetadataLabel(song: SongWithVersions): string {
@@ -911,6 +920,7 @@ interface MigrationPreviewSong {
     text: string;
     completed: boolean;
     timestampSeconds: number | null;
+    versionNumber: number | null;
   }>;
 }
 
@@ -1101,7 +1111,13 @@ function parseMigrationInput(
         itemObj.timestampSeconds >= 0
           ? itemObj.timestampSeconds
           : null;
-      return [{ text, completed, timestampSeconds }];
+      const versionNumber =
+        typeof itemObj.versionNumber === 'number' &&
+        Number.isFinite(itemObj.versionNumber) &&
+        itemObj.versionNumber >= 1
+          ? Math.trunc(itemObj.versionNumber)
+          : null;
+      return [{ text, completed, timestampSeconds, versionNumber }];
     });
 
     if (items.length === 0) continue;
@@ -4375,12 +4391,24 @@ export function App(): JSX.Element {
       return;
     }
 
+    const checklistSong = snapshot.songs.find((song) => song.id === songId) ?? null;
+    const capturedVersion =
+      selectedPlaybackVersion && selectedPlaybackVersion.songId === songId
+        ? selectedPlaybackVersion
+        : checklistSong
+          ? getActiveSongVersion(checklistSong)
+          : null;
+    const capturedVersionNumber = capturedVersion
+      ? getVersionNumberFromFileName(capturedVersion.fileName)
+      : null;
+
     updateSongChecklistItems(songId, (items) => [
       {
         id: createChecklistItemId(),
         text: itemText,
         completed: false,
         timestampSeconds: checklistCapturedTimestamp,
+        versionNumber: capturedVersionNumber,
       },
       ...items,
     ]);
@@ -4577,6 +4605,7 @@ export function App(): JSX.Element {
           text: item.text,
           completed: item.completed,
           timestampSeconds: item.timestampSeconds,
+          versionNumber: item.versionNumber,
         }));
 
         next[entry.matchedSongId] = [...newItems, ...existingItems];
@@ -4938,6 +4967,7 @@ export function App(): JSX.Element {
             text: item.text,
             completed: item.completed,
             timestampSeconds: item.timestampSeconds,
+            versionNumber: item.versionNumber,
           })),
           completedCount: checklistItems.filter((i) => i.completed).length,
           totalCount: checklistItems.length,
@@ -6377,11 +6407,15 @@ ${iCloudPathLine}
             >
               {checklistModalItemsChronological.length > 0 ? (
                 <ul className="checklist-item-list" data-testid="song-checklist-items">
-                  {checklistModalItemsChronological.map((item) => (
+                  {checklistModalItemsChronological.map((item) => {
+                    const hasItemMetadata =
+                      item.timestampSeconds !== null || item.versionNumber !== null;
+
+                    return (
                     <li
                       key={item.id}
                       className={`checklist-item-row${
-                        item.timestampSeconds !== null ? ' has-timestamp' : ''
+                        hasItemMetadata ? ' has-metadata' : ''
                       }${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}`}
                     >
                       <label className="checklist-item-toggle">
@@ -6397,17 +6431,26 @@ ${iCloudPathLine}
                           }}
                         />
                       </label>
-                      {item.timestampSeconds !== null ? (
-                        <button
-                          type="button"
-                          className="checklist-timestamp-badge"
-                          onClick={() => handleChecklistTimestampClick(item.timestampSeconds!)}
-                          data-testid="song-checklist-item-timestamp"
-                          title={`Jump to ${formatTime(item.timestampSeconds)}`}
-                          aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
-                        >
-                          {formatTime(item.timestampSeconds)}
-                        </button>
+                      {hasItemMetadata ? (
+                        <div className="checklist-item-meta">
+                          {item.timestampSeconds !== null ? (
+                            <button
+                              type="button"
+                              className="checklist-timestamp-badge"
+                              onClick={() => handleChecklistTimestampClick(item.timestampSeconds!)}
+                              data-testid="song-checklist-item-timestamp"
+                              title={`Jump to ${formatTime(item.timestampSeconds)}`}
+                              aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
+                            >
+                              {formatTime(item.timestampSeconds)}
+                            </button>
+                          ) : null}
+                          {item.versionNumber !== null ? (
+                            <span className="checklist-version-badge" data-testid="song-checklist-item-version">
+                              v{item.versionNumber}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
                       <textarea
                         className={`checklist-item-text${item.completed ? ' completed' : ''}`}
@@ -6453,7 +6496,8 @@ ${iCloudPathLine}
                         <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
                       </button>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               ) : (
                 <p className="muted checklist-empty-state" data-testid="song-checklist-empty">

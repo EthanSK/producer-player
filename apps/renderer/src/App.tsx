@@ -6365,7 +6365,7 @@ export function App(): JSX.Element {
                       <LevelMeter
                         analyserNode={analyserNode}
                         orientation="vertical"
-                        width={40}
+                        width={48}
                         height={260}
                         isPlaying={isPlaying}
                       />

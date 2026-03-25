@@ -1167,6 +1167,8 @@ export function App(): JSX.Element {
   const checklistUnderlyingSidePaneScrollRef = useRef<HTMLDivElement | null>(null);
   const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const checklistSkipBackTenButtonRef = useRef<HTMLButtonElement | null>(null);
+  const checklistSkipBackFiveButtonRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusedChecklistTransportRef = useRef<HTMLButtonElement | null>(null);
   const checklistItemsScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const checklistVisibleSongIdRef = useRef<string | null>(null);
   const checklistVisibleItemCountRef = useRef(0);
@@ -6123,7 +6125,13 @@ export function App(): JSX.Element {
                       className="checklist-skip-button"
                       data-testid="song-checklist-skip-back-10"
                       onClick={() => handleSkipSeconds(-10)}
+                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
                       onKeyDown={(event) => {
+                        if (event.key === ' ') {
+                          event.preventDefault();
+                          void handleTogglePlayback();
+                          return;
+                        }
                         if (
                           event.key === 'Tab' &&
                           event.shiftKey &&
@@ -6141,11 +6149,18 @@ export function App(): JSX.Element {
                       −10s
                     </button>
                     <button
+                      ref={checklistSkipBackFiveButtonRef}
                       type="button"
                       className="checklist-skip-button checklist-skip-button-small"
                       data-testid="song-checklist-skip-back-5"
                       onClick={() => handleSkipSeconds(-5)}
+                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
                       onKeyDown={(event) => {
+                        if (event.key === ' ') {
+                          event.preventDefault();
+                          void handleTogglePlayback();
+                          return;
+                        }
                         if (
                           event.key === 'Tab' &&
                           event.shiftKey &&
@@ -6167,7 +6182,13 @@ export function App(): JSX.Element {
                       className="checklist-skip-button checklist-skip-button-small"
                       data-testid="song-checklist-skip-back-2"
                       onClick={() => handleSkipSeconds(-2)}
+                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
                       onKeyDown={(event) => {
+                        if (event.key === ' ') {
+                          event.preventDefault();
+                          void handleTogglePlayback();
+                          return;
+                        }
                         if (
                           event.key === 'Tab' &&
                           event.shiftKey &&
@@ -6194,7 +6215,13 @@ export function App(): JSX.Element {
                       onClick={() => {
                         void handleTogglePlayback();
                       }}
+                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
                       onKeyDown={(event) => {
+                        if (event.key === ' ') {
+                          event.preventDefault();
+                          void handleTogglePlayback();
+                          return;
+                        }
                         if (
                           event.key === 'Tab' &&
                           event.shiftKey &&
@@ -6214,7 +6241,13 @@ export function App(): JSX.Element {
                       className="checklist-skip-button checklist-skip-button-small"
                       data-testid="song-checklist-skip-forward-2"
                       onClick={() => handleSkipSeconds(2)}
+                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
                       onKeyDown={(event) => {
+                        if (event.key === ' ') {
+                          event.preventDefault();
+                          void handleTogglePlayback();
+                          return;
+                        }
                         if (
                           event.key === 'Tab' &&
                           event.shiftKey &&
@@ -6236,7 +6269,13 @@ export function App(): JSX.Element {
                       className="checklist-skip-button checklist-skip-button-small"
                       data-testid="song-checklist-skip-forward-5"
                       onClick={() => handleSkipSeconds(5)}
+                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
                       onKeyDown={(event) => {
+                        if (event.key === ' ') {
+                          event.preventDefault();
+                          void handleTogglePlayback();
+                          return;
+                        }
                         if (
                           event.key === 'Tab' &&
                           event.shiftKey &&
@@ -6258,7 +6297,13 @@ export function App(): JSX.Element {
                       className="checklist-skip-button"
                       data-testid="song-checklist-skip-forward-10"
                       onClick={() => handleSkipSeconds(10)}
+                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
                       onKeyDown={(event) => {
+                        if (event.key === ' ') {
+                          event.preventDefault();
+                          void handleTogglePlayback();
+                          return;
+                        }
                         if (
                           event.key === 'Tab' &&
                           event.shiftKey &&
@@ -6316,7 +6361,7 @@ export function App(): JSX.Element {
                     !event.altKey
                   ) {
                     event.preventDefault();
-                    checklistSkipBackTenButtonRef.current?.focus();
+                    (lastFocusedChecklistTransportRef.current ?? checklistSkipBackFiveButtonRef.current)?.focus();
                     return;
                   }
 

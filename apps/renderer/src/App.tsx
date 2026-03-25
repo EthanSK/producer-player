@@ -55,6 +55,8 @@ import { LoudnessHistogram } from './LoudnessHistogram';
 import { Spectrogram } from './Spectrogram';
 import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
 import { HelpTooltip } from './HelpTooltip';
+import { AgentChatPanel } from './AgentChatPanel';
+import type { AgentContext } from '@producer-player/contracts';
 import {
   LUFS_LINKS,
   TRUE_PEAK_LINKS,
@@ -4858,6 +4860,190 @@ export function App(): JSX.Element {
   };
   handleSkipSecondsRef.current = handleSkipSeconds;
 
+  const getAnalysisContext = useCallback((): AgentContext | null => {
+    const trackInfo = selectedPlaybackVersion
+      ? {
+          name: selectedSong?.title ?? selectedPlaybackVersion.fileName,
+          fileName: selectedPlaybackVersion.fileName,
+          filePath: selectedPlaybackVersion.filePath,
+          format: selectedPlaybackVersion.extension,
+          durationSeconds: (selectedPlaybackVersion.durationMs ?? 0) / 1000,
+          sampleRateHz: measuredAnalysis?.sampleRateHz ?? null,
+          albumName:
+            snapshot.linkedFolders.find((f) => f.id === selectedFolderId)?.name ?? null,
+          albumTrackCount: songs.length,
+          referenceTrack: referenceTrack
+            ? { fileName: referenceTrack.fileName, filePath: referenceTrack.filePath }
+            : null,
+        }
+      : null;
+
+    const staticAnalysisData = measuredAnalysis
+      ? {
+          integratedLufs: measuredAnalysis.integratedLufs,
+          loudnessRangeLufs: measuredAnalysis.loudnessRangeLufs,
+          truePeakDbfs: measuredAnalysis.truePeakDbfs,
+          samplePeakDbfs: measuredAnalysis.samplePeakDbfs,
+          meanVolumeDbfs: measuredAnalysis.meanVolumeDbfs,
+          maxMomentaryLufs: measuredAnalysis.maxMomentaryLufs,
+          maxShortTermLufs: measuredAnalysis.maxShortTermLufs,
+          sampleRateHz: measuredAnalysis.sampleRateHz,
+        }
+      : null;
+
+    const webAudioData = analysis
+      ? {
+          peakDbfs: analysis.peakDbfs,
+          integratedLufsEstimate: analysis.integratedLufsEstimate,
+          rmsDbfs: analysis.rmsDbfs,
+          crestFactorDb: analysis.crestFactorDb,
+          dcOffset: analysis.dcOffset,
+          clipCount: analysis.clipCount,
+          durationSeconds: analysis.durationSeconds,
+          tonalBalance: {
+            low: analysis.tonalBalance.low,
+            mid: analysis.tonalBalance.mid,
+            high: analysis.tonalBalance.high,
+          },
+          frameLoudnessDbfs: analysis.frameLoudnessDbfs,
+          frameDurationSeconds: analysis.frameDurationSeconds,
+        }
+      : null;
+
+    const platformNormData = measuredAnalysis
+      ? {
+          platforms: NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
+            const preview = normalizationPreviewByPlatformId.get(platform.id);
+            return {
+              platformId: platform.id,
+              platformLabel: platform.label,
+              targetLufs: platform.targetLufs,
+              truePeakCeilingDbtp: platform.truePeakCeilingDbtp,
+              policy: platform.policy,
+              rawGainDb: preview?.rawGainDb ?? null,
+              appliedGainDb: preview?.appliedGainDb ?? null,
+              projectedIntegratedLufs: preview?.projectedIntegratedLufs ?? null,
+              headroomCapDb: preview?.headroomCapDb ?? null,
+              limitedByHeadroom: preview?.limitedByHeadroom ?? false,
+              explanation: preview?.explanation ?? '',
+            };
+          }),
+        }
+      : null;
+
+    const refData = referenceTrack
+      ? {
+          static: referenceTrack.measuredAnalysis
+            ? {
+                integratedLufs: referenceTrack.measuredAnalysis.integratedLufs,
+                loudnessRangeLufs: referenceTrack.measuredAnalysis.loudnessRangeLufs,
+                truePeakDbfs: referenceTrack.measuredAnalysis.truePeakDbfs,
+                samplePeakDbfs: referenceTrack.measuredAnalysis.samplePeakDbfs,
+                meanVolumeDbfs: referenceTrack.measuredAnalysis.meanVolumeDbfs,
+                maxMomentaryLufs: referenceTrack.measuredAnalysis.maxMomentaryLufs,
+                maxShortTermLufs: referenceTrack.measuredAnalysis.maxShortTermLufs,
+                sampleRateHz: referenceTrack.measuredAnalysis.sampleRateHz,
+              }
+            : null,
+          webAudio: referenceTrack.previewAnalysis
+            ? {
+                peakDbfs: referenceTrack.previewAnalysis.peakDbfs,
+                integratedLufsEstimate: referenceTrack.previewAnalysis.integratedLufsEstimate,
+                rmsDbfs: referenceTrack.previewAnalysis.rmsDbfs,
+                crestFactorDb: referenceTrack.previewAnalysis.crestFactorDb,
+                dcOffset: referenceTrack.previewAnalysis.dcOffset,
+                clipCount: referenceTrack.previewAnalysis.clipCount,
+                durationSeconds: referenceTrack.previewAnalysis.durationSeconds,
+                tonalBalance: {
+                  low: referenceTrack.previewAnalysis.tonalBalance.low,
+                  mid: referenceTrack.previewAnalysis.tonalBalance.mid,
+                  high: referenceTrack.previewAnalysis.tonalBalance.high,
+                },
+                frameLoudnessDbfs: referenceTrack.previewAnalysis.frameLoudnessDbfs,
+                frameDurationSeconds: referenceTrack.previewAnalysis.frameDurationSeconds,
+              }
+            : null,
+          deltas:
+            analysis && referenceTrack.previewAnalysis
+              ? {
+                  integratedLufsDelta:
+                    measuredAnalysis?.integratedLufs != null &&
+                    referenceTrack.measuredAnalysis.integratedLufs != null
+                      ? measuredAnalysis.integratedLufs -
+                        referenceTrack.measuredAnalysis.integratedLufs
+                      : null,
+                  truePeakDelta:
+                    measuredAnalysis?.truePeakDbfs != null &&
+                    referenceTrack.measuredAnalysis.truePeakDbfs != null
+                      ? measuredAnalysis.truePeakDbfs -
+                        referenceTrack.measuredAnalysis.truePeakDbfs
+                      : null,
+                  crestFactorDelta:
+                    analysis.crestFactorDb - referenceTrack.previewAnalysis.crestFactorDb,
+                  tonalBalanceDelta: {
+                    low:
+                      analysis.tonalBalance.low -
+                      referenceTrack.previewAnalysis.tonalBalance.low,
+                    mid:
+                      analysis.tonalBalance.mid -
+                      referenceTrack.previewAnalysis.tonalBalance.mid,
+                    high:
+                      analysis.tonalBalance.high -
+                      referenceTrack.previewAnalysis.tonalBalance.high,
+                  },
+                  loudnessRangeDelta:
+                    measuredAnalysis?.loudnessRangeLufs != null &&
+                    referenceTrack.measuredAnalysis.loudnessRangeLufs != null
+                      ? measuredAnalysis.loudnessRangeLufs -
+                        referenceTrack.measuredAnalysis.loudnessRangeLufs
+                      : null,
+                }
+              : null,
+        }
+      : null;
+
+    const checklistSongId = selectedSong?.id;
+    const checklistItems = checklistSongId ? songChecklists[checklistSongId] ?? [] : [];
+    const checklistData = checklistSongId
+      ? {
+          items: checklistItems.map((item) => ({
+            id: item.id,
+            text: item.text,
+            completed: item.completed,
+            timestampSeconds: item.timestampSeconds,
+          })),
+          completedCount: checklistItems.filter((i) => i.completed).length,
+          totalCount: checklistItems.length,
+        }
+      : null;
+
+    return {
+      track: trackInfo,
+      staticAnalysis: staticAnalysisData,
+      webAudioAnalysis: webAudioData,
+      platformNormalization: platformNormData,
+      reference: refData,
+      checklist: checklistData,
+      activePlatformId: selectedNormalizationPlatformId,
+      isPlaying,
+      currentTimeSeconds,
+    };
+  }, [
+    selectedPlaybackVersion,
+    selectedSong,
+    selectedFolderId,
+    snapshot.linkedFolders,
+    songs,
+    measuredAnalysis,
+    analysis,
+    referenceTrack,
+    normalizationPreviewByPlatformId,
+    songChecklists,
+    selectedNormalizationPlatformId,
+    isPlaying,
+    currentTimeSeconds,
+  ]);
+
   return (
     <div className="app-shell" data-testid="app-shell">
       <aside className="panel panel-left">
@@ -7843,6 +8029,7 @@ export function App(): JSX.Element {
           </div>
         </div>
       ) : null}
+      <AgentChatPanel getAnalysisContext={getAnalysisContext} />
     </div>
   );
 }

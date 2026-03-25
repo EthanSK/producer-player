@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, protocol, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, protocol, safeStorage, shell } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, promises as fs } from 'node:fs';
 import { dirname, extname, join, parse, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import type {
+  AgentContext,
+  AgentProviderId,
+  AgentStartSessionPayload,
+  AgentSendTurnPayload,
+  AgentRespondApprovalPayload,
   AudioFileAnalysis,
   ICloudAvailabilityResult,
   ICloudBackupData,
@@ -25,6 +30,7 @@ import type {
 } from '@producer-player/contracts';
 import { AUDIO_EXTENSIONS, IPC_CHANNELS, parsePlaylistOrderExport } from '@producer-player/contracts';
 import { FileLibraryService } from '@producer-player/domain';
+import * as agentService from './agent-service';
 
 const DEFAULT_RENDERER_DEV_URL =
   process.env.RENDERER_DEV_URL ?? 'http://127.0.0.1:4207';
@@ -2903,6 +2909,82 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.OPEN_UPDATE_DOWNLOAD, async (_event, url?: string | null) => {
     await openUpdateDownloadUrl(url);
   });
+
+  // --- Agent IPC handlers ---
+
+  agentService.setEventCallback((event) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.AGENT_EVENT, event);
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_START_SESSION,
+    async (_event, payload: AgentStartSessionPayload) => {
+      agentService.startSession(payload.provider, payload.mode, payload.systemPrompt);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SEND_TURN,
+    async (_event, payload: AgentSendTurnPayload) => {
+      agentService.sendTurn(payload.message, payload.context);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_INTERRUPT, async () => {
+    agentService.interrupt();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_RESPOND_APPROVAL,
+    async (_event, payload: AgentRespondApprovalPayload) => {
+      agentService.respondToApproval(payload.approvalId, payload.decision);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_DESTROY_SESSION, async () => {
+    agentService.destroySession();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_CHECK_PROVIDER,
+    async (_event, provider: AgentProviderId) => {
+      return agentService.isProviderAvailable(provider);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_STORE_DEEPGRAM_KEY,
+    async (_event, key: string) => {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error('Encryption is not available on this system.');
+      }
+      const encrypted = safeStorage.encryptString(key);
+      const statePath = join(app.getPath('userData'), 'deepgram-key.enc');
+      await fs.writeFile(statePath, encrypted);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_GET_DEEPGRAM_KEY, async () => {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    const statePath = join(app.getPath('userData'), 'deepgram-key.enc');
+    try {
+      const encrypted = await fs.readFile(statePath);
+      return safeStorage.decryptString(encrypted);
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_CLEAR_DEEPGRAM_KEY, async () => {
+    const statePath = join(app.getPath('userData'), 'deepgram-key.enc');
+    try {
+      await fs.unlink(statePath);
+    } catch {
+      // ignore if doesn't exist
+    }
+  });
 }
 
 app.whenReady().then(async () => {
@@ -2925,6 +3007,7 @@ app.on('before-quit', () => {
   globalShortcut.unregisterAll();
   clearAutomaticUpdateChecks();
   releaseAllFolderSecurityScopes();
+  agentService.destroySession();
 
   if (libraryService) {
     void libraryService.dispose();

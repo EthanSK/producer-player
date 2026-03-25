@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
+  type AgentEvent,
+  type AgentEventListener,
+  type AgentProviderId,
+  type AgentRespondApprovalPayload,
+  type AgentSendTurnPayload,
+  type AgentStartSessionPayload,
   type ICloudBackupData,
   type PlaylistOrderExportV1,
   type ProducerPlayerBridge,
@@ -145,6 +151,54 @@ const bridge: ProducerPlayerBridge = {
 
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.TRANSPORT_COMMAND, wrappedListener);
+    };
+  },
+
+  async agentStartSession(payload: AgentStartSessionPayload) {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_START_SESSION, payload);
+  },
+
+  async agentSendTurn(payload: AgentSendTurnPayload) {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_SEND_TURN, payload);
+  },
+
+  async agentInterrupt() {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_INTERRUPT);
+  },
+
+  async agentRespondApproval(payload: AgentRespondApprovalPayload) {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_RESPOND_APPROVAL, payload);
+  },
+
+  async agentDestroySession() {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_DESTROY_SESSION);
+  },
+
+  async agentCheckProvider(provider: AgentProviderId) {
+    return ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHECK_PROVIDER, provider);
+  },
+
+  async agentStoreDeepgramKey(key: string) {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_STORE_DEEPGRAM_KEY, key);
+  },
+
+  async agentGetDeepgramKey() {
+    return ipcRenderer.invoke(IPC_CHANNELS.AGENT_GET_DEEPGRAM_KEY);
+  },
+
+  async agentClearDeepgramKey() {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_CLEAR_DEEPGRAM_KEY);
+  },
+
+  onAgentEvent(listener: AgentEventListener) {
+    const wrappedListener = (_event: unknown, agentEvent: unknown) => {
+      listener(agentEvent as AgentEvent);
+    };
+
+    ipcRenderer.on(IPC_CHANNELS.AGENT_EVENT, wrappedListener);
+
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.AGENT_EVENT, wrappedListener);
     };
   },
 };

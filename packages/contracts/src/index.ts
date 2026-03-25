@@ -159,6 +159,16 @@ export const IPC_CHANNELS = {
   CHECK_ICLOUD_AVAILABLE: 'producer-player:check-icloud-available',
   CHECK_FOR_UPDATES: 'producer-player:check-for-updates',
   OPEN_UPDATE_DOWNLOAD: 'producer-player:open-update-download',
+  AGENT_START_SESSION: 'producer-player:agent-start-session',
+  AGENT_SEND_TURN: 'producer-player:agent-send-turn',
+  AGENT_INTERRUPT: 'producer-player:agent-interrupt',
+  AGENT_RESPOND_APPROVAL: 'producer-player:agent-respond-approval',
+  AGENT_DESTROY_SESSION: 'producer-player:agent-destroy-session',
+  AGENT_EVENT: 'producer-player:agent-event',
+  AGENT_CHECK_PROVIDER: 'producer-player:agent-check-provider',
+  AGENT_STORE_DEEPGRAM_KEY: 'producer-player:agent-store-deepgram-key',
+  AGENT_GET_DEEPGRAM_KEY: 'producer-player:agent-get-deepgram-key',
+  AGENT_CLEAR_DEEPGRAM_KEY: 'producer-player:agent-clear-deepgram-key',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
@@ -221,6 +231,140 @@ export interface UpdateCheckResult {
   message: string;
 }
 
+export type AgentProviderId = 'claude' | 'codex';
+export type AgentMode = 'analysis' | 'ui-interaction';
+
+export interface AgentStartSessionPayload {
+  provider: AgentProviderId;
+  mode: AgentMode;
+  systemPrompt?: string;
+}
+
+export interface AgentSendTurnPayload {
+  message: string;
+  context?: AgentContext | null;
+}
+
+export interface AgentRespondApprovalPayload {
+  approvalId: string;
+  decision: 'allow' | 'deny';
+}
+
+export interface AgentTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+}
+
+export type AgentEvent =
+  | { type: 'text-delta'; content: string }
+  | { type: 'thinking'; content: string }
+  | { type: 'tool-use-start'; toolName: string; toolId: string; input: unknown }
+  | { type: 'tool-use-result'; toolId: string; output: unknown }
+  | { type: 'approval-request'; approvalId: string; toolName: string; description: string }
+  | { type: 'turn-complete'; usage?: AgentTokenUsage }
+  | { type: 'error'; code: string; message: string }
+  | { type: 'session-ended'; reason: string };
+
+export interface AgentTrackInfo {
+  name: string;
+  fileName: string;
+  filePath: string;
+  format: string;
+  durationSeconds: number;
+  sampleRateHz: number | null;
+  albumName: string | null;
+  albumTrackCount: number;
+  referenceTrack: { fileName: string; filePath: string } | null;
+}
+
+export interface AgentStaticAnalysis {
+  integratedLufs: number | null;
+  loudnessRangeLufs: number | null;
+  truePeakDbfs: number | null;
+  samplePeakDbfs: number | null;
+  meanVolumeDbfs: number | null;
+  maxMomentaryLufs: number | null;
+  maxShortTermLufs: number | null;
+  sampleRateHz: number | null;
+}
+
+export interface AgentWebAudioAnalysis {
+  peakDbfs: number;
+  integratedLufsEstimate: number;
+  rmsDbfs: number;
+  crestFactorDb: number;
+  dcOffset: number;
+  clipCount: number;
+  durationSeconds: number;
+  tonalBalance: {
+    low: number;
+    mid: number;
+    high: number;
+  };
+  frameLoudnessDbfs: number[];
+  frameDurationSeconds: number;
+}
+
+export interface AgentPlatformNormalizationEntry {
+  platformId: string;
+  platformLabel: string;
+  targetLufs: number;
+  truePeakCeilingDbtp: number;
+  policy: string;
+  rawGainDb: number | null;
+  appliedGainDb: number | null;
+  projectedIntegratedLufs: number | null;
+  headroomCapDb: number | null;
+  limitedByHeadroom: boolean;
+  explanation: string;
+}
+
+export interface AgentPlatformNormalization {
+  platforms: AgentPlatformNormalizationEntry[];
+}
+
+export interface AgentReferenceAnalysis {
+  static: AgentStaticAnalysis | null;
+  webAudio: AgentWebAudioAnalysis | null;
+  deltas: {
+    integratedLufsDelta: number | null;
+    truePeakDelta: number | null;
+    crestFactorDelta: number | null;
+    tonalBalanceDelta: {
+      low: number;
+      mid: number;
+      high: number;
+    } | null;
+    loudnessRangeDelta: number | null;
+  } | null;
+}
+
+export interface AgentChecklistStatus {
+  items: Array<{
+    id: string;
+    text: string;
+    completed: boolean;
+    timestampSeconds: number | null;
+  }>;
+  completedCount: number;
+  totalCount: number;
+}
+
+export interface AgentContext {
+  track: AgentTrackInfo | null;
+  staticAnalysis: AgentStaticAnalysis | null;
+  webAudioAnalysis: AgentWebAudioAnalysis | null;
+  platformNormalization: AgentPlatformNormalization | null;
+  reference: AgentReferenceAnalysis | null;
+  checklist: AgentChecklistStatus | null;
+  activePlatformId: string | null;
+  isPlaying: boolean;
+  currentTimeSeconds: number;
+}
+
+export type AgentEventListener = (event: AgentEvent) => void;
+
 export interface ProducerPlayerBridge {
   getLibrarySnapshot(): Promise<LibrarySnapshot>;
   getEnvironment(): Promise<ProducerPlayerEnvironment>;
@@ -253,6 +397,16 @@ export interface ProducerPlayerBridge {
   openUpdateDownload(url?: string | null): Promise<void>;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
   onTransportCommand(listener: TransportCommandListener): () => void;
+  agentStartSession(payload: AgentStartSessionPayload): Promise<void>;
+  agentSendTurn(payload: AgentSendTurnPayload): Promise<void>;
+  agentInterrupt(): Promise<void>;
+  agentRespondApproval(payload: AgentRespondApprovalPayload): Promise<void>;
+  agentDestroySession(): Promise<void>;
+  agentCheckProvider(provider: AgentProviderId): Promise<boolean>;
+  agentStoreDeepgramKey(key: string): Promise<void>;
+  agentGetDeepgramKey(): Promise<string | null>;
+  agentClearDeepgramKey(): Promise<void>;
+  onAgentEvent(listener: AgentEventListener): () => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

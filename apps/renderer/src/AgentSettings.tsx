@@ -1,18 +1,31 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AgentProviderId } from '@producer-player/contracts';
+import type {
+  AgentModelDefinition,
+  AgentModelId,
+  AgentProviderId,
+} from '@producer-player/contracts';
+import { AGENT_PROVIDER_LABELS } from './agentModels';
 
 interface AgentSettingsProps {
   provider: AgentProviderId;
+  model: AgentModelId;
+  availableModels: readonly AgentModelDefinition[];
   onProviderChange: (provider: AgentProviderId) => void;
+  onModelChange: (model: AgentModelId) => void;
   onClearChat: () => void;
   onClose: () => void;
+  controlsDisabled?: boolean;
 }
 
 export function AgentSettings({
   provider,
+  model,
+  availableModels,
   onProviderChange,
+  onModelChange,
   onClearChat,
   onClose,
+  controlsDisabled = false,
 }: AgentSettingsProps): JSX.Element {
   const [deepgramKey, setDeepgramKey] = useState('');
   const [deepgramKeySet, setDeepgramKeySet] = useState(false);
@@ -21,7 +34,6 @@ export function AgentSettings({
   });
   const [confirmClear, setConfirmClear] = useState(false);
 
-  // Load Deepgram key status
   useEffect(() => {
     void window.producerPlayer.agentGetDeepgramKey().then((key) => {
       setDeepgramKeySet(key !== null && key.length > 0);
@@ -64,23 +76,39 @@ export function AgentSettings({
       <div className="agent-settings-section">
         <label className="agent-settings-label">Provider</label>
         <div className="agent-settings-provider-row">
-          <button
-            type="button"
-            className={`agent-settings-provider-option ${provider === 'claude' ? 'agent-settings-provider-option--active' : ''}`}
-            onClick={() => onProviderChange('claude')}
-          >
-            Claude
-          </button>
-          <button
-            type="button"
-            className={`agent-settings-provider-option ${provider === 'codex' ? 'agent-settings-provider-option--active' : ''}`}
-            onClick={() => onProviderChange('codex')}
-            disabled
-            title="Codex support coming soon"
-          >
-            Codex
-          </button>
+          {(['claude', 'codex'] as const).map((providerId) => (
+            <button
+              key={providerId}
+              type="button"
+              className={`agent-settings-provider-option ${provider === providerId ? 'agent-settings-provider-option--active' : ''}`}
+              onClick={() => onProviderChange(providerId)}
+              disabled={controlsDisabled}
+              data-testid={`agent-provider-${providerId}`}
+            >
+              {AGENT_PROVIDER_LABELS[providerId]}
+            </button>
+          ))}
         </div>
+      </div>
+
+      <div className="agent-settings-section">
+        <label className="agent-settings-label" htmlFor="agent-model-select">
+          Model
+        </label>
+        <select
+          id="agent-model-select"
+          className="agent-settings-model-select"
+          value={model}
+          onChange={(event) => onModelChange(event.target.value)}
+          disabled={controlsDisabled}
+          data-testid="agent-model-select"
+        >
+          {availableModels.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="agent-settings-section">
@@ -120,11 +148,7 @@ export function AgentSettings({
 
       <div className="agent-settings-section">
         <label className="agent-settings-toggle-row">
-          <input
-            type="checkbox"
-            checked={hideVoice}
-            onChange={handleHideVoiceToggle}
-          />
+          <input type="checkbox" checked={hideVoice} onChange={handleHideVoiceToggle} />
           <span>Hide voice input</span>
         </label>
       </div>

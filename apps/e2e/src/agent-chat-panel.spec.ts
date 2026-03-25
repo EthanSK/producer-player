@@ -1,3 +1,5 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import { ENABLE_AGENT_FEATURES } from '@producer-player/contracts';
 import {
@@ -5,6 +7,127 @@ import {
   createE2ETestDirectories,
   cleanupE2ETestDirectories,
 } from './helpers/electron-app';
+
+type FakeCliEnvironment = {
+  binDirectory: string;
+  logDirectory: string;
+  env: Record<string, string>;
+};
+
+function buildFakeCliScript(provider: 'claude' | 'codex'): string {
+  const version = provider === 'claude' ? '2.1.81 (Claude Code)' : 'codex-cli 0.104.0';
+
+  return `#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+
+const provider = ${JSON.stringify(provider)};
+const args = process.argv.slice(2);
+const logDir = process.env.PRODUCER_PLAYER_FAKE_AGENT_LOG_DIR;
+
+function extractCurrentMessage(stdin) {
+  const match = stdin.match(/<current-user-message>\\n([\\s\\S]*?)\\n<\\/current-user-message>/);
+  return match ? match[1].trim() : stdin.trim();
+}
+
+function appendLog(entry) {
+  if (!logDir) return;
+  fs.mkdirSync(logDir, { recursive: true });
+  fs.appendFileSync(path.join(logDir, provider + '.jsonl'), JSON.stringify(entry) + '\\n');
+}
+
+if (args.includes('--version') || args.includes('-V') || args.includes('-v')) {
+  console.log(${JSON.stringify(version)});
+  process.exit(0);
+}
+
+let stdin = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  stdin += chunk;
+});
+process.stdin.on('end', () => {
+  const modelFlag = provider === 'claude' ? '--model' : '--model';
+  const modelIndex = args.indexOf(modelFlag);
+  const model = modelIndex >= 0 ? args[modelIndex + 1] : 'unknown-model';
+  const currentMessage = extractCurrentMessage(stdin);
+
+  appendLog({ provider, argv: args, stdin, currentMessage, model });
+
+  if (provider === 'claude') {
+    console.log(JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'CLAUDE(' + model + '): ' + currentMessage },
+      },
+    }));
+    console.log(JSON.stringify({
+      type: 'result',
+      result: 'CLAUDE(' + model + '): ' + currentMessage,
+      usage: { input_tokens: 21, output_tokens: 8 },
+    }));
+    return;
+  }
+
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: 'test-thread' }));
+  console.log(JSON.stringify({ type: 'turn.started' }));
+  console.log(JSON.stringify({
+    type: 'item.completed',
+    item: {
+      id: 'item-1',
+      type: 'agent_message',
+      text: 'CODEX(' + model + '): ' + currentMessage,
+    },
+  }));
+  console.log(JSON.stringify({
+    type: 'turn.completed',
+    usage: { input_tokens: 34, cached_input_tokens: 13, output_tokens: 11 },
+  }));
+});
+process.stdin.resume();
+`;
+}
+
+async function createFakeCliEnvironment(rootDirectory: string): Promise<FakeCliEnvironment> {
+  const binDirectory = path.join(rootDirectory, 'fake-agent-bin');
+  const logDirectory = path.join(rootDirectory, 'fake-agent-logs');
+
+  await fs.mkdir(binDirectory, { recursive: true });
+  await fs.mkdir(logDirectory, { recursive: true });
+
+  await fs.writeFile(path.join(binDirectory, 'claude'), buildFakeCliScript('claude'), {
+    mode: 0o755,
+  });
+  await fs.writeFile(path.join(binDirectory, 'codex'), buildFakeCliScript('codex'), {
+    mode: 0o755,
+  });
+
+  return {
+    binDirectory,
+    logDirectory,
+    env: {
+      PATH: `${binDirectory}:${process.env.PATH ?? ''}`,
+      PRODUCER_PLAYER_FAKE_AGENT_LOG_DIR: logDirectory,
+    },
+  };
+}
+
+async function readJsonLines(filePath: string): Promise<Record<string, unknown>[]> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    return raw
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+}
 
 test.describe('Agent Chat Panel', () => {
   if (!ENABLE_AGENT_FEATURES) {
@@ -24,6 +147,7 @@ test.describe('Agent Chat Panel', () => {
 
     return;
   }
+
   test('toggle button is visible on launch', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-toggle');
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
@@ -44,7 +168,6 @@ test.describe('Agent Chat Panel', () => {
     try {
       await expect(page.getByTestId('agent-panel-toggle')).toBeVisible();
 
-      // Panel should not be visually open initially
       const panel = page.getByTestId('agent-chat-panel');
       await expect(panel).toBeAttached();
       const hasOpenClass = await panel.evaluate((el) =>
@@ -52,14 +175,10 @@ test.describe('Agent Chat Panel', () => {
       );
       expect(hasOpenClass).toBe(false);
 
-      // Click to open
       await page.getByTestId('agent-panel-toggle').click();
       await expect(panel).toHaveClass(/agent-chat-panel--open/);
-
-      // Close button should be visible
       await expect(page.getByTestId('agent-panel-close')).toBeVisible();
 
-      // Click close
       await page.getByTestId('agent-panel-close').click();
       const hasOpenClassAfterClose = await panel.evaluate((el) =>
         el.classList.contains('agent-chat-panel--open')
@@ -73,43 +192,49 @@ test.describe('Agent Chat Panel', () => {
 
   test('empty state shows starter prompts', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-empty-state');
-    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
 
     try {
       await page.getByTestId('agent-panel-toggle').click();
-
-      // Should show empty state or provider notice
-      // (provider notice if claude CLI not available, which is expected in CI)
-      const emptyState = page.getByTestId('agent-empty-state');
-      const providerNotice = page.getByTestId('agent-provider-notice');
-
-      // One of these should be visible
-      const emptyVisible = await emptyState.isVisible().catch(() => false);
-      const noticeVisible = await providerNotice.isVisible().catch(() => false);
-      expect(emptyVisible || noticeVisible).toBe(true);
-
-      if (emptyVisible) {
-        const chips = page.getByTestId('agent-starter-chip');
-        await expect(chips).toHaveCount(4);
-      }
+      await expect(page.getByTestId('agent-empty-state')).toBeVisible();
+      await expect(page.getByTestId('agent-provider-notice')).toHaveCount(0);
+      await expect(page.getByTestId('agent-starter-chip')).toHaveCount(4);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
     }
   });
 
-  test('settings menu opens and closes', async () => {
+  test('settings menu opens and the provider/model picker works', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-settings');
-    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
 
     try {
       await page.getByTestId('agent-panel-toggle').click();
-
-      // Open settings
       await page.getByTestId('agent-settings-toggle').click();
       await expect(page.getByTestId('agent-settings')).toBeVisible();
 
-      // Close settings
+      const modelSelect = page.getByTestId('agent-model-select');
+      await expect(page.getByTestId('agent-provider-claude')).toBeVisible();
+      await expect(page.getByTestId('agent-provider-codex')).toBeVisible();
+      await expect(modelSelect).toHaveValue('claude-sonnet-4-6');
+      await expect(modelSelect.locator('option')).toHaveCount(3);
+
+      await page.getByTestId('agent-provider-codex').click();
+      await expect(modelSelect).toHaveValue('gpt-5.4');
+      await expect(modelSelect.locator('option')).toHaveCount(6);
+      await expect(modelSelect.locator('option')).toContainText([
+        'GPT-5.4',
+        'GPT-5.4 Mini',
+        'GPT-5.3 Codex',
+      ]);
+
       await page.getByTestId('agent-settings-toggle').click();
       await expect(page.getByTestId('agent-settings')).not.toBeVisible();
     } finally {
@@ -130,8 +255,6 @@ test.describe('Agent Chat Panel', () => {
 
       await input.fill('Hello agent');
       await expect(input).toHaveValue('Hello agent');
-
-      // Send button should be visible
       await expect(page.getByTestId('agent-send-button')).toBeVisible();
     } finally {
       await electronApp.close();
@@ -139,26 +262,81 @@ test.describe('Agent Chat Panel', () => {
     }
   });
 
-  test('send button triggers message display', async () => {
-    const dirs = await createE2ETestDirectories('agent-panel-send');
-    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
+  test('Claude end-to-end uses the selected model and preserves conversation history', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-claude-e2e');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
 
     try {
       await page.getByTestId('agent-panel-toggle').click();
+      await page.getByTestId('agent-settings-toggle').click();
+      await page.getByTestId('agent-model-select').selectOption('claude-haiku-4-5');
+      await page.getByTestId('agent-settings-toggle').click();
 
       const input = page.getByTestId('agent-composer-input');
-      await input.fill('Test message');
-
-      // Click send
+      await input.fill('First test question');
       await page.getByTestId('agent-send-button').click();
+      await expect(page.getByTestId('agent-message-agent').last()).toContainText(
+        'CLAUDE(claude-haiku-4-5): First test question'
+      );
 
-      // User message should appear in the timeline
-      const userMessage = page.getByTestId('agent-message-user');
-      await expect(userMessage.first()).toBeVisible({ timeout: 5000 });
-      await expect(userMessage.first()).toContainText('Test message');
+      await input.fill('Follow up question');
+      await page.getByTestId('agent-send-button').click();
+      await expect(page.getByTestId('agent-message-agent').last()).toContainText(
+        'CLAUDE(claude-haiku-4-5): Follow up question'
+      );
 
-      // Input should be cleared
-      await expect(input).toHaveValue('');
+      const claudeLogs = await readJsonLines(path.join(fakeCli.logDirectory, 'claude.jsonl'));
+      expect(claudeLogs).toHaveLength(2);
+
+      const firstArgs = claudeLogs[0]?.argv as string[];
+      expect(firstArgs).toContain('--model');
+      expect(firstArgs).toContain('--output-format');
+      expect(firstArgs).toContain('stream-json');
+      expect(firstArgs).toContain('--verbose');
+      expect(firstArgs).toContain('--dangerously-skip-permissions');
+      expect(firstArgs).toContain('--tools');
+      expect(firstArgs[firstArgs.indexOf('--model') + 1]).toBe('claude-haiku-4-5');
+
+      const secondPrompt = String(claudeLogs[1]?.stdin ?? '');
+      expect(secondPrompt).toContain('<conversation-history>');
+      expect(secondPrompt).toContain('User:\nFirst test question');
+      expect(secondPrompt).toContain('Assistant:\nCLAUDE(claude-haiku-4-5): First test question');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('Codex end-to-end uses the selected model', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-codex-e2e');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
+
+    try {
+      await page.getByTestId('agent-panel-toggle').click();
+      await page.getByTestId('agent-settings-toggle').click();
+      await page.getByTestId('agent-provider-codex').click();
+      await page.getByTestId('agent-model-select').selectOption('gpt-5.3-codex');
+      await page.getByTestId('agent-settings-toggle').click();
+
+      const input = page.getByTestId('agent-composer-input');
+      await input.fill('Need codex help');
+      await page.getByTestId('agent-send-button').click();
+      await expect(page.getByTestId('agent-message-agent').last()).toContainText(
+        'CODEX(gpt-5.3-codex): Need codex help'
+      );
+
+      const codexLogs = await readJsonLines(path.join(fakeCli.logDirectory, 'codex.jsonl'));
+      expect(codexLogs).toHaveLength(1);
+      const codexArgs = codexLogs[0]?.argv as string[];
+      expect(codexArgs.slice(0, 2)).toEqual(['exec', '--skip-git-repo-check']);
+      expect(codexArgs).toContain('--json');
+      expect(codexArgs[codexArgs.indexOf('--model') + 1]).toBe('gpt-5.3-codex');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
@@ -167,31 +345,28 @@ test.describe('Agent Chat Panel', () => {
 
   test('clear chat removes messages', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-clear');
-    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
 
     try {
       await page.getByTestId('agent-panel-toggle').click();
 
-      // Type and send a message
       const input = page.getByTestId('agent-composer-input');
       await input.fill('Test message for clear');
       await page.getByTestId('agent-send-button').click();
-
-      // Wait for user message to appear
       await expect(page.getByTestId('agent-message-user').first()).toBeVisible({ timeout: 5000 });
 
-      // Open settings and clear chat
       await page.getByTestId('agent-settings-toggle').click();
       await expect(page.getByTestId('agent-settings')).toBeVisible();
 
       const clearButton = page.getByTestId('agent-clear-chat');
-      await clearButton.click(); // first click shows confirmation
-      await clearButton.click(); // second click confirms
+      await clearButton.click();
+      await clearButton.click();
 
-      // Messages should be gone, empty state or provider notice should show
       const timeline = page.getByTestId('agent-timeline');
-      const userMessages = timeline.getByTestId('agent-message-user');
-      await expect(userMessages).toHaveCount(0, { timeout: 3000 });
+      await expect(timeline.getByTestId('agent-message-user')).toHaveCount(0, { timeout: 3000 });
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
@@ -200,15 +375,16 @@ test.describe('Agent Chat Panel', () => {
 
   test('Enter key sends message and Shift+Enter adds newline', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-keyboard');
-    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
 
     try {
       await page.getByTestId('agent-panel-toggle').click();
 
       const input = page.getByTestId('agent-composer-input');
       await input.focus();
-
-      // Type text and press Shift+Enter for newline
       await input.fill('Line one');
       await input.press('Shift+Enter');
       await input.evaluate((el) => {
@@ -216,14 +392,10 @@ test.describe('Agent Chat Panel', () => {
         el.dispatchEvent(new Event('input', { bubbles: true }));
       });
 
-      // Value should contain both lines
       const value = await input.inputValue();
       expect(value).toContain('Line one');
-
-      // Press Enter to send
       await input.press('Enter');
 
-      // User message should appear
       await expect(page.getByTestId('agent-message-user').first()).toBeVisible({ timeout: 5000 });
     } finally {
       await electronApp.close();

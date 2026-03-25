@@ -132,9 +132,9 @@ export interface PlaylistOrderExportV1 {
  * Enables the experimental agent assistant surfaces in Producer Player,
  * including the renderer chat panel and Electron-backed agent IPC hooks.
  *
- * Disabled by default while the feature is being parked behind a flag.
+ * Enabled again by default while the agent integration is being actively tested.
  */
-export const ENABLE_AGENT_FEATURES = false;
+export const ENABLE_AGENT_FEATURES = true;
 
 export const IPC_CHANNELS = {
   GET_LIBRARY_SNAPSHOT: 'producer-player:get-library-snapshot',
@@ -242,10 +242,46 @@ export interface UpdateCheckResult {
 export type AgentProviderId = 'claude' | 'codex';
 export type AgentMode = 'analysis' | 'ui-interaction';
 
+export interface AgentModelDefinition {
+  id: string;
+  label: string;
+}
+
+export const AGENT_MODEL_OPTIONS_BY_PROVIDER = {
+  codex: [
+    { id: 'gpt-5.4', label: 'GPT-5.4' },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+    { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+    { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
+    { id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
+    { id: 'gpt-5.2', label: 'GPT-5.2' },
+  ],
+  claude: [
+    { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+    { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+  ],
+} as const satisfies Record<AgentProviderId, readonly AgentModelDefinition[]>;
+
+export type AgentModelId =
+  | (typeof AGENT_MODEL_OPTIONS_BY_PROVIDER)[AgentProviderId][number]['id']
+  | (string & {});
+
+export const DEFAULT_AGENT_MODEL_BY_PROVIDER: Record<AgentProviderId, AgentModelId> = {
+  codex: 'gpt-5.4',
+  claude: 'claude-sonnet-4-6',
+};
+
+export const AGENT_PROVIDER_LABELS: Record<AgentProviderId, string> = {
+  codex: 'Codex',
+  claude: 'Claude',
+};
+
 export interface AgentStartSessionPayload {
   provider: AgentProviderId;
   mode: AgentMode;
   systemPrompt?: string;
+  model?: AgentModelId;
 }
 
 export interface AgentSendTurnPayload {

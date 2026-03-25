@@ -2967,7 +2967,12 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_START_SESSION,
     async (_event, payload: AgentStartSessionPayload) => {
-      agentService.startSession(payload.provider, payload.mode, payload.systemPrompt);
+      agentService.startSession(
+        payload.provider,
+        payload.mode,
+        payload.systemPrompt,
+        payload.model,
+      );
     }
   );
 

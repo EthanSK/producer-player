@@ -19,6 +19,6 @@ export const SHOW_3000AD_BRANDING = false;
  * including the renderer chat panel, Electron agent IPC handlers,
  * and Deepgram-backed voice input/settings hooks.
  *
- * This is OFF by default for now.
+ * This is ON by default while the integration is being actively exercised.
  */
-export const ENABLE_AGENT_FEATURES = false;
+export const ENABLE_AGENT_FEATURES = true;

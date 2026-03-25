@@ -8,11 +8,16 @@ import {
 import type {
   AgentContext,
   AgentEvent,
+  AgentModelId,
   AgentProviderId,
   AgentTokenUsage,
 } from '@producer-player/contracts';
 import { AgentComposer } from './AgentComposer';
 import { AgentSettings } from './AgentSettings';
+import {
+  AGENT_MODEL_OPTIONS_BY_PROVIDER,
+  DEFAULT_AGENT_MODEL_BY_PROVIDER,
+} from './agentModels';
 
 export interface AgentChatMessage {
   id: string;
@@ -33,6 +38,21 @@ const STARTER_PROMPTS = [
   'Check for clipping',
   'Is this ready for Spotify?',
 ];
+
+const AGENT_PROVIDER_STORAGE_KEY = 'producer-player.agent-provider';
+const AGENT_MODEL_STORAGE_PREFIX = 'producer-player.agent-model.';
+
+function readStoredProvider(): AgentProviderId {
+  const stored = localStorage.getItem(AGENT_PROVIDER_STORAGE_KEY);
+  return stored === 'codex' ? 'codex' : 'claude';
+}
+
+function readStoredModel(provider: AgentProviderId): AgentModelId {
+  const stored = localStorage.getItem(`${AGENT_MODEL_STORAGE_PREFIX}${provider}`)?.trim();
+  return stored && stored.length > 0
+    ? stored
+    : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
+}
 
 let messageIdCounter = 0;
 function nextMessageId(): string {
@@ -56,7 +76,11 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
   const [messages, setMessages] = useState<AgentChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
-  const [provider, setProvider] = useState<AgentProviderId>('claude');
+  const [provider, setProvider] = useState<AgentProviderId>(() => readStoredProvider());
+  const [modelByProvider, setModelByProvider] = useState<Record<AgentProviderId, AgentModelId>>(() => ({
+    claude: readStoredModel('claude'),
+    codex: readStoredModel('codex'),
+  }));
   const [providerAvailable, setProviderAvailable] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFirstUseBadge, setShowFirstUseBadge] = useState(() => {
@@ -71,6 +95,11 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const userScrolledUpRef = useRef(false);
   const streamingMessageIdRef = useRef<string | null>(null);
+
+  const availableModels = AGENT_MODEL_OPTIONS_BY_PROVIDER[provider];
+  const currentModel = availableModels.some((option) => option.id === modelByProvider[provider])
+    ? modelByProvider[provider]
+    : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
 
   useEffect(() => {
     if (!isOpen) return;
@@ -192,6 +221,15 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
     });
   }, [showFirstUseBadge]);
 
+  const resetActiveSession = useCallback(() => {
+    if (sessionActive) {
+      void window.producerPlayer.agentDestroySession();
+      setSessionActive(false);
+    }
+    streamingMessageIdRef.current = null;
+    setIsStreaming(false);
+  }, [sessionActive]);
+
   const handleSendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || isStreaming) return;
@@ -200,6 +238,7 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
         await window.producerPlayer.agentStartSession({
           provider,
           mode: 'analysis',
+          model: currentModel,
         });
         setSessionActive(true);
       }
@@ -222,7 +261,7 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
         context,
       });
     },
-    [isStreaming, sessionActive, provider, getAnalysisContext]
+    [currentModel, getAnalysisContext, isStreaming, provider, sessionActive]
   );
 
   const handleInterrupt = useCallback(() => {
@@ -241,13 +280,8 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
 
   const handleClearChat = useCallback(() => {
     setMessages([]);
-    streamingMessageIdRef.current = null;
-    setIsStreaming(false);
-    if (sessionActive) {
-      void window.producerPlayer.agentDestroySession();
-      setSessionActive(false);
-    }
-  }, [sessionActive]);
+    resetActiveSession();
+  }, [resetActiveSession]);
 
   const handleApproval = useCallback(
     (decision: 'allow' | 'deny') => {
@@ -265,13 +299,46 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
     void window.producerPlayer.copyTextToClipboard(content);
   }, []);
 
-  const handleProviderChange = useCallback((newProvider: AgentProviderId) => {
-    setProvider(newProvider);
-    setProviderAvailable(null);
-    void window.producerPlayer.agentCheckProvider(newProvider).then((available) => {
-      setProviderAvailable(available);
-    });
-  }, []);
+  const handleProviderChange = useCallback(
+    (newProvider: AgentProviderId) => {
+      if (newProvider === provider) return;
+      resetActiveSession();
+      localStorage.setItem(AGENT_PROVIDER_STORAGE_KEY, newProvider);
+      setProvider(newProvider);
+      setProviderAvailable(null);
+      void window.producerPlayer.agentCheckProvider(newProvider).then((available) => {
+        setProviderAvailable(available);
+      });
+    },
+    [provider, resetActiveSession]
+  );
+
+  const handleModelChange = useCallback(
+    (model: AgentModelId) => {
+      resetActiveSession();
+      localStorage.setItem(`${AGENT_MODEL_STORAGE_PREFIX}${provider}`, model);
+      setModelByProvider((prev) => ({
+        ...prev,
+        [provider]: model,
+      }));
+    },
+    [provider, resetActiveSession]
+  );
+
+  const providerUnavailableCopy =
+    provider === 'claude'
+      ? {
+          title: 'Claude Code CLI not found. Install it with:',
+          command: 'npm i -g @anthropic-ai/claude-code',
+          followup: 'Then authenticate:',
+          followupCommand: 'claude auth',
+        }
+      : {
+          title: 'Codex CLI not found. Install or update it, then make sure `codex` is on your PATH.',
+          command: 'codex --version',
+          followup: 'Once it is available, reopen the panel or switch providers to retry detection.',
+          followupCommand: '',
+        };
 
   const panelStyle: CSSProperties = {
     transform: isOpen ? 'translateY(0)' : 'translateY(calc(100% - 4px))',
@@ -335,9 +402,13 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
         {settingsOpen && (
           <AgentSettings
             provider={provider}
+            model={currentModel}
+            availableModels={availableModels}
             onProviderChange={handleProviderChange}
+            onModelChange={handleModelChange}
             onClearChat={handleClearChat}
             onClose={() => setSettingsOpen(false)}
+            controlsDisabled={isStreaming}
           />
         )}
 
@@ -376,10 +447,12 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
         >
           {providerAvailable === false && (
             <div className="agent-provider-notice" data-testid="agent-provider-notice">
-              <p>Claude CLI not found. Install it with:</p>
-              <code>npm i -g @anthropic-ai/claude-code</code>
-              <p>Then authenticate:</p>
-              <code>claude auth</code>
+              <p>{providerUnavailableCopy.title}</p>
+              <code>{providerUnavailableCopy.command}</code>
+              <p>{providerUnavailableCopy.followup}</p>
+              {providerUnavailableCopy.followupCommand ? (
+                <code>{providerUnavailableCopy.followupCommand}</code>
+              ) : null}
             </div>
           )}
 

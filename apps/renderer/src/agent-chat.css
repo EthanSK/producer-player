@@ -186,6 +186,27 @@
   cursor: not-allowed;
 }
 
+.agent-settings-model-select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-1);
+  color: var(--text-main);
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.agent-settings-model-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.agent-settings-model-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .agent-settings-key-row {
   display: flex;
   gap: 6px;

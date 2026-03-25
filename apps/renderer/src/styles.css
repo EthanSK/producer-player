@@ -55,6 +55,36 @@ body,
   align-items: center;
 }
 
+.panel-main-header {
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.panel-main-header .actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.panel-main-header .actions > * {
+  flex-shrink: 0;
+}
+
+.panel-main-header .actions-help-group {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.panel-main-header .actions-help-group .help-tooltip-trigger {
+  margin-left: 0;
+}
+
 .panel-header h2 {
   margin: 0;
   font-size: 16px;

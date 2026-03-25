@@ -5722,7 +5722,7 @@ export function App(): JSX.Element {
       </aside>
 
       <main className="panel panel-main">
-        <header className="panel-header">
+        <header className="panel-header panel-main-header">
           <div className="album-header-row">
             <button
               type="button"
@@ -5864,7 +5864,9 @@ export function App(): JSX.Element {
             >
               <span aria-hidden="true">🚶</span>
             </button>
-            <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and metadata as a JSON file for backup or transfer.\n\n• ⤒ (Import Order) — Imports a previously exported JSON file to restore track ordering.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
+            <div className="actions-help-group">
+              <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and metadata as a JSON file for backup or transfer.\n\n• ⤒ (Import Order) — Imports a previously exported JSON file to restore track ordering.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
+            </div>
           </div>
         </header>
 

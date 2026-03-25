@@ -602,6 +602,16 @@ input[type='range'] {
   align-items: start;
 }
 
+.analysis-ab-row {
+  display: flex;
+  gap: 10px;
+}
+
+.analysis-ab-row > .analysis-ab-toggle {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .analysis-ab-toggle {
   display: grid;
   gap: 8px;

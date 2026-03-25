@@ -434,9 +434,11 @@ export function SpectrumAnalyzer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analyserNode, width, height, isFullScreen, isPlaying, activeBandsKey, dbToY, mousePosRef]);
 
+  const isBandToggleEnabled = typeof onBandToggle === 'function';
+
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!isFullScreen || !onBandToggle) return;
+      if (!onBandToggle) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
 
@@ -449,7 +451,7 @@ export function SpectrumAnalyzer({
         onBandToggle(bandIndex, event.shiftKey);
       }
     },
-    [isFullScreen, onBandToggle, width]
+    [onBandToggle, width]
   );
 
   return (
@@ -462,7 +464,7 @@ export function SpectrumAnalyzer({
         height: `${height}px`,
         borderRadius: isFullScreen ? '10px' : '6px',
         display: 'block',
-        cursor: isFullScreen ? 'crosshair' : 'default',
+        cursor: isBandToggleEnabled ? (isFullScreen ? 'crosshair' : 'pointer') : 'default',
       }}
       onClick={handleClick}
       data-testid={isFullScreen ? 'spectrum-analyzer-full' : 'spectrum-analyzer-mini'}

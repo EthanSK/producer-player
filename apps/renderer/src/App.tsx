@@ -6075,6 +6075,8 @@ export function App(): JSX.Element {
                   analyserNode={analyserNode}
                   width={180}
                   height={48}
+                  activeBands={soloedBands}
+                  onBandToggle={handleBandToggle}
                   isPlaying={isPlaying}
                 />
                 <LevelMeter

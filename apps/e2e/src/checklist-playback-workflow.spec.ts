@@ -456,6 +456,10 @@ test.describe('checklist playback workflow', () => {
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await cueSongVersion(page, 'Track A', 'Track A v1.wav');
 
+      const miniSpectrum = page.getByTestId('spectrum-analyzer-mini');
+      await expect(miniSpectrum).toBeVisible();
+      await miniSpectrum.click({ position: { x: 120, y: 24 } });
+
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText(/Reference Track/i);
@@ -477,10 +481,15 @@ test.describe('checklist playback workflow', () => {
       expect(overlaySectionOrder[0]).toBe('analysis-overlay-visualizations');
       expect(overlaySectionOrder[1]).toBe('analysis-overlay-reference-panel');
 
-      await page.getByTestId('spectrum-analyzer-full').click({ position: { x: 120, y: 60 } });
-      await expect(page.getByTestId('analysis-clear-solo-bands')).toBeVisible();
-      await page.getByTestId('analysis-clear-solo-bands').click();
-      await expect(page.getByTestId('analysis-clear-solo-bands')).toHaveCount(0);
+      const clearSoloButton = page.getByTestId('analysis-clear-solo-bands');
+      await expect(clearSoloButton).toBeVisible();
+      await clearSoloButton.click();
+      await expect(clearSoloButton).toHaveCount(0);
+
+      await fullScreenSpectrum.click({ position: { x: 120, y: 60 } });
+      await expect(clearSoloButton).toBeVisible();
+      await clearSoloButton.click();
+      await expect(clearSoloButton).toHaveCount(0);
 
       await page.getByTestId('analysis-modal').click({ position: { x: 8, y: 8 } });
       await expect(page.getByTestId('analysis-modal')).toHaveCount(0);

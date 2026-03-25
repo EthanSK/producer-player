@@ -140,12 +140,12 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
-  test('paused preview wheel scrubs the checklist timestamp and matching items flash when playback reaches them', async () => {
+  test('set now captures checklist timestamp and matching items flash when playback reaches them', async () => {
     const directories = await createE2ETestDirectories(
-      'producer-player-checklist-preview-scroll-highlight'
+      'producer-player-checklist-set-now-highlight'
     );
     await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
-      durationMs: 4_200,
+      durationMs: 7_200,
       frequencyHz: 550,
     });
 
@@ -160,23 +160,138 @@ test.describe('checklist playback workflow', () => {
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 
       await page.getByTestId('song-checklist-play-toggle').click();
-      await waitForPlaybackSeconds(page, 1.1);
+      await waitForPlaybackSeconds(page, 4.2);
       await page.getByTestId('song-checklist-play-toggle').click();
 
+      await page.getByTestId('song-checklist-set-now').click();
       const previewBadge = page.getByTestId('song-checklist-input-timestamp-preview');
-      await previewBadge.hover();
-      await page.mouse.wheel(0, 120);
-      await expect(previewBadge).toHaveText('0:02');
+      const capturedPreviewTimestamp = (await previewBadge.textContent())?.trim() ?? '';
+      expect(capturedPreviewTimestamp).toMatch(/^\d+:\d{2}$/);
 
       await page.getByTestId('song-checklist-input').fill('Bass pocket');
       await page.getByTestId('song-checklist-add').click();
-      await expect(page.getByTestId('song-checklist-item-timestamp').first()).toHaveText('0:02');
+      await expect(page.getByTestId('song-checklist-item-timestamp').first()).toHaveText(
+        capturedPreviewTimestamp
+      );
+
+      await page.getByTestId('song-checklist-skip-back-10').click();
 
       await page.getByTestId('song-checklist-play-toggle').click();
       await expect.poll(async () => {
         const className = await page.locator('.checklist-item-row').first().getAttribute('class');
         return className ?? '';
       }).toContain('is-active');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('checklist scroll stays free over timestamp badges while playback is running', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-scroll-free-while-playing'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 8_000,
+      frequencyHz: 515,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await cueSongVersion(page, 'Track A', 'Track A v1.wav');
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const input = page.getByTestId('song-checklist-input');
+      const addButton = page.getByTestId('song-checklist-add');
+      for (let index = 1; index <= 24; index += 1) {
+        await input.fill(`Checklist note ${index}`);
+        await addButton.click();
+      }
+
+      const scrollRegion = page.getByTestId('song-checklist-scroll-region');
+      const scrollMetrics = await scrollRegion.evaluate((node) => ({
+        scrollHeight: (node as HTMLDivElement).scrollHeight,
+        clientHeight: (node as HTMLDivElement).clientHeight,
+      }));
+      expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight + 80);
+
+      await scrollRegion.evaluate((node) => {
+        (node as HTMLDivElement).scrollTop = 0;
+      });
+
+      await page.getByTestId('song-checklist-play-toggle').click();
+      await waitForPlaybackSeconds(page, 0.5);
+
+      const firstTimestampBadge = page.getByTestId('song-checklist-item-timestamp').first();
+      await firstTimestampBadge.hover();
+
+      const scrollTopBefore = await scrollRegion.evaluate(
+        (node) => (node as HTMLDivElement).scrollTop
+      );
+
+      await page.mouse.wheel(0, 420);
+
+      await expect
+        .poll(async () =>
+          scrollRegion.evaluate((node) => (node as HTMLDivElement).scrollTop)
+        )
+        .toBeGreaterThan(scrollTopBefore + 50);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('adding checklist items does not auto-scroll the checklist dialog', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-no-auto-scroll-on-add'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 8_000,
+      frequencyHz: 455,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await cueSongVersion(page, 'Track A', 'Track A v1.wav');
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const input = page.getByTestId('song-checklist-input');
+      const addButton = page.getByTestId('song-checklist-add');
+      for (let index = 1; index <= 24; index += 1) {
+        await input.fill(`Auto-scroll baseline ${index}`);
+        await addButton.click();
+      }
+
+      const scrollRegion = page.getByTestId('song-checklist-scroll-region');
+      await scrollRegion.evaluate((node) => {
+        (node as HTMLDivElement).scrollTop = 120;
+      });
+
+      const scrollTopBeforeAdd = await scrollRegion.evaluate(
+        (node) => (node as HTMLDivElement).scrollTop
+      );
+
+      await input.fill('Auto-scroll should stay put');
+      await addButton.click();
+
+      await expect
+        .poll(async () => scrollRegion.evaluate((node) => (node as HTMLDivElement).scrollTop))
+        .toBeLessThan(scrollTopBeforeAdd + 30);
+
+      await expect
+        .poll(async () => scrollRegion.evaluate((node) => (node as HTMLDivElement).scrollTop))
+        .toBeGreaterThan(scrollTopBeforeAdd - 30);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

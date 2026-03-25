@@ -305,7 +305,6 @@ function clampTimestampSeconds(
 }
 
 const CHECKLIST_CAPTURE_LOOKBACK_SECONDS = 3;
-const CHECKLIST_PREVIEW_SCROLL_STEP_SECONDS = 1;
 const CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS = 1200;
 const CHECKLIST_HISTORY_LIMIT = 100;
 
@@ -1244,9 +1243,6 @@ export function App(): JSX.Element {
   const checklistSkipBackTenButtonRef = useRef<HTMLButtonElement | null>(null);
   const checklistSkipBackFiveButtonRef = useRef<HTMLButtonElement | null>(null);
   const lastFocusedChecklistTransportRef = useRef<HTMLButtonElement | null>(null);
-  const checklistItemsScrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const checklistVisibleSongIdRef = useRef<string | null>(null);
-  const checklistVisibleItemCountRef = useRef(0);
   const songChecklistsRef = useRef(songChecklists);
   const checklistUndoStackRef = useRef(checklistUndoStack);
   const checklistRedoStackRef = useRef(checklistRedoStack);
@@ -1434,39 +1430,8 @@ export function App(): JSX.Element {
       }
       checklistHighlightTimeoutsRef.current.clear();
       previousChecklistPlaybackTimeRef.current = currentTimeSeconds;
-      checklistVisibleSongIdRef.current = null;
-      checklistVisibleItemCountRef.current = 0;
     }
   }, [checklistModalSongId, currentTimeSeconds]);
-
-  useEffect(() => {
-    const visibleItemCount = checklistModalSongId
-      ? songChecklists[checklistModalSongId]?.length ?? 0
-      : 0;
-    const songChanged = checklistVisibleSongIdRef.current !== checklistModalSongId;
-    const itemCountIncreased = visibleItemCount > checklistVisibleItemCountRef.current;
-
-    checklistVisibleSongIdRef.current = checklistModalSongId;
-    checklistVisibleItemCountRef.current = visibleItemCount;
-
-    if (!checklistModalSongId || (!songChanged && !itemCountIncreased)) {
-      return;
-    }
-
-    // Don't auto-scroll during playback — it fights with user scrolling
-    if (isPlayingRef.current) {
-      return;
-    }
-
-    const scrollRegion = checklistItemsScrollContainerRef.current;
-    if (!scrollRegion) {
-      return;
-    }
-
-    requestAnimationFrame(() => {
-      scrollRegion.scrollTop = scrollRegion.scrollHeight;
-    });
-  }, [checklistModalSongId, songChecklists]);
 
   useEffect(() => {
     const selectedVersion =
@@ -4372,71 +4337,6 @@ export function App(): JSX.Element {
     freezeChecklistTimestampAtCurrentPlayback();
   }
 
-  function handleChecklistTimestampPreviewWheel(event: WheelEvent<HTMLButtonElement>): void {
-    event.preventDefault();
-
-    const audio = audioRef.current;
-    if (!audio || !audio.paused) {
-      return;
-    }
-
-    const direction = event.deltaY > 0 ? 1 : event.deltaY < 0 ? -1 : 0;
-    if (direction === 0) {
-      return;
-    }
-
-    const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : undefined;
-    const baseTimestamp = checklistCapturedTimestamp ?? captureCurrentPlaybackTimestamp() ?? 0;
-    const nextTimestamp = clampTimestampSeconds(
-      baseTimestamp + direction * CHECKLIST_PREVIEW_SCROLL_STEP_SECONDS,
-      duration,
-      0
-    );
-
-    if (nextTimestamp === null) {
-      return;
-    }
-
-    setChecklistTimestampMode('frozen');
-    setChecklistCapturedTimestamp(nextTimestamp);
-  }
-
-  function handleChecklistItemTimestampWheel(
-    songId: string,
-    itemId: string,
-    currentSeconds: number,
-    event: WheelEvent<HTMLButtonElement>
-  ): void {
-    event.preventDefault();
-
-    const direction = event.deltaY > 0 ? 1 : event.deltaY < 0 ? -1 : 0;
-    if (direction === 0) {
-      return;
-    }
-
-    const audio = audioRef.current;
-    const duration =
-      audio && Number.isFinite(audio.duration) && audio.duration > 0
-        ? audio.duration
-        : undefined;
-    const nextTimestamp = clampTimestampSeconds(
-      currentSeconds + direction * CHECKLIST_PREVIEW_SCROLL_STEP_SECONDS,
-      duration,
-      0
-    );
-
-    if (nextTimestamp === null) {
-      return;
-    }
-
-    updateSongChecklistItems(songId, (items) =>
-      items.map((item) =>
-        item.id === itemId ? { ...item, timestampSeconds: nextTimestamp } : item
-      )
-    );
-    highlightChecklistTimestamp(itemId);
-  }
-
   function highlightChecklistTimestamp(itemId: string): void {
     setActiveChecklistTimestampIds((current) =>
       current.includes(itemId) ? current : [...current, itemId]
@@ -6414,7 +6314,6 @@ export function App(): JSX.Element {
             </div>
 
             <div
-              ref={checklistItemsScrollContainerRef}
               className="checklist-item-scroll-region"
               data-testid="song-checklist-scroll-region"
             >
@@ -6445,14 +6344,6 @@ export function App(): JSX.Element {
                           type="button"
                           className="checklist-timestamp-badge"
                           onClick={() => handleChecklistTimestampClick(item.timestampSeconds!)}
-                          onWheel={(event) =>
-                            handleChecklistItemTimestampWheel(
-                              checklistModalSong.id,
-                              item.id,
-                              item.timestampSeconds!,
-                              event
-                            )
-                          }
                           data-testid="song-checklist-item-timestamp"
                           title={`Jump to ${formatTime(item.timestampSeconds)}`}
                           aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
@@ -6752,7 +6643,6 @@ export function App(): JSX.Element {
                     title={`Seek to ${formatTime(checklistCapturedTimestamp)}`}
                     data-testid="song-checklist-input-timestamp-preview"
                     onClick={() => handleChecklistTimestampClick(checklistCapturedTimestamp)}
-                    onWheel={handleChecklistTimestampPreviewWheel}
                   >
                     {formatTime(checklistCapturedTimestamp)}
                   </button>

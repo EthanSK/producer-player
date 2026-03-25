@@ -6366,6 +6366,18 @@ export function App(): JSX.Element {
                         onInput={(event) => {
                           autosizeChecklistTextarea(event.currentTarget);
                         }}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === 'Enter' &&
+                            !event.shiftKey &&
+                            !event.metaKey &&
+                            !event.ctrlKey &&
+                            !event.altKey
+                          ) {
+                            event.preventDefault();
+                            event.currentTarget.blur();
+                          }
+                        }}
                         ref={(node) => {
                           if (node) {
                             autosizeChecklistTextarea(node);

@@ -61,6 +61,39 @@ test.describe('Checklist textarea UX', () => {
     }
   });
 
+  test('editing an existing checklist item blurs on Enter instead of inserting a newline', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-item-enter-blur'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkSingleSongAndOpenChecklist(page, directories.fixtureDirectory);
+
+      const composer = page.getByTestId('song-checklist-input');
+      await composer.fill('Original note');
+      await composer.press('Enter');
+
+      const itemText = page.getByTestId('song-checklist-item-text').first();
+      await expect(itemText).toHaveValue('Original note');
+
+      await itemText.focus();
+      await itemText.fill('Edited note');
+      await itemText.press('Enter');
+
+      await expect(itemText).not.toBeFocused();
+      await expect(itemText).toHaveValue('Edited note');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('Shift+Tab reverses inside transport controls and resets after reopening checklist', async () => {
     const directories = await createE2ETestDirectories('producer-player-checklist-shift-tab-toggle');
 

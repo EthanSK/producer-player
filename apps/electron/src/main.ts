@@ -2979,7 +2979,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SEND_TURN,
     async (_event, payload: AgentSendTurnPayload) => {
-      agentService.sendTurn(payload.message, payload.context);
+      agentService.sendTurn(payload.message, payload.context, payload.uiContext);
     }
   );
 

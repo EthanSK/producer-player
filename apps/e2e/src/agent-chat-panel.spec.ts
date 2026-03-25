@@ -221,10 +221,14 @@ test.describe('Agent Chat Panel', () => {
       await expect(page.getByTestId('agent-settings')).toBeVisible();
 
       const modelSelect = page.getByTestId('agent-model-select');
+      const systemPromptInput = page.getByTestId('agent-system-prompt-input');
       await expect(page.getByTestId('agent-provider-claude')).toBeVisible();
       await expect(page.getByTestId('agent-provider-codex')).toBeVisible();
       await expect(modelSelect).toHaveValue('claude-sonnet-4-6');
       await expect(modelSelect.locator('option')).toHaveCount(3);
+      await expect(systemPromptInput).toBeVisible();
+      await expect(systemPromptInput).toHaveValue(/full-access mastering agent/i);
+      await expect(page.getByTestId('agent-system-prompt-reset')).toBeVisible();
 
       await page.getByTestId('agent-provider-codex').click();
       await expect(modelSelect).toHaveValue('gpt-5.4');
@@ -270,9 +274,12 @@ test.describe('Agent Chat Panel', () => {
     });
 
     try {
+      const customSystemPrompt = 'Claude full access mastering test prompt';
+
       await page.getByTestId('agent-panel-toggle').click();
       await page.getByTestId('agent-settings-toggle').click();
       await page.getByTestId('agent-model-select').selectOption('claude-haiku-4-5');
+      await page.getByTestId('agent-system-prompt-input').fill(customSystemPrompt);
       await page.getByTestId('agent-settings-toggle').click();
 
       const input = page.getByTestId('agent-composer-input');
@@ -297,8 +304,14 @@ test.describe('Agent Chat Panel', () => {
       expect(firstArgs).toContain('stream-json');
       expect(firstArgs).toContain('--verbose');
       expect(firstArgs).toContain('--dangerously-skip-permissions');
-      expect(firstArgs).toContain('--tools');
+      expect(firstArgs).toContain('--system-prompt');
+      expect(firstArgs).not.toContain('--tools');
       expect(firstArgs[firstArgs.indexOf('--model') + 1]).toBe('claude-haiku-4-5');
+      expect(firstArgs[firstArgs.indexOf('--system-prompt') + 1]).toBe(customSystemPrompt);
+
+      const firstPrompt = String(claudeLogs[0]?.stdin ?? '');
+      expect(firstPrompt).toContain('<ui-context>');
+      expect(firstPrompt).toContain('"domSnapshot"');
 
       const secondPrompt = String(claudeLogs[1]?.stdin ?? '');
       expect(secondPrompt).toContain('<conversation-history>');
@@ -318,10 +331,13 @@ test.describe('Agent Chat Panel', () => {
     });
 
     try {
+      const customSystemPrompt = 'Codex full access mastering test prompt';
+
       await page.getByTestId('agent-panel-toggle').click();
       await page.getByTestId('agent-settings-toggle').click();
       await page.getByTestId('agent-provider-codex').click();
       await page.getByTestId('agent-model-select').selectOption('gpt-5.3-codex');
+      await page.getByTestId('agent-system-prompt-input').fill(customSystemPrompt);
       await page.getByTestId('agent-settings-toggle').click();
 
       const input = page.getByTestId('agent-composer-input');
@@ -335,8 +351,15 @@ test.describe('Agent Chat Panel', () => {
       expect(codexLogs).toHaveLength(1);
       const codexArgs = codexLogs[0]?.argv as string[];
       expect(codexArgs.slice(0, 2)).toEqual(['exec', '--skip-git-repo-check']);
+      expect(codexArgs).toContain('--dangerously-bypass-approvals-and-sandbox');
       expect(codexArgs).toContain('--json');
       expect(codexArgs[codexArgs.indexOf('--model') + 1]).toBe('gpt-5.3-codex');
+
+      const codexPrompt = String(codexLogs[0]?.stdin ?? '');
+      expect(codexPrompt).toContain('<agent-system-prompt>');
+      expect(codexPrompt).toContain(customSystemPrompt);
+      expect(codexPrompt).toContain('<ui-context>');
+      expect(codexPrompt).toContain('"domSnapshot"');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);

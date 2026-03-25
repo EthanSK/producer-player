@@ -10,8 +10,11 @@ interface AgentSettingsProps {
   provider: AgentProviderId;
   model: AgentModelId;
   availableModels: readonly AgentModelDefinition[];
+  systemPrompt: string;
   onProviderChange: (provider: AgentProviderId) => void;
   onModelChange: (model: AgentModelId) => void;
+  onSystemPromptChange: (prompt: string) => void;
+  onResetSystemPrompt: () => void;
   onClearChat: () => void;
   onClose: () => void;
   controlsDisabled?: boolean;
@@ -21,8 +24,11 @@ export function AgentSettings({
   provider,
   model,
   availableModels,
+  systemPrompt,
   onProviderChange,
   onModelChange,
+  onSystemPromptChange,
+  onResetSystemPrompt,
   onClearChat,
   onClose,
   controlsDisabled = false,
@@ -109,6 +115,33 @@ export function AgentSettings({
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="agent-settings-section">
+        <label className="agent-settings-label" htmlFor="agent-system-prompt-input">
+          System prompt
+        </label>
+        <textarea
+          id="agent-system-prompt-input"
+          className="agent-settings-system-prompt"
+          value={systemPrompt}
+          onChange={(event) => onSystemPromptChange(event.target.value)}
+          disabled={controlsDisabled}
+          rows={8}
+          spellCheck={false}
+          data-testid="agent-system-prompt-input"
+        />
+        <div className="agent-settings-system-prompt-actions">
+          <button
+            type="button"
+            className="agent-settings-system-prompt-reset"
+            onClick={onResetSystemPrompt}
+            disabled={controlsDisabled}
+            data-testid="agent-system-prompt-reset"
+          >
+            Reset default
+          </button>
+        </div>
       </div>
 
       <div className="agent-settings-section">

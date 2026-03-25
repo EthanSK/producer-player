@@ -207,6 +207,51 @@
   cursor: not-allowed;
 }
 
+.agent-settings-system-prompt {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-1);
+  color: var(--text-main);
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, monospace;
+}
+
+.agent-settings-system-prompt:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.agent-settings-system-prompt:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-settings-system-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.agent-settings-system-prompt-reset {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text-main);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.agent-settings-system-prompt-reset:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .agent-settings-key-row {
   display: flex;
   gap: 6px;

@@ -9,38 +9,28 @@ import {
   type AgentModelId,
   type AgentProviderId,
   type AgentTokenUsage,
+  type AgentUiContext,
 } from '@producer-player/contracts';
 
-const MASTERING_SYSTEM_PROMPT = `You are a mastering engineer assistant inside Producer Player, a desktop
-application for music producers. You help users evaluate and improve their
-masters by reading analysis data and providing professional feedback.
+const MASTERING_SYSTEM_PROMPT = `You are Producer Player's full-access mastering agent.
 
-Your personality:
-- Experienced mastering engineer: you've heard thousands of mixes
-- Professional but approachable: explain technical concepts clearly
-- Educational: always explain WHY something matters
-- Honest: if something needs fixing, say so directly
-- Respectful of artistic intent: distinguish technical flaws from creative choices
+Core role:
+- You are an expert mastering engineer for modern recorded music.
+- Give direct, technically grounded advice about loudness, dynamics, tonal balance, stereo image, clipping, translation, and platform readiness.
+- Respect artistic intent, but be blunt about technical problems.
 
-You receive a JSON context payload each turn containing the track's analysis
-data (see AgentContext schema). Use this data to inform your responses.
+Environment + permissions:
+- Treat this session as full-permission by default.
+- You may inspect the local Producer Player source tree and related project files when the underlying CLI supports it.
+- A live UI context payload may be provided on each turn, including the current app URL, document title, and a DOM snapshot of the current window.
+- You may propose and write JavaScript that would inspect or mutate app state arbitrarily when that helps accomplish the task.
+- If a requested DOM or state mutation is not directly executable through the current host wiring, say that plainly and provide the exact JavaScript or source-code change you would apply.
 
-Your default workflow when asked to analyze:
-1. Acknowledge the track
-2. Assess levels, loudness, dynamics, frequency balance, stereo image, platform readiness
-3. Prioritize issues: critical > important > recommended > informational
-4. Provide specific, actionable suggestions with parameter ranges
-5. Compare to reference if available
-
-Rules:
-- Never recommend specific commercial plugins by name
-- Give parameter ranges, not exact values ("try 2-3 dB" not "set to 2.7 dB")
-- When uncertain about genre, ask the user
-- If data is missing (null values), say so and explain what additional analysis would help
-- Keep responses focused -- do not repeat the same point multiple times
-- Use the checklist to track what the user has already addressed
-- Format comparisons as tables when possible
-- Use Markdown formatting for structured responses`;
+Behavior:
+- Use the supplied analysis context and UI context before guessing.
+- When discussing UI or implementation issues, reason from the DOM snapshot and the available source code.
+- Prefer concrete fixes, patches, selectors, state updates, and parameter ranges over vague advice.
+- Unless the user is clearly asking for product/debugging work, stay grounded in mastering and Producer Player tasks.`;
 
 type AgentHistoryEntry = {
   role: 'user' | 'assistant';
@@ -126,13 +116,22 @@ function buildTurnPrompt(
   session: AgentSessionState,
   message: string,
   context?: AgentContext | null,
+  uiContext?: AgentUiContext | null,
 ): string {
   const sections: string[] = [
-    'Continue this in-app mastering conversation. Keep your response grounded in the supplied analysis context when present.',
+    'Continue this in-app Producer Player conversation. Keep your response grounded in the supplied analysis context, UI context, and available source code when present.',
   ];
+
+  if (session.provider === 'codex') {
+    sections.push(`<agent-system-prompt>\n${session.systemPrompt}\n</agent-system-prompt>`);
+  }
 
   if (context) {
     sections.push(`<analysis-context>\n${JSON.stringify(context, null, 2)}\n</analysis-context>`);
+  }
+
+  if (uiContext) {
+    sections.push(`<ui-context>\n${JSON.stringify(uiContext, null, 2)}\n</ui-context>`);
   }
 
   if (session.history.length > 0) {
@@ -160,8 +159,6 @@ function getSpawnArgs(session: AgentSessionState): string[] {
       '--system-prompt',
       session.systemPrompt,
       '--dangerously-skip-permissions',
-      '--tools',
-      '',
       '--no-session-persistence',
     ];
   }
@@ -170,8 +167,7 @@ function getSpawnArgs(session: AgentSessionState): string[] {
     'exec',
     '--skip-git-repo-check',
     '--ephemeral',
-    '-s',
-    'read-only',
+    '--dangerously-bypass-approvals-and-sandbox',
     '--model',
     session.model,
     '--json',
@@ -348,7 +344,11 @@ export function startSession(
   };
 }
 
-export function sendTurn(message: string, context?: AgentContext | null): void {
+export function sendTurn(
+  message: string,
+  context?: AgentContext | null,
+  uiContext?: AgentUiContext | null,
+): void {
   if (!currentSession?.alive) {
     emitEvent({
       type: 'error',
@@ -384,7 +384,7 @@ export function sendTurn(message: string, context?: AgentContext | null): void {
     return;
   }
 
-  const prompt = buildTurnPrompt(session, trimmedMessage, context);
+  const prompt = buildTurnPrompt(session, trimmedMessage, context, uiContext);
   const child = spawn(cliPath, getSpawnArgs(session), {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {

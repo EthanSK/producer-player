@@ -15,6 +15,12 @@ import type {
 import { AgentComposer } from './AgentComposer';
 import { AgentSettings } from './AgentSettings';
 import {
+  captureAgentUiContext,
+  DEFAULT_AGENT_SYSTEM_PROMPT,
+  AGENT_SYSTEM_PROMPT_STORAGE_KEY,
+  readStoredAgentSystemPrompt,
+} from './agentPrompts';
+import {
   AGENT_MODEL_OPTIONS_BY_PROVIDER,
   DEFAULT_AGENT_MODEL_BY_PROVIDER,
 } from './agentModels';
@@ -81,6 +87,7 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
     claude: readStoredModel('claude'),
     codex: readStoredModel('codex'),
   }));
+  const [systemPrompt, setSystemPrompt] = useState<string>(() => readStoredAgentSystemPrompt());
   const [providerAvailable, setProviderAvailable] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showFirstUseBadge, setShowFirstUseBadge] = useState(() => {
@@ -100,6 +107,7 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
   const currentModel = availableModels.some((option) => option.id === modelByProvider[provider])
     ? modelByProvider[provider]
     : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
+  const effectiveSystemPrompt = systemPrompt.trim() || DEFAULT_AGENT_SYSTEM_PROMPT;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -239,6 +247,7 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
           provider,
           mode: 'analysis',
           model: currentModel,
+          systemPrompt: effectiveSystemPrompt,
         });
         setSessionActive(true);
       }
@@ -255,13 +264,15 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
       userScrolledUpRef.current = false;
 
       const context = getAnalysisContext();
+      const uiContext = captureAgentUiContext();
 
       await window.producerPlayer.agentSendTurn({
         message: text.trim(),
         context,
+        uiContext,
       });
     },
-    [currentModel, getAnalysisContext, isStreaming, provider, sessionActive]
+    [currentModel, effectiveSystemPrompt, getAnalysisContext, isStreaming, provider, sessionActive]
   );
 
   const handleInterrupt = useCallback(() => {
@@ -324,6 +335,27 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
     },
     [provider, resetActiveSession]
   );
+
+  const handleSystemPromptChange = useCallback(
+    (nextPrompt: string) => {
+      resetActiveSession();
+      setSystemPrompt(nextPrompt);
+
+      if (nextPrompt.trim().length > 0) {
+        localStorage.setItem(AGENT_SYSTEM_PROMPT_STORAGE_KEY, nextPrompt);
+        return;
+      }
+
+      localStorage.removeItem(AGENT_SYSTEM_PROMPT_STORAGE_KEY);
+    },
+    [resetActiveSession]
+  );
+
+  const handleResetSystemPrompt = useCallback(() => {
+    resetActiveSession();
+    localStorage.removeItem(AGENT_SYSTEM_PROMPT_STORAGE_KEY);
+    setSystemPrompt(DEFAULT_AGENT_SYSTEM_PROMPT);
+  }, [resetActiveSession]);
 
   const providerUnavailableCopy =
     provider === 'claude'
@@ -404,8 +436,11 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
             provider={provider}
             model={currentModel}
             availableModels={availableModels}
+            systemPrompt={systemPrompt}
             onProviderChange={handleProviderChange}
             onModelChange={handleModelChange}
+            onSystemPromptChange={handleSystemPromptChange}
+            onResetSystemPrompt={handleResetSystemPrompt}
             onClearChat={handleClearChat}
             onClose={() => setSettingsOpen(false)}
             controlsDisabled={isStreaming}

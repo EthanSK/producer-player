@@ -284,9 +284,16 @@ export interface AgentStartSessionPayload {
   model?: AgentModelId;
 }
 
+export interface AgentUiContext {
+  documentTitle: string | null;
+  locationHref: string | null;
+  domSnapshot: string | null;
+}
+
 export interface AgentSendTurnPayload {
   message: string;
   context?: AgentContext | null;
+  uiContext?: AgentUiContext | null;
 }
 
 export interface AgentRespondApprovalPayload {

@@ -87,6 +87,10 @@ const TRUSTED_EXTERNAL_URLS: { origin: string; pathPrefix?: string }[] = [
   { origin: 'https://ethansk.github.io', pathPrefix: '/producer-player' },
   // Linkfire "by 3000 AD" link
   { origin: 'https://lnkfi.re', pathPrefix: '/3000AD' },
+  // YouTube video tutorials linked from help tooltips
+  { origin: 'https://www.youtube.com', pathPrefix: '/watch' },
+  { origin: 'https://youtube.com', pathPrefix: '/watch' },
+  { origin: 'https://youtu.be' },
 ];
 const DEVELOPMENT_WINDOW_ICON_PATH = resolve(__dirname, '../../../assets/icon/png/icon-512.png');
 
@@ -2299,6 +2303,26 @@ async function createMainWindow(): Promise<void> {
 
   mainWindow.webContents.session.setPermissionRequestHandler(
     (_webContents, _permission, callback) => callback(false)
+  );
+
+  // Inject a Content-Security-Policy that allows YouTube thumbnail images to
+  // load.  Without this Electron's default restrictive CSP (applied when the
+  // renderer is loaded from a file:// or custom-scheme origin) blocks the
+  // external <img> requests to img.youtube.com.
+  mainWindow.webContents.session.webRequest.onHeadersReceived(
+    (details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: file:; " +
+            "img-src 'self' data: blob: file: https://img.youtube.com; " +
+            "media-src 'self' data: blob: file: mediastream:; " +
+            "connect-src 'self' ws: wss: http: https:;",
+          ],
+        },
+      });
+    },
   );
 
   mainWindow.webContents.on('will-navigate', (event, targetUrl) => {

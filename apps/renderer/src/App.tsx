@@ -5366,13 +5366,18 @@ export function App(): JSX.Element {
                   title="Click to edit album title"
                   data-testid="album-title-text"
                 >
-                  {albumTitle} <HelpTooltip text={"What this is: Your song list — all the tracks in the currently linked folder, organized as an album. Songs are auto-grouped by name, with versions nested under each title.\n\nHow to use it: Click a song to select it. Double-click to start playback. Drag songs up or down to reorder the tracklist. Use the search bar to filter by name.\n\nWhy you'd want to: Arrange your album's running order and keep all your mixes organized in one place.\n\nTip: The order you set here is preserved across sessions and used when you export — so arrange it like your final tracklist."} />
+                  {albumTitle}
                 </h2>
               )}
-              <p className="muted">{formatTrackCount(songs.length)}</p>
-              <p className="muted album-duration-label" data-testid="album-duration-label">
-                {formatAlbumDuration(albumDurationSeconds)}
-              </p>
+              <div className="panel-title-metadata-row">
+                <div className="panel-title-metadata-left">
+                  <p className="muted">{formatTrackCount(songs.length)}</p>
+                  <p className="muted album-duration-label" data-testid="album-duration-label">
+                    {formatAlbumDuration(albumDurationSeconds)}
+                  </p>
+                </div>
+                <HelpTooltip text={"What this is: Your song list — all the tracks in the currently linked folder, organized as an album. Songs are auto-grouped by name, with versions nested under each title.\n\nHow to use it: Click a song to select it. Double-click to start playback. Drag songs up or down to reorder the tracklist. Use the search bar to filter by name.\n\nWhy you'd want to: Arrange your album's running order and keep all your mixes organized in one place.\n\nTip: The order you set here is preserved across sessions and used when you export — so arrange it like your final tracklist."} />
+              </div>
             </div>
           </div>
           <div className="actions">
@@ -5414,7 +5419,6 @@ export function App(): JSX.Element {
             >
               Export Latest
             </button>
-            <HelpTooltip text={"What this is: Export tools for sharing or backing up your album. 'Export Latest' creates a new folder with just the newest version of each track, numbered in your tracklist order. The ⤓ button exports the playlist ordering as a JSON file. The ⤒ button imports a previously exported JSON to restore track order.\n\nHow to use it: Click 'Export Latest' to pick a destination folder — it copies and renames files with numeric prefixes (01, 02, etc.). Use ⤓ to save your ordering metadata as JSON, and ⤒ to re-import it later or on another machine.\n\nWhy you'd want to: Quickly assemble a final, ordered set of files for distribution, or back up and restore your tracklist arrangement.\n\nTip: Export Latest is great for sending a numbered tracklist to your mastering engineer or distributor — no manual renaming needed."} />
             <button
               type="button"
               className="icon-button"
@@ -5459,6 +5463,7 @@ export function App(): JSX.Element {
             >
               <span aria-hidden="true">🚶</span>
             </button>
+            <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and metadata as a JSON file for backup or transfer.\n\n• ⤒ (Import Order) — Imports a previously exported JSON file to restore track ordering.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
           </div>
         </header>
 
@@ -6335,7 +6340,6 @@ export function App(): JSX.Element {
                     ▶▶
                   </button>
                 </div>
-                <span className="checklist-transport-hint">Shift+Tab to jump between text input and time jump buttons</span>
               </div>
             ) : null}
 
@@ -6423,16 +6427,6 @@ export function App(): JSX.Element {
             <div className="checklist-modal-actions">
               <button
                 type="button"
-                className="ghost"
-                onClick={() => handleClearCompletedChecklistItems(checklistModalSong.id)}
-                disabled={checklistCompletedCount === 0}
-                data-testid="song-checklist-clear-completed"
-                title="Remove all completed checklist items."
-              >
-                Clear Completed
-              </button>
-              <button
-                type="button"
                 className="ghost danger"
                 onClick={(e) => {
                   if (e.shiftKey) {
@@ -6458,6 +6452,17 @@ export function App(): JSX.Element {
                 title="Delete all checklist items for this song."
               >
                 Delete All
+              </button>
+              <span className="checklist-transport-hint">Shift+Tab to jump between text input and time jump buttons</span>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => handleClearCompletedChecklistItems(checklistModalSong.id)}
+                disabled={checklistCompletedCount === 0}
+                data-testid="song-checklist-clear-completed"
+                title="Remove all completed checklist items."
+              >
+                Clear Completed
               </button>
               <button type="button" onClick={handleCloseSongChecklist} title="Close checklist.">
                 Done

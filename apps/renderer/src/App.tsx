@@ -42,7 +42,7 @@ import {
 } from './sharedUserState';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
 import packageMetadata from '../../../package.json';
-import { SHOW_3000AD_BRANDING } from './featureFlags';
+import { ENABLE_AGENT_FEATURES, SHOW_3000AD_BRANDING } from './featureFlags';
 import { SpectrumAnalyzer } from './SpectrumAnalyzer';
 import { LevelMeter } from './LevelMeter';
 import { LoudnessHistoryGraph } from './LoudnessHistoryGraph';
@@ -8029,7 +8029,9 @@ export function App(): JSX.Element {
           </div>
         </div>
       ) : null}
-      <AgentChatPanel getAnalysisContext={getAnalysisContext} />
+      {ENABLE_AGENT_FEATURES ? (
+        <AgentChatPanel getAnalysisContext={getAnalysisContext} />
+      ) : null}
     </div>
   );
 }

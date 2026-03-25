@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { ENABLE_AGENT_FEATURES } from '@producer-player/contracts';
 import {
   launchProducerPlayer,
   createE2ETestDirectories,
@@ -6,6 +7,23 @@ import {
 } from './helpers/electron-app';
 
 test.describe('Agent Chat Panel', () => {
+  if (!ENABLE_AGENT_FEATURES) {
+    test('toggle is hidden when agent features are disabled', async () => {
+      const dirs = await createE2ETestDirectories('agent-panel-disabled');
+      const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
+
+      try {
+        await expect(page.getByTestId('app-shell')).toBeVisible();
+        await expect(page.getByTestId('agent-panel-toggle')).toHaveCount(0);
+        await expect(page.getByTestId('agent-chat-panel')).toHaveCount(0);
+      } finally {
+        await electronApp.close();
+        await cleanupE2ETestDirectories(dirs);
+      }
+    });
+
+    return;
+  }
   test('toggle button is visible on launch', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-toggle');
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);

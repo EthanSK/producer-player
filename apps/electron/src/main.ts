@@ -28,7 +28,12 @@ import type {
   SongWithVersions,
   TransportCommand,
 } from '@producer-player/contracts';
-import { AUDIO_EXTENSIONS, IPC_CHANNELS, parsePlaylistOrderExport } from '@producer-player/contracts';
+import {
+  AUDIO_EXTENSIONS,
+  ENABLE_AGENT_FEATURES,
+  IPC_CHANNELS,
+  parsePlaylistOrderExport,
+} from '@producer-player/contracts';
 import { FileLibraryService } from '@producer-player/domain';
 import * as agentService from './agent-service';
 
@@ -75,6 +80,7 @@ const GITHUB_RELEASES_LATEST_API_URL = 'https://api.github.com/repos/EthanSK/pro
 const UPDATE_CHECK_TIMEOUT_MS = 12_000;
 const AUTO_UPDATE_CHECK_DELAY_MS = 9_000;
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const AGENT_FEATURES_DISABLED_MESSAGE = 'Agent features are disabled by feature flag.';
 
 /**
  * Trusted external URLs that may be opened from the renderer.
@@ -2911,6 +2917,46 @@ function registerIpcHandlers(service: FileLibraryService): void {
   });
 
   // --- Agent IPC handlers ---
+
+  if (!ENABLE_AGENT_FEATURES) {
+    ipcMain.handle(IPC_CHANNELS.AGENT_START_SESSION, async () => {
+      throw new Error(AGENT_FEATURES_DISABLED_MESSAGE);
+    });
+
+    ipcMain.handle(IPC_CHANNELS.AGENT_SEND_TURN, async () => {
+      throw new Error(AGENT_FEATURES_DISABLED_MESSAGE);
+    });
+
+    ipcMain.handle(IPC_CHANNELS.AGENT_INTERRUPT, async () => {
+      // No-op while the feature is disabled.
+    });
+
+    ipcMain.handle(IPC_CHANNELS.AGENT_RESPOND_APPROVAL, async () => {
+      throw new Error(AGENT_FEATURES_DISABLED_MESSAGE);
+    });
+
+    ipcMain.handle(IPC_CHANNELS.AGENT_DESTROY_SESSION, async () => {
+      // No-op while the feature is disabled.
+    });
+
+    ipcMain.handle(IPC_CHANNELS.AGENT_CHECK_PROVIDER, async () => {
+      return false;
+    });
+
+    ipcMain.handle(IPC_CHANNELS.AGENT_STORE_DEEPGRAM_KEY, async () => {
+      throw new Error(AGENT_FEATURES_DISABLED_MESSAGE);
+    });
+
+    ipcMain.handle(IPC_CHANNELS.AGENT_GET_DEEPGRAM_KEY, async () => {
+      return null;
+    });
+
+    ipcMain.handle(IPC_CHANNELS.AGENT_CLEAR_DEEPGRAM_KEY, async () => {
+      // No-op while the feature is disabled.
+    });
+
+    return;
+  }
 
   agentService.setEventCallback((event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {

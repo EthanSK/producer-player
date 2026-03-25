@@ -13,3 +13,12 @@
  * and opens https://lnkfi.re/3000AD in the user's default browser.
  */
 export const SHOW_3000AD_BRANDING = false;
+
+/**
+ * Enables the experimental mastering agent inside Producer Player,
+ * including the renderer chat panel, Electron agent IPC handlers,
+ * and Deepgram-backed voice input/settings hooks.
+ *
+ * This is OFF by default for now.
+ */
+export const ENABLE_AGENT_FEATURES = false;

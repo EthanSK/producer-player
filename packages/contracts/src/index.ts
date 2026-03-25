@@ -128,6 +128,14 @@ export interface PlaylistOrderExportV1 {
   songs: SongWithVersions[];
 }
 
+/**
+ * Enables the experimental agent assistant surfaces in Producer Player,
+ * including the renderer chat panel and Electron-backed agent IPC hooks.
+ *
+ * Disabled by default while the feature is being parked behind a flag.
+ */
+export const ENABLE_AGENT_FEATURES = false;
+
 export const IPC_CHANNELS = {
   GET_LIBRARY_SNAPSHOT: 'producer-player:get-library-snapshot',
   GET_ENVIRONMENT: 'producer-player:get-environment',

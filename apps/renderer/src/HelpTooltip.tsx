@@ -51,15 +51,20 @@ const triggerStyle: CSSProperties = {
   border: '1px solid rgba(156, 175, 196, 0.35)',
   background: 'transparent',
   color: '#9cafc4',
-  fontSize: 9,
-  fontWeight: 700,
   cursor: 'pointer',
-  lineHeight: 1,
+  lineHeight: 0,
   verticalAlign: 'middle',
   marginLeft: 4,
   flexShrink: 0,
   userSelect: 'none' as const,
   padding: 0,
+};
+
+const triggerIconStyle: CSSProperties = {
+  display: 'block',
+  width: 8,
+  height: 8,
+  flexShrink: 0,
 };
 
 /* ─── Modal overlay & content ─── */
@@ -322,7 +327,22 @@ export function HelpTooltip({ text, links }: HelpTooltipProps): JSX.Element {
           setOpen(true);
         }}
       >
-        ?
+        <svg
+          viewBox="0 0 12 12"
+          aria-hidden="true"
+          focusable="false"
+          style={triggerIconStyle}
+        >
+          <path
+            d="M4.55 4.35a1.78 1.78 0 1 1 2.95 1.35c-.64.56-1.06.96-1.06 1.73"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <circle cx="6" cy="9.2" r="0.72" fill="currentColor" />
+        </svg>
       </button>
       {open && <HelpModal text={text} links={links ?? []} onClose={handleClose} />}
     </>

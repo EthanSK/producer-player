@@ -461,6 +461,13 @@ input[type='range'] {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.sidebar-status-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .sidebar-status h3 {
   margin: 0;
   font-size: 14px;

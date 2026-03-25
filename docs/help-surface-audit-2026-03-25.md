@@ -1,6 +1,6 @@
 # Help Surface Audit — 2026-03-25
 
-Scope requested: audit every user-facing help tooltip/dialog surface and every tutorial video link across Producer Player app + website, then fix mismatched/random links.
+Scope requested: audit every user-facing help tooltip/dialog surface and every tutorial video link across Producer Player app + website, fix mismatched/random links, and add a concrete status-card help tooltip in the left sidebar with operational path/backup guidance.
 
 ## Audit method
 
@@ -15,14 +15,15 @@ Scope requested: audit every user-facing help tooltip/dialog surface and every t
 
 ## Coverage inventory
 
-- App HelpTooltip instances: **46**
+- App HelpTooltip instances: **47**
 - App HelpTooltip instances with tutorial links: **39**
-- App HelpTooltip instances without links: **7**
+- App HelpTooltip instances without links: **8**
 - Distinct tutorial link sets: **24**
 - Tutorial link placements (sum of all set entries): **72**
 - Distinct tutorial URLs: **58**
 - Website embedded videos: **1** (`./assets/video/producer-player-explainer-web.mp4`)
 - Website help-copy mention audited: **1**
+- Total help/tutorial surfaces audited (app + website): **49**
 
 ## Issues found (before fixes)
 
@@ -37,6 +38,18 @@ Initial automated pass flagged **10** relevance/mismatch issues concentrated in:
 - `SPECTROGRAM_LINKS` (incorrect video ID / wrong destination video)
 
 ## Fixes applied
+
+Added a new sidebar status-card help surface in `apps/renderer/src/App.tsx` (+ supporting layout style in `apps/renderer/src/styles.css`):
+
+- **Status card header help icon**
+  - Added a top-right help tooltip in the Status card header.
+  - Help text now explains:
+    - what status/last scan indicate,
+    - exactly what Auto-organize does,
+    - watched folder paths currently linked,
+    - where Auto-organize archives go (`<linked-folder>/old`),
+    - iCloud backup folder path when available,
+    - that iCloud backup syncs checklist/ratings/preferences metadata (not audio files), and how to open the path via the Show button.
 
 Updated `apps/renderer/src/helpTooltipLinks.ts` to keep tutorial links tightly aligned to their metric/section:
 

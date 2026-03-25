@@ -132,6 +132,8 @@ const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
 const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
 const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
+const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
+const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const MAX_SAVED_REFERENCE_TRACKS = 20;
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
 const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
@@ -1134,6 +1136,17 @@ export function App(): JSX.Element {
   const [migrationPreview, setMigrationPreview] = useState<MigrationPreviewSong[] | null>(null);
   const [migrationSchemaCopied, setMigrationSchemaCopied] = useState(false);
   const [migrationImportDone, setMigrationImportDone] = useState(false);
+
+  const [albumTitle, setAlbumTitle] = useState<string>(() => {
+    return window.localStorage.getItem(ALBUM_TITLE_STORAGE_KEY) ?? 'Untitled Album';
+  });
+  const [albumTitleEditing, setAlbumTitleEditing] = useState(false);
+  const [albumTitleDraft, setAlbumTitleDraft] = useState('');
+  const [albumArt, setAlbumArt] = useState<string | null>(() => {
+    return window.localStorage.getItem(ALBUM_ART_STORAGE_KEY);
+  });
+  const albumArtInputRef = useRef<HTMLInputElement | null>(null);
+  const albumTitleInputRef = useRef<HTMLInputElement | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
@@ -2890,6 +2903,49 @@ export function App(): JSX.Element {
     }
 
     await runSnapshotTask(() => window.producerPlayer.unlinkFolder(folderId));
+  }
+
+  function handleAlbumTitleStartEdit(): void {
+    setAlbumTitleDraft(albumTitle);
+    setAlbumTitleEditing(true);
+    requestAnimationFrame(() => {
+      albumTitleInputRef.current?.focus();
+      albumTitleInputRef.current?.select();
+    });
+  }
+
+  function handleAlbumTitleSave(): void {
+    const trimmed = albumTitleDraft.trim();
+    const newTitle = trimmed || 'Untitled Album';
+    setAlbumTitle(newTitle);
+    window.localStorage.setItem(ALBUM_TITLE_STORAGE_KEY, newTitle);
+    setAlbumTitleEditing(false);
+  }
+
+  function handleAlbumTitleCancel(): void {
+    setAlbumTitleEditing(false);
+  }
+
+  function handleAlbumArtClick(): void {
+    albumArtInputRef.current?.click();
+  }
+
+  function handleAlbumArtChange(e: React.ChangeEvent<HTMLInputElement>): void {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setAlbumArt(dataUrl);
+      try {
+        window.localStorage.setItem(ALBUM_ART_STORAGE_KEY, dataUrl);
+      } catch {
+        // localStorage may be full for very large images — ignore silently
+      }
+    };
+    reader.readAsDataURL(file);
+    // Reset input so re-selecting the same file triggers onChange
+    e.target.value = '';
   }
 
   async function handleRescan(): Promise<void> {
@@ -5148,12 +5204,58 @@ export function App(): JSX.Element {
 
       <main className="panel panel-main">
         <header className="panel-header">
-          <div className="panel-title">
-            <h2>Album <HelpTooltip text={"What this is: Your song list — all the tracks in the currently linked folder, organized as an album. Songs are auto-grouped by name, with versions nested under each title.\n\nHow to use it: Click a song to select it. Double-click to start playback. Drag songs up or down to reorder the tracklist. Use the search bar to filter by name.\n\nWhy you'd want to: Arrange your album's running order and keep all your mixes organized in one place.\n\nTip: The order you set here is preserved across sessions and used when you export — so arrange it like your final tracklist."} /></h2>
-            <p className="muted">{formatTrackCount(songs.length)}</p>
-            <p className="muted album-duration-label" data-testid="album-duration-label">
-              {formatAlbumDuration(albumDurationSeconds)}
-            </p>
+          <div className="album-header-row">
+            <button
+              type="button"
+              className="album-art-trigger"
+              onClick={handleAlbumArtClick}
+              title="Click to upload album art"
+              data-testid="album-art-trigger"
+            >
+              {albumArt ? (
+                <img src={albumArt} alt="Album art" className="album-art-img" />
+              ) : (
+                <span className="album-art-placeholder" aria-hidden="true">🎵</span>
+              )}
+            </button>
+            <input
+              ref={albumArtInputRef}
+              type="file"
+              accept="image/*"
+              className="album-art-file-input"
+              onChange={handleAlbumArtChange}
+              data-testid="album-art-file-input"
+            />
+            <div className="panel-title">
+              {albumTitleEditing ? (
+                <input
+                  ref={albumTitleInputRef}
+                  type="text"
+                  className="album-title-input"
+                  value={albumTitleDraft}
+                  onChange={(e) => setAlbumTitleDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAlbumTitleSave();
+                    if (e.key === 'Escape') handleAlbumTitleCancel();
+                  }}
+                  onBlur={handleAlbumTitleSave}
+                  data-testid="album-title-input"
+                />
+              ) : (
+                <h2
+                  className="album-title-text"
+                  onClick={handleAlbumTitleStartEdit}
+                  title="Click to edit album title"
+                  data-testid="album-title-text"
+                >
+                  {albumTitle} <HelpTooltip text={"What this is: Your song list — all the tracks in the currently linked folder, organized as an album. Songs are auto-grouped by name, with versions nested under each title.\n\nHow to use it: Click a song to select it. Double-click to start playback. Drag songs up or down to reorder the tracklist. Use the search bar to filter by name.\n\nWhy you'd want to: Arrange your album's running order and keep all your mixes organized in one place.\n\nTip: The order you set here is preserved across sessions and used when you export — so arrange it like your final tracklist."} />
+                </h2>
+              )}
+              <p className="muted">{formatTrackCount(songs.length)}</p>
+              <p className="muted album-duration-label" data-testid="album-duration-label">
+                {formatAlbumDuration(albumDurationSeconds)}
+              </p>
+            </div>
           </div>
           <div className="actions">
             <button

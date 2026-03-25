@@ -2505,3 +2505,72 @@ button.checklist-play-toggle[data-playing='true'] {
     flex-direction: column;
   }
 }
+
+/* ── Album header: art + editable title ── */
+
+.album-header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.album-art-trigger {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  border: 1px dashed var(--border);
+  background: var(--bg-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+  transition: border-color 120ms ease;
+}
+
+.album-art-trigger:hover {
+  border-color: var(--accent);
+}
+
+.album-art-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.album-art-placeholder {
+  font-size: 20px;
+  opacity: 0.45;
+  line-height: 1;
+}
+
+.album-art-file-input {
+  display: none;
+}
+
+.album-title-text {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 80ms ease;
+}
+
+.album-title-text:hover {
+  color: var(--accent);
+}
+
+.album-title-input {
+  font-size: 16px;
+  font-weight: 700;
+  background: var(--bg-2);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text-main);
+  padding: 2px 6px;
+  width: 100%;
+  max-width: 260px;
+  outline: none;
+}

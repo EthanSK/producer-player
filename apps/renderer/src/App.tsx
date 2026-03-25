@@ -307,6 +307,7 @@ function clampTimestampSeconds(
 const CHECKLIST_CAPTURE_LOOKBACK_SECONDS = 3;
 const CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS = 1200;
 const CHECKLIST_HISTORY_LIMIT = 100;
+const PLAYER_DOCK_PREVIEW_VISUAL_WIDTH = 180;
 
 function cloneSongChecklistsState(
   checklists: Record<string, SongChecklistItem[]>
@@ -6015,7 +6016,7 @@ ${iCloudPathLine}
               <div className="player-dock-visualizations">
                 <SpectrumAnalyzer
                   analyserNode={analyserNode}
-                  width={180}
+                  width={PLAYER_DOCK_PREVIEW_VISUAL_WIDTH}
                   height={48}
                   activeBands={soloedBands}
                   onBandToggle={handleBandToggle}
@@ -6024,7 +6025,7 @@ ${iCloudPathLine}
                 <LevelMeter
                   analyserNode={analyserNode}
                   orientation="horizontal"
-                  width={120}
+                  width={PLAYER_DOCK_PREVIEW_VISUAL_WIDTH}
                   height={20}
                   isPlaying={isPlaying}
                 />

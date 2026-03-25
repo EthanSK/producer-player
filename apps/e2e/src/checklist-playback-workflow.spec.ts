@@ -572,7 +572,18 @@ test.describe('checklist playback workflow', () => {
       await cueSongVersion(page, 'Track A', 'Track A v1.wav');
 
       const miniSpectrum = page.getByTestId('spectrum-analyzer-mini');
+      const miniLevelMeter = page.getByTestId('level-meter-mini');
       await expect(miniSpectrum).toBeVisible();
+      await expect(miniLevelMeter).toBeVisible();
+
+      const miniSpectrumWidth = await miniSpectrum.evaluate((element) =>
+        Math.round(element.getBoundingClientRect().width)
+      );
+      const miniLevelMeterWidth = await miniLevelMeter.evaluate((element) =>
+        Math.round(element.getBoundingClientRect().width)
+      );
+      expect(miniLevelMeterWidth).toBe(miniSpectrumWidth);
+
       await miniSpectrum.click({ position: { x: 120, y: 24 } });
 
       await page.getByTestId('analysis-expand-button').click();

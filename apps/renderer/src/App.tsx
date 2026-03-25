@@ -2860,6 +2860,19 @@ export function App(): JSX.Element {
         }
       }
 
+      // Left/Right arrow keys: seek backward/forward by 5 seconds
+      // (industry standard for media players — matches YouTube, HTML5 players, etc.)
+      if (
+        !textEntryFocused &&
+        !hasUndoModifier &&
+        (event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+      ) {
+        event.preventDefault();
+        const seekOffset = event.key === 'ArrowLeft' ? -5 : 5;
+        handleSkipSecondsRef.current(seekOffset);
+        return;
+      }
+
       if (event.repeat || event.code !== 'Space') {
         return;
       }
@@ -5152,7 +5165,7 @@ export function App(): JSX.Element {
                 <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
                   <button
                     type="button"
-                    className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
+                    className={playbackPreviewMode === 'mix' ? 'active' : 'ghost'}
                     onClick={() => handleReferencePreviewModeChange('mix')}
                     data-testid="analysis-ab-mix"
                     title="Listen to your mix."
@@ -5161,7 +5174,7 @@ export function App(): JSX.Element {
                   </button>
                   <button
                     type="button"
-                    className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
+                    className={playbackPreviewMode === 'reference' ? 'active' : 'ghost'}
                     onClick={() => handleReferencePreviewModeChange('reference')}
                     data-testid="analysis-ab-reference"
                     disabled={!referenceTrack || referenceStatus === 'loading'}
@@ -6479,12 +6492,13 @@ export function App(): JSX.Element {
                     </button>
                   </div>
 
+                  <div className="analysis-ab-row">
                   <div className="analysis-ab-toggle">
                     <span className="analysis-ab-label">Quick A/B</span>
                     <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
                       <button
                         type="button"
-                        className={playbackPreviewMode === 'mix' ? '' : 'ghost'}
+                        className={playbackPreviewMode === 'mix' ? 'active' : 'ghost'}
                         onClick={() => handleReferencePreviewModeChange('mix')}
                         data-testid="analysis-overlay-ab-mix"
                         title="Listen to your mix."
@@ -6493,7 +6507,7 @@ export function App(): JSX.Element {
                       </button>
                       <button
                         type="button"
-                        className={playbackPreviewMode === 'reference' ? '' : 'ghost'}
+                        className={playbackPreviewMode === 'reference' ? 'active' : 'ghost'}
                         onClick={() => handleReferencePreviewModeChange('reference')}
                         data-testid="analysis-overlay-ab-reference"
                         disabled={!referenceTrack || referenceStatus === 'loading'}
@@ -6509,7 +6523,7 @@ export function App(): JSX.Element {
                     <div className="analysis-ab-actions" role="group" aria-label="Level match toggle">
                       <button
                         type="button"
-                        className={referenceLevelMatchEnabled ? '' : 'ghost'}
+                        className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
                         onClick={() => setReferenceLevelMatchEnabled((v) => !v)}
                         disabled={!referenceTrack}
                         title="Automatically adjust reference playback gain to match your mix's integrated LUFS"
@@ -6523,6 +6537,7 @@ export function App(): JSX.Element {
                         </span>
                       ) : null}
                     </div>
+                  </div>
                   </div>
 
                   <div className="analysis-reference-slot active" data-testid="analysis-reference-slot-a">

@@ -2315,10 +2315,10 @@ async function createMainWindow(): Promise<void> {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: file:; " +
+            "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: file: producer-media:; " +
             "img-src 'self' data: blob: file: https://img.youtube.com; " +
-            "media-src 'self' data: blob: file: mediastream:; " +
-            "connect-src 'self' ws: wss: http: https:;",
+            "media-src 'self' data: blob: file: mediastream: producer-media:; " +
+            "connect-src 'self' ws: wss: http: https: producer-media:;",
           ],
         },
       });

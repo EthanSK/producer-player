@@ -304,3 +304,63 @@ export const MASTERING_CHECKLIST_LINKS: HelpTooltipLink[] = [
     url: 'https://www.youtube.com/watch?v=a1wDGTBAkwU',
   },
 ];
+
+export const CREST_FACTOR_HISTORY_LINKS: HelpTooltipLink[] = [
+  {
+    label: 'Crest Factor & Dynamic Range Explained - iZotope',
+    url: 'https://www.youtube.com/watch?v=oHVMNmhTnqE',
+  },
+  {
+    label: 'Understanding Dynamics: Peak vs RMS - Produce Like A Pro',
+    url: 'https://www.youtube.com/watch?v=5v5qLPBiSYE',
+  },
+  {
+    label: 'Dynamic Range & Crest Factor in Mastering - Sage Audio',
+    url: 'https://www.youtube.com/watch?v=v6nT6MFBbHU',
+  },
+];
+
+export const MID_SIDE_SPECTRUM_LINKS: HelpTooltipLink[] = [
+  {
+    label: 'Mid/Side Processing Explained - iZotope',
+    url: 'https://www.youtube.com/watch?v=NZqBTNEOjrE',
+  },
+  {
+    label: 'Mid/Side EQ in Mastering - Produce Like A Pro',
+    url: 'https://www.youtube.com/watch?v=x2ogDXvYbFA',
+  },
+  {
+    label: 'Understanding Mid/Side - Dan Worrall',
+    url: 'https://www.youtube.com/watch?v=sXhBEKdJbxI',
+  },
+];
+
+export const LOUDNESS_HISTOGRAM_LINKS: HelpTooltipLink[] = [
+  {
+    label: 'Loudness Metering Over Time - TC Electronic',
+    url: 'https://www.youtube.com/watch?v=iSak8aU7EP8',
+  },
+  {
+    label: 'LUFS Explained: How Loud Should You Master? - Mastering.com',
+    url: 'https://www.youtube.com/watch?v=W0hMWhqaGe4',
+  },
+  {
+    label: 'Dynamic Range & LRA Explained - Production Music Live',
+    url: 'https://www.youtube.com/watch?v=7bBaZNvC574',
+  },
+];
+
+export const SPECTROGRAM_LINKS: HelpTooltipLink[] = [
+  {
+    label: 'How to Read a Spectrogram - iZotope',
+    url: 'https://www.youtube.com/watch?v=C3d0BXKt0s0',
+  },
+  {
+    label: 'Spectrogram Analysis for Mixing - Behind The Speakers',
+    url: 'https://www.youtube.com/watch?v=YzvlJKzJRPU',
+  },
+  {
+    label: 'Using Spectrograms in Mastering - Produce Like A Pro',
+    url: 'https://www.youtube.com/watch?v=pg12kB0cGyU',
+  },
+];

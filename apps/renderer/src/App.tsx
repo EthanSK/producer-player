@@ -3003,7 +3003,7 @@ export function App(): JSX.Element {
         const PsdModule = await import('@webtoon/psd');
         const Psd = PsdModule.default;
         const psd = Psd.parse(buffer);
-        const compositeData = psd.composite();
+        const compositeData = await psd.composite();
         const canvas = document.createElement('canvas');
         canvas.width = psd.width;
         canvas.height = psd.height;
@@ -5335,7 +5335,7 @@ export function App(): JSX.Element {
             <input
               ref={albumArtInputRef}
               type="file"
-              accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.svg,.bmp"
+              accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.svg,.bmp,.psd"
               className="album-art-file-input"
               onChange={handleAlbumArtChange}
               data-testid="album-art-file-input"

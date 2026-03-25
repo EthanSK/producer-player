@@ -14,7 +14,7 @@ interface SpectrumAnalyzerProps {
   isFullScreen?: boolean;
   isPlaying?: boolean;
   activeBands?: ReadonlySet<number>;
-  onBandToggle?: (bandIndex: number) => void;
+  onBandToggle?: (bandIndex: number, shiftKey: boolean) => void;
 }
 
 const MIN_FREQ = 20;
@@ -334,7 +334,7 @@ export function SpectrumAnalyzer({
         ctx.fillStyle = 'rgba(156, 175, 196, 0.3)';
         ctx.font = '11px Inter, sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText('Click a band to solo', width - 8, height - 16);
+        ctx.fillText('Click a band to solo \u2022 Shift+click to exclude', width - 8, height - 16);
       } else if (isFullScreen && hasActiveBands) {
         const activeLabels = Array.from(activeBands!)
           .sort((a, b) => a - b)
@@ -446,7 +446,7 @@ export function SpectrumAnalyzer({
       const bandIndex = getBandIndexForFrequency(freq);
 
       if (bandIndex >= 0) {
-        onBandToggle(bandIndex);
+        onBandToggle(bandIndex, event.shiftKey);
       }
     },
     [isFullScreen, onBandToggle, width]

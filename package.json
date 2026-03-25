@@ -122,5 +122,8 @@
     "rimraf": "^6.0.1",
     "typescript": "^5.8.2",
     "wait-on": "^9.0.1"
+  },
+  "dependencies": {
+    "@webtoon/psd": "^0.4.0"
   }
 }

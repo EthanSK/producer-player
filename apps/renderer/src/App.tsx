@@ -40,6 +40,10 @@ import {
   sanitizeSongChecklists,
   sanitizeSongRatings,
 } from './sharedUserState';
+import {
+  computeSongDateOpacitiesByAge,
+  SONG_DATE_OPACITY_RANGE,
+} from './songAgeOpacity';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
 import packageMetadata from '../../../package.json';
 import { ENABLE_AGENT_FEATURES, SHOW_3000AD_BRANDING } from './featureFlags';
@@ -2338,6 +2342,17 @@ export function App(): JSX.Element {
       matchedVersionNamesBySongId: matchedVersions,
     };
   }, [searchText, selectedFolderId, snapshot.songs]);
+
+  const songDateOpacityBySongId = useMemo(
+    () =>
+      computeSongDateOpacitiesByAge(
+        songs.map((song) => ({
+          id: song.id,
+          latestExportAt: song.latestExportAt,
+        }))
+      ),
+    [songs]
+  );
 
   useEffect(() => {
     if (songs.length === 0) {
@@ -5860,6 +5875,8 @@ ${iCloudPathLine}
             const songRowMetadataLabel = getSongRowMetadataLabel(song);
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
             const songChecklistCount = songChecklists[song.id]?.length ?? 0;
+            const songDateOpacity =
+              songDateOpacityBySongId.get(song.id) ?? SONG_DATE_OPACITY_RANGE.unknown;
 
             return (
               <li
@@ -5953,7 +5970,9 @@ ${iCloudPathLine}
                           <span className="song-checklist-count">{songChecklistCount}</span>
                         ) : null}
                       </button>
-                      <span className="muted">{formatDate(song.latestExportAt)}</span>
+                      <span className="muted" style={{ opacity: songDateOpacity }}>
+                        {formatDate(song.latestExportAt)}
+                      </span>
                     </div>
                   </div>
                 </div>

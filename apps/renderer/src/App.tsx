@@ -2965,40 +2965,66 @@ export function App(): JSX.Element {
     albumArtInputRef.current?.click();
   }
 
+  function processAlbumArtDataUrl(dataUrl: string): void {
+    const MAX_ALBUM_ART_DIM = 256;
+    const img = new Image();
+    img.onload = () => {
+      let finalDataUrl = dataUrl;
+      if (img.width > MAX_ALBUM_ART_DIM || img.height > MAX_ALBUM_ART_DIM) {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(MAX_ALBUM_ART_DIM / img.width, MAX_ALBUM_ART_DIM / img.height);
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          finalDataUrl = canvas.toDataURL('image/png');
+        }
+      }
+      setAlbumArt(finalDataUrl);
+      try {
+        window.localStorage.setItem(ALBUM_ART_STORAGE_KEY, finalDataUrl);
+      } catch {
+        // localStorage may be full for very large images — ignore silently
+      }
+    };
+    img.src = dataUrl;
+  }
+
   function handleAlbumArtChange(e: React.ChangeEvent<HTMLInputElement>): void {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const MAX_ALBUM_ART_DIM = 256;
+    const isPsd = file.name.toLowerCase().endsWith('.psd');
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      // Resize large images to MAX_ALBUM_ART_DIM x MAX_ALBUM_ART_DIM before storing
-      const img = new Image();
-      img.onload = () => {
-        let finalDataUrl = dataUrl;
-        if (img.width > MAX_ALBUM_ART_DIM || img.height > MAX_ALBUM_ART_DIM) {
-          const canvas = document.createElement('canvas');
-          const scale = Math.min(MAX_ALBUM_ART_DIM / img.width, MAX_ALBUM_ART_DIM / img.height);
-          canvas.width = Math.round(img.width * scale);
-          canvas.height = Math.round(img.height * scale);
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            finalDataUrl = canvas.toDataURL('image/png');
-          }
-        }
-        setAlbumArt(finalDataUrl);
-        try {
-          window.localStorage.setItem(ALBUM_ART_STORAGE_KEY, finalDataUrl);
-        } catch {
-          // localStorage may be full for very large images — ignore silently
-        }
+    if (isPsd) {
+      // Parse PSD file using @webtoon/psd and render the composite image
+      file.arrayBuffer().then(async (buffer) => {
+        const PsdModule = await import('@webtoon/psd');
+        const Psd = PsdModule.default;
+        const psd = Psd.parse(buffer);
+        const compositeData = psd.composite();
+        const canvas = document.createElement('canvas');
+        canvas.width = psd.width;
+        canvas.height = psd.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const imageData = ctx.createImageData(psd.width, psd.height);
+        imageData.data.set(compositeData);
+        ctx.putImageData(imageData, 0, 0);
+        const dataUrl = canvas.toDataURL('image/png');
+        processAlbumArtDataUrl(dataUrl);
+      }).catch(() => {
+        // PSD parsing failed — ignore silently
+      });
+    } else {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        processAlbumArtDataUrl(dataUrl);
       };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    }
     // Reset input so re-selecting the same file triggers onChange
     e.target.value = '';
   }
@@ -3654,13 +3680,24 @@ export function App(): JSX.Element {
     }
   }
 
-  function handleBandToggle(bandIndex: number): void {
+  function handleBandToggle(bandIndex: number, shiftKey: boolean = false): void {
     setSoloedBands((prev) => {
-      const next = new Set(prev);
-      if (next.has(bandIndex)) {
+      let next: Set<number>;
+      if (shiftKey) {
+        // Shift+click: select all bands EXCEPT the clicked one (exclude mode)
+        next = new Set(FREQUENCY_BANDS.map((_, i) => i));
         next.delete(bandIndex);
+        // If the result is the same as current selection, clear all (toggle off)
+        if (next.size === prev.size && Array.from(next).every((i) => prev.has(i))) {
+          next = new Set<number>();
+        }
       } else {
-        next.add(bandIndex);
+        next = new Set(prev);
+        if (next.has(bandIndex)) {
+          next.delete(bandIndex);
+        } else {
+          next.add(bandIndex);
+        }
       }
       rebuildBandSoloFilters(next);
       return next;
@@ -6108,6 +6145,18 @@ export function App(): JSX.Element {
                       className="checklist-skip-button checklist-skip-button-small"
                       data-testid="song-checklist-skip-back-5"
                       onClick={() => handleSkipSeconds(-5)}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === 'Tab' &&
+                          event.shiftKey &&
+                          !event.metaKey &&
+                          !event.ctrlKey &&
+                          !event.altKey
+                        ) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                        }
+                      }}
                       title="Skip back 5 seconds"
                       aria-label="Skip back 5 seconds"
                     >
@@ -6118,6 +6167,18 @@ export function App(): JSX.Element {
                       className="checklist-skip-button checklist-skip-button-small"
                       data-testid="song-checklist-skip-back-2"
                       onClick={() => handleSkipSeconds(-2)}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === 'Tab' &&
+                          event.shiftKey &&
+                          !event.metaKey &&
+                          !event.ctrlKey &&
+                          !event.altKey
+                        ) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                        }
+                      }}
                       title="Skip back 2 seconds"
                       aria-label="Skip back 2 seconds"
                     >
@@ -6133,6 +6194,18 @@ export function App(): JSX.Element {
                       onClick={() => {
                         void handleTogglePlayback();
                       }}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === 'Tab' &&
+                          event.shiftKey &&
+                          !event.metaKey &&
+                          !event.ctrlKey &&
+                          !event.altKey
+                        ) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                        }
+                      }}
                     >
                       <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
                     </button>
@@ -6141,6 +6214,18 @@ export function App(): JSX.Element {
                       className="checklist-skip-button checklist-skip-button-small"
                       data-testid="song-checklist-skip-forward-2"
                       onClick={() => handleSkipSeconds(2)}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === 'Tab' &&
+                          event.shiftKey &&
+                          !event.metaKey &&
+                          !event.ctrlKey &&
+                          !event.altKey
+                        ) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                        }
+                      }}
                       title="Skip forward 2 seconds"
                       aria-label="Skip forward 2 seconds"
                     >
@@ -6151,6 +6236,18 @@ export function App(): JSX.Element {
                       className="checklist-skip-button checklist-skip-button-small"
                       data-testid="song-checklist-skip-forward-5"
                       onClick={() => handleSkipSeconds(5)}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === 'Tab' &&
+                          event.shiftKey &&
+                          !event.metaKey &&
+                          !event.ctrlKey &&
+                          !event.altKey
+                        ) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                        }
+                      }}
                       title="Skip forward 5 seconds"
                       aria-label="Skip forward 5 seconds"
                     >
@@ -6161,6 +6258,18 @@ export function App(): JSX.Element {
                       className="checklist-skip-button"
                       data-testid="song-checklist-skip-forward-10"
                       onClick={() => handleSkipSeconds(10)}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === 'Tab' &&
+                          event.shiftKey &&
+                          !event.metaKey &&
+                          !event.ctrlKey &&
+                          !event.altKey
+                        ) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                        }
+                      }}
                       title="Skip forward 10 seconds"
                       aria-label="Skip forward 10 seconds"
                     >
@@ -6182,7 +6291,7 @@ export function App(): JSX.Element {
               </div>
             ) : null}
 
-            <span className="checklist-transport-hint">Shift+Tab toggles −10s ↔ input</span>
+            <span className="checklist-transport-hint">Shift+Tab toggles transport ↔ input</span>
             <div className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}>
               <textarea
                 ref={checklistComposerTextareaRef}
@@ -6378,6 +6487,16 @@ export function App(): JSX.Element {
                   </button>
                   <button
                     type="button"
+                    className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                    data-testid="analysis-overlay-skip-back-1"
+                    onClick={() => handleSkipSeconds(-1)}
+                    title="Skip back 1 second"
+                    aria-label="Skip back 1 second"
+                  >
+                    −1s
+                  </button>
+                  <button
+                    type="button"
                     className="analysis-overlay-transport-button"
                     data-testid="analysis-overlay-prev"
                     onClick={() => handlePreviousTrack()}
@@ -6408,6 +6527,16 @@ export function App(): JSX.Element {
                     aria-label="Next track"
                   >
                     ▶▶
+                  </button>
+                  <button
+                    type="button"
+                    className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                    data-testid="analysis-overlay-skip-forward-1"
+                    onClick={() => handleSkipSeconds(1)}
+                    title="Skip forward 1 second"
+                    aria-label="Skip forward 1 second"
+                  >
+                    +1s
                   </button>
                   <button
                     type="button"

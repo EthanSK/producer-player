@@ -1671,6 +1671,18 @@ export function App(): JSX.Element {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        const active = document.activeElement;
+        const isChecklistInputFocused =
+          active instanceof HTMLElement &&
+          (active.dataset.testid === 'song-checklist-input' ||
+            active.dataset.testid === 'song-checklist-item-text');
+
+        if (isChecklistInputFocused) {
+          active.blur();
+          event.stopPropagation();
+          return;
+        }
+
         setChecklistModalSongId(null);
         setChecklistDraftText('');
       }

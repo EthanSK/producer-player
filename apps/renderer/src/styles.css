@@ -317,6 +317,13 @@ input[type='range'] {
   gap: 8px;
 }
 
+.folder-add-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 .add-folder-primary {
   min-width: 200px;
   padding: 10px 20px;
@@ -2070,7 +2077,7 @@ button.checklist-play-toggle[data-playing='true'] {
 .analysis-overlay-viz-row {
   display: flex;
   gap: 14px;
-  align-items: stretch;
+  align-items: flex-start;
 }
 
 .analysis-overlay-viz-spectrum {

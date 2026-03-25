@@ -2968,15 +2968,35 @@ export function App(): JSX.Element {
   function handleAlbumArtChange(e: React.ChangeEvent<HTMLInputElement>): void {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const MAX_ALBUM_ART_DIM = 256;
+
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      setAlbumArt(dataUrl);
-      try {
-        window.localStorage.setItem(ALBUM_ART_STORAGE_KEY, dataUrl);
-      } catch {
-        // localStorage may be full for very large images — ignore silently
-      }
+      // Resize large images to MAX_ALBUM_ART_DIM x MAX_ALBUM_ART_DIM before storing
+      const img = new Image();
+      img.onload = () => {
+        let finalDataUrl = dataUrl;
+        if (img.width > MAX_ALBUM_ART_DIM || img.height > MAX_ALBUM_ART_DIM) {
+          const canvas = document.createElement('canvas');
+          const scale = Math.min(MAX_ALBUM_ART_DIM / img.width, MAX_ALBUM_ART_DIM / img.height);
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            finalDataUrl = canvas.toDataURL('image/png');
+          }
+        }
+        setAlbumArt(finalDataUrl);
+        try {
+          window.localStorage.setItem(ALBUM_ART_STORAGE_KEY, finalDataUrl);
+        } catch {
+          // localStorage may be full for very large images — ignore silently
+        }
+      };
+      img.src = dataUrl;
     };
     reader.readAsDataURL(file);
     // Reset input so re-selecting the same file triggers onChange
@@ -4666,19 +4686,21 @@ export function App(): JSX.Element {
         </button>
 
         <section className="folder-tools-card" data-testid="folder-tools-card">
-          <HelpTooltip text={"What this is: Folder linking connects Producer Player to a folder on your disk where your exported audio files live (WAV, MP3, AAC/M4A). The app watches this folder and automatically picks up new or updated files.\n\nHow to use it: Click 'Add Folder…' and select the folder where you export your mixes from your DAW. You can link multiple folders (e.g. one per album). Click a folder name to filter the song list. Use the unlink button (×) to remove a folder.\n\nWhy you'd want to: Keep the app in sync with your DAW exports — every time you bounce a new version, it appears automatically.\n\nTip: Name your exported files with version suffixes (e.g. 'Track Name v2.wav') so the app can group versions together under one song."} />
           <section className="folder-add-cta">
-            <button
-              type="button"
-              className="add-folder-primary"
-              onClick={() => {
-                void handleOpenFolderDialog();
-              }}
-              data-testid="link-folder-dialog-button"
-              title="Choose a folder containing your exported audio files."
-            >
-              Add Folder…
-            </button>
+            <div className="folder-add-row">
+              <button
+                type="button"
+                className="add-folder-primary"
+                onClick={() => {
+                  void handleOpenFolderDialog();
+                }}
+                data-testid="link-folder-dialog-button"
+                title="Choose a folder containing your exported audio files."
+              >
+                Add Folder…
+              </button>
+              <HelpTooltip text={"What this is: Folder linking connects Producer Player to a folder on your disk where your exported audio files live (WAV, MP3, AAC/M4A). The app watches this folder and automatically picks up new or updated files.\n\nHow to use it: Click 'Add Folder…' and select the folder where you export your mixes from your DAW. You can link multiple folders (e.g. one per album). Click a folder name to filter the song list. Use the unlink button (×) to remove a folder.\n\nWhy you'd want to: Keep the app in sync with your DAW exports — every time you bounce a new version, it appears automatically.\n\nTip: Name your exported files with version suffixes (e.g. 'Track Name v2.wav') so the app can group versions together under one song."} />
+            </div>
             {environment.isMacAppStoreSandboxed ? (
               <p
                 className="muted"
@@ -5276,7 +5298,7 @@ export function App(): JSX.Element {
             <input
               ref={albumArtInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.svg,.bmp"
               className="album-art-file-input"
               onChange={handleAlbumArtChange}
               data-testid="album-art-file-input"
@@ -6438,12 +6460,12 @@ export function App(): JSX.Element {
             {selectedPlaybackVersion ? (
               <div className="analysis-overlay-grid">
                 <section className="analysis-overlay-section analysis-overlay-visualizations" data-testid="analysis-overlay-visualizations">
-                  <div className="analysis-section-header">
-                    <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{refTrackSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high).\n\nWhat to look for: A balanced spectrum curve gently slopes downward from low to high frequencies — roughly 3 dB per octave. A big hump in the lows means your mix is bass-heavy; a rising high end means it's too bright.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
-                    <p className="analysis-section-subtitle">Real-time frequency content — click bands to solo frequency ranges</p>
-                  </div>
                   <div className="analysis-overlay-viz-row">
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
+                      <div className="analysis-section-header">
+                        <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{refTrackSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high).\n\nWhat to look for: A balanced spectrum curve gently slopes downward from low to high frequencies — roughly 3 dB per octave. A big hump in the lows means your mix is bass-heavy; a rising high end means it's too bright.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
+                        <p className="analysis-section-subtitle">Real-time frequency content — click bands to solo frequency ranges</p>
+                      </div>
                       <SpectrumAnalyzer
                         analyserNode={analyserNode}
                         width={spectrumFullWidth}

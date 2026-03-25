@@ -57,6 +57,7 @@ import {
   LRA_LINKS,
   STEREO_CORRELATION_LINKS,
   SPECTRUM_ANALYZER_LINKS,
+  LEVEL_METER_LINKS,
   WAVEFORM_LINKS,
   VECTORSCOPE_LINKS,
   PLATFORM_NORMALIZATION_LINKS,
@@ -6346,8 +6347,8 @@ export function App(): JSX.Element {
               <div className="analysis-overlay-grid">
                 <section className="analysis-overlay-section analysis-overlay-visualizations" data-testid="analysis-overlay-visualizations">
                   <div className="analysis-section-header">
-                    <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer &amp; Level Meter{refTrackSuffix} <HelpTooltip text={"What you're seeing: Two tools in one. The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high). The Level Meter beside it shows a colored bar for RMS level (the average loudness you perceive) with a gradient from green (safe) through yellow to red (hot). A thin line marks the peak hold — the loudest moment, which lingers for 1.5 seconds before falling.\n\nWhat to look for: A balanced spectrum curve gently slopes downward from low to high frequencies — roughly 3 dB per octave. A big hump in the lows means your mix is bass-heavy; a rising high end means it's too bright. On the level meter, the bar should mostly stay in the green/yellow zone. If the peak hold line hits red (above -6 dB), you're running hot.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
-                    <p className="analysis-section-subtitle">Real-time frequency content and peak/RMS levels — click bands to solo frequency ranges</p>
+                    <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{refTrackSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high).\n\nWhat to look for: A balanced spectrum curve gently slopes downward from low to high frequencies — roughly 3 dB per octave. A big hump in the lows means your mix is bass-heavy; a rising high end means it's too bright.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
+                    <p className="analysis-section-subtitle">Real-time frequency content — click bands to solo frequency ranges</p>
                   </div>
                   <div className="analysis-overlay-viz-row">
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
@@ -6362,6 +6363,9 @@ export function App(): JSX.Element {
                       />
                     </div>
                     <div className="analysis-overlay-viz-meters">
+                      <div className="analysis-section-header">
+                        <h4>Level Meter <HelpTooltip text={"What you're seeing: The Level Meter shows a colored bar for RMS level (the average loudness you perceive) with a gradient from green (safe) through yellow to red (hot). A thin line marks the peak hold — the loudest moment, which lingers for 1.5 seconds before falling.\n\nWhat to look for: The bar should mostly stay in the green/yellow zone. If the peak hold line hits red (above -6 dB), you're running hot and risk clipping or distortion.\n\nTip: Keep an eye on the peak hold line during the loudest sections of your track. If it's consistently in the red, consider pulling back your master fader or limiter threshold."} links={LEVEL_METER_LINKS} /></h4>
+                      </div>
                       <LevelMeter
                         analyserNode={analyserNode}
                         orientation="vertical"

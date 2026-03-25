@@ -80,6 +80,21 @@ export const SPECTRUM_ANALYZER_LINKS: HelpTooltipLink[] = [
   },
 ];
 
+export const LEVEL_METER_LINKS: HelpTooltipLink[] = [
+  {
+    label: 'Peak vs RMS Metering Explained - iZotope',
+    url: 'https://www.youtube.com/watch?v=oHVMNmhTnqE',
+  },
+  {
+    label: 'Understanding Audio Meters - Produce Like A Pro',
+    url: 'https://www.youtube.com/watch?v=5v5qLPBiSYE',
+  },
+  {
+    label: 'Level Metering for Mixing & Mastering - Dan Worrall',
+    url: 'https://www.youtube.com/watch?v=q2gatFLOzGM',
+  },
+];
+
 export const WAVEFORM_LINKS: HelpTooltipLink[] = [
   {
     label: 'Reading Waveforms Like a Pro - iZotope',

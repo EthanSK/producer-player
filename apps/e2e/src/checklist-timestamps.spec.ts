@@ -1,3 +1,7 @@
+import { spawn, spawnSync } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import {
   cleanupE2ETestDirectories,
@@ -16,6 +20,41 @@ async function linkFixtureFolder(page: Page, fixtureDirectory: string): Promise<
   }, fixtureDirectory);
 
   await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+}
+
+function hasFfmpeg(): boolean {
+  const check = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+  return check.status === 0;
+}
+
+async function runFfmpeg(args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const ffmpeg = spawn('ffmpeg', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stderr = '';
+    ffmpeg.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(`ffmpeg exited with ${code}: ${stderr}`));
+    });
+  });
+}
+
+function parseTimestampBadgeText(value: string): number {
+  const [minutesPart, secondsPart] = value.split(':');
+  const minutes = Number.parseInt(minutesPart ?? '0', 10);
+  const seconds = Number.parseInt(secondsPart ?? '0', 10);
+
+  return minutes * 60 + seconds;
 }
 
 test.describe('Checklist timestamp feature', () => {
@@ -55,6 +94,89 @@ test.describe('Checklist timestamp feature', () => {
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('typing starts a frozen 3-second lookback timestamp without rewinding the playhead', async () => {
+    test.skip(!hasFfmpeg(), 'ffmpeg is required for real playback timestamp coverage.');
+
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-checklist-typing-lookback-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-checklist-typing-lookback-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=12',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Typing Timestamp Probe v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, fixtureDirectory);
+
+      await page.getByTestId('main-list-row').first().click();
+      await page
+        .getByTestId('inspector-version-row')
+        .first()
+        .getByRole('button', { name: 'Cue' })
+        .click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Typing Timestamp Probe v1.wav');
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const miniScrubber = page.getByTestId('song-checklist-mini-player-scrubber');
+      const composer = page.getByTestId('song-checklist-input');
+
+      await page.getByTestId('song-checklist-skip-forward-10').click();
+      await expect
+        .poll(async () => Number.parseFloat(await miniScrubber.inputValue()))
+        .toBeGreaterThan(9.5);
+
+      const playheadBeforeTyping = Number.parseFloat(await miniScrubber.inputValue());
+      await composer.focus();
+      await composer.type('A');
+
+      const observedPlayheadValues: number[] = [];
+      for (let index = 0; index < 6; index += 1) {
+        await page.waitForTimeout(80);
+        observedPlayheadValues.push(Number.parseFloat(await miniScrubber.inputValue()));
+      }
+      const minimumObservedPlayhead = Math.min(...observedPlayheadValues);
+      const previewBadgeText = (await page
+        .getByTestId('song-checklist-input-timestamp-preview')
+        .textContent())
+        ?.trim() ?? '0:00';
+      expect(minimumObservedPlayhead).toBeGreaterThan(playheadBeforeTyping - 0.4);
+
+      const previewTimestampSeconds = parseTimestampBadgeText(previewBadgeText);
+      const expectedLookbackTimestamp = Math.max(0, Math.floor(playheadBeforeTyping - 3));
+      expect(previewTimestampSeconds).toBe(expectedLookbackTimestamp);
+
+      await composer.press('Enter');
+      await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue('A');
+      await expect(page.getByTestId('song-checklist-item-timestamp').first()).toHaveText(
+        previewBadgeText
+      );
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
     }
   });
 

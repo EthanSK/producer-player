@@ -4190,7 +4190,7 @@ export function App(): JSX.Element {
     clearChecklistTimestampHighlights();
   }
 
-  function freezeChecklistTimestampAtCurrentPlayback(options?: { seekPlayback?: boolean }): void {
+  function freezeChecklistTimestampAtCurrentPlayback(): void {
     const timestamp = captureCurrentPlaybackTimestamp(CHECKLIST_CAPTURE_LOOKBACK_SECONDS);
     if (timestamp === null) {
       return;
@@ -4198,10 +4198,6 @@ export function App(): JSX.Element {
 
     setChecklistTimestampMode('frozen');
     setChecklistCapturedTimestamp(timestamp);
-
-    if (options?.seekPlayback) {
-      handleSeek(timestamp);
-    }
   }
 
   function handleOpenSongChecklist(songId: string): void {
@@ -4345,7 +4341,7 @@ export function App(): JSX.Element {
     }
 
     if (wasEmpty && checklistTimestampMode === 'live') {
-      freezeChecklistTimestampAtCurrentPlayback({ seekPlayback: true });
+      freezeChecklistTimestampAtCurrentPlayback();
     }
   }
 

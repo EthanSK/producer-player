@@ -39,34 +39,6 @@ function openExternalUrl(url: string): void {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-/* ─── Trigger button (the ? icon) ─── */
-
-const triggerStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: 14,
-  height: 14,
-  borderRadius: '50%',
-  border: '1px solid rgba(156, 175, 196, 0.35)',
-  background: 'transparent',
-  color: '#9cafc4',
-  cursor: 'pointer',
-  lineHeight: 0,
-  verticalAlign: 'middle',
-  marginLeft: 4,
-  flexShrink: 0,
-  userSelect: 'none' as const,
-  padding: 0,
-};
-
-const triggerIconStyle: CSSProperties = {
-  display: 'block',
-  width: 8,
-  height: 8,
-  flexShrink: 0,
-};
-
 /* ─── Modal overlay & content ─── */
 
 const overlayStyle: CSSProperties = {
@@ -320,7 +292,7 @@ export function HelpTooltip({ text, links }: HelpTooltipProps): JSX.Element {
     <>
       <button
         type="button"
-        style={triggerStyle}
+        className="help-tooltip-trigger"
         aria-label="Help"
         onClick={(e) => {
           e.stopPropagation();
@@ -331,7 +303,7 @@ export function HelpTooltip({ text, links }: HelpTooltipProps): JSX.Element {
           viewBox="0 0 12 12"
           aria-hidden="true"
           focusable="false"
-          style={triggerIconStyle}
+          className="help-tooltip-trigger-icon"
         >
           <path
             d="M4.55 4.35a1.78 1.78 0 1 1 2.95 1.35c-.64.56-1.06.96-1.06 1.73"

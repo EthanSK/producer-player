@@ -185,6 +185,33 @@ button.icon-button:hover:not(:disabled) {
   background: rgba(92, 167, 255, 0.12);
 }
 
+button.help-tooltip-trigger {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin-left: 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(156, 175, 196, 0.35);
+  background: transparent;
+  color: #9cafc4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  /* Inline headings render this icon a touch low; a tiny baseline lift fixes those
+     cases while flex layouts keep centering via align-items. */
+  vertical-align: 1.5px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.help-tooltip-trigger-icon {
+  display: block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
 button.drag-source,
 .main-list-row.drag-source {
   border-color: #ffca6b;

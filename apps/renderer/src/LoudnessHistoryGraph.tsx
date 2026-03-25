@@ -8,6 +8,8 @@ interface LoudnessHistoryGraphProps {
   isPlaying: boolean;
   width: number;
   height: number;
+  /** Called when the user clicks on the graph to seek to a time position. */
+  onSeek?: (timeSeconds: number) => void;
 }
 
 const DB_MIN = -60;
@@ -29,6 +31,7 @@ export function LoudnessHistoryGraph({
   isPlaying,
   width,
   height,
+  onSeek,
 }: LoudnessHistoryGraphProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -38,6 +41,21 @@ export function LoudnessHistoryGraph({
     width,
     height,
   });
+
+  const handleCanvasClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (!onSeek || !analysis || analysis.frameLoudnessDbfs.length === 0) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const plotW = width - PADDING_LEFT - PADDING_RIGHT;
+      const clampedX = Math.max(PADDING_LEFT, Math.min(PADDING_LEFT + plotW, x));
+      const timeAtClick = ((clampedX - PADDING_LEFT) / plotW) * analysis.durationSeconds;
+      onSeek(Math.max(0, Math.min(analysis.durationSeconds, timeAtClick)));
+    },
+    [onSeek, analysis, width]
+  );
 
   const drawGraph = useCallback(() => {
     const canvas = canvasRef.current;
@@ -225,6 +243,7 @@ export function LoudnessHistoryGraph({
       style={{ width, height, display: 'block', borderRadius: 8, cursor: 'crosshair' }}
       onMouseMove={() => drawGraph()}
       onMouseLeave={() => drawGraph()}
+      onClick={handleCanvasClick}
       data-testid="loudness-history-graph"
     />
   );

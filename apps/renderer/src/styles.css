@@ -1120,6 +1120,39 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   opacity: 1 !important;
 }
 
+.recent-reference-tracks {
+  margin-top: 8px;
+}
+
+.recent-reference-tracks .analysis-stat-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.recent-reference-tracks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recent-reference-track-btn {
+  text-align: left;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.recent-reference-track-btn.active {
+  background: var(--accent-bg, rgba(92, 167, 255, 0.15));
+  color: var(--accent, #5ca7ff);
+}
+
 .folder-row {
   display: flex;
   justify-content: space-between;
@@ -2602,8 +2635,8 @@ button.checklist-play-toggle[data-playing='true'] {
 
 .album-art-trigger {
   flex-shrink: 0;
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   border-radius: 6px;
   border: 1px dashed var(--border);
   background: var(--bg-2);

@@ -49,6 +49,10 @@ import { LoudnessHistoryGraph } from './LoudnessHistoryGraph';
 import { WaveformDisplay } from './WaveformDisplay';
 import { StereoCorrelationMeter } from './StereoCorrelationMeter';
 import { Vectorscope } from './Vectorscope';
+import { CrestFactorGraph } from './CrestFactorGraph';
+import { MidSideSpectrum } from './MidSideSpectrum';
+import { LoudnessHistogram } from './LoudnessHistogram';
+import { Spectrogram } from './Spectrogram';
 import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
 import { HelpTooltip } from './HelpTooltip';
 import {
@@ -72,6 +76,10 @@ import {
   CLIP_COUNT_LINKS,
   MEAN_VOLUME_LINKS,
   MASTERING_CHECKLIST_LINKS,
+  CREST_FACTOR_HISTORY_LINKS,
+  MID_SIDE_SPECTRUM_LINKS,
+  LOUDNESS_HISTOGRAM_LINKS,
+  SPECTROGRAM_LINKS,
 } from './helpTooltipLinks';
 
 type RepeatMode = 'off' | 'one' | 'all';
@@ -133,6 +141,9 @@ const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
 const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
 const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
+const REFERENCE_TRACK_PER_SONG_KEY_PREFIX = 'producer-player.reference-track.';
+const RECENT_REFERENCE_TRACKS_KEY = 'producer-player.recent-reference-tracks.v1';
+const MAX_RECENT_REFERENCE_TRACKS = 3;
 const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
 const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
@@ -735,6 +746,53 @@ function formatSavedReferenceDate(isoString: string): string {
   }
 }
 
+/** Persist the reference track file path for a given song. */
+function persistReferenceTrackForSong(songId: string, filePath: string): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(`${REFERENCE_TRACK_PER_SONG_KEY_PREFIX}${songId}`, filePath);
+}
+
+/** Read the persisted reference track file path for a song. */
+function readReferenceTrackForSong(songId: string): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(`${REFERENCE_TRACK_PER_SONG_KEY_PREFIX}${songId}`) ?? null;
+}
+
+interface RecentReferenceEntry {
+  filePath: string;
+  fileName: string;
+}
+
+/** Read the recent reference tracks array from localStorage. */
+function readRecentReferenceTracks(): RecentReferenceEntry[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(RECENT_REFERENCE_TRACKS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry: unknown) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return [];
+      const c = entry as Partial<RecentReferenceEntry>;
+      if (typeof c.filePath !== 'string' || !c.filePath || typeof c.fileName !== 'string' || !c.fileName) return [];
+      return [{ filePath: c.filePath, fileName: c.fileName }];
+    }).slice(0, MAX_RECENT_REFERENCE_TRACKS);
+  } catch {
+    return [];
+  }
+}
+
+/** Add a reference to the recent list (newest first, max 3). */
+function addToRecentReferenceTracks(entry: RecentReferenceEntry): RecentReferenceEntry[] {
+  const current = readRecentReferenceTracks();
+  const filtered = current.filter((r) => r.filePath !== entry.filePath);
+  const updated = [entry, ...filtered].slice(0, MAX_RECENT_REFERENCE_TRACKS);
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(RECENT_REFERENCE_TRACKS_KEY, JSON.stringify(updated));
+  }
+  return updated;
+}
+
 function formatAlbumDuration(totalSeconds: number | null): string {
   if (totalSeconds === null || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
     return 'Album length unavailable';
@@ -1120,6 +1178,9 @@ export function App(): JSX.Element {
   const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrackEntry[]>(() =>
     readSavedReferenceTracks()
   );
+  const [recentReferenceTracks, setRecentReferenceTracks] = useState<RecentReferenceEntry[]>(() =>
+    readRecentReferenceTracks()
+  );
   const [referenceTrack, setReferenceTrack] = useState<LoadedReferenceTrack | null>(null);
   const [referenceStatus, setReferenceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle'
@@ -1218,6 +1279,45 @@ export function App(): JSX.Element {
   const [soloedBands, setSoloedBands] = useState<Set<number>>(new Set());
   const [spectrumFullWidth, setSpectrumFullWidth] = useState(860);
   const spectrumFullContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Advanced mastering visualization refs + visibility state (IntersectionObserver)
+  const crestFactorSectionRef = useRef<HTMLDivElement | null>(null);
+  const midSideSpectrumSectionRef = useRef<HTMLDivElement | null>(null);
+  const loudnessHistogramSectionRef = useRef<HTMLDivElement | null>(null);
+  const spectrogramSectionRef = useRef<HTMLDivElement | null>(null);
+  const [crestFactorVisible, setCrestFactorVisible] = useState(false);
+  const [midSideSpectrumVisible, setMidSideSpectrumVisible] = useState(false);
+  const [loudnessHistogramVisible, setLoudnessHistogramVisible] = useState(false);
+  const [spectrogramVisible, setSpectrogramVisible] = useState(false);
+
+  // IntersectionObserver to pause off-screen visualizations
+  useEffect(() => {
+    const entries: [React.RefObject<HTMLDivElement | null>, (v: boolean) => void][] = [
+      [crestFactorSectionRef, setCrestFactorVisible],
+      [midSideSpectrumSectionRef, setMidSideSpectrumVisible],
+      [loudnessHistogramSectionRef, setLoudnessHistogramVisible],
+      [spectrogramSectionRef, setSpectrogramVisible],
+    ];
+
+    const observer = new IntersectionObserver(
+      (ioEntries) => {
+        for (const ioEntry of ioEntries) {
+          for (const [ref, setter] of entries) {
+            if (ref.current === ioEntry.target) {
+              setter(ioEntry.isIntersecting);
+            }
+          }
+        }
+      },
+      { threshold: 0.05 }
+    );
+
+    for (const [ref] of entries) {
+      if (ref.current) observer.observe(ref.current);
+    }
+
+    return () => observer.disconnect();
+  }, [analysisExpanded]);
 
   const applyPlaybackGain = useCallback(
     (nextVolume: number, nextNormalizationGainDb: number) => {
@@ -3759,6 +3859,16 @@ export function App(): JSX.Element {
         return next;
       });
 
+      // Task 41: Persist reference track per song
+      if (selectedSongId) {
+        persistReferenceTrackForSong(selectedSongId, selection.filePath);
+      }
+
+      // Task 42: Add to recent reference tracks list
+      setRecentReferenceTracks(
+        addToRecentReferenceTracks({ filePath: selection.filePath, fileName: selection.fileName })
+      );
+
       setReferenceStatus('ready');
     } catch (cause: unknown) {
       setReferenceStatus('error');
@@ -3840,6 +3950,44 @@ export function App(): JSX.Element {
     setReferenceStatus('idle');
     setReferenceError(null);
   }
+
+  /** Load a reference track by file path (looks it up in saved references). */
+  async function handleLoadReferenceByFilePath(filePath: string): Promise<void> {
+    const saved = savedReferenceTracks.find((r) => r.filePath === filePath);
+    if (saved) {
+      await handleLoadSavedReferenceTrack(saved);
+      return;
+    }
+    // Fallback: resolve and load directly
+    try {
+      const resolvedPlaybackSource = await window.producerPlayer.resolvePlaybackSource(filePath);
+      const fileName = filePath.split('/').pop() ?? filePath;
+      await loadReferenceTrack('external-file', {
+        filePath,
+        fileName,
+        subtitle: 'Auto-loaded reference',
+        playbackSource: resolvedPlaybackSource,
+      });
+    } catch {
+      // Silently ignore — the file may no longer exist
+    }
+  }
+
+  // Task 41: Auto-load persisted reference track when song changes
+  const autoLoadRefSongIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedSongId || selectedSongId === autoLoadRefSongIdRef.current) return;
+    autoLoadRefSongIdRef.current = selectedSongId;
+
+    // Only auto-load if no reference is currently loaded
+    if (referenceTrack) return;
+
+    const persistedPath = readReferenceTrackForSong(selectedSongId);
+    if (persistedPath) {
+      void handleLoadReferenceByFilePath(persistedPath);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSongId]);
 
   function handleReferencePreviewModeChange(nextMode: 'mix' | 'reference'): void {
     if (nextMode === 'reference' && !referenceTrack) {
@@ -4071,6 +4219,32 @@ export function App(): JSX.Element {
     setChecklistCapturedTimestamp(null);
     setChecklistTimestampMode('live');
     clearChecklistTimestampHighlights();
+  }
+
+  function handleOpenMasteringFromChecklist(): void {
+    const modalSongId = checklistModalSongIdRef.current;
+    if (modalSongId) {
+      const modalSong = snapshot.songs.find((song) => song.id === modalSongId) ?? null;
+      if (modalSong) {
+        const nextPlaybackVersionId = getPreferredPlaybackVersionId(modalSong);
+        setSelectedSongId(modalSong.id);
+        if (nextPlaybackVersionId) {
+          setSelectedPlaybackVersionId(nextPlaybackVersionId);
+        }
+      }
+    }
+
+    handleCloseSongChecklist();
+    setAnalysisExpanded(true);
+  }
+
+  function handleOpenChecklistFromMastering(): void {
+    if (!selectedPlaybackSongId) {
+      return;
+    }
+
+    setAnalysisExpanded(false);
+    handleOpenSongChecklist(selectedPlaybackSongId);
   }
 
   function handleChecklistOverlayWheel(event: WheelEvent<HTMLDivElement>): void {
@@ -4497,6 +4671,9 @@ export function App(): JSX.Element {
     [checklistModalItems]
   );
   const checklistCompletedCount = checklistModalItems.filter((item) => item.completed).length;
+  const checklistModalCanOpenMastering = checklistModalSong
+    ? getPreferredPlaybackVersionId(checklistModalSong) !== null
+    : false;
 
   useEffect(() => {
     if (
@@ -5311,6 +5488,29 @@ export function App(): JSX.Element {
                   </div>
                 )}
               </div>
+
+              {recentReferenceTracks.length > 0 ? (
+                <div className="recent-reference-tracks" data-testid="recent-reference-tracks">
+                  <span className="analysis-stat-label">Recent references</span>
+                  <div className="recent-reference-tracks-list">
+                    {recentReferenceTracks.map((recent) => (
+                      <button
+                        key={recent.filePath}
+                        type="button"
+                        className={
+                          'recent-reference-track-btn ghost' +
+                          (referenceTrack?.filePath === recent.filePath ? ' active' : '')
+                        }
+                        onClick={() => void handleLoadReferenceByFilePath(recent.filePath)}
+                        disabled={referenceStatus === 'loading'}
+                        title={recent.filePath}
+                      >
+                        {recent.fileName}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </>
           ) : (
             <p className="muted" data-testid="analysis-empty-state">
@@ -6453,6 +6653,16 @@ export function App(): JSX.Element {
               >
                 Delete All
               </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={handleOpenMasteringFromChecklist}
+                disabled={!checklistModalCanOpenMastering}
+                data-testid="song-checklist-open-mastering"
+                title="Open this song in full-screen mastering."
+              >
+                Mastering <span aria-hidden="true">⤢</span>
+              </button>
               <span className="checklist-transport-hint">Shift+Tab to jump between text input and time jump buttons</span>
               <button
                 type="button"
@@ -6627,6 +6837,16 @@ export function App(): JSX.Element {
                   />
                 </div>
               ) : null}
+              <button
+                type="button"
+                className="ghost"
+                onClick={handleOpenChecklistFromMastering}
+                disabled={!selectedPlaybackSongId}
+                data-testid="analysis-open-checklist-button"
+                title="Open this track's checklist."
+              >
+                Checklist
+              </button>
               <button
                 type="button"
                 className="ghost"
@@ -6868,6 +7088,7 @@ export function App(): JSX.Element {
                     isPlaying={isPlaying}
                     width={Math.max(400, spectrumFullWidth)}
                     height={140}
+                    onSeek={handleSeek}
                   />
                 </section>
 
@@ -6882,6 +7103,7 @@ export function App(): JSX.Element {
                     isPlaying={isPlaying}
                     width={Math.max(400, spectrumFullWidth)}
                     height={100}
+                    onSeek={handleSeek}
                   />
                 </section>
 
@@ -7051,37 +7273,48 @@ export function App(): JSX.Element {
                     role="group"
                     aria-label="Platform normalization presets"
                   >
-                    {NORMALIZATION_PLATFORM_PROFILES.map((platform) => (
-                      <button
-                        key={`overlay-${platform.id}`}
-                        type="button"
-                        className={`analysis-platform-button${
-                          selectedNormalizationPlatformId === platform.id ? ' selected' : ''
-                        }`}
-                        onClick={() => setSelectedNormalizationPlatformId(platform.id)}
-                        data-testid={`analysis-overlay-platform-${platform.id}`}
-                        title={platform.description}
-                        aria-pressed={selectedNormalizationPlatformId === platform.id}
-                      >
-                        <span className="analysis-platform-header-row">
-                          <span
-                            className="analysis-platform-icon"
-                            style={{ '--platform-accent': platform.accentColor } as CSSProperties}
-                          >
-                            <PlatformIcon platformId={platform.id} />
+                    {NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
+                      const platformPreview = normalizationPreviewByPlatformId.get(platform.id) ?? null;
+                      const platformChangeText =
+                        analysisStatus === 'ready' && platformPreview
+                          ? formatSignedLevel(platformPreview.appliedGainDb)
+                          : '—';
+
+                      return (
+                        <button
+                          key={`overlay-${platform.id}`}
+                          type="button"
+                          className={`analysis-platform-button${
+                            selectedNormalizationPlatformId === platform.id ? ' selected' : ''
+                          }`}
+                          onClick={() => setSelectedNormalizationPlatformId(platform.id)}
+                          data-testid={`analysis-overlay-platform-${platform.id}`}
+                          title={platform.description}
+                          aria-pressed={selectedNormalizationPlatformId === platform.id}
+                        >
+                          <span className="analysis-platform-header-row">
+                            <span
+                              className="analysis-platform-icon"
+                              style={{ '--platform-accent': platform.accentColor } as CSSProperties}
+                            >
+                              <PlatformIcon platformId={platform.id} />
+                            </span>
+                            <span className="analysis-platform-title">{platform.label}</span>
                           </span>
-                          <span className="analysis-platform-title">{platform.label}</span>
-                        </span>
-                        <span className="analysis-platform-copy">
-                          <span className="analysis-platform-target">
-                            {platform.targetLufs.toFixed(0)} LUFS target
+                          <span className="analysis-platform-copy">
+                            <span className="analysis-platform-target">
+                              {platform.targetLufs.toFixed(0)} LUFS target
+                            </span>
+                            <span className="analysis-platform-change">
+                              Applied {platformChangeText}
+                            </span>
+                            <span className="muted">
+                              {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                            </span>
                           </span>
-                          <span className="muted">
-                            {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
-                          </span>
-                        </span>
-                      </button>
-                    ))}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   <div className="analysis-normalization-metrics-grid">
@@ -7340,6 +7573,83 @@ export function App(): JSX.Element {
                     </div>
                   </section>
                 ) : null}
+
+                {/* Dynamic Range / Crest Factor Meter */}
+                <section
+                  className="analysis-overlay-section"
+                  data-testid="analysis-crest-factor-history"
+                  ref={crestFactorSectionRef}
+                >
+                  <div className="analysis-section-header">
+                    <h4>Dynamic Range / Crest Factor <HelpTooltip text={"What you're seeing: A real-time line graph plotting the crest factor (peak-to-RMS difference) over the last 30 seconds. The crest factor measures how much transient headroom your audio has — the gap between the loudest peak and the average (RMS) level.\n\nColor coding: Green (above 8 dB) means healthy dynamics with well-preserved transients. Yellow (6-8 dB) indicates moderate compression typical of commercial masters. Red (below 6 dB) signals heavily compressed or limited audio — the dynamics are being crushed.\n\nWhat to look for: Watch how the line moves during different sections. Verses might show higher crest factor while choruses drop lower as limiting kicks in. If the line stays consistently in the red zone, you may be over-limiting.\n\nTip: Compare this graph during your loudest chorus vs. your quietest verse. If both sections show similar crest factor, your master might lack dynamic contrast."} links={CREST_FACTOR_HISTORY_LINKS} /></h4>
+                    <p className="analysis-section-subtitle">Real-time peak-to-RMS difference — green = healthy dynamics, red = crushed</p>
+                  </div>
+                  <CrestFactorGraph
+                    analyserNode={analyserNode}
+                    width={spectrumFullWidth}
+                    height={200}
+                    isPlaying={isPlaying}
+                    isVisible={crestFactorVisible}
+                  />
+                </section>
+
+                {/* Mid/Side Spectrum */}
+                <section
+                  className="analysis-overlay-section"
+                  data-testid="analysis-mid-side-spectrum"
+                  ref={midSideSpectrumSectionRef}
+                >
+                  <div className="analysis-section-header">
+                    <h4>Mid/Side Spectrum <HelpTooltip text={"What you're seeing: Two overlaid spectrum curves — blue for Mid (L+R summed) and orange for Side (L-R). Both share the same frequency axis as the main spectrum analyzer.\n\nWhat to look for: Bass frequencies (below ~200 Hz) should be predominantly Mid (blue) with minimal Side (orange) — this ensures mono-compatible low end. If orange is dominant in the lows, your bass is too wide and may collapse on mono playback. In the highs, Side content is normal (reverb, panned elements).\n\nTip: Use this alongside the Mid/Side Monitoring controls to listen and compare."} links={MID_SIDE_SPECTRUM_LINKS} /></h4>
+                    <p className="analysis-section-subtitle">Frequency content split into Mid (center) and Side (stereo width)</p>
+                  </div>
+                  <MidSideSpectrum
+                    analyserNodeL={analyserNodeL}
+                    analyserNodeR={analyserNodeR}
+                    width={spectrumFullWidth}
+                    height={240}
+                    isPlaying={isPlaying}
+                    isVisible={midSideSpectrumVisible}
+                  />
+                </section>
+
+                {/* Loudness Histogram / Distribution */}
+                <section
+                  className="analysis-overlay-section"
+                  data-testid="analysis-loudness-histogram"
+                  ref={loudnessHistogramSectionRef}
+                >
+                  <div className="analysis-section-header">
+                    <h4>Loudness Distribution <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. Green dashed lines mark the streaming target range (-16 to -6 LUFS).\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: Play the full track to accumulate a complete picture. The histogram resets when you switch tracks."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
+                    <p className="analysis-section-subtitle">Statistical distribution of loudness levels — play the full track for best results</p>
+                  </div>
+                  <LoudnessHistogram
+                    analyserNode={analyserNode}
+                    width={spectrumFullWidth}
+                    height={200}
+                    isPlaying={isPlaying}
+                    isVisible={loudnessHistogramVisible}
+                  />
+                </section>
+
+                {/* Spectrogram (Scrolling) */}
+                <section
+                  className="analysis-overlay-section"
+                  data-testid="analysis-spectrogram"
+                  ref={spectrogramSectionRef}
+                >
+                  <div className="analysis-section-header">
+                    <h4>Spectrogram <HelpTooltip text={"What you're seeing: A scrolling 2D heatmap — X is time, Y is frequency (20 Hz to 20 kHz, logarithmic), color intensity is amplitude. Dark blue = quiet, green = moderate, yellow = loud, red = very loud.\n\nWhat to look for: A persistent bright horizontal band indicates a resonant frequency that may need EQ. Vertical bright lines are transients (drums, clicks). Gradual color shifts show arrangement dynamics between sections.\n\nTip: Especially useful for spotting issues a real-time spectrum misses — like a rogue frequency that appears briefly, or gradual tonal drift across sections."} links={SPECTROGRAM_LINKS} /></h4>
+                    <p className="analysis-section-subtitle">Scrolling frequency heatmap — time vs. frequency vs. amplitude</p>
+                  </div>
+                  <Spectrogram
+                    analyserNode={analyserNode}
+                    width={spectrumFullWidth}
+                    height={260}
+                    isPlaying={isPlaying}
+                    isVisible={spectrogramVisible}
+                  />
+                </section>
               </div>
             ) : (
               <p className="muted">Pick a track to see mastering analysis.</p>

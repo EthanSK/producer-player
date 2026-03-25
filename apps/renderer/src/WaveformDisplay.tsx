@@ -11,6 +11,8 @@ interface WaveformDisplayProps {
   isPlaying: boolean;
   width: number;
   height: number;
+  /** Called when the user clicks on the waveform to seek to a time position. */
+  onSeek?: (timeSeconds: number) => void;
 }
 
 const PADDING_LEFT = 30;
@@ -53,6 +55,7 @@ export function WaveformDisplay({
   isPlaying,
   width,
   height,
+  onSeek,
 }: WaveformDisplayProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -62,6 +65,22 @@ export function WaveformDisplay({
     width,
     height,
   });
+
+  const handleCanvasClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const effectiveDuration = durationSeconds > 0 ? durationSeconds : (analysis?.durationSeconds ?? 0);
+      if (!onSeek || !waveformPeaks || waveformPeaks.length === 0 || effectiveDuration <= 0) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const plotW = width - PADDING_LEFT - PADDING_RIGHT;
+      const clampedX = Math.max(PADDING_LEFT, Math.min(PADDING_LEFT + plotW, x));
+      const timeAtClick = ((clampedX - PADDING_LEFT) / plotW) * effectiveDuration;
+      onSeek(Math.max(0, Math.min(effectiveDuration, timeAtClick)));
+    },
+    [onSeek, waveformPeaks, analysis, durationSeconds, width]
+  );
 
   const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
@@ -224,6 +243,7 @@ export function WaveformDisplay({
       style={{ width, height, display: 'block', borderRadius: 8, cursor: 'crosshair' }}
       onMouseMove={() => drawWaveform()}
       onMouseLeave={() => drawWaveform()}
+      onClick={handleCanvasClick}
       data-testid="waveform-display"
     />
   );

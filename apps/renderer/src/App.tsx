@@ -1199,6 +1199,7 @@ export function App(): JSX.Element {
     next: () => undefined,
     previous: () => undefined,
   });
+  const handleSkipSecondsRef = useRef<(offsetSeconds: number) => void>(() => undefined);
   const playbackAudioContextRef = useRef<AudioContext | null>(null);
   const playbackGainNodeRef = useRef<GainNode | null>(null);
   const playbackAnalyserNodeRef = useRef<AnalyserNode | null>(null);
@@ -4601,6 +4602,7 @@ export function App(): JSX.Element {
     next: handleNextTrack,
     previous: handlePreviousTrack,
   };
+  handleSkipSecondsRef.current = handleSkipSeconds;
 
   return (
     <div className="app-shell" data-testid="app-shell">
@@ -6284,6 +6286,26 @@ export function App(): JSX.Element {
                 <div className="analysis-overlay-transport" data-testid="analysis-overlay-transport">
                   <button
                     type="button"
+                    className="analysis-overlay-transport-button analysis-overlay-skip-button"
+                    data-testid="analysis-overlay-skip-back-10"
+                    onClick={() => handleSkipSeconds(-10)}
+                    title="Skip back 10 seconds"
+                    aria-label="Skip back 10 seconds"
+                  >
+                    −10s
+                  </button>
+                  <button
+                    type="button"
+                    className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                    data-testid="analysis-overlay-skip-back-5"
+                    onClick={() => handleSkipSeconds(-5)}
+                    title="Skip back 5 seconds"
+                    aria-label="Skip back 5 seconds"
+                  >
+                    −5s
+                  </button>
+                  <button
+                    type="button"
                     className="analysis-overlay-transport-button"
                     data-testid="analysis-overlay-prev"
                     onClick={() => handlePreviousTrack()}
@@ -6314,6 +6336,26 @@ export function App(): JSX.Element {
                     aria-label="Next track"
                   >
                     ▶▶
+                  </button>
+                  <button
+                    type="button"
+                    className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                    data-testid="analysis-overlay-skip-forward-5"
+                    onClick={() => handleSkipSeconds(5)}
+                    title="Skip forward 5 seconds"
+                    aria-label="Skip forward 5 seconds"
+                  >
+                    +5s
+                  </button>
+                  <button
+                    type="button"
+                    className="analysis-overlay-transport-button analysis-overlay-skip-button"
+                    data-testid="analysis-overlay-skip-forward-10"
+                    onClick={() => handleSkipSeconds(10)}
+                    title="Skip forward 10 seconds"
+                    aria-label="Skip forward 10 seconds"
+                  >
+                    +10s
                   </button>
                   <span className="analysis-overlay-transport-time muted" data-testid="analysis-overlay-time">
                     {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}

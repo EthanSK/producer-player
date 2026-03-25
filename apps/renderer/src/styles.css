@@ -880,6 +880,30 @@ button.analysis-overlay-play-toggle {
   font-size: 16px;
 }
 
+button.analysis-overlay-skip-button {
+  font-size: 11px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: transparent;
+}
+
+button.analysis-overlay-skip-button:hover {
+  background: rgba(92, 167, 255, 0.22);
+}
+
+button.analysis-overlay-skip-button.analysis-overlay-skip-button-small {
+  font-size: 10px;
+  padding: 0 6px;
+  height: 24px;
+  opacity: 0.75;
+}
+
+button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
+  opacity: 1;
+}
+
 .analysis-overlay-transport-time {
   font-size: 11px;
   white-space: nowrap;

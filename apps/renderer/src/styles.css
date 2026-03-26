@@ -1414,6 +1414,7 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   padding: 2px 8px;
 }
 
+.song-project-button,
 .song-checklist-button {
   display: inline-flex;
   align-items: center;
@@ -1423,6 +1424,21 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   font-size: 11px;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+.song-project-button {
+  border-color: rgba(154, 182, 211, 0.4);
+  background: rgba(154, 182, 211, 0.08);
+}
+
+.song-project-button.has-project-file {
+  border-color: rgba(92, 167, 255, 0.75);
+  background: rgba(92, 167, 255, 0.18);
+}
+
+.song-project-icon {
+  font-size: 12px;
+  line-height: 1;
 }
 
 .song-checklist-button.has-items {

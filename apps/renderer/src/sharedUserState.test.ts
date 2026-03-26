@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   mergeLegacyAndSharedUserState,
   sanitizeSongChecklists,
+  sanitizeSongProjectFilePaths,
   sanitizeSongRatings,
 } from './sharedUserState';
 
@@ -68,6 +69,20 @@ describe('shared user state sanitizers', () => {
       ],
     });
   });
+
+  it('keeps only valid per-song project file paths', () => {
+    expect(
+      sanitizeSongProjectFilePaths({
+        songA: '/Users/ethan/music/song-a.logicx',
+        songB: '   C:\\Projects\\song-b.flp   ',
+        empty: '',
+        bad: 42,
+      })
+    ).toEqual({
+      songA: '/Users/ethan/music/song-a.logicx',
+      songB: 'C:\\Projects\\song-b.flp',
+    });
+  });
 });
 
 describe('mergeLegacyAndSharedUserState', () => {
@@ -85,6 +100,9 @@ describe('mergeLegacyAndSharedUserState', () => {
               versionNumber: 5,
             },
           ],
+        },
+        projectFilePaths: {
+          songA: '/Shared/SongA.logicx',
         },
       },
       {
@@ -108,6 +126,10 @@ describe('mergeLegacyAndSharedUserState', () => {
               versionNumber: null,
             },
           ],
+        },
+        projectFilePaths: {
+          songA: '/Legacy/ShouldNotWin.logicx',
+          songB: '/Legacy/SongB.als',
         },
       }
     );
@@ -136,6 +158,10 @@ describe('mergeLegacyAndSharedUserState', () => {
             versionNumber: null,
           },
         ],
+      },
+      projectFilePaths: {
+        songA: '/Shared/SongA.logicx',
+        songB: '/Legacy/SongB.als',
       },
     });
   });

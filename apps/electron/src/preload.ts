@@ -96,6 +96,10 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.PICK_REFERENCE_TRACK);
   },
 
+  async pickProjectFile(initialPath?: string | null) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PICK_PROJECT_FILE, initialPath ?? null);
+  },
+
   async getSharedUserState() {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_SHARED_USER_STATE);
   },

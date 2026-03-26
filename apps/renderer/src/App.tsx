@@ -38,6 +38,7 @@ import {
 import {
   mergeLegacyAndSharedUserState,
   sanitizeSongChecklists,
+  sanitizeSongProjectFilePaths,
   sanitizeSongRatings,
 } from './sharedUserState';
 import {
@@ -145,6 +146,7 @@ const DEFAULT_PLAYBACK_VOLUME = 1;
 const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
+const SONG_PROJECT_FILE_PATHS_STORAGE_KEY = 'producer-player.song-project-file-paths.v1';
 const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
 const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
@@ -641,6 +643,34 @@ function persistSongChecklists(checklists: Record<string, SongChecklistItem[]>):
   }
 
   window.localStorage.setItem(SONG_CHECKLISTS_STORAGE_KEY, JSON.stringify(checklists));
+}
+
+function readStoredSongProjectFilePaths(): Record<string, string> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SONG_PROJECT_FILE_PATHS_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    return sanitizeSongProjectFilePaths(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+function persistSongProjectFilePaths(projectFilePaths: Record<string, string>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(
+    SONG_PROJECT_FILE_PATHS_STORAGE_KEY,
+    JSON.stringify(projectFilePaths)
+  );
 }
 
 function readICloudBackupEnabled(): boolean {
@@ -1174,6 +1204,9 @@ export function App(): JSX.Element {
   const [songChecklists, setSongChecklists] = useState<Record<string, SongChecklistItem[]>>(
     () => readStoredSongChecklists()
   );
+  const [songProjectFilePaths, setSongProjectFilePaths] = useState<Record<string, string>>(
+    () => readStoredSongProjectFilePaths()
+  );
   const [sharedUserStateReady, setSharedUserStateReady] = useState(false);
   const [iCloudBackupEnabled, setICloudBackupEnabled] = useState<boolean>(() =>
     readICloudBackupEnabled()
@@ -1574,15 +1607,18 @@ export function App(): JSX.Element {
           {
             ratings: sanitizeSongRatings(sharedState?.ratings),
             checklists: sanitizeSongChecklists(sharedState?.checklists),
+            projectFilePaths: sanitizeSongProjectFilePaths(sharedState?.projectFilePaths),
           },
           {
             ratings: readStoredSongRatings(),
             checklists: readStoredSongChecklists(),
+            projectFilePaths: readStoredSongProjectFilePaths(),
           }
         );
 
         setSongRatings(merged.ratings);
         setSongChecklists(merged.checklists);
+        setSongProjectFilePaths(merged.projectFilePaths);
         songChecklistsRef.current = merged.checklists;
         setChecklistUndoStack([]);
         setChecklistRedoStack([]);
@@ -1590,6 +1626,7 @@ export function App(): JSX.Element {
         checklistRedoStackRef.current = [];
         persistSongRatings(merged.ratings);
         persistSongChecklists(merged.checklists);
+        persistSongProjectFilePaths(merged.projectFilePaths);
       })
       .catch(() => undefined)
       .finally(() => {
@@ -1612,6 +1649,10 @@ export function App(): JSX.Element {
   }, [songChecklists]);
 
   useEffect(() => {
+    persistSongProjectFilePaths(songProjectFilePaths);
+  }, [songProjectFilePaths]);
+
+  useEffect(() => {
     if (!sharedUserStateReady) {
       return;
     }
@@ -1622,7 +1663,11 @@ export function App(): JSX.Element {
 
     sharedUserStateSyncTimerRef.current = setTimeout(() => {
       void window.producerPlayer
-        .setSharedUserState({ ratings: songRatings, checklists: songChecklists })
+        .setSharedUserState({
+          ratings: songRatings,
+          checklists: songChecklists,
+          projectFilePaths: songProjectFilePaths,
+        })
         .catch(() => undefined);
     }, 250);
 
@@ -1631,7 +1676,7 @@ export function App(): JSX.Element {
         clearTimeout(sharedUserStateSyncTimerRef.current);
       }
     };
-  }, [sharedUserStateReady, songRatings, songChecklists]);
+  }, [sharedUserStateReady, songRatings, songChecklists, songProjectFilePaths]);
 
   // Keep ref in sync
   useEffect(() => {
@@ -1704,6 +1749,12 @@ export function App(): JSX.Element {
         setSongRatings(parsedRatings);
         persistSongRatings(parsedRatings);
       }
+
+      if (result.data.projectFilePaths && typeof result.data.projectFilePaths === 'object') {
+        const parsedProjectFilePaths = sanitizeSongProjectFilePaths(result.data.projectFilePaths);
+        setSongProjectFilePaths(parsedProjectFilePaths);
+        persistSongProjectFilePaths(parsedProjectFilePaths);
+      }
     }).catch(() => {
       if (cancelled) return;
       setICloudInitialLoadDone(true);
@@ -1712,7 +1763,7 @@ export function App(): JSX.Element {
     return () => { cancelled = true; };
   }, [iCloudBackupEnabled, iCloudAvailability, iCloudInitialLoadDone]);
 
-  // Sync to iCloud whenever ratings or checklists change (debounced)
+  // Sync to iCloud whenever ratings, checklists, or project links change (debounced)
   useEffect(() => {
     if (!iCloudBackupEnabledRef.current) return;
     if (!iCloudInitialLoadDone) return;
@@ -1728,6 +1779,7 @@ export function App(): JSX.Element {
       const backupData: ICloudBackupData = {
         checklists: songChecklists,
         ratings: songRatings,
+        projectFilePaths: songProjectFilePaths,
         state: {
           iCloudEnabled: true,
           updatedAt: now,
@@ -1758,7 +1810,7 @@ export function App(): JSX.Element {
         clearTimeout(iCloudSyncTimerRef.current);
       }
     };
-  }, [songRatings, songChecklists, iCloudInitialLoadDone]);
+  }, [songRatings, songChecklists, songProjectFilePaths, iCloudInitialLoadDone]);
 
   useEffect(() => {
     if (!checklistModalSongId) {
@@ -3343,6 +3395,7 @@ export function App(): JSX.Element {
       const backupData: ICloudBackupData = {
         checklists: songChecklists,
         ratings: songRatings,
+        projectFilePaths: songProjectFilePaths,
         state: {
           iCloudEnabled: true,
           updatedAt: now,
@@ -4054,6 +4107,45 @@ export function App(): JSX.Element {
       ...current,
       [songId]: nextRating,
     }));
+  }
+
+  function setSongProjectFilePath(songId: string, projectFilePath: string | null): void {
+    setSongProjectFilePaths((current) => {
+      const normalizedPath =
+        typeof projectFilePath === 'string' ? projectFilePath.trim() : '';
+
+      if (normalizedPath.length === 0) {
+        if (!(songId in current)) {
+          return current;
+        }
+
+        const { [songId]: _removed, ...rest } = current;
+        return rest;
+      }
+
+      if (current[songId] === normalizedPath) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [songId]: normalizedPath,
+      };
+    });
+  }
+
+  async function handlePickSongProjectFile(songId: string): Promise<void> {
+    await runVoidTask(async () => {
+      const selection = await window.producerPlayer.pickProjectFile(
+        songProjectFilePaths[songId] ?? null
+      );
+
+      if (!selection) {
+        return;
+      }
+
+      setSongProjectFilePath(songId, selection.filePath);
+    });
   }
 
   function updateSongChecklists(
@@ -5868,6 +5960,10 @@ export function App(): JSX.Element {
             const songRowMetadataLabel = getSongRowMetadataLabel(song);
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
             const songChecklistCount = songChecklists[song.id]?.length ?? 0;
+            const songProjectFilePath = songProjectFilePaths[song.id] ?? null;
+            const songProjectFileName = songProjectFilePath
+              ? getPathTail(songProjectFilePath)
+              : null;
             const songDateOpacity =
               songDateOpacityBySongId.get(song.id) ?? SONG_DATE_OPACITY_RANGE.unknown;
 
@@ -5943,6 +6039,36 @@ export function App(): JSX.Element {
                       {songRowMetadataLabel}
                     </span>
                     <div className="main-list-row-meta-footer">
+                      <button
+                        type="button"
+                        className={`song-project-button${songProjectFilePath ? ' has-project-file' : ''}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+
+                          if (event.altKey) {
+                            setSongProjectFilePath(song.id, null);
+                            return;
+                          }
+
+                          void handlePickSongProjectFile(song.id);
+                        }}
+                        data-testid="song-project-file-button"
+                        title={
+                          songProjectFilePath
+                            ? `Project file linked: ${songProjectFilePath}\nClick to change project file. Hold ⌥ (Alt) and click to clear.`
+                            : 'Set project file path for this song.'
+                        }
+                        aria-label={
+                          songProjectFilePath
+                            ? `${songRowTitle} project file ${songProjectFileName ?? 'linked'}`
+                            : `${songRowTitle} set project file`
+                        }
+                      >
+                        <span className="song-project-icon" aria-hidden="true">
+                          🗂
+                        </span>
+                        <span>Project</span>
+                      </button>
                       <button
                         type="button"
                         className={`song-checklist-button${songChecklistCount > 0 ? ' has-items' : ''}`}

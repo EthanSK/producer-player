@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, protocol, safeStorage, shell } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, promises as fs } from 'node:fs';
-import { dirname, extname, join, parse, resolve } from 'node:path';
+import { basename, dirname, extname, join, parse, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import type {
   AgentContext,
@@ -22,6 +22,7 @@ import type {
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
+  ProjectFileSelection,
   ReferenceTrackSelection,
   SongVersion,
   UpdateCheckResult,
@@ -55,6 +56,7 @@ const IS_MAC_APP_STORE_SANDBOX = process.mas === true;
 const ICLOUD_DRIVE_DIRECTORY_NAME = 'Producer Player';
 const ICLOUD_CHECKLISTS_FILE = 'checklists.json';
 const ICLOUD_RATINGS_FILE = 'ratings.json';
+const ICLOUD_PROJECT_FILE_PATHS_FILE = 'project-file-paths.json';
 const ICLOUD_STATE_FILE = 'state.json';
 
 const IS_TEST_MODE =
@@ -746,6 +748,7 @@ interface PersistedSharedUserState {
   version: number;
   ratings: Record<string, number>;
   checklists: Record<string, SongChecklistItem[]>;
+  projectFilePaths: Record<string, string>;
   updatedAt: string;
 }
 
@@ -773,6 +776,7 @@ function createFallbackSharedUserState(): PersistedSharedUserState {
     version: 1,
     ratings: {},
     checklists: {},
+    projectFilePaths: {},
     updatedAt: new Date(0).toISOString(),
   };
 }
@@ -875,6 +879,25 @@ function parseSongChecklists(value: unknown): Record<string, SongChecklistItem[]
     }
 
     return [[songId, parseSongChecklistItems(items)] as const];
+  });
+
+  return Object.fromEntries(entries);
+}
+
+function parseSongProjectFilePaths(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const entries = Object.entries(value).flatMap(([songId, projectFilePath]) => {
+    const normalizedPath =
+      typeof projectFilePath === 'string' ? projectFilePath.trim() : '';
+
+    if (songId.length === 0 || normalizedPath.length === 0) {
+      return [];
+    }
+
+    return [[songId, normalizedPath] as const];
   });
 
   return Object.fromEntries(entries);
@@ -1142,6 +1165,7 @@ function parsePersistedSharedUserState(raw: string): PersistedSharedUserState {
     version: typeof parsed.version === 'number' ? parsed.version : fallback.version,
     ratings: parseSongRatings(parsed.ratings),
     checklists: parseSongChecklists(parsed.checklists),
+    projectFilePaths: parseSongProjectFilePaths(parsed.projectFilePaths),
     updatedAt:
       typeof parsed.updatedAt === 'string' && parsed.updatedAt.length > 0
         ? parsed.updatedAt
@@ -1167,6 +1191,7 @@ async function writePersistedSharedUserState(
     version: 1,
     ratings: parseSongRatings(payload.ratings),
     checklists: parseSongChecklists(payload.checklists),
+    projectFilePaths: parseSongProjectFilePaths(payload.projectFilePaths),
     updatedAt: new Date().toISOString(),
   };
 
@@ -1703,6 +1728,31 @@ async function pickReferenceTrack(): Promise<ReferenceTrackSelection | null> {
     filePath: selectedPath,
     fileName: extname(selectedPath).length > 0 ? selectedPath.split(/[/\\]/).pop() ?? selectedPath : selectedPath,
     playbackSource,
+  };
+}
+
+async function pickProjectFile(initialPath?: string | null): Promise<ProjectFileSelection | null> {
+  const dialogOptions: OpenDialogOptions = {
+    title: 'Choose project file',
+    properties: ['openFile'],
+  };
+
+  if (typeof initialPath === 'string' && initialPath.trim().length > 0) {
+    dialogOptions.defaultPath = resolve(initialPath);
+  }
+
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+    : await dialog.showOpenDialog(dialogOptions);
+
+  const selectedPath = result.filePaths[0];
+  if (!selectedPath) {
+    return null;
+  }
+
+  return {
+    filePath: selectedPath,
+    fileName: basename(selectedPath),
   };
 }
 
@@ -2511,6 +2561,10 @@ async function syncDataToICloud(data: ICloudBackupData): Promise<ICloudSyncResul
         data.ratings
       ),
       writeJsonAtomic(
+        join(backupDirectory, ICLOUD_PROJECT_FILE_PATHS_FILE),
+        data.projectFilePaths
+      ),
+      writeJsonAtomic(
         join(backupDirectory, ICLOUD_STATE_FILE),
         data.state
       ),
@@ -2551,6 +2605,7 @@ async function loadDataFromICloud(): Promise<ICloudLoadResult> {
     const filePaths = {
       checklists: join(backupDirectory, ICLOUD_CHECKLISTS_FILE),
       ratings: join(backupDirectory, ICLOUD_RATINGS_FILE),
+      projectFilePaths: join(backupDirectory, ICLOUD_PROJECT_FILE_PATHS_FILE),
       state: join(backupDirectory, ICLOUD_STATE_FILE),
     };
 
@@ -2575,9 +2630,10 @@ async function loadDataFromICloud(): Promise<ICloudLoadResult> {
       }
     };
 
-    const [checklists, ratings, state] = await Promise.all([
+    const [checklists, ratings, projectFilePaths, state] = await Promise.all([
       readJsonSafe<Record<string, SongChecklistItem[]>>(filePaths.checklists, {}),
       readJsonSafe<Record<string, number>>(filePaths.ratings, {}),
+      readJsonSafe<Record<string, string>>(filePaths.projectFilePaths, {}),
       readJsonSafe<ICloudBackupData['state']>(filePaths.state, {
         iCloudEnabled: true,
         updatedAt: new Date(0).toISOString(),
@@ -2586,7 +2642,12 @@ async function loadDataFromICloud(): Promise<ICloudLoadResult> {
 
     return {
       available: true,
-      data: { checklists, ratings, state },
+      data: {
+        checklists: parseSongChecklists(checklists),
+        ratings: parseSongRatings(ratings),
+        projectFilePaths: parseSongProjectFilePaths(projectFilePaths),
+        state,
+      },
       iCloudNewerThan: latestModifiedAt ? latestModifiedAt.toISOString() : undefined,
     };
   } catch (error: unknown) {
@@ -2890,6 +2951,10 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.PICK_REFERENCE_TRACK, async () => {
     return pickReferenceTrack();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PICK_PROJECT_FILE, async (_event, initialPath?: string | null) => {
+    return pickProjectFile(initialPath ?? null);
   });
 
   ipcMain.handle(IPC_CHANNELS.GET_SHARED_USER_STATE, async () => {

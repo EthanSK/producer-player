@@ -67,6 +67,11 @@ export interface ReferenceTrackSelection {
   playbackSource: PlaybackSourceInfo;
 }
 
+export interface ProjectFileSelection {
+  filePath: string;
+  fileName: string;
+}
+
 export interface LogicalSong {
   id: string;
   folderId: string;
@@ -158,6 +163,7 @@ export const IPC_CHANNELS = {
   RESOLVE_PLAYBACK_SOURCE: 'producer-player:resolve-playback-source',
   ANALYZE_AUDIO_FILE: 'producer-player:analyze-audio-file',
   PICK_REFERENCE_TRACK: 'producer-player:pick-reference-track',
+  PICK_PROJECT_FILE: 'producer-player:pick-project-file',
   SNAPSHOT_UPDATED: 'producer-player:snapshot-updated',
   TRANSPORT_COMMAND: 'producer-player:transport-command',
   GET_SHARED_USER_STATE: 'producer-player:get-shared-user-state',
@@ -194,12 +200,14 @@ export interface SongChecklistItem {
 export interface SharedUserState {
   ratings: Record<string, number>;
   checklists: Record<string, SongChecklistItem[]>;
+  projectFilePaths: Record<string, string>;
   updatedAt: string;
 }
 
 export interface ICloudBackupData {
   checklists: Record<string, SongChecklistItem[]>;
   ratings: Record<string, number>;
+  projectFilePaths: Record<string, string>;
   state: {
     iCloudEnabled: boolean;
     updatedAt: string;
@@ -441,6 +449,7 @@ export interface ProducerPlayerBridge {
   resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo>;
   analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis>;
   pickReferenceTrack(): Promise<ReferenceTrackSelection | null>;
+  pickProjectFile(initialPath?: string | null): Promise<ProjectFileSelection | null>;
   getSharedUserState(): Promise<SharedUserState>;
   setSharedUserState(state: Omit<SharedUserState, 'updatedAt'>): Promise<SharedUserState>;
   syncToICloud(data: ICloudBackupData): Promise<ICloudSyncResult>;

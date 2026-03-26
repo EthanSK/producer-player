@@ -3,6 +3,7 @@ import type { SongChecklistItem } from '@producer-player/contracts';
 export interface SharedUserStateDraft {
   ratings: Record<string, number>;
   checklists: Record<string, SongChecklistItem[]>;
+  projectFilePaths: Record<string, string>;
 }
 
 export function sanitizeSongRatings(value: unknown): Record<string, number> {
@@ -88,6 +89,25 @@ export function sanitizeSongChecklists(value: unknown): Record<string, SongCheck
   return Object.fromEntries(entries);
 }
 
+export function sanitizeSongProjectFilePaths(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const entries = Object.entries(value).flatMap(([songId, projectFilePath]) => {
+    const normalizedPath =
+      typeof projectFilePath === 'string' ? projectFilePath.trim() : '';
+
+    if (songId.length === 0 || normalizedPath.length === 0) {
+      return [];
+    }
+
+    return [[songId, normalizedPath] as const];
+  });
+
+  return Object.fromEntries(entries);
+}
+
 export function mergeLegacyAndSharedUserState(
   shared: SharedUserStateDraft,
   legacy: SharedUserStateDraft
@@ -111,5 +131,14 @@ export function mergeLegacyAndSharedUserState(
     checklists[songId] = items;
   }
 
-  return { ratings, checklists };
+  const projectFilePaths = { ...shared.projectFilePaths };
+  for (const [songId, projectFilePath] of Object.entries(legacy.projectFilePaths)) {
+    if (songId in projectFilePaths) {
+      continue;
+    }
+
+    projectFilePaths[songId] = projectFilePath;
+  }
+
+  return { ratings, checklists, projectFilePaths };
 }

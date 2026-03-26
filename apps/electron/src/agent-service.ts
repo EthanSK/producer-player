@@ -3,11 +3,14 @@ import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import {
   DEFAULT_AGENT_MODEL_BY_PROVIDER,
+  DEFAULT_AGENT_THINKING_BY_PROVIDER,
   type AgentContext,
+  type AgentConversationHistoryEntry,
   type AgentEvent,
   type AgentMode,
   type AgentModelId,
   type AgentProviderId,
+  type AgentThinkingEffort,
   type AgentTokenUsage,
   type AgentUiContext,
 } from '@producer-player/contracts';
@@ -41,12 +44,14 @@ interface AgentTurnState {
   assistantText: string;
   finalized: boolean;
   sawAssistantText: boolean;
+  codexItemTextById: Map<string, string>;
 }
 
 interface AgentSessionState {
   provider: AgentProviderId;
   mode: AgentMode;
   model: AgentModelId;
+  thinking: AgentThinkingEffort;
   process: ChildProcess | null;
   systemPrompt: string;
   alive: boolean;
@@ -106,6 +111,38 @@ function normalizeModel(provider: AgentProviderId, model?: AgentModelId): AgentM
   return trimmed.length > 0 ? trimmed : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
 }
 
+function normalizeThinking(
+  provider: AgentProviderId,
+  thinking?: AgentThinkingEffort,
+): AgentThinkingEffort {
+  if (thinking === 'low' || thinking === 'medium' || thinking === 'high') {
+    return thinking;
+  }
+  return DEFAULT_AGENT_THINKING_BY_PROVIDER[provider];
+}
+
+function normalizeSeedHistory(
+  history?: AgentConversationHistoryEntry[],
+): AgentHistoryEntry[] {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+
+  return history
+    .flatMap((entry) => {
+      const role = entry?.role;
+      const content = typeof entry?.content === 'string' ? entry.content.trim() : '';
+      if ((role !== 'user' && role !== 'assistant') || content.length === 0) {
+        return [];
+      }
+      return [{ role, content } as const];
+    })
+    .map((entry) => ({
+      role: entry.role,
+      content: entry.content,
+    }));
+}
+
 function buildConversationHistory(history: AgentSessionState['history']): string {
   return history
     .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
@@ -156,6 +193,8 @@ function getSpawnArgs(session: AgentSessionState): string[] {
       '--include-partial-messages',
       '--model',
       session.model,
+      '--effort',
+      session.thinking,
       '--system-prompt',
       session.systemPrompt,
       '--dangerously-skip-permissions',
@@ -170,6 +209,8 @@ function getSpawnArgs(session: AgentSessionState): string[] {
     '--dangerously-bypass-approvals-and-sandbox',
     '--model',
     session.model,
+    '-c',
+    `model_reasoning_effort="${session.thinking}"`,
     '--json',
     '-',
   ];
@@ -269,25 +310,149 @@ function handleClaudeJsonLine(session: AgentSessionState, parsed: Record<string,
   }
 }
 
+function readCodexText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => readCodexText(entry)).join('');
+  }
+
+  if (!isJsonRecord(value)) {
+    return '';
+  }
+
+  if (typeof value.text === 'string') {
+    return value.text;
+  }
+
+  if (typeof value.delta === 'string') {
+    return value.delta;
+  }
+
+  if (isJsonRecord(value.delta)) {
+    const nestedDeltaText = readCodexText(value.delta);
+    if (nestedDeltaText.length > 0) {
+      return nestedDeltaText;
+    }
+  }
+
+  if (Array.isArray(value.content)) {
+    const contentText = readCodexText(value.content);
+    if (contentText.length > 0) {
+      return contentText;
+    }
+  }
+
+  if (Array.isArray(value.parts)) {
+    const partsText = readCodexText(value.parts);
+    if (partsText.length > 0) {
+      return partsText;
+    }
+  }
+
+  return '';
+}
+
+function normalizeCodexMessageText(value: unknown): string | null {
+  const text = readCodexText(value);
+  return text.length > 0 ? text : null;
+}
+
+function appendCodexDeltaText(
+  session: AgentSessionState,
+  itemId: string | null,
+  deltaText: string,
+): void {
+  if (!itemId) {
+    appendAssistantText(session, deltaText);
+    return;
+  }
+
+  const activeTurn = session.activeTurn;
+  const previousText = activeTurn?.codexItemTextById.get(itemId) ?? '';
+
+  if (deltaText.startsWith(previousText)) {
+    const nextChunk = deltaText.slice(previousText.length);
+    if (nextChunk.length > 0) {
+      appendAssistantText(session, nextChunk);
+    }
+    activeTurn?.codexItemTextById.set(itemId, deltaText);
+    return;
+  }
+
+  appendAssistantText(session, deltaText);
+  activeTurn?.codexItemTextById.set(itemId, previousText + deltaText);
+}
+
+function appendCodexCompletedText(
+  session: AgentSessionState,
+  itemId: string | null,
+  completedText: string,
+): void {
+  if (!itemId) {
+    appendAssistantText(session, completedText);
+    return;
+  }
+
+  const activeTurn = session.activeTurn;
+  const previousText = activeTurn?.codexItemTextById.get(itemId) ?? '';
+
+  if (completedText === previousText) {
+    return;
+  }
+
+  if (previousText.length > 0 && completedText.startsWith(previousText)) {
+    const remainder = completedText.slice(previousText.length);
+    if (remainder.length > 0) {
+      appendAssistantText(session, remainder);
+    }
+    activeTurn?.codexItemTextById.set(itemId, completedText);
+    return;
+  }
+
+  const assistantText = activeTurn?.assistantText ?? '';
+  if (!assistantText.endsWith(completedText)) {
+    appendAssistantText(session, completedText);
+  }
+  activeTurn?.codexItemTextById.set(itemId, completedText);
+}
+
 function handleCodexJsonLine(session: AgentSessionState, parsed: Record<string, unknown>): void {
   const type = typeof parsed.type === 'string' ? parsed.type : '';
 
-  if (type === 'item.completed') {
-    const item = isJsonRecord(parsed.item) ? parsed.item : null;
-    if (
-      item &&
-      (item.type === 'agent_message' || item.type === 'message') &&
-      typeof item.text === 'string'
-    ) {
-      appendAssistantText(session, item.text);
+  if (type === 'response.output_text.delta') {
+    const deltaText = normalizeCodexMessageText(parsed.delta);
+    if (deltaText) {
+      appendAssistantText(session, deltaText);
     }
     return;
   }
 
   if (type === 'item.delta') {
     const item = isJsonRecord(parsed.item) ? parsed.item : null;
-    if (item && typeof item.text === 'string') {
-      appendAssistantText(session, item.text);
+    const itemId = typeof item?.id === 'string' ? item.id : null;
+    const deltaText =
+      normalizeCodexMessageText(parsed.delta) ?? normalizeCodexMessageText(item);
+
+    if (deltaText) {
+      appendCodexDeltaText(session, itemId, deltaText);
+    }
+    return;
+  }
+
+  if (type === 'item.completed') {
+    const item = isJsonRecord(parsed.item) ? parsed.item : null;
+    if (
+      item &&
+      (item.type === 'agent_message' || item.type === 'message' || item.type === 'output_text')
+    ) {
+      const itemId = typeof item.id === 'string' ? item.id : null;
+      const completedText = normalizeCodexMessageText(item);
+      if (completedText) {
+        appendCodexCompletedText(session, itemId, completedText);
+      }
     }
     return;
   }
@@ -317,6 +482,8 @@ export function startSession(
   mode: AgentMode,
   systemPrompt?: string,
   model?: AgentModelId,
+  thinking?: AgentThinkingEffort,
+  history?: AgentConversationHistoryEntry[],
 ): void {
   if (currentSession?.alive) {
     destroySession();
@@ -336,10 +503,11 @@ export function startSession(
     provider,
     mode,
     model: normalizeModel(provider, model),
+    thinking: normalizeThinking(provider, thinking),
     process: null,
     systemPrompt: systemPrompt || MASTERING_SYSTEM_PROMPT,
     alive: true,
-    history: [],
+    history: normalizeSeedHistory(history),
     activeTurn: null,
   };
 }
@@ -400,6 +568,7 @@ export function sendTurn(
     assistantText: '',
     finalized: false,
     sawAssistantText: false,
+    codexItemTextById: new Map<string, string>(),
   };
 
   child.stdin?.end(prompt);

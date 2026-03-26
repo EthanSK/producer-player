@@ -71,9 +71,12 @@ const AGENT_PROVIDER_STORAGE_KEY = 'producer-player.agent-provider';
 const AGENT_MODEL_STORAGE_PREFIX = 'producer-player.agent-model.';
 const AGENT_THINKING_STORAGE_PREFIX = 'producer-player.agent-thinking.';
 const AGENT_PANEL_SEEN_STORAGE_KEY = 'producer-player.agent-panel-seen';
+const AGENT_PANEL_ONBOARDING_ARMED_STORAGE_KEY =
+  'producer-player.agent-panel-onboarding-armed';
 const AGENT_ACTIVE_CHAT_STORAGE_KEY = 'producer-player.agent-chat-active.v1';
 const AGENT_CHAT_HISTORY_STORAGE_KEY = 'producer-player.agent-chat-history.v1';
-const AGENT_AUTO_OPEN_DELAY_MS = 2 * 60 * 1000;
+const AGENT_AUTO_OPEN_DELAY_DEFAULT_MS = 2 * 60 * 1000;
+const AGENT_AUTO_OPEN_DELAY_TEST_MS = 1200;
 const AGENT_CHAT_HISTORY_LIMIT = 20;
 
 let messageIdCounter = 0;
@@ -355,9 +358,19 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
   );
   const [providerAvailable, setProviderAvailable] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [showFirstUseBadge] = useState(() => {
-    return localStorage.getItem(AGENT_PANEL_SEEN_STORAGE_KEY) !== 'true';
+  const [shouldRunFirstLaunchOnboarding] = useState(() => {
+    const alreadySeen = localStorage.getItem(AGENT_PANEL_SEEN_STORAGE_KEY) === 'true';
+    const onboardingAlreadyArmed =
+      localStorage.getItem(AGENT_PANEL_ONBOARDING_ARMED_STORAGE_KEY) === 'true';
+
+    if (alreadySeen || onboardingAlreadyArmed) {
+      return false;
+    }
+
+    localStorage.setItem(AGENT_PANEL_ONBOARDING_ARMED_STORAGE_KEY, 'true');
+    return true;
   });
+  const [autoOpenDelayMs, setAutoOpenDelayMs] = useState<number | null>(null);
   const [approvalRequest, setApprovalRequest] = useState<{
     approvalId: string;
     toolName: string;
@@ -393,7 +406,35 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
   }, [isOpen, provider]);
 
   useEffect(() => {
-    if (!showFirstUseBadge || isOpen || onboardingScheduledRef.current) {
+    let alive = true;
+
+    void window.producerPlayer
+      .getEnvironment()
+      .then((environment) => {
+        if (!alive) return;
+        setAutoOpenDelayMs(
+          environment.isTestMode
+            ? AGENT_AUTO_OPEN_DELAY_TEST_MS
+            : AGENT_AUTO_OPEN_DELAY_DEFAULT_MS
+        );
+      })
+      .catch(() => {
+        if (!alive) return;
+        setAutoOpenDelayMs(AGENT_AUTO_OPEN_DELAY_DEFAULT_MS);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !shouldRunFirstLaunchOnboarding ||
+      isOpen ||
+      onboardingScheduledRef.current ||
+      autoOpenDelayMs === null
+    ) {
       return;
     }
 
@@ -401,12 +442,12 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
     const timeoutId = window.setTimeout(() => {
       setIsOpen(true);
       localStorage.setItem(AGENT_PANEL_SEEN_STORAGE_KEY, 'true');
-    }, AGENT_AUTO_OPEN_DELAY_MS);
+    }, autoOpenDelayMs);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isOpen, showFirstUseBadge]);
+  }, [autoOpenDelayMs, isOpen, shouldRunFirstLaunchOnboarding]);
 
   const scrollToBottom = useCallback(() => {
     if (timelineRef.current && !userScrolledUpRef.current) {

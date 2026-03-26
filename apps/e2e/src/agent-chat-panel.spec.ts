@@ -263,6 +263,74 @@ test.describe('Agent Chat Panel', () => {
     }
   });
 
+  test('first-launch onboarding auto-opens once and does not repeat after restart', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-onboarding-first-run');
+
+    let firstRun: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+
+    try {
+      firstRun = await launchProducerPlayer(dirs.userDataDirectory);
+
+      const firstPanel = firstRun.page.getByTestId('agent-chat-panel');
+      await expect(firstPanel).toBeAttached();
+      const firstRunInitiallyOpen = await firstPanel.evaluate((el) =>
+        el.classList.contains('agent-chat-panel--open')
+      );
+      expect(firstRunInitiallyOpen).toBe(false);
+
+      await expect
+        .poll(
+          async () =>
+            firstPanel.evaluate((el) => el.classList.contains('agent-chat-panel--open')),
+          { timeout: 12000 }
+        )
+        .toBe(true);
+
+      const firstLaunchState = await firstRun.page.evaluate(() => ({
+        panelSeen: localStorage.getItem('producer-player.agent-panel-seen'),
+        onboardingArmed: localStorage.getItem(
+          'producer-player.agent-panel-onboarding-armed'
+        ),
+      }));
+
+      expect(firstLaunchState.panelSeen).toBe('true');
+      expect(firstLaunchState.onboardingArmed).toBe('true');
+
+      await firstRun.electronApp.close();
+      firstRun = null;
+
+      const secondRun = await launchProducerPlayer(dirs.userDataDirectory);
+
+      try {
+        const secondPanel = secondRun.page.getByTestId('agent-chat-panel');
+        await expect(secondPanel).toBeAttached();
+
+        await secondRun.page.waitForTimeout(2500);
+        const secondRunAutoOpened = await secondPanel.evaluate((el) =>
+          el.classList.contains('agent-chat-panel--open')
+        );
+        expect(secondRunAutoOpened).toBe(false);
+
+        const secondLaunchState = await secondRun.page.evaluate(() => ({
+          panelSeen: localStorage.getItem('producer-player.agent-panel-seen'),
+          onboardingArmed: localStorage.getItem(
+            'producer-player.agent-panel-onboarding-armed'
+          ),
+        }));
+
+        expect(secondLaunchState.panelSeen).toBe('true');
+        expect(secondLaunchState.onboardingArmed).toBe('true');
+      } finally {
+        await secondRun.electronApp.close();
+      }
+    } finally {
+      if (firstRun) {
+        await firstRun.electronApp.close();
+      }
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
   test('panel opens and closes when toggle is clicked', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-open-close');
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);

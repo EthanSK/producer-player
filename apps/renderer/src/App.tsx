@@ -1345,45 +1345,6 @@ export function App(): JSX.Element {
   const [spectrumFullWidth, setSpectrumFullWidth] = useState(860);
   const spectrumFullContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Advanced mastering visualization refs + visibility state (IntersectionObserver)
-  const crestFactorSectionRef = useRef<HTMLDivElement | null>(null);
-  const midSideSpectrumSectionRef = useRef<HTMLDivElement | null>(null);
-  const loudnessHistogramSectionRef = useRef<HTMLDivElement | null>(null);
-  const spectrogramSectionRef = useRef<HTMLDivElement | null>(null);
-  const [crestFactorVisible, setCrestFactorVisible] = useState(false);
-  const [midSideSpectrumVisible, setMidSideSpectrumVisible] = useState(false);
-  const [loudnessHistogramVisible, setLoudnessHistogramVisible] = useState(false);
-  const [spectrogramVisible, setSpectrogramVisible] = useState(false);
-
-  // IntersectionObserver to pause off-screen visualizations
-  useEffect(() => {
-    const entries: [React.RefObject<HTMLDivElement | null>, (v: boolean) => void][] = [
-      [crestFactorSectionRef, setCrestFactorVisible],
-      [midSideSpectrumSectionRef, setMidSideSpectrumVisible],
-      [loudnessHistogramSectionRef, setLoudnessHistogramVisible],
-      [spectrogramSectionRef, setSpectrogramVisible],
-    ];
-
-    const observer = new IntersectionObserver(
-      (ioEntries) => {
-        for (const ioEntry of ioEntries) {
-          for (const [ref, setter] of entries) {
-            if (ref.current === ioEntry.target) {
-              setter(ioEntry.isIntersecting);
-            }
-          }
-        }
-      },
-      { threshold: 0.05 }
-    );
-
-    for (const [ref] of entries) {
-      if (ref.current) observer.observe(ref.current);
-    }
-
-    return () => observer.disconnect();
-  }, [analysisExpanded]);
-
   const applyPlaybackGain = useCallback(
     (nextVolume: number, nextNormalizationGainDb: number) => {
       const audio = audioRef.current;
@@ -7855,7 +7816,6 @@ export function App(): JSX.Element {
                 <section
                   className="analysis-overlay-section"
                   data-testid="analysis-crest-factor-history"
-                  ref={crestFactorSectionRef}
                 >
                   <div className="analysis-section-header">
                     <h4>Dynamic Range / Crest Factor <HelpTooltip text={"What you're seeing: A real-time line graph plotting the crest factor (peak-to-RMS difference) over the last 30 seconds. The crest factor measures how much transient headroom your audio has — the gap between the loudest peak and the average (RMS) level.\n\nColor coding: Green (above 8 dB) means healthy dynamics with well-preserved transients. Yellow (6-8 dB) indicates moderate compression typical of commercial masters. Red (below 6 dB) signals heavily compressed or limited audio — the dynamics are being crushed.\n\nWhat to look for: Watch how the line moves during different sections. Verses might show higher crest factor while choruses drop lower as limiting kicks in. If the line stays consistently in the red zone, you may be over-limiting.\n\nTip: Compare this graph during your loudest chorus vs. your quietest verse. If both sections show similar crest factor, your master might lack dynamic contrast."} links={CREST_FACTOR_HISTORY_LINKS} /></h4>
@@ -7866,7 +7826,6 @@ export function App(): JSX.Element {
                     width={spectrumFullWidth}
                     height={200}
                     isPlaying={isPlaying}
-                    isVisible={crestFactorVisible}
                   />
                 </section>
 
@@ -7874,7 +7833,6 @@ export function App(): JSX.Element {
                 <section
                   className="analysis-overlay-section"
                   data-testid="analysis-mid-side-spectrum"
-                  ref={midSideSpectrumSectionRef}
                 >
                   <div className="analysis-section-header">
                     <h4>Mid/Side Spectrum <HelpTooltip text={"What you're seeing: Two overlaid spectrum curves — blue for Mid (L+R summed) and orange for Side (L-R). Both share the same frequency axis as the main spectrum analyzer.\n\nWhat to look for: Bass frequencies (below ~200 Hz) should be predominantly Mid (blue) with minimal Side (orange) — this ensures mono-compatible low end. If orange is dominant in the lows, your bass is too wide and may collapse on mono playback. In the highs, Side content is normal (reverb, panned elements).\n\nTip: Use this alongside the Mid/Side Monitoring controls to listen and compare."} links={MID_SIDE_SPECTRUM_LINKS} /></h4>
@@ -7886,7 +7844,6 @@ export function App(): JSX.Element {
                     width={spectrumFullWidth}
                     height={240}
                     isPlaying={isPlaying}
-                    isVisible={midSideSpectrumVisible}
                   />
                 </section>
 
@@ -7894,18 +7851,15 @@ export function App(): JSX.Element {
                 <section
                   className="analysis-overlay-section"
                   data-testid="analysis-loudness-histogram"
-                  ref={loudnessHistogramSectionRef}
                 >
                   <div className="analysis-section-header">
-                    <h4>Loudness Distribution <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. Green dashed lines mark the streaming target range (-16 to -6 LUFS).\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: Play the full track to accumulate a complete picture. The histogram resets when you switch tracks."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
-                    <p className="analysis-section-subtitle">Statistical distribution of loudness levels — play the full track for best results</p>
+                    <h4>Loudness Distribution <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. Green dashed lines mark the streaming target range (-16 to -6 LUFS).\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: This is built from the full-track analysis, so you can inspect the complete distribution immediately without waiting for playback or scroll position."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
+                    <p className="analysis-section-subtitle">Statistical distribution of loudness levels across the full analyzed track</p>
                   </div>
                   <LoudnessHistogram
-                    analyserNode={analyserNode}
+                    frameLoudnessDbfs={analysis?.frameLoudnessDbfs ?? []}
                     width={spectrumFullWidth}
                     height={200}
-                    isPlaying={isPlaying}
-                    isVisible={loudnessHistogramVisible}
                   />
                 </section>
 
@@ -7913,7 +7867,6 @@ export function App(): JSX.Element {
                 <section
                   className="analysis-overlay-section"
                   data-testid="analysis-spectrogram"
-                  ref={spectrogramSectionRef}
                 >
                   <div className="analysis-section-header">
                     <h4>Spectrogram <HelpTooltip text={"What you're seeing: A scrolling 2D heatmap — X is time, Y is frequency (20 Hz to 20 kHz, logarithmic), color intensity is amplitude. Dark blue = quiet, green = moderate, yellow = loud, red = very loud.\n\nWhat to look for: A persistent bright horizontal band indicates a resonant frequency that may need EQ. Vertical bright lines are transients (drums, clicks). Gradual color shifts show arrangement dynamics between sections.\n\nTip: Especially useful for spotting issues a real-time spectrum misses — like a rogue frequency that appears briefly, or gradual tonal drift across sections."} links={SPECTROGRAM_LINKS} /></h4>
@@ -7924,7 +7877,6 @@ export function App(): JSX.Element {
                     width={spectrumFullWidth}
                     height={260}
                     isPlaying={isPlaying}
-                    isVisible={spectrogramVisible}
                   />
                 </section>
               </div>

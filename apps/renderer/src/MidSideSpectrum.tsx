@@ -7,7 +7,6 @@ interface MidSideSpectrumProps {
   width: number;
   height: number;
   isPlaying: boolean;
-  isVisible: boolean;
 }
 
 const MIN_FREQ = 20;
@@ -35,7 +34,6 @@ export function MidSideSpectrum({
   width,
   height,
   isPlaying,
-  isVisible,
 }: MidSideSpectrumProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -199,13 +197,13 @@ export function MidSideSpectrum({
     ctx.fillStyle = '#c6d5e8';
     ctx.fillText('Side', plotRight - 46, legendY - 3);
 
-    if (isPlaying && isVisible) {
+    if (isPlaying) {
       animFrameRef.current = requestAnimationFrame(draw);
     }
-  }, [analyserNodeL, analyserNodeR, width, height, isPlaying, isVisible]);
+  }, [analyserNodeL, analyserNodeR, width, height, isPlaying]);
 
   useEffect(() => {
-    if (isPlaying && isVisible) {
+    if (isPlaying) {
       animFrameRef.current = requestAnimationFrame(draw);
     }
     return () => {
@@ -213,7 +211,7 @@ export function MidSideSpectrum({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [draw, isPlaying, isVisible]);
+  }, [draw, isPlaying]);
 
   return (
     <canvas

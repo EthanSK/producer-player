@@ -5,7 +5,6 @@ interface SpectrogramProps {
   width: number;
   height: number;
   isPlaying: boolean;
-  isVisible: boolean;
 }
 
 const PADDING_LEFT = 44;
@@ -55,7 +54,6 @@ export function Spectrogram({
   width,
   height,
   isPlaying,
-  isVisible,
 }: SpectrogramProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -223,15 +221,15 @@ export function Spectrogram({
     ctx.textAlign = 'right';
     ctx.fillText('Loud', legendX + legendWidth, legendY + legendHeight + 10);
 
-    if (isPlaying && isVisible) {
+    if (isPlaying) {
       animFrameRef.current = requestAnimationFrame(draw);
     }
-  }, [analyserNode, width, height, isPlaying, isVisible]);
+  }, [analyserNode, width, height, isPlaying]);
 
   useEffect(() => {
-    if (isPlaying && isVisible) {
+    if (isPlaying) {
       animFrameRef.current = requestAnimationFrame(draw);
-    } else if (!isPlaying && isVisible) {
+    } else {
       // Draw once when paused to show current state
       draw();
     }
@@ -240,7 +238,7 @@ export function Spectrogram({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [draw, isPlaying, isVisible]);
+  }, [draw, isPlaying]);
 
   return (
     <canvas

@@ -6,7 +6,6 @@ interface CrestFactorGraphProps {
   width: number;
   height: number;
   isPlaying: boolean;
-  isVisible: boolean;
 }
 
 const PADDING_LEFT = 44;
@@ -28,7 +27,6 @@ export function CrestFactorGraph({
   width,
   height,
   isPlaying,
-  isVisible,
 }: CrestFactorGraphProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -222,13 +220,13 @@ export function CrestFactorGraph({
     ctx.fillText('Crest (dB)', 0, 0);
     ctx.restore();
 
-    if (isPlaying && isVisible) {
+    if (isPlaying) {
       animFrameRef.current = requestAnimationFrame(draw);
     }
-  }, [analyserNode, width, height, isPlaying, isVisible, getColor]);
+  }, [analyserNode, width, height, isPlaying, getColor]);
 
   useEffect(() => {
-    if (isPlaying && isVisible) {
+    if (isPlaying) {
       animFrameRef.current = requestAnimationFrame(draw);
     }
     return () => {
@@ -236,7 +234,7 @@ export function CrestFactorGraph({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [draw, isPlaying, isVisible]);
+  }, [draw, isPlaying]);
 
   return (
     <canvas

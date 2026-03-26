@@ -1,12 +1,9 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { getRmsLevel } from './audioEngine';
+import { useEffect, useMemo, useRef, useCallback } from 'react';
 
 interface LoudnessHistogramProps {
-  analyserNode: AnalyserNode | null;
+  frameLoudnessDbfs: readonly number[];
   width: number;
   height: number;
-  isPlaying: boolean;
-  isVisible: boolean;
 }
 
 const PADDING_LEFT = 44;
@@ -14,32 +11,50 @@ const PADDING_RIGHT = 12;
 const PADDING_TOP = 8;
 const PADDING_BOTTOM = 30;
 
-// LUFS bins from -60 to 0 in 1 dB increments
+// LUFS-like bins from -60 to 0 in 1 dB increments
 const BIN_MIN = -60;
 const BIN_MAX = 0;
 const BIN_SIZE = 1;
 const BIN_COUNT = (BIN_MAX - BIN_MIN) / BIN_SIZE;
 
-const SAMPLE_INTERVAL_MS = 250; // sample every 250ms (short-term LUFS approximation)
+export interface LoudnessHistogramData {
+  bins: number[];
+  totalSamples: number;
+}
+
+export function buildLoudnessHistogramData(
+  frameLoudnessDbfs: readonly number[]
+): LoudnessHistogramData {
+  const bins = new Array(BIN_COUNT).fill(0);
+  let totalSamples = 0;
+
+  for (const frameLoudness of frameLoudnessDbfs) {
+    if (!Number.isFinite(frameLoudness)) {
+      continue;
+    }
+
+    const clamped = Math.max(BIN_MIN, Math.min(BIN_MAX, frameLoudness));
+    const rawBinIndex = Math.floor((clamped - BIN_MIN) / BIN_SIZE);
+    const binIndex = Math.max(0, Math.min(BIN_COUNT - 1, rawBinIndex));
+
+    bins[binIndex] += 1;
+    totalSamples += 1;
+  }
+
+  return { bins, totalSamples };
+}
 
 export function LoudnessHistogram({
-  analyserNode,
+  frameLoudnessDbfs,
   width,
   height,
-  isPlaying,
-  isVisible,
 }: LoudnessHistogramProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animFrameRef = useRef<number>(0);
-  const binsRef = useRef<number[]>(new Array(BIN_COUNT).fill(0));
-  const totalSamplesRef = useRef<number>(0);
-  const lastSampleTimeRef = useRef<number>(0);
 
-  // Reset histogram when analyser changes (new track)
-  useEffect(() => {
-    binsRef.current = new Array(BIN_COUNT).fill(0);
-    totalSamplesRef.current = 0;
-  }, [analyserNode]);
+  const histogramData = useMemo(
+    () => buildLoudnessHistogramData(frameLoudnessDbfs),
+    [frameLoudnessDbfs]
+  );
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -52,20 +67,6 @@ export function LoudnessHistogram({
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
-
-    // Sample loudness
-    const now = performance.now();
-    if (analyserNode && isPlaying && now - lastSampleTimeRef.current >= SAMPLE_INTERVAL_MS) {
-      lastSampleTimeRef.current = now;
-      const rmsDb = getRmsLevel(analyserNode);
-      // Approximate LUFS offset (RMS to LUFS is roughly -0.691 for K-weighted, but we use raw RMS as approximation)
-      const lufs = rmsDb;
-      const binIndex = Math.floor((lufs - BIN_MIN) / BIN_SIZE);
-      if (binIndex >= 0 && binIndex < BIN_COUNT) {
-        binsRef.current[binIndex]++;
-        totalSamplesRef.current++;
-      }
-    }
 
     const plotLeft = PADDING_LEFT;
     const plotRight = width - PADDING_RIGHT;
@@ -83,7 +84,7 @@ export function LoudnessHistogram({
     ctx.lineWidth = 1;
     ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
 
-    // X-axis: LUFS values
+    // X-axis: loudness values
     const lufsGridLines = [-50, -40, -30, -20, -10];
     ctx.textAlign = 'center';
     for (const lufs of lufsGridLines) {
@@ -96,21 +97,19 @@ export function LoudnessHistogram({
       ctx.fillText(`${lufs}`, x, plotBottom + 14);
     }
 
-    // Draw bars
-    const bins = binsRef.current;
-    const total = totalSamplesRef.current;
+    const { bins, totalSamples } = histogramData;
     const maxCount = Math.max(1, ...bins);
     const barWidth = plotWidth / BIN_COUNT;
 
     for (let i = 0; i < BIN_COUNT; i++) {
       if (bins[i] === 0) continue;
 
-      const percentage = total > 0 ? bins[i] / total : 0;
+      const percentage = totalSamples > 0 ? bins[i] / totalSamples : 0;
       const barHeight = (bins[i] / maxCount) * plotHeight;
       const x = plotLeft + (i / BIN_COUNT) * plotWidth;
       const y = plotBottom - barHeight;
 
-      // Color based on LUFS value
+      // Color based on loudness value
       const lufsValue = BIN_MIN + i * BIN_SIZE;
       let color: string;
       if (lufsValue >= -16 && lufsValue <= -6) {
@@ -131,11 +130,7 @@ export function LoudnessHistogram({
         ctx.fillStyle = '#e0eaf5';
         ctx.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(
-          `${(percentage * 100).toFixed(0)}%`,
-          x + barWidth / 2,
-          y - 4
-        );
+        ctx.fillText(`${(percentage * 100).toFixed(0)}%`, x + barWidth / 2, y - 4);
       }
     }
 
@@ -180,26 +175,12 @@ export function LoudnessHistogram({
     ctx.fillStyle = '#6b8199';
     ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(`${total} samples`, plotRight, plotTop + 12);
-
-    if (isPlaying && isVisible) {
-      animFrameRef.current = requestAnimationFrame(draw);
-    }
-  }, [analyserNode, width, height, isPlaying, isVisible]);
+    ctx.fillText(`${totalSamples} frames`, plotRight, plotTop + 12);
+  }, [height, histogramData, width]);
 
   useEffect(() => {
-    if (isPlaying && isVisible) {
-      animFrameRef.current = requestAnimationFrame(draw);
-    } else if (!isPlaying && isVisible) {
-      // Draw once even when paused to show accumulated data
-      draw();
-    }
-    return () => {
-      if (animFrameRef.current) {
-        cancelAnimationFrame(animFrameRef.current);
-      }
-    };
-  }, [draw, isPlaying, isVisible]);
+    draw();
+  }, [draw]);
 
   return (
     <canvas

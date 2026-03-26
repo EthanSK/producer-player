@@ -72,6 +72,8 @@ const TEST_LATEST_ORDERED_EXPORT_DIRECTORY =
   process.env.PRODUCER_PLAYER_E2E_LATEST_ORDERED_EXPORT_DIRECTORY ?? null;
 const TEST_REFERENCE_IMPORT_PATH =
   process.env.PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH ?? null;
+const TEST_PROJECT_FILE_PICK_PATH =
+  process.env.PRODUCER_PLAYER_E2E_PROJECT_FILE_PICK_PATH ?? null;
 const ANALYSIS_DELAY_MS = Number(process.env.PRODUCER_PLAYER_ANALYSIS_DELAY_MS ?? '0');
 const PUBLIC_REPOSITORY_ORIGIN = 'https://github.com';
 const PUBLIC_REPOSITORY_PATH = '/EthanSK/producer-player';
@@ -1732,20 +1734,29 @@ async function pickReferenceTrack(): Promise<ReferenceTrackSelection | null> {
 }
 
 async function pickProjectFile(initialPath?: string | null): Promise<ProjectFileSelection | null> {
-  const dialogOptions: OpenDialogOptions = {
-    title: 'Choose project file',
-    properties: ['openFile'],
-  };
+  const testSelectionPath = TEST_PROJECT_FILE_PICK_PATH;
 
-  if (typeof initialPath === 'string' && initialPath.trim().length > 0) {
-    dialogOptions.defaultPath = resolve(initialPath);
+  let selectedPath: string | undefined;
+
+  if (testSelectionPath) {
+    selectedPath = resolve(testSelectionPath);
+  } else {
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Choose project file',
+      properties: ['openFile'],
+    };
+
+    if (typeof initialPath === 'string' && initialPath.trim().length > 0) {
+      dialogOptions.defaultPath = resolve(initialPath);
+    }
+
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    selectedPath = result.filePaths[0];
   }
 
-  const result = mainWindow
-    ? await dialog.showOpenDialog(mainWindow, dialogOptions)
-    : await dialog.showOpenDialog(dialogOptions);
-
-  const selectedPath = result.filePaths[0];
   if (!selectedPath) {
     return null;
   }
@@ -2920,6 +2931,26 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
     if (!stats.isDirectory()) {
       throw new Error(`Path is not a folder: ${resolvedPath}`);
+    }
+
+    const error = await shell.openPath(resolvedPath);
+    if (error) {
+      throw new Error(error);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.OPEN_FILE, async (_event, filePath: string) => {
+    const resolvedPath = resolve(filePath);
+
+    let stats;
+    try {
+      stats = await fs.stat(resolvedPath);
+    } catch {
+      throw new Error(`File not accessible: ${resolvedPath}`);
+    }
+
+    if (!stats.isFile()) {
+      throw new Error(`Path is not a file: ${resolvedPath}`);
     }
 
     const error = await shell.openPath(resolvedPath);

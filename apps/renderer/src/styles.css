@@ -1431,9 +1431,36 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   background: rgba(154, 182, 211, 0.08);
 }
 
+.song-project-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .song-project-button.has-project-file {
   border-color: rgba(92, 167, 255, 0.75);
   background: rgba(92, 167, 255, 0.18);
+}
+
+.song-project-clear-button {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(154, 182, 211, 0.5);
+  background: rgba(154, 182, 211, 0.12);
+  color: #d9e8fb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.song-project-clear-button:hover {
+  border-color: rgba(255, 124, 124, 0.65);
+  background: rgba(255, 124, 124, 0.16);
+  color: #ffd9d9;
 }
 
 .song-project-icon {

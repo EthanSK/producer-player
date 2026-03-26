@@ -157,6 +157,7 @@ export const IPC_CHANNELS = {
     'producer-player:export-latest-versions-in-order',
   OPEN_IN_FINDER: 'producer-player:open-in-finder',
   OPEN_FOLDER: 'producer-player:open-folder',
+  OPEN_FILE: 'producer-player:open-file',
   OPEN_EXTERNAL_URL: 'producer-player:open-external-url',
   COPY_TEXT_TO_CLIPBOARD: 'producer-player:copy-text-to-clipboard',
   TO_FILE_URL: 'producer-player:to-file-url',
@@ -443,6 +444,7 @@ export interface ProducerPlayerBridge {
   ): Promise<{ folderPath: string | null; exportedCount: number }>;
   revealFile(filePath: string): Promise<void>;
   openFolder(folderPath: string): Promise<void>;
+  openFile(filePath: string): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
   copyTextToClipboard(text: string): Promise<void>;
   toFileUrl(filePath: string): Promise<string>;

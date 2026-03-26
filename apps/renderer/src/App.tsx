@@ -4148,6 +4148,18 @@ export function App(): JSX.Element {
     });
   }
 
+  async function handleOpenSongProjectFile(songId: string): Promise<void> {
+    const projectFilePath = songProjectFilePaths[songId] ?? null;
+    if (!projectFilePath) {
+      await handlePickSongProjectFile(songId);
+      return;
+    }
+
+    await runVoidTask(async () => {
+      await window.producerPlayer.openFile(projectFilePath);
+    });
+  }
+
   function updateSongChecklists(
     updater: (current: Record<string, SongChecklistItem[]>) => Record<string, SongChecklistItem[]>,
     options?: { recordHistory?: boolean }
@@ -6039,36 +6051,56 @@ export function App(): JSX.Element {
                       {songRowMetadataLabel}
                     </span>
                     <div className="main-list-row-meta-footer">
-                      <button
-                        type="button"
-                        className={`song-project-button${songProjectFilePath ? ' has-project-file' : ''}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-
-                          if (event.altKey) {
-                            setSongProjectFilePath(song.id, null);
-                            return;
-                          }
-
-                          void handlePickSongProjectFile(song.id);
-                        }}
-                        data-testid="song-project-file-button"
-                        title={
-                          songProjectFilePath
-                            ? `Project file linked: ${songProjectFilePath}\nClick to change project file. Hold ⌥ (Alt) and click to clear.`
-                            : 'Set project file path for this song.'
-                        }
-                        aria-label={
-                          songProjectFilePath
-                            ? `${songRowTitle} project file ${songProjectFileName ?? 'linked'}`
-                            : `${songRowTitle} set project file`
-                        }
-                      >
-                        <span className="song-project-icon" aria-hidden="true">
-                          🗂
-                        </span>
-                        <span>Project</span>
-                      </button>
+                      {songProjectFilePath ? (
+                        <div className="song-project-controls">
+                          <button
+                            type="button"
+                            className="song-project-button has-project-file"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleOpenSongProjectFile(song.id);
+                            }}
+                            data-testid="song-project-open-button"
+                            title={`Open project\n${songProjectFilePath}`}
+                            aria-label={`${songRowTitle} open project ${songProjectFileName ?? 'linked file'}`}
+                          >
+                            <span className="song-project-icon" aria-hidden="true">
+                              🗂
+                            </span>
+                            <span>Open project</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="song-project-clear-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSongProjectFilePath(song.id, null);
+                            }}
+                            data-testid="song-project-clear-button"
+                            title="Clear project"
+                            aria-label={`${songRowTitle} clear project`}
+                          >
+                            <span aria-hidden="true">×</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="song-project-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handlePickSongProjectFile(song.id);
+                          }}
+                          data-testid="song-project-set-button"
+                          title="Set project"
+                          aria-label={`${songRowTitle} set project`}
+                        >
+                          <span className="song-project-icon" aria-hidden="true">
+                            🗂
+                          </span>
+                          <span>Set project</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         className={`song-checklist-button${songChecklistCount > 0 ? ' has-items' : ''}`}

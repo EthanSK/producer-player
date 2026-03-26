@@ -74,7 +74,10 @@ async function writeTestWav(
   await fs.writeFile(filePath, buffer);
 }
 
-async function launchProducerPlayer(userDataDirectory: string): Promise<LaunchedApp> {
+async function launchProducerPlayer(
+  userDataDirectory: string,
+  options: { env?: Record<string, string> } = {}
+): Promise<LaunchedApp> {
   const workspaceRoot = path.resolve(__dirname, '../../..');
   const electronEntry = path.join(workspaceRoot, 'apps/electron/dist/main.cjs');
 
@@ -86,6 +89,7 @@ async function launchProducerPlayer(userDataDirectory: string): Promise<Launched
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       PRODUCER_PLAYER_TEST_ID: randomUUID(),
       PRODUCER_PLAYER_E2E_WINDOW_MODE: 'background',
+      ...(options.env ?? {}),
     },
   });
 
@@ -212,6 +216,93 @@ test.describe('Producer Player desktop shell', () => {
 
       await firstRow.getByTestId('song-checklist-button').click();
       await expect(page.getByTestId('song-checklist-item-text')).toHaveValue('Fade ending');
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('shows set/open/clear project controls and persists project path per song', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-project-link-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-project-link-user-data-')
+    );
+
+    const projectFilePath = path.join(fixtureDirectory, 'Project Link Session.logicx');
+
+    await writeTestWav(path.join(fixtureDirectory, 'Project Link Song v1.wav'), {
+      frequencyHz: 540,
+    });
+    await fs.writeFile(projectFilePath, 'dummy project payload', 'utf8');
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory, {
+      env: {
+        PRODUCER_PLAYER_E2E_PROJECT_FILE_PICK_PATH: projectFilePath,
+      },
+    });
+
+    try {
+      await page.evaluate(async (p) => { await (window as any).producerPlayer.linkFolder(p); }, fixtureDirectory);
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      const firstRow = page.getByTestId('main-list-row').first();
+
+      const initialPlacement = await firstRow
+        .locator('.main-list-row-meta-footer')
+        .evaluate((footer) => {
+          const setProjectButton = footer.querySelector('[data-testid="song-project-set-button"]');
+          const checklistButton = footer.querySelector('[data-testid="song-checklist-button"]');
+
+          if (!(setProjectButton instanceof HTMLElement) || !(checklistButton instanceof HTMLElement)) {
+            return null;
+          }
+
+          return {
+            projectBeforeChecklist: Boolean(
+              setProjectButton.compareDocumentPosition(checklistButton) &
+                Node.DOCUMENT_POSITION_FOLLOWING
+            ),
+          };
+        });
+
+      expect(initialPlacement).not.toBeNull();
+      expect(initialPlacement?.projectBeforeChecklist).toBe(true);
+
+      await expect(firstRow.getByTestId('song-project-set-button')).toContainText('Set project');
+
+      await firstRow.getByTestId('song-project-set-button').click();
+
+      await expect(firstRow.getByTestId('song-project-open-button')).toContainText('Open project');
+      await expect(firstRow.getByTestId('song-project-clear-button')).toBeVisible();
+      await expect(firstRow.getByTestId('song-project-clear-button')).toHaveAttribute(
+        'title',
+        'Clear project'
+      );
+
+      const storedAfterSetRaw = await page.evaluate(() =>
+        window.localStorage.getItem('producer-player.song-project-file-paths.v1')
+      );
+      const storedAfterSet = storedAfterSetRaw
+        ? (JSON.parse(storedAfterSetRaw) as Record<string, string>)
+        : {};
+      expect(Object.values(storedAfterSet)).toContain(projectFilePath);
+
+      await firstRow.getByTestId('song-project-clear-button').click();
+
+      await expect(firstRow.getByTestId('song-project-set-button')).toContainText('Set project');
+      await expect(firstRow.getByTestId('song-project-open-button')).toHaveCount(0);
+      await expect(firstRow.getByTestId('song-project-clear-button')).toHaveCount(0);
+
+      const storedAfterClearRaw = await page.evaluate(() =>
+        window.localStorage.getItem('producer-player.song-project-file-paths.v1')
+      );
+      const storedAfterClear = storedAfterClearRaw
+        ? (JSON.parse(storedAfterClearRaw) as Record<string, string>)
+        : {};
+      expect(Object.keys(storedAfterClear)).toHaveLength(0);
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });

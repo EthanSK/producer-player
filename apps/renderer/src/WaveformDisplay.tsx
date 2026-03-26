@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { TrackAnalysisResult } from './audioAnalysis';
 import { useCrosshairOverlay, drawCrosshair } from './useCrosshairOverlay';
+import { sampleSeriesAtRatio } from './graphHoverSampling';
 
 interface WaveformDisplayProps {
   /** Pre-computed waveform peaks (downsampled) */
@@ -193,26 +194,43 @@ export function WaveformDisplay({
       const clampedX = Math.max(PADDING_LEFT, Math.min(PADDING_LEFT + plotW, mPos.x));
 
       // Compute precise time from x position
-      const timeAtCursor = effectiveDuration > 0
-        ? ((clampedX - PADDING_LEFT) / plotW) * effectiveDuration
-        : 0;
+      const timeAtCursor =
+        effectiveDuration > 0 && plotW > 0
+          ? ((clampedX - PADDING_LEFT) / plotW) * effectiveDuration
+          : 0;
       const m = Math.floor(timeAtCursor / 60);
       const s = Math.floor(timeAtCursor % 60);
       const timeLabel = `${m}:${s.toString().padStart(2, '0')}`;
 
-      // Compute amplitude from y position
-      const ampAtCursor = 1 - 2 * ((mPos.y - PADDING_TOP) / plotH);
-      const ampClamped = Math.max(-1, Math.min(1, ampAtCursor));
-      const ampLabel = ampClamped.toFixed(2);
+      // Sample the actual waveform peak value at the hovered X position.
+      const xRatio = plotW > 0 ? (clampedX - PADDING_LEFT) / plotW : 0;
+      const sampledPeak = Math.max(
+        0,
+        Math.min(1, sampleSeriesAtRatio(waveformPeaks, xRatio) ?? 0)
+      );
+      const topY = centerY - sampledPeak * (plotH / 2);
+      const bottomY = centerY + sampledPeak * (plotH / 2);
+      const clampedMouseY = Math.max(PADDING_TOP, Math.min(PADDING_TOP + plotH, mPos.y));
+      const useTopEdge = Math.abs(clampedMouseY - topY) <= Math.abs(clampedMouseY - bottomY);
+      const sampledY = useTopEdge ? topY : bottomY;
+      const sampledAmplitude = useTopEdge ? sampledPeak : -sampledPeak;
+      const ampLabel = sampledAmplitude.toFixed(2);
 
-      drawCrosshair(ctx, mPos, {
-        plotLeft: PADDING_LEFT,
-        plotTop: PADDING_TOP,
-        plotRight: PADDING_LEFT + plotW,
-        plotBottom: PADDING_TOP + plotH,
-        xLabel: timeLabel,
-        yLabel: ampLabel,
-      });
+      drawCrosshair(
+        ctx,
+        {
+          x: clampedX,
+          y: sampledY,
+        },
+        {
+          plotLeft: PADDING_LEFT,
+          plotTop: PADDING_TOP,
+          plotRight: PADDING_LEFT + plotW,
+          plotBottom: PADDING_TOP + plotH,
+          xLabel: timeLabel,
+          yLabel: ampLabel,
+        }
+      );
     }
   }, [waveformPeaks, analysis, currentTimeSeconds, durationSeconds, width, height, mousePosRef]);
 

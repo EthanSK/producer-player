@@ -6,6 +6,7 @@ import {
   getBandIndexForFrequency,
 } from './audioEngine';
 import { useCrosshairOverlay, drawCrosshair } from './useCrosshairOverlay';
+import { sampleSpectrumDbAtFrequency } from './graphHoverSampling';
 
 interface SpectrumAnalyzerProps {
   analyserNode: AnalyserNode | null;
@@ -350,22 +351,38 @@ export function SpectrumAnalyzer({
       if (isFullScreen) {
         const mPos = mousePosRef.current;
         if (mPos) {
-          const freq = xToFrequency(mPos.x, width, MIN_FREQ, MAX_FREQ);
+          const clampedX = Math.max(0, Math.min(width, mPos.x));
+          const freq = xToFrequency(clampedX, width, MIN_FREQ, MAX_FREQ);
           const freqLabel = freq >= 1000
             ? `${(freq / 1000).toFixed(2)}kHz`
             : `${Math.round(freq)}Hz`;
 
-          const dbAtCursor = DB_MAX - (mPos.y / height) * (DB_MAX - DB_MIN);
-          const dbLabel = `${dbAtCursor.toFixed(1)}dB`;
+          // Sample the actual spectrum curve value at the hovered frequency.
+          const sampledDb = Math.max(
+            DB_MIN,
+            Math.min(
+              DB_MAX,
+              sampleSpectrumDbAtFrequency(smoothed, freq, fftSize, sampleRate, DB_MIN)
+            )
+          );
+          const sampledY = dbToY(sampledDb, height);
+          const dbLabel = `${sampledDb.toFixed(1)}dB`;
 
-          drawCrosshair(ctx, mPos, {
-            plotLeft: 0,
-            plotTop: 0,
-            plotRight: width,
-            plotBottom: height,
-            xLabel: freqLabel,
-            yLabel: dbLabel,
-          });
+          drawCrosshair(
+            ctx,
+            {
+              x: clampedX,
+              y: sampledY,
+            },
+            {
+              plotLeft: 0,
+              plotTop: 0,
+              plotRight: width,
+              plotBottom: height,
+              xLabel: freqLabel,
+              yLabel: dbLabel,
+            }
+          );
         }
       }
     };

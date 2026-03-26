@@ -532,6 +532,25 @@ input[type='range'] {
   gap: 2px;
 }
 
+.analysis-panel-layout-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.analysis-draggable-panel-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.analysis-compact-section {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .analysis-track-summary {
   display: grid;
   gap: 2px;
@@ -732,6 +751,49 @@ input[type='range'] {
   border-radius: 12px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.025);
+}
+
+.analysis-overlay-section,
+.analysis-compact-section,
+.analysis-normalization-panel {
+  position: relative;
+  padding-right: 44px;
+}
+
+.analysis-panel-drag-handle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px dashed rgba(92, 167, 255, 0.4);
+  background: rgba(8, 13, 18, 0.8);
+  color: #9dc0de;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+  z-index: 2;
+}
+
+.analysis-panel-drag-handle:hover {
+  border-color: rgba(92, 167, 255, 0.75);
+  color: #d7e6f6;
+}
+
+.analysis-panel-drag-handle:active {
+  cursor: grabbing;
+}
+
+.analysis-overlay-section.drop-target,
+.analysis-draggable-panel-shell.drop-target > .analysis-compact-section,
+.analysis-draggable-panel-shell.drop-target > .analysis-normalization-panel {
+  border-color: rgba(92, 167, 255, 0.8);
+  box-shadow: 0 0 0 1px rgba(92, 167, 255, 0.25);
 }
 
 .analysis-normalization-header {
@@ -2436,14 +2498,6 @@ button.checklist-play-toggle[data-playing='true'] {
 
 .analysis-pro-indicator.fail .indicator-value {
   color: #f87171;
-}
-
-/* Side-by-side: current track (left) + tonal balance (right) */
-.analysis-overlay-side-by-side {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  align-items: start;
 }
 
 @media (max-width: 1360px) {

@@ -510,6 +510,22 @@ function formatSignedLevel(level: number | null | undefined): string {
   return `${level >= 0 ? '+' : ''}${level.toFixed(1)} dB`;
 }
 
+function formatAppliedChangeMainText(level: number | null | undefined): string {
+  if (level === null || level === undefined || !Number.isFinite(level)) {
+    return 'Applied change —';
+  }
+
+  if (level < 0) {
+    return `Applied reduction ${Math.abs(level).toFixed(1)} dB`;
+  }
+
+  if (level > 0) {
+    return `Applied boost ${level.toFixed(1)} dB`;
+  }
+
+  return 'Applied change 0.0 dB';
+}
+
 function formatPercent(value: number): string {
   if (!Number.isFinite(value)) {
     return '0%';
@@ -5024,6 +5040,15 @@ export function App(): JSX.Element {
       empty: '—',
     }
   );
+  const normalizationAppliedMainText = buildAnalysisValue(
+    analysisStatus,
+    formatAppliedChangeMainText(normalizationPreview?.appliedGainDb),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+      empty: 'Applied change —',
+    }
+  );
   const normalizationProjectedText = buildAnalysisValue(
     analysisStatus,
     formatMeasuredStat(normalizationPreview?.projectedIntegratedLufs, 'LUFS'),
@@ -5711,10 +5736,15 @@ export function App(): JSX.Element {
                 <div className="analysis-platform-grid" role="group" aria-label="Platform normalization presets">
                   {NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
                     const platformPreview = normalizationPreviewByPlatformId.get(platform.id) ?? null;
-                    const platformChangeText =
-                      analysisStatus === 'ready' && platformPreview
-                        ? formatSignedLevel(platformPreview.appliedGainDb)
-                        : '—';
+                    const platformAppliedMainText = buildAnalysisValue(
+                      analysisStatus,
+                      formatAppliedChangeMainText(platformPreview?.appliedGainDb),
+                      {
+                        loading: 'Loading…',
+                        error: 'Error',
+                        empty: 'Applied change —',
+                      }
+                    );
 
                     return (
                       <button
@@ -5741,9 +5771,7 @@ export function App(): JSX.Element {
                           <span className="analysis-platform-target">
                             {platform.targetLufs.toFixed(0)} LUFS target
                           </span>
-                          <span className="analysis-platform-change">
-                            Applied {platformChangeText}
-                          </span>
+                          <span className="analysis-platform-change">{platformAppliedMainText}</span>
                           <span className="muted">
                             {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
                           </span>
@@ -5755,12 +5783,12 @@ export function App(): JSX.Element {
 
                 <div className="analysis-reference-inline analysis-normalization-inline">
                   <div className="analysis-stat-card compact" data-testid="analysis-normalization-change">
-                    <span className="analysis-stat-label">Applied change</span>
-                    <strong>{normalizationChangeText}</strong>
+                    <span className="analysis-stat-label">Applied reduction / boost</span>
+                    <strong>{normalizationAppliedMainText}</strong>
                     <span className="muted">
                       {normalizationPreviewEnabled
-                        ? 'Previewing now'
-                        : 'Off — tap Preview On to hear it'}
+                        ? `Previewing now · ${normalizationChangeText}`
+                        : `Off — tap Preview On to hear it · ${normalizationChangeText}`}
                     </span>
                   </div>
                   <div className="analysis-stat-card compact" data-testid="analysis-normalization-projected">
@@ -5786,15 +5814,6 @@ export function App(): JSX.Element {
                       {selectedNormalizationPlatform.truePeakCeilingDbtp.toFixed(0)} dBTP
                     </strong>
                     <span className="muted">Platform target</span>
-                  </div>
-                  <div className="analysis-stat-card compact" data-testid="analysis-normalization-policy">
-                    <span className="analysis-stat-label">Gain policy</span>
-                    <strong>
-                      {selectedNormalizationPlatform.policy === 'down-only'
-                        ? 'Turn down only'
-                        : 'Turn up & down'}
-                    </strong>
-                    <span className="muted">{selectedNormalizationPlatform.description}</span>
                   </div>
                 </div>
               </section>
@@ -7971,10 +7990,15 @@ export function App(): JSX.Element {
                   >
                     {NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
                       const platformPreview = normalizationPreviewByPlatformId.get(platform.id) ?? null;
-                      const platformChangeText =
-                        analysisStatus === 'ready' && platformPreview
-                          ? formatSignedLevel(platformPreview.appliedGainDb)
-                          : '—';
+                      const platformAppliedMainText = buildAnalysisValue(
+                        analysisStatus,
+                        formatAppliedChangeMainText(platformPreview?.appliedGainDb),
+                        {
+                          loading: 'Loading…',
+                          error: 'Error',
+                          empty: 'Applied change —',
+                        }
+                      );
 
                       return (
                         <button
@@ -8001,9 +8025,7 @@ export function App(): JSX.Element {
                             <span className="analysis-platform-target">
                               {platform.targetLufs.toFixed(0)} LUFS target
                             </span>
-                            <span className="analysis-platform-change">
-                              Applied {platformChangeText}
-                            </span>
+                            <span className="analysis-platform-change">{platformAppliedMainText}</span>
                             <span className="muted">
                               {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
                             </span>
@@ -8015,12 +8037,12 @@ export function App(): JSX.Element {
 
                   <div className="analysis-normalization-metrics-grid">
                     <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-change">
-                      <span className="analysis-stat-label">Applied change</span>
-                      <strong>{normalizationChangeText}</strong>
+                      <span className="analysis-stat-label">Applied reduction / boost</span>
+                      <strong>{normalizationAppliedMainText}</strong>
                       <span className="muted">
                         {normalizationPreviewEnabled
-                          ? 'Previewing now'
-                          : 'Off — tap Preview On to hear it'}
+                          ? `Previewing now · ${normalizationChangeText}`
+                          : `Off — tap Preview On to hear it · ${normalizationChangeText}`}
                       </span>
                     </div>
                     <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-projected">
@@ -8046,15 +8068,6 @@ export function App(): JSX.Element {
                         {selectedNormalizationPlatform.truePeakCeilingDbtp.toFixed(0)} dBTP
                       </strong>
                       <span className="muted">Platform target</span>
-                    </div>
-                    <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-policy">
-                      <span className="analysis-stat-label">Gain policy</span>
-                      <strong>
-                        {selectedNormalizationPlatform.policy === 'down-only'
-                          ? 'Turn down only'
-                          : 'Turn up & down'}
-                      </strong>
-                      <span className="muted">{selectedNormalizationPlatform.description}</span>
                     </div>
                   </div>
                 </section>

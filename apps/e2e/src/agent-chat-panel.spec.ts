@@ -24,6 +24,9 @@ const path = require('node:path');
 const provider = ${JSON.stringify(provider)};
 const args = process.argv.slice(2);
 const logDir = process.env.PRODUCER_PLAYER_FAKE_AGENT_LOG_DIR;
+const streamMode = process.env.PRODUCER_PLAYER_FAKE_AGENT_STREAMING === '1';
+const chunkDelayMs = Number(process.env.PRODUCER_PLAYER_FAKE_AGENT_CHUNK_DELAY_MS || '160');
+const finalDelayMs = Number(process.env.PRODUCER_PLAYER_FAKE_AGENT_FINAL_DELAY_MS || '0');
 
 function extractCurrentMessage(stdin) {
   const match = stdin.match(/<current-user-message>\\n([\\s\\S]*?)\\n<\\/current-user-message>/);
@@ -34,6 +37,18 @@ function appendLog(entry) {
   if (!logDir) return;
   fs.mkdirSync(logDir, { recursive: true });
   fs.appendFileSync(path.join(logDir, provider + '.jsonl'), JSON.stringify(entry) + '\\n');
+}
+
+function emit(event) {
+  console.log(JSON.stringify(event));
+}
+
+function runAfterFinalDelay(callback) {
+  if (finalDelayMs > 0) {
+    setTimeout(callback, finalDelayMs);
+    return;
+  }
+  callback();
 }
 
 if (args.includes('--version') || args.includes('-V') || args.includes('-v')) {
@@ -47,43 +62,130 @@ process.stdin.on('data', (chunk) => {
   stdin += chunk;
 });
 process.stdin.on('end', () => {
-  const modelFlag = provider === 'claude' ? '--model' : '--model';
+  const modelFlag = '--model';
   const modelIndex = args.indexOf(modelFlag);
   const model = modelIndex >= 0 ? args[modelIndex + 1] : 'unknown-model';
   const currentMessage = extractCurrentMessage(stdin);
 
-  appendLog({ provider, argv: args, stdin, currentMessage, model });
+  appendLog({ provider, argv: args, stdin, currentMessage, model, streamMode });
 
   if (provider === 'claude') {
-    console.log(JSON.stringify({
+    const fullText = 'CLAUDE(' + model + '): ' + currentMessage;
+
+    if (!streamMode) {
+      runAfterFinalDelay(() => {
+        emit({
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: fullText },
+          },
+        });
+        emit({
+          type: 'result',
+          result: fullText,
+          usage: { input_tokens: 21, output_tokens: 8 },
+        });
+      });
+      return;
+    }
+
+    const prefix = 'CLAUDE(' + model + '): ';
+    const remainder = currentMessage;
+
+    emit({
       type: 'stream_event',
       event: {
         type: 'content_block_delta',
-        delta: { type: 'text_delta', text: 'CLAUDE(' + model + '): ' + currentMessage },
+        delta: { type: 'text_delta', text: prefix },
       },
-    }));
-    console.log(JSON.stringify({
-      type: 'result',
-      result: 'CLAUDE(' + model + '): ' + currentMessage,
-      usage: { input_tokens: 21, output_tokens: 8 },
-    }));
+    });
+
+    setTimeout(() => {
+      emit({
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: remainder },
+        },
+      });
+
+      setTimeout(() => {
+        emit({
+          type: 'result',
+          result: fullText,
+          usage: { input_tokens: 21, output_tokens: 8 },
+        });
+      }, chunkDelayMs);
+    }, chunkDelayMs);
+
     return;
   }
 
-  console.log(JSON.stringify({ type: 'thread.started', thread_id: 'test-thread' }));
-  console.log(JSON.stringify({ type: 'turn.started' }));
-  console.log(JSON.stringify({
-    type: 'item.completed',
-    item: {
-      id: 'item-1',
-      type: 'agent_message',
-      text: 'CODEX(' + model + '): ' + currentMessage,
-    },
-  }));
-  console.log(JSON.stringify({
-    type: 'turn.completed',
-    usage: { input_tokens: 34, cached_input_tokens: 13, output_tokens: 11 },
-  }));
+  const fullText = 'CODEX(' + model + '): ' + currentMessage;
+
+  emit({ type: 'thread.started', thread_id: 'test-thread' });
+  emit({ type: 'turn.started' });
+
+  if (!streamMode) {
+    runAfterFinalDelay(() => {
+      emit({
+        type: 'item.completed',
+        item: {
+          id: 'item-1',
+          type: 'agent_message',
+          text: fullText,
+        },
+      });
+      emit({
+        type: 'turn.completed',
+        usage: { input_tokens: 34, cached_input_tokens: 13, output_tokens: 11 },
+      });
+    });
+    return;
+  }
+
+  const chunkSize = Math.max(1, Math.floor(fullText.length / 3));
+  const chunks = [
+    fullText.slice(0, chunkSize),
+    fullText.slice(chunkSize, chunkSize * 2),
+    fullText.slice(chunkSize * 2),
+  ].filter(Boolean);
+
+  const itemId = 'item-1';
+  let index = 0;
+
+  function emitNextChunk() {
+    if (index >= chunks.length) {
+      emit({
+        type: 'item.completed',
+        item: {
+          id: itemId,
+          type: 'agent_message',
+          text: fullText,
+        },
+      });
+      emit({
+        type: 'turn.completed',
+        usage: { input_tokens: 34, cached_input_tokens: 13, output_tokens: 11 },
+      });
+      return;
+    }
+
+    emit({
+      type: 'item.delta',
+      item: {
+        id: itemId,
+        type: 'agent_message',
+        text: chunks[index],
+      },
+    });
+
+    index += 1;
+    setTimeout(emitNextChunk, chunkDelayMs);
+  }
+
+  emitNextChunk();
 });
 process.stdin.resume();
 `;
@@ -178,6 +280,9 @@ test.describe('Agent Chat Panel', () => {
       await page.getByTestId('agent-panel-toggle').click();
       await expect(panel).toHaveClass(/agent-chat-panel--open/);
       await expect(page.getByTestId('agent-panel-title')).toHaveText('Produceboi agent');
+      await expect(page.locator('.agent-experimental-label')).toHaveCount(0);
+      await expect(page.getByTestId('agent-help-toggle')).toHaveAttribute('title', 'Assistant setup help');
+      await expect(page.getByTestId('agent-settings-toggle')).toHaveAttribute('title', 'Assistant settings');
       await expect(page.getByTestId('agent-panel-close')).toBeVisible();
       await expect(page.getByTestId('agent-panel-close')).toHaveAttribute('title', 'Minimize');
 
@@ -202,6 +307,8 @@ test.describe('Agent Chat Panel', () => {
     try {
       await page.getByTestId('agent-panel-toggle').click();
       await expect(page.getByTestId('agent-empty-state')).toBeVisible();
+      await expect(page.getByTestId('agent-empty-state-steps')).toContainText('Install Claude Code or Codex CLI.');
+      await expect(page.getByTestId('agent-empty-state-help')).toBeVisible();
       await expect(page.getByTestId('agent-provider-notice')).toHaveCount(0);
       await expect(page.getByTestId('agent-starter-chip')).toHaveCount(4);
     } finally {
@@ -223,21 +330,26 @@ test.describe('Agent Chat Panel', () => {
       await expect(page.getByTestId('agent-settings')).toBeVisible();
 
       const modelSelect = page.getByTestId('agent-model-select');
+      const thinkingSelect = page.getByTestId('agent-thinking-select');
       const systemPromptInput = page.getByTestId('agent-system-prompt-input');
       await expect(page.getByTestId('agent-provider-claude')).toBeVisible();
       await expect(page.getByTestId('agent-provider-codex')).toBeVisible();
       await expect(modelSelect).toHaveValue('claude-sonnet-4-6');
       await expect(modelSelect.locator('option')).toHaveCount(3);
+      await expect(thinkingSelect).toHaveValue('high');
       await expect(systemPromptInput).toBeVisible();
       await expect(systemPromptInput).toHaveValue(/full-access mastering agent/i);
       await expect(page.getByTestId('agent-system-prompt-reset')).toBeVisible();
       await expect(page.getByTestId('agent-deepgram-key-help')).toContainText(
         'microphone button appears beside the message box'
       );
+      await expect(page.getByTestId('agent-clear-chat')).toContainText('Start new chat');
+      await expect(page.getByTestId('agent-open-chat-history')).toContainText('Chat history');
 
       await page.getByTestId('agent-provider-codex').click();
       await expect(modelSelect).toHaveValue('gpt-5.4');
       await expect(modelSelect.locator('option')).toHaveCount(6);
+      await expect(thinkingSelect).toHaveValue('high');
       await expect(modelSelect.locator('option')).toContainText([
         'GPT-5.4',
         'GPT-5.4 Mini',
@@ -246,6 +358,29 @@ test.describe('Agent Chat Panel', () => {
 
       await page.getByTestId('agent-settings-toggle').click();
       await expect(page.getByTestId('agent-settings')).not.toBeVisible();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('header help dialog explains CLI setup and low-cost model', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-help-dialog');
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
+
+    try {
+      await page.getByTestId('agent-panel-toggle').click();
+      await page.getByTestId('agent-help-toggle').click();
+
+      const helpDialog = page.getByTestId('agent-help-dialog');
+      await expect(helpDialog).toBeVisible();
+      await expect(helpDialog).toContainText('Set up Produceboi agent');
+      await expect(helpDialog).toContainText('claude auth');
+      await expect(helpDialog).toContainText('existing subscription');
+      await expect(helpDialog).toContainText('automatic compaction has not been verified');
+
+      await page.getByTestId('agent-help-close').click();
+      await expect(helpDialog).toHaveCount(0);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
@@ -332,6 +467,7 @@ test.describe('Agent Chat Panel', () => {
       await page.getByTestId('agent-panel-toggle').click();
       await page.getByTestId('agent-settings-toggle').click();
       await page.getByTestId('agent-model-select').selectOption('claude-haiku-4-5');
+      await page.getByTestId('agent-thinking-select').selectOption('medium');
       await page.getByTestId('agent-system-prompt-input').fill(customSystemPrompt);
       await page.getByTestId('agent-settings-toggle').click();
 
@@ -357,9 +493,11 @@ test.describe('Agent Chat Panel', () => {
       expect(firstArgs).toContain('stream-json');
       expect(firstArgs).toContain('--verbose');
       expect(firstArgs).toContain('--dangerously-skip-permissions');
+      expect(firstArgs).toContain('--effort');
       expect(firstArgs).toContain('--system-prompt');
       expect(firstArgs).not.toContain('--tools');
       expect(firstArgs[firstArgs.indexOf('--model') + 1]).toBe('claude-haiku-4-5');
+      expect(firstArgs[firstArgs.indexOf('--effort') + 1]).toBe('medium');
       expect(firstArgs[firstArgs.indexOf('--system-prompt') + 1]).toBe(customSystemPrompt);
 
       const firstPrompt = String(claudeLogs[0]?.stdin ?? '');
@@ -390,6 +528,7 @@ test.describe('Agent Chat Panel', () => {
       await page.getByTestId('agent-settings-toggle').click();
       await page.getByTestId('agent-provider-codex').click();
       await page.getByTestId('agent-model-select').selectOption('gpt-5.3-codex');
+      await page.getByTestId('agent-thinking-select').selectOption('low');
       await page.getByTestId('agent-system-prompt-input').fill(customSystemPrompt);
       await page.getByTestId('agent-settings-toggle').click();
 
@@ -405,6 +544,8 @@ test.describe('Agent Chat Panel', () => {
       const codexArgs = codexLogs[0]?.argv as string[];
       expect(codexArgs.slice(0, 2)).toEqual(['exec', '--skip-git-repo-check']);
       expect(codexArgs).toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(codexArgs).toContain('-c');
+      expect(codexArgs).toContain('model_reasoning_effort="low"');
       expect(codexArgs).toContain('--json');
       expect(codexArgs[codexArgs.indexOf('--model') + 1]).toBe('gpt-5.3-codex');
 
@@ -419,8 +560,93 @@ test.describe('Agent Chat Panel', () => {
     }
   });
 
-  test('clear chat removes messages', async () => {
-    const dirs = await createE2ETestDirectories('agent-panel-clear');
+  test('Claude streams into the active message before completion', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-claude-streaming');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: {
+        ...fakeCli.env,
+        PRODUCER_PLAYER_FAKE_AGENT_STREAMING: '1',
+        PRODUCER_PLAYER_FAKE_AGENT_CHUNK_DELAY_MS: '320',
+      },
+    });
+
+    try {
+      await page.getByTestId('agent-panel-toggle').click();
+
+      const input = page.getByTestId('agent-composer-input');
+      await input.fill('Claude streaming check');
+      await page.getByTestId('agent-send-button').click();
+
+      const content = page
+        .getByTestId('agent-message-agent')
+        .last()
+        .locator('.agent-message-content');
+
+      await expect(content.locator('.agent-typing-cursor')).toBeVisible();
+      await expect(content).toContainText('CLAUDE(claude-sonnet-4-6):', { timeout: 5000 });
+
+      const fullText = 'CLAUDE(claude-sonnet-4-6): Claude streaming check';
+      await expect
+        .poll(async () => {
+          const text = (await content.innerText()).trim();
+          return text.length > 0 && text.length < fullText.length;
+        })
+        .toBe(true);
+
+      await expect(content).toContainText(fullText);
+      await expect(content.locator('.agent-typing-cursor')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('Codex item.delta chunks stream without duplicating the final message', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-codex-streaming');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: {
+        ...fakeCli.env,
+        PRODUCER_PLAYER_FAKE_AGENT_STREAMING: '1',
+        PRODUCER_PLAYER_FAKE_AGENT_CHUNK_DELAY_MS: '320',
+      },
+    });
+
+    try {
+      await page.getByTestId('agent-panel-toggle').click();
+      await page.getByTestId('agent-settings-toggle').click();
+      await page.getByTestId('agent-provider-codex').click();
+      await page.getByTestId('agent-model-select').selectOption('gpt-5.3-codex');
+      await page.getByTestId('agent-settings-toggle').click();
+
+      const input = page.getByTestId('agent-composer-input');
+      await input.fill('Codex streaming check');
+      await page.getByTestId('agent-send-button').click();
+
+      const content = page
+        .getByTestId('agent-message-agent')
+        .last()
+        .locator('.agent-message-content');
+
+      await expect(content.locator('.agent-typing-cursor')).toBeVisible();
+      await expect(content).toContainText('CODEX(gpt-5.3-codex):', { timeout: 5000 });
+
+      const fullText = 'CODEX(gpt-5.3-codex): Codex streaming check';
+      await expect(content).toContainText(fullText);
+      await expect(content.locator('.agent-typing-cursor')).toHaveCount(0);
+
+      const finalText = (await content.innerText()).trim();
+      expect(finalText).toBe(fullText);
+      expect((finalText.match(/CODEX\(gpt-5\.3-codex\):/g) ?? []).length).toBe(1);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('new chat archives conversation and clears timeline', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-new-chat');
     const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
       extraEnv: fakeCli.env,
@@ -430,19 +656,23 @@ test.describe('Agent Chat Panel', () => {
       await page.getByTestId('agent-panel-toggle').click();
 
       const input = page.getByTestId('agent-composer-input');
-      await input.fill('Test message for clear');
+      await input.fill('Test message for archive');
       await page.getByTestId('agent-send-button').click();
       await expect(page.getByTestId('agent-message-user').first()).toBeVisible({ timeout: 5000 });
 
       await page.getByTestId('agent-settings-toggle').click();
       await expect(page.getByTestId('agent-settings')).toBeVisible();
-
-      const clearButton = page.getByTestId('agent-clear-chat');
-      await clearButton.click();
-      await clearButton.click();
+      await page.getByTestId('agent-clear-chat').click();
 
       const timeline = page.getByTestId('agent-timeline');
       await expect(timeline.getByTestId('agent-message-user')).toHaveCount(0, { timeout: 3000 });
+
+      await page.getByTestId('agent-history-toggle').click();
+      await expect(page.getByTestId('agent-history-state')).toBeVisible();
+      await expect(page.getByTestId('agent-history-item')).toHaveCount(1);
+      await page.getByTestId('agent-history-open').first().click();
+      await expect(page.getByTestId('agent-history-state')).toHaveCount(0);
+      await expect(page.getByTestId('agent-message-user').first()).toContainText('Test message for archive');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);

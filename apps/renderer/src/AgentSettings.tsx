@@ -3,6 +3,8 @@ import type {
   AgentModelDefinition,
   AgentModelId,
   AgentProviderId,
+  AgentThinkingEffort,
+  AgentThinkingOption,
 } from '@producer-player/contracts';
 import { AGENT_PROVIDER_LABELS } from './agentModels';
 import { notifyAgentVoiceSettingsUpdated } from './agentVoiceSettings';
@@ -10,13 +12,18 @@ import { notifyAgentVoiceSettingsUpdated } from './agentVoiceSettings';
 interface AgentSettingsProps {
   provider: AgentProviderId;
   model: AgentModelId;
+  thinking: AgentThinkingEffort;
   availableModels: readonly AgentModelDefinition[];
+  availableThinkingOptions: readonly AgentThinkingOption[];
   systemPrompt: string;
   onProviderChange: (provider: AgentProviderId) => void;
   onModelChange: (model: AgentModelId) => void;
+  onThinkingChange: (thinking: AgentThinkingEffort) => void;
   onSystemPromptChange: (prompt: string) => void;
   onResetSystemPrompt: () => void;
-  onClearChat: () => void;
+  onNewChat: () => void;
+  onOpenHistory: () => void;
+  hasHistory: boolean;
   onClose: () => void;
   controlsDisabled?: boolean;
 }
@@ -24,20 +31,24 @@ interface AgentSettingsProps {
 export function AgentSettings({
   provider,
   model,
+  thinking,
   availableModels,
+  availableThinkingOptions,
   systemPrompt,
   onProviderChange,
   onModelChange,
+  onThinkingChange,
   onSystemPromptChange,
   onResetSystemPrompt,
-  onClearChat,
+  onNewChat,
+  onOpenHistory,
+  hasHistory,
   onClose,
   controlsDisabled = false,
 }: AgentSettingsProps): JSX.Element {
   const [deepgramKey, setDeepgramKey] = useState('');
   const [deepgramKeySet, setDeepgramKeySet] = useState(false);
   const [deepgramKeyError, setDeepgramKeyError] = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
     void window.producerPlayer
@@ -84,15 +95,15 @@ export function AgentSettings({
     }
   }, []);
 
-  const handleClearChat = useCallback(() => {
-    if (!confirmClear) {
-      setConfirmClear(true);
-      return;
-    }
-    onClearChat();
-    setConfirmClear(false);
+  const handleNewChatClick = useCallback(() => {
+    onNewChat();
     onClose();
-  }, [confirmClear, onClearChat, onClose]);
+  }, [onClose, onNewChat]);
+
+  const handleOpenHistoryClick = useCallback(() => {
+    onOpenHistory();
+    onClose();
+  }, [onClose, onOpenHistory]);
 
   return (
     <div className="agent-settings" data-testid="agent-settings">
@@ -127,6 +138,26 @@ export function AgentSettings({
           data-testid="agent-model-select"
         >
           {availableModels.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="agent-settings-section">
+        <label className="agent-settings-label" htmlFor="agent-thinking-select">
+          Thinking
+        </label>
+        <select
+          id="agent-thinking-select"
+          className="agent-settings-model-select"
+          value={thinking}
+          onChange={(event) => onThinkingChange(event.target.value as AgentThinkingEffort)}
+          disabled={controlsDisabled}
+          data-testid="agent-thinking-select"
+        >
+          {availableThinkingOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
             </option>
@@ -210,11 +241,21 @@ export function AgentSettings({
       <div className="agent-settings-section agent-settings-section--danger">
         <button
           type="button"
-          className={`agent-settings-clear-button ${confirmClear ? 'agent-settings-clear-button--confirm' : ''}`}
-          onClick={handleClearChat}
+          className="agent-settings-clear-button"
+          onClick={handleNewChatClick}
           data-testid="agent-clear-chat"
         >
-          {confirmClear ? 'Click again to confirm' : 'Clear chat'}
+          Start new chat
+        </button>
+        <button
+          type="button"
+          className="agent-settings-clear-button agent-settings-secondary-button"
+          onClick={handleOpenHistoryClick}
+          data-testid="agent-open-chat-history"
+          disabled={!hasHistory}
+          title={hasHistory ? 'Open previous chats' : 'No chat history yet'}
+        >
+          Chat history
         </button>
       </div>
     </div>

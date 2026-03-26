@@ -7,9 +7,11 @@ import {
 } from 'react';
 import type {
   AgentContext,
+  AgentConversationHistoryEntry,
   AgentEvent,
   AgentModelId,
   AgentProviderId,
+  AgentThinkingEffort,
   AgentTokenUsage,
 } from '@producer-player/contracts';
 import { AgentComposer } from './AgentComposer';
@@ -22,7 +24,9 @@ import {
 } from './agentPrompts';
 import {
   AGENT_MODEL_OPTIONS_BY_PROVIDER,
+  AGENT_THINKING_OPTIONS,
   DEFAULT_AGENT_MODEL_BY_PROVIDER,
+  DEFAULT_AGENT_THINKING_BY_PROVIDER,
 } from './agentModels';
 
 export interface AgentChatMessage {
@@ -38,6 +42,18 @@ interface AgentChatPanelProps {
   getAnalysisContext: () => AgentContext | null;
 }
 
+interface StoredActiveChat {
+  id: string;
+  messages: AgentChatMessage[];
+}
+
+interface AgentChatHistoryEntry {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: AgentChatMessage[];
+}
+
 const STARTER_PROMPTS = [
   'How is my loudness?',
   'Compare to reference',
@@ -45,25 +61,29 @@ const STARTER_PROMPTS = [
   'Is this ready for Spotify?',
 ];
 
+const EMPTY_CHAT_SETUP_STEPS = [
+  'Install Claude Code or Codex CLI.',
+  'Sign in with your CLI subscription (for example, `claude auth` or `codex login`).',
+  'Open settings to choose provider, model, and thinking level.',
+];
+
 const AGENT_PROVIDER_STORAGE_KEY = 'producer-player.agent-provider';
 const AGENT_MODEL_STORAGE_PREFIX = 'producer-player.agent-model.';
-
-function readStoredProvider(): AgentProviderId {
-  const stored = localStorage.getItem(AGENT_PROVIDER_STORAGE_KEY);
-  return stored === 'codex' ? 'codex' : 'claude';
-}
-
-function readStoredModel(provider: AgentProviderId): AgentModelId {
-  const stored = localStorage.getItem(`${AGENT_MODEL_STORAGE_PREFIX}${provider}`)?.trim();
-  return stored && stored.length > 0
-    ? stored
-    : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
-}
+const AGENT_THINKING_STORAGE_PREFIX = 'producer-player.agent-thinking.';
+const AGENT_PANEL_SEEN_STORAGE_KEY = 'producer-player.agent-panel-seen';
+const AGENT_ACTIVE_CHAT_STORAGE_KEY = 'producer-player.agent-chat-active.v1';
+const AGENT_CHAT_HISTORY_STORAGE_KEY = 'producer-player.agent-chat-history.v1';
+const AGENT_AUTO_OPEN_DELAY_MS = 2 * 60 * 1000;
+const AGENT_CHAT_HISTORY_LIMIT = 20;
 
 let messageIdCounter = 0;
 function nextMessageId(): string {
   messageIdCounter += 1;
   return `msg-${messageIdCounter}-${Date.now()}`;
+}
+
+function createConversationId(): string {
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -77,21 +97,266 @@ function formatRelativeTime(timestamp: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readStoredProvider(): AgentProviderId {
+  const stored = localStorage.getItem(AGENT_PROVIDER_STORAGE_KEY);
+  return stored === 'codex' ? 'codex' : 'claude';
+}
+
+function readStoredModel(provider: AgentProviderId): AgentModelId {
+  const stored = localStorage.getItem(`${AGENT_MODEL_STORAGE_PREFIX}${provider}`)?.trim();
+  return stored && stored.length > 0
+    ? stored
+    : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
+}
+
+function readStoredThinking(provider: AgentProviderId): AgentThinkingEffort {
+  const stored = localStorage.getItem(`${AGENT_THINKING_STORAGE_PREFIX}${provider}`)?.trim();
+  return stored === 'low' || stored === 'medium' || stored === 'high'
+    ? stored
+    : DEFAULT_AGENT_THINKING_BY_PROVIDER[provider];
+}
+
+function sanitizeTokenUsage(value: unknown): AgentTokenUsage | undefined {
+  if (!isRecord(value)) return undefined;
+
+  const inputTokens = typeof value.inputTokens === 'number' ? value.inputTokens : undefined;
+  const outputTokens = typeof value.outputTokens === 'number' ? value.outputTokens : undefined;
+  const cacheReadTokens =
+    typeof value.cacheReadTokens === 'number' ? value.cacheReadTokens : undefined;
+
+  if (inputTokens === undefined || outputTokens === undefined) {
+    return undefined;
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+  };
+}
+
+function sanitizeStoredMessage(value: unknown): AgentChatMessage | null {
+  if (!isRecord(value)) return null;
+
+  const role = value.role;
+  if (role !== 'user' && role !== 'agent' && role !== 'system') {
+    return null;
+  }
+
+  const content = typeof value.content === 'string' ? value.content : '';
+  const timestamp =
+    typeof value.timestamp === 'number' && Number.isFinite(value.timestamp)
+      ? value.timestamp
+      : Date.now();
+  const id =
+    typeof value.id === 'string' && value.id.trim().length > 0
+      ? value.id
+      : nextMessageId();
+
+  const statusRaw = value.status;
+  const status =
+    statusRaw === 'streaming' ||
+    statusRaw === 'complete' ||
+    statusRaw === 'stopped' ||
+    statusRaw === 'error'
+      ? statusRaw
+      : undefined;
+
+  const usage = sanitizeTokenUsage(value.usage);
+
+  return {
+    id,
+    role,
+    content,
+    timestamp,
+    ...(status ? { status } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
+function normalizeMessagesForPersistence(messages: AgentChatMessage[]): AgentChatMessage[] {
+  return messages.map((message) =>
+    message.status === 'streaming'
+      ? { ...message, status: 'stopped' }
+      : message
+  );
+}
+
+function sanitizeStoredMessages(value: unknown): AgentChatMessage[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry) => sanitizeStoredMessage(entry))
+    .filter((entry): entry is AgentChatMessage => entry !== null)
+    .map((entry) =>
+      entry.status === 'streaming' ? { ...entry, status: 'stopped' } : entry
+    );
+}
+
+function readStoredActiveChat(): StoredActiveChat {
+  const fallback: StoredActiveChat = {
+    id: createConversationId(),
+    messages: [],
+  };
+
+  const raw = localStorage.getItem(AGENT_ACTIVE_CHAT_STORAGE_KEY);
+  if (!raw) return fallback;
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) return fallback;
+
+    const id =
+      typeof parsed.id === 'string' && parsed.id.trim().length > 0
+        ? parsed.id
+        : fallback.id;
+
+    const messages = sanitizeStoredMessages(parsed.messages);
+
+    return {
+      id,
+      messages,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredActiveChat(chat: StoredActiveChat): void {
+  localStorage.setItem(
+    AGENT_ACTIVE_CHAT_STORAGE_KEY,
+    JSON.stringify({
+      id: chat.id,
+      messages: normalizeMessagesForPersistence(chat.messages),
+    })
+  );
+}
+
+function readStoredChatHistory(): AgentChatHistoryEntry[] {
+  const raw = localStorage.getItem(AGENT_CHAT_HISTORY_STORAGE_KEY);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((entry) => {
+        if (!isRecord(entry)) return null;
+
+        const id =
+          typeof entry.id === 'string' && entry.id.trim().length > 0
+            ? entry.id
+            : createConversationId();
+        const title =
+          typeof entry.title === 'string' && entry.title.trim().length > 0
+            ? entry.title
+            : 'Untitled chat';
+        const updatedAt =
+          typeof entry.updatedAt === 'number' && Number.isFinite(entry.updatedAt)
+            ? entry.updatedAt
+            : Date.now();
+        const messages = sanitizeStoredMessages(entry.messages);
+
+        if (messages.length === 0) {
+          return null;
+        }
+
+        return {
+          id,
+          title,
+          updatedAt,
+          messages,
+        } satisfies AgentChatHistoryEntry;
+      })
+      .filter((entry): entry is AgentChatHistoryEntry => entry !== null)
+      .slice(0, AGENT_CHAT_HISTORY_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredChatHistory(history: AgentChatHistoryEntry[]): void {
+  localStorage.setItem(
+    AGENT_CHAT_HISTORY_STORAGE_KEY,
+    JSON.stringify(
+      history.slice(0, AGENT_CHAT_HISTORY_LIMIT).map((entry) => ({
+        ...entry,
+        messages: normalizeMessagesForPersistence(entry.messages),
+      }))
+    )
+  );
+}
+
+function buildHistoryTitle(messages: AgentChatMessage[]): string {
+  const firstUserMessage = messages.find(
+    (message) => message.role === 'user' && message.content.trim().length > 0
+  );
+  const fallbackMessage = messages.find((message) => message.content.trim().length > 0);
+
+  const source = firstUserMessage?.content ?? fallbackMessage?.content;
+  if (!source) {
+    return 'Untitled chat';
+  }
+
+  const trimmed = source.trim().replace(/\s+/g, ' ');
+  return trimmed.length > 64 ? `${trimmed.slice(0, 61)}...` : trimmed;
+}
+
+function buildHistorySeed(messages: AgentChatMessage[]): AgentConversationHistoryEntry[] {
+  return messages
+    .filter(
+      (message) =>
+        (message.role === 'user' || message.role === 'agent') &&
+        message.content.trim().length > 0
+    )
+    .map((message) => ({
+      role: message.role === 'user' ? 'user' : 'assistant',
+      content: message.content,
+    }));
+}
+
 export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX.Element {
+  const initialActiveChatRef = useRef<StoredActiveChat>(readStoredActiveChat());
+
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<AgentChatMessage[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState(
+    initialActiveChatRef.current.id
+  );
+  const [messages, setMessages] = useState<AgentChatMessage[]>(
+    initialActiveChatRef.current.messages
+  );
+  const [chatHistory, setChatHistory] = useState<AgentChatHistoryEntry[]>(() =>
+    readStoredChatHistory()
+  );
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
   const [provider, setProvider] = useState<AgentProviderId>(() => readStoredProvider());
-  const [modelByProvider, setModelByProvider] = useState<Record<AgentProviderId, AgentModelId>>(() => ({
+  const [modelByProvider, setModelByProvider] = useState<
+    Record<AgentProviderId, AgentModelId>
+  >(() => ({
     claude: readStoredModel('claude'),
     codex: readStoredModel('codex'),
   }));
-  const [systemPrompt, setSystemPrompt] = useState<string>(() => readStoredAgentSystemPrompt());
+  const [thinkingByProvider, setThinkingByProvider] = useState<
+    Record<AgentProviderId, AgentThinkingEffort>
+  >(() => ({
+    claude: readStoredThinking('claude'),
+    codex: readStoredThinking('codex'),
+  }));
+  const [systemPrompt, setSystemPrompt] = useState<string>(() =>
+    readStoredAgentSystemPrompt()
+  );
   const [providerAvailable, setProviderAvailable] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [showFirstUseBadge, setShowFirstUseBadge] = useState(() => {
-    return localStorage.getItem('producer-player.agent-panel-seen') !== 'true';
+  const [showFirstUseBadge] = useState(() => {
+    return localStorage.getItem(AGENT_PANEL_SEEN_STORAGE_KEY) !== 'true';
   });
   const [approvalRequest, setApprovalRequest] = useState<{
     approvalId: string;
@@ -102,12 +367,23 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const userScrolledUpRef = useRef(false);
   const streamingMessageIdRef = useRef<string | null>(null);
+  const onboardingScheduledRef = useRef(false);
 
   const availableModels = AGENT_MODEL_OPTIONS_BY_PROVIDER[provider];
   const currentModel = availableModels.some((option) => option.id === modelByProvider[provider])
     ? modelByProvider[provider]
     : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
+  const currentThinking =
+    thinkingByProvider[provider] ?? DEFAULT_AGENT_THINKING_BY_PROVIDER[provider];
   const effectiveSystemPrompt = systemPrompt.trim() || DEFAULT_AGENT_SYSTEM_PROMPT;
+
+  useEffect(() => {
+    writeStoredActiveChat({ id: activeConversationId, messages });
+  }, [activeConversationId, messages]);
+
+  useEffect(() => {
+    writeStoredChatHistory(chatHistory);
+  }, [chatHistory]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -115,6 +391,22 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
       setProviderAvailable(available);
     });
   }, [isOpen, provider]);
+
+  useEffect(() => {
+    if (!showFirstUseBadge || isOpen || onboardingScheduledRef.current) {
+      return;
+    }
+
+    onboardingScheduledRef.current = true;
+    const timeoutId = window.setTimeout(() => {
+      setIsOpen(true);
+      localStorage.setItem(AGENT_PANEL_SEEN_STORAGE_KEY, 'true');
+    }, AGENT_AUTO_OPEN_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isOpen, showFirstUseBadge]);
 
   const scrollToBottom = useCallback(() => {
     if (timelineRef.current && !userScrolledUpRef.current) {
@@ -124,7 +416,7 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, scrollToBottom]);
+  }, [messages, historyOpen, scrollToBottom]);
 
   const handleTimelineScroll = useCallback(() => {
     const el = timelineRef.current;
@@ -154,9 +446,7 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
           } else {
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === streamId
-                  ? { ...m, content: m.content + event.content }
-                  : m
+                m.id === streamId ? { ...m, content: m.content + event.content } : m
               )
             );
           }
@@ -168,30 +458,39 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
           streamingMessageIdRef.current = null;
           setIsStreaming(false);
           if (completedId) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === completedId
-                  ? { ...m, status: 'complete', usage: event.usage }
-                  : m
-              )
-            );
+            setMessages((prev) => {
+              const next = prev.map((m) =>
+                m.id === completedId ? { ...m, status: 'complete', usage: event.usage } : m
+              );
+
+              return next.filter(
+                (m) => !(m.id === completedId && m.role === 'agent' && m.content.length === 0)
+              );
+            });
           }
           break;
         }
 
         case 'error': {
+          const erroredId = streamingMessageIdRef.current;
           streamingMessageIdRef.current = null;
           setIsStreaming(false);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: nextMessageId(),
-              role: 'system',
-              content: `Error: ${event.message}`,
-              timestamp: Date.now(),
-              status: 'error',
-            },
-          ]);
+          setMessages((prev) => {
+            const next = erroredId
+              ? prev.map((m) => (m.id === erroredId ? { ...m, status: 'error' } : m))
+              : prev;
+
+            return [
+              ...next,
+              {
+                id: nextMessageId(),
+                role: 'system',
+                content: `Error: ${event.message}`,
+                timestamp: Date.now(),
+                status: 'error',
+              },
+            ];
+          });
           break;
         }
 
@@ -219,16 +518,6 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
     return unsubscribe;
   }, []);
 
-  const handleTogglePanel = useCallback(() => {
-    setIsOpen((prev) => {
-      if (!prev && showFirstUseBadge) {
-        setShowFirstUseBadge(false);
-        localStorage.setItem('producer-player.agent-panel-seen', 'true');
-      }
-      return !prev;
-    });
-  }, [showFirstUseBadge]);
-
   const resetActiveSession = useCallback(() => {
     if (sessionActive) {
       void window.producerPlayer.agentDestroySession();
@@ -238,16 +527,95 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
     setIsStreaming(false);
   }, [sessionActive]);
 
+  const archiveCurrentConversation = useCallback(() => {
+    if (messages.length === 0) {
+      return;
+    }
+
+    const entry: AgentChatHistoryEntry = {
+      id: activeConversationId,
+      title: buildHistoryTitle(messages),
+      updatedAt: Date.now(),
+      messages: normalizeMessagesForPersistence(messages),
+    };
+
+    setChatHistory((prev) => [entry, ...prev.filter((item) => item.id !== entry.id)].slice(0, AGENT_CHAT_HISTORY_LIMIT));
+  }, [activeConversationId, messages]);
+
+  const handleNewChat = useCallback(() => {
+    archiveCurrentConversation();
+    resetActiveSession();
+    setMessages([]);
+    setActiveConversationId(createConversationId());
+    setHistoryOpen(false);
+    userScrolledUpRef.current = false;
+  }, [archiveCurrentConversation, resetActiveSession]);
+
+  const handleRestoreHistory = useCallback(
+    (conversationId: string) => {
+      const selected = chatHistory.find((entry) => entry.id === conversationId);
+      if (!selected) return;
+
+      resetActiveSession();
+      setMessages(normalizeMessagesForPersistence(selected.messages));
+      setActiveConversationId(selected.id);
+      setChatHistory((prev) => prev.filter((entry) => entry.id !== conversationId));
+      setHistoryOpen(false);
+      setHelpDialogOpen(false);
+      userScrolledUpRef.current = false;
+    },
+    [chatHistory, resetActiveSession]
+  );
+
+  const handleDeleteHistoryEntry = useCallback((conversationId: string) => {
+    setChatHistory((prev) => prev.filter((entry) => entry.id !== conversationId));
+  }, []);
+
+  const handleTogglePanel = useCallback(() => {
+    setIsOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        localStorage.setItem(AGENT_PANEL_SEEN_STORAGE_KEY, 'true');
+      } else {
+        setSettingsOpen(false);
+        setHistoryOpen(false);
+        setHelpDialogOpen(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleSettings = useCallback(() => {
+    setSettingsOpen((prev) => !prev);
+    setHistoryOpen(false);
+    setHelpDialogOpen(false);
+  }, []);
+
+  const handleToggleHistory = useCallback(() => {
+    setHistoryOpen((prev) => !prev);
+    setSettingsOpen(false);
+    setHelpDialogOpen(false);
+  }, []);
+
+  const handleToggleHelp = useCallback(() => {
+    setHelpDialogOpen((prev) => !prev);
+    setSettingsOpen(false);
+    setHistoryOpen(false);
+  }, []);
+
   const handleSendMessage = useCallback(
     async (text: string) => {
-      if (!text.trim() || isStreaming) return;
+      if (!text.trim() || isStreaming || historyOpen) return;
 
       if (!sessionActive) {
+        const historySeed = buildHistorySeed(messages);
         await window.producerPlayer.agentStartSession({
           provider,
           mode: 'analysis',
           model: currentModel,
+          thinking: currentThinking,
           systemPrompt: effectiveSystemPrompt,
+          ...(historySeed.length > 0 ? { history: historySeed } : {}),
         });
         setSessionActive(true);
       }
@@ -259,7 +627,20 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
         timestamp: Date.now(),
         status: 'complete',
       };
-      setMessages((prev) => [...prev, userMsg]);
+      const pendingAssistantId = nextMessageId();
+
+      setMessages((prev) => [
+        ...prev,
+        userMsg,
+        {
+          id: pendingAssistantId,
+          role: 'agent',
+          content: '',
+          timestamp: Date.now(),
+          status: 'streaming',
+        },
+      ]);
+      streamingMessageIdRef.current = pendingAssistantId;
       setIsStreaming(true);
       userScrolledUpRef.current = false;
 
@@ -272,7 +653,17 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
         uiContext,
       });
     },
-    [currentModel, effectiveSystemPrompt, getAnalysisContext, isStreaming, provider, sessionActive]
+    [
+      currentModel,
+      currentThinking,
+      effectiveSystemPrompt,
+      getAnalysisContext,
+      historyOpen,
+      isStreaming,
+      messages,
+      provider,
+      sessionActive,
+    ]
   );
 
   const handleInterrupt = useCallback(() => {
@@ -281,18 +672,9 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
     streamingMessageIdRef.current = null;
     setIsStreaming(false);
     if (stoppedId) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === stoppedId ? { ...m, status: 'stopped' } : m
-        )
-      );
+      setMessages((prev) => prev.map((m) => (m.id === stoppedId ? { ...m, status: 'stopped' } : m)));
     }
   }, []);
-
-  const handleClearChat = useCallback(() => {
-    setMessages([]);
-    resetActiveSession();
-  }, [resetActiveSession]);
 
   const handleApproval = useCallback(
     (decision: 'allow' | 'deny') => {
@@ -336,6 +718,18 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
     [provider, resetActiveSession]
   );
 
+  const handleThinkingChange = useCallback(
+    (thinking: AgentThinkingEffort) => {
+      resetActiveSession();
+      localStorage.setItem(`${AGENT_THINKING_STORAGE_PREFIX}${provider}`, thinking);
+      setThinkingByProvider((prev) => ({
+        ...prev,
+        [provider]: thinking,
+      }));
+    },
+    [provider, resetActiveSession]
+  );
+
   const handleSystemPromptChange = useCallback(
     (nextPrompt: string) => {
       resetActiveSession();
@@ -362,14 +756,14 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
       ? {
           title: 'Claude Code CLI not found. Install it with:',
           command: 'npm i -g @anthropic-ai/claude-code',
-          followup: 'Then authenticate:',
+          followup: 'Then authenticate with your subscription:',
           followupCommand: 'claude auth',
         }
       : {
           title: 'Codex CLI not found. Install or update it, then make sure `codex` is on your PATH.',
           command: 'codex --version',
-          followup: 'Once it is available, reopen the panel or switch providers to retry detection.',
-          followupCommand: '',
+          followup: 'Then authenticate with your subscription:',
+          followupCommand: 'codex login',
         };
 
   const panelStyle: CSSProperties = {
@@ -383,14 +777,20 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
         className="agent-toggle-button"
         onClick={handleTogglePanel}
         data-testid="agent-panel-toggle"
-        title={isOpen ? 'Close AI assistant' : 'Open AI assistant'}
+        title={isOpen ? 'Minimize AI assistant' : 'Open AI assistant'}
       >
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          width="20"
+          height="20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
-        {showFirstUseBadge && (
-          <span className="agent-experimental-badge">Experimental</span>
-        )}
       </button>
 
       <div
@@ -401,25 +801,79 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
         <div className="agent-panel-header">
           <div className="agent-panel-header-left">
             <div className="agent-panel-avatar" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M4 15c2.5-4 5.2-6 8-6s5.5 2 8 6" />
                 <path d="M4 9c2.5-4 5.2-6 8-6s5.5 2 8 6" opacity="0.55" />
                 <path d="M7 18c1.6-1.2 3.3-1.8 5-1.8s3.4.6 5 1.8" />
               </svg>
             </div>
             <div className="agent-panel-heading-copy">
-              <h3 className="agent-panel-title" data-testid="agent-panel-title">Produceboi agent</h3>
+              <h3 className="agent-panel-title" data-testid="agent-panel-title">
+                Produceboi agent
+              </h3>
               <p className="agent-panel-subtitle">Mastering wingman for the tricky bits.</p>
             </div>
-            <span className="agent-experimental-label">Experimental</span>
           </div>
           <div className="agent-panel-header-right">
             <button
               type="button"
-              className="agent-settings-button"
-              onClick={() => setSettingsOpen((prev) => !prev)}
+              className="agent-header-button"
+              onClick={handleToggleHelp}
+              data-testid="agent-help-toggle"
+              title="Assistant setup help"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M9.6 9a2.4 2.4 0 1 1 4.8 0c0 1.9-2.4 2.2-2.4 4" />
+                <circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={`agent-header-button ${historyOpen ? 'agent-header-button--active' : ''}`}
+              onClick={handleToggleHistory}
+              data-testid="agent-history-toggle"
+              title="Chat history"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 12a9 9 0 1 0 3-6.7" />
+                <path d="M3 4v5h5" />
+                <path d="M12 7v5l3 3" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={`agent-header-button ${settingsOpen ? 'agent-header-button--active' : ''}`}
+              onClick={handleToggleSettings}
               data-testid="agent-settings-toggle"
-              title="Settings"
+              title="Assistant settings"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -437,12 +891,25 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
             </button>
             <button
               type="button"
-              className="agent-close-button"
-              onClick={() => setIsOpen(false)}
+              className="agent-header-button"
+              onClick={() => {
+                setIsOpen(false);
+                setSettingsOpen(false);
+                setHistoryOpen(false);
+                setHelpDialogOpen(false);
+              }}
               data-testid="agent-panel-close"
               title="Minimize"
             >
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
                 <path d="M6 12h12" />
               </svg>
             </button>
@@ -453,13 +920,18 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
           <AgentSettings
             provider={provider}
             model={currentModel}
+            thinking={currentThinking}
             availableModels={availableModels}
+            availableThinkingOptions={AGENT_THINKING_OPTIONS}
             systemPrompt={systemPrompt}
             onProviderChange={handleProviderChange}
             onModelChange={handleModelChange}
+            onThinkingChange={handleThinkingChange}
             onSystemPromptChange={handleSystemPromptChange}
             onResetSystemPrompt={handleResetSystemPrompt}
-            onClearChat={handleClearChat}
+            onNewChat={handleNewChat}
+            onOpenHistory={() => setHistoryOpen(true)}
+            hasHistory={chatHistory.length > 0}
             onClose={() => setSettingsOpen(false)}
             controlsDisabled={isStreaming}
           />
@@ -498,83 +970,154 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
           aria-live="polite"
           data-testid="agent-timeline"
         >
-          {providerAvailable === false && (
-            <div className="agent-provider-notice" data-testid="agent-provider-notice">
-              <p>{providerUnavailableCopy.title}</p>
-              <code>{providerUnavailableCopy.command}</code>
-              <p>{providerUnavailableCopy.followup}</p>
-              {providerUnavailableCopy.followupCommand ? (
-                <code>{providerUnavailableCopy.followupCommand}</code>
-              ) : null}
-            </div>
-          )}
+          {historyOpen ? (
+            <div className="agent-history-state" data-testid="agent-history-state">
+              <div className="agent-history-header-row">
+                <h4 className="agent-history-title">Chat history</h4>
+                <button
+                  type="button"
+                  className="agent-history-close"
+                  onClick={() => setHistoryOpen(false)}
+                  data-testid="agent-history-close"
+                  title="Back to current chat"
+                >
+                  Back to chat
+                </button>
+              </div>
 
-          {messages.length === 0 && providerAvailable !== false && (
-            <div className="agent-empty-state" data-testid="agent-empty-state">
-              <p className="agent-empty-state-title">
-                Produceboi can help with mastering, loudness, tone, and audio gremlins.
-              </p>
-              <div className="agent-starter-prompts">
-                {STARTER_PROMPTS.map((prompt) => (
+              {chatHistory.length === 0 ? (
+                <p className="agent-history-empty" data-testid="agent-history-empty">
+                  No saved chats yet. Start a new chat and your previous one will appear here.
+                </p>
+              ) : (
+                <ul className="agent-history-list">
+                  {chatHistory.map((entry) => (
+                    <li key={entry.id} className="agent-history-item" data-testid="agent-history-item">
+                      <div className="agent-history-item-copy">
+                        <strong>{entry.title}</strong>
+                        <span>
+                          {formatRelativeTime(entry.updatedAt)} · {entry.messages.length} messages
+                        </span>
+                      </div>
+                      <div className="agent-history-item-actions">
+                        <button
+                          type="button"
+                          className="agent-history-action"
+                          onClick={() => handleRestoreHistory(entry.id)}
+                          data-testid="agent-history-open"
+                          title="Open this chat"
+                        >
+                          Open
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-history-action agent-history-action--danger"
+                          onClick={() => handleDeleteHistoryEntry(entry.id)}
+                          data-testid="agent-history-delete"
+                          title="Delete from history"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <>
+              {providerAvailable === false && (
+                <div className="agent-provider-notice" data-testid="agent-provider-notice">
+                  <p>{providerUnavailableCopy.title}</p>
+                  <code>{providerUnavailableCopy.command}</code>
+                  <p>{providerUnavailableCopy.followup}</p>
+                  {providerUnavailableCopy.followupCommand ? (
+                    <code>{providerUnavailableCopy.followupCommand}</code>
+                  ) : null}
+                </div>
+              )}
+
+              {messages.length === 0 && providerAvailable !== false && (
+                <div className="agent-empty-state" data-testid="agent-empty-state">
+                  <p className="agent-empty-state-title">
+                    Set up once, then use your CLI subscription directly from this panel.
+                  </p>
+                  <ol className="agent-empty-state-steps" data-testid="agent-empty-state-steps">
+                    {EMPTY_CHAT_SETUP_STEPS.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
                   <button
-                    key={prompt}
                     type="button"
-                    className="agent-starter-chip"
-                    onClick={() => void handleSendMessage(prompt)}
-                    data-testid="agent-starter-chip"
+                    className="agent-empty-state-help"
+                    onClick={() => {
+                      setHelpDialogOpen(true);
+                      setSettingsOpen(false);
+                      setHistoryOpen(false);
+                    }}
+                    data-testid="agent-empty-state-help"
                   >
-                    {prompt}
+                    Open setup help
                   </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`agent-message agent-message--${msg.role}`}
-              data-testid={`agent-message-${msg.role}`}
-            >
-              <div className="agent-message-bubble">
-                <div className="agent-message-content">
-                  {msg.role === 'agent' ? (
-                    <AgentMarkdownContent content={msg.content} />
-                  ) : (
-                    <span>{msg.content}</span>
-                  )}
-                  {msg.status === 'streaming' && (
-                    <span className="agent-typing-cursor" />
-                  )}
-                  {msg.status === 'stopped' && (
-                    <span className="agent-stopped-label"> (stopped)</span>
-                  )}
+                  <div className="agent-starter-prompts">
+                    {STARTER_PROMPTS.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        className="agent-starter-chip"
+                        onClick={() => void handleSendMessage(prompt)}
+                        data-testid="agent-starter-chip"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="agent-message-meta">
-                  <span className="agent-message-time">
-                    {formatRelativeTime(msg.timestamp)}
-                  </span>
-                  {msg.role === 'agent' && msg.status === 'complete' && (
-                    <button
-                      type="button"
-                      className="agent-copy-button"
-                      onClick={() => handleCopyMessage(msg.content)}
-                      title="Copy message"
-                    >
-                      Copy
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
+              )}
 
-          {isStreaming && !streamingMessageIdRef.current && (
-            <div className="agent-typing-indicator" data-testid="agent-typing-indicator">
-              <span className="agent-typing-dot" />
-              <span className="agent-typing-dot" />
-              <span className="agent-typing-dot" />
-            </div>
+              {messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`agent-message agent-message--${msg.role}`}
+                  data-testid={`agent-message-${msg.role}`}
+                >
+                  <div className="agent-message-bubble">
+                    <div className="agent-message-content">
+                      {msg.role === 'agent' ? (
+                        <AgentMarkdownContent content={msg.content} />
+                      ) : (
+                        <span>{msg.content}</span>
+                      )}
+                      {msg.status === 'streaming' && <span className="agent-typing-cursor" />}
+                      {msg.status === 'stopped' && (
+                        <span className="agent-stopped-label"> (stopped)</span>
+                      )}
+                    </div>
+                    <div className="agent-message-meta">
+                      <span className="agent-message-time">{formatRelativeTime(msg.timestamp)}</span>
+                      {msg.role === 'agent' && msg.status === 'complete' && (
+                        <button
+                          type="button"
+                          className="agent-copy-button"
+                          onClick={() => handleCopyMessage(msg.content)}
+                          title="Copy message"
+                        >
+                          Copy
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {isStreaming && !streamingMessageIdRef.current && (
+                <div className="agent-typing-indicator" data-testid="agent-typing-indicator">
+                  <span className="agent-typing-dot" />
+                  <span className="agent-typing-dot" />
+                  <span className="agent-typing-dot" />
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -582,8 +1125,59 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
           onSend={handleSendMessage}
           onInterrupt={handleInterrupt}
           isStreaming={isStreaming}
-          disabled={providerAvailable === false}
+          disabled={providerAvailable === false || historyOpen}
         />
+
+        {helpDialogOpen && (
+          <div
+            className="agent-help-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Assistant setup help"
+            data-testid="agent-help-dialog"
+          >
+            <div className="agent-help-dialog">
+              <div className="agent-help-dialog-header">
+                <h4>Set up Produceboi agent</h4>
+                <button
+                  type="button"
+                  className="agent-help-close"
+                  onClick={() => setHelpDialogOpen(false)}
+                  data-testid="agent-help-close"
+                  title="Close help"
+                >
+                  ✕
+                </button>
+              </div>
+              <p>
+                This assistant uses your local CLI login, so you can run sessions through your
+                existing subscription without wiring separate per-message API billing in-app.
+              </p>
+              <p className="agent-help-note">
+                Long-chat note: automatic compaction has not been verified in this desktop flow yet.
+                If the context gets too long or stale, use <strong>Start new chat</strong> in
+                Settings to reset the conversation cleanly.
+              </p>
+              <ol className="agent-help-steps">
+                {EMPTY_CHAT_SETUP_STEPS.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+              <div className="agent-help-commands">
+                <div>
+                  <strong>Claude Code</strong>
+                  <code>npm i -g @anthropic-ai/claude-code</code>
+                  <code>claude auth</code>
+                </div>
+                <div>
+                  <strong>Codex</strong>
+                  <code>codex --version</code>
+                  <code>codex login</code>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

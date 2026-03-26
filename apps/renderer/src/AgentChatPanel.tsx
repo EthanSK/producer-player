@@ -459,9 +459,17 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
           setIsStreaming(false);
           if (completedId) {
             setMessages((prev) => {
-              const next = prev.map((m) =>
-                m.id === completedId ? { ...m, status: 'complete', usage: event.usage } : m
-              );
+              const next = prev.map((m) => {
+                if (m.id !== completedId) {
+                  return m;
+                }
+
+                return {
+                  ...m,
+                  status: 'complete' as const,
+                  ...(event.usage ? { usage: event.usage } : {}),
+                };
+              });
 
               return next.filter(
                 (m) => !(m.id === completedId && m.role === 'agent' && m.content.length === 0)
@@ -477,7 +485,9 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
           setIsStreaming(false);
           setMessages((prev) => {
             const next = erroredId
-              ? prev.map((m) => (m.id === erroredId ? { ...m, status: 'error' } : m))
+              ? prev.map((m) =>
+                  m.id === erroredId ? { ...m, status: 'error' as const } : m
+                )
               : prev;
 
             return [

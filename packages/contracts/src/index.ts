@@ -287,11 +287,36 @@ export const AGENT_PROVIDER_LABELS: Record<AgentProviderId, string> = {
   claude: 'Claude',
 };
 
+export type AgentThinkingEffort = 'low' | 'medium' | 'high';
+
+export interface AgentThinkingOption {
+  id: AgentThinkingEffort;
+  label: string;
+}
+
+export const AGENT_THINKING_OPTIONS: readonly AgentThinkingOption[] = [
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+];
+
+export const DEFAULT_AGENT_THINKING_BY_PROVIDER: Record<AgentProviderId, AgentThinkingEffort> = {
+  codex: 'high',
+  claude: 'high',
+};
+
+export interface AgentConversationHistoryEntry {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface AgentStartSessionPayload {
   provider: AgentProviderId;
   mode: AgentMode;
   systemPrompt?: string;
   model?: AgentModelId;
+  thinking?: AgentThinkingEffort;
+  history?: AgentConversationHistoryEntry[];
 }
 
 export interface AgentUiContext {

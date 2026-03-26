@@ -679,6 +679,75 @@ test.describe('Agent Chat Panel', () => {
     }
   });
 
+  test('settings and active chat persist after restart', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-persist-restart');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+
+    let firstRun: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+
+    try {
+      firstRun = await launchProducerPlayer(dirs.userDataDirectory, {
+        extraEnv: fakeCli.env,
+      });
+
+      await firstRun.page.getByTestId('agent-panel-toggle').click();
+      await firstRun.page.getByTestId('agent-settings-toggle').click();
+      await firstRun.page.getByTestId('agent-provider-codex').click();
+      await firstRun.page.getByTestId('agent-model-select').selectOption('gpt-5.3-codex');
+      await firstRun.page.getByTestId('agent-thinking-select').selectOption('low');
+      await firstRun.page.getByTestId('agent-settings-toggle').click();
+
+      const firstInput = firstRun.page.getByTestId('agent-composer-input');
+      await firstInput.fill('Persist this chat');
+      await firstRun.page.getByTestId('agent-send-button').click();
+      await expect(firstRun.page.getByTestId('agent-message-agent').last()).toContainText(
+        'CODEX(gpt-5.3-codex): Persist this chat'
+      );
+
+      await firstRun.electronApp.close();
+      firstRun = null;
+
+      const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+        extraEnv: fakeCli.env,
+      });
+
+      try {
+        await page.getByTestId('agent-panel-toggle').click();
+        await expect(page.getByTestId('agent-message-user').first()).toContainText(
+          'Persist this chat'
+        );
+
+        await page.getByTestId('agent-settings-toggle').click();
+        await expect(page.getByTestId('agent-provider-codex')).toHaveClass(/--active/);
+        await expect(page.getByTestId('agent-model-select')).toHaveValue('gpt-5.3-codex');
+        await expect(page.getByTestId('agent-thinking-select')).toHaveValue('low');
+        await page.getByTestId('agent-settings-toggle').click();
+
+        const input = page.getByTestId('agent-composer-input');
+        await input.fill('Second turn after restart');
+        await page.getByTestId('agent-send-button').click();
+
+        await expect(page.getByTestId('agent-message-agent').last()).toContainText(
+          'CODEX(gpt-5.3-codex): Second turn after restart'
+        );
+
+        const codexLogs = await readJsonLines(path.join(fakeCli.logDirectory, 'codex.jsonl'));
+        expect(codexLogs).toHaveLength(2);
+
+        const secondPrompt = String(codexLogs[1]?.stdin ?? '');
+        expect(secondPrompt).toContain('<conversation-history>');
+        expect(secondPrompt).toContain('User:\nPersist this chat');
+      } finally {
+        await electronApp.close();
+      }
+    } finally {
+      if (firstRun) {
+        await firstRun.electronApp.close();
+      }
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
   test('Enter key sends message and Shift+Enter adds newline', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-keyboard');
     const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);

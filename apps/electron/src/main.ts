@@ -3075,6 +3075,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
         payload.mode,
         payload.systemPrompt,
         payload.model,
+        payload.thinking,
+        payload.history,
       );
     }
   );

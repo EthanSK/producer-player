@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { TrackAnalysisResult } from './audioAnalysis';
 import { useCrosshairOverlay, drawCrosshair } from './useCrosshairOverlay';
+import { sampleSeriesAtTime } from './graphHoverSampling';
 
 interface LoudnessHistoryGraphProps {
   analysis: TrackAnalysisResult | null;
@@ -193,26 +194,36 @@ export function LoudnessHistoryGraph({
     const mPos = mousePosRef.current;
     if (mPos) {
       const clampedX = Math.max(PADDING_LEFT, Math.min(PADDING_LEFT + plotW, mPos.x));
-      const clampedY = Math.max(PADDING_TOP, Math.min(PADDING_TOP + plotH, mPos.y));
 
       // Compute precise time from x position (with tenths of seconds for precision)
-      const timeAtCursor = ((clampedX - PADDING_LEFT) / plotW) * totalDur;
+      const timeAtCursor =
+        totalDur > 0 && plotW > 0 ? ((clampedX - PADDING_LEFT) / plotW) * totalDur : 0;
       const tm = Math.floor(timeAtCursor / 60);
       const ts = (timeAtCursor % 60).toFixed(1);
       const timeLabel = `${tm}:${parseFloat(ts) < 10 ? '0' : ''}${ts}`;
 
-      // Compute dB value from y position
-      const dbAtCursor = DB_MIN + (1 - (clampedY - PADDING_TOP) / plotH) * (DB_MAX - DB_MIN);
+      // Sample the actual loudness value from the curve at the hovered X position.
+      const sampledDb = sampleSeriesAtTime(frames, frameDur, timeAtCursor);
+      const dbAtCursor = Math.max(DB_MIN, Math.min(DB_MAX, sampledDb ?? DB_MIN));
+      const sampledY =
+        PADDING_TOP + plotH * (1 - (dbAtCursor - DB_MIN) / (DB_MAX - DB_MIN));
       const dbLabel = `${dbAtCursor.toFixed(1)} LUFS`;
 
-      drawCrosshair(ctx, mPos, {
-        plotLeft: PADDING_LEFT,
-        plotTop: PADDING_TOP,
-        plotRight: PADDING_LEFT + plotW,
-        plotBottom: PADDING_TOP + plotH,
-        xLabel: timeLabel,
-        yLabel: dbLabel,
-      });
+      drawCrosshair(
+        ctx,
+        {
+          x: clampedX,
+          y: sampledY,
+        },
+        {
+          plotLeft: PADDING_LEFT,
+          plotTop: PADDING_TOP,
+          plotRight: PADDING_LEFT + plotW,
+          plotBottom: PADDING_TOP + plotH,
+          xLabel: timeLabel,
+          yLabel: dbLabel,
+        }
+      );
     }
   }, [analysis, currentTimeSeconds, width, height, mousePosRef]);
 

@@ -987,6 +987,9 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('No reference');
       await expect(page.getByTestId('analysis-ab-reference')).toBeDisabled();
 
+      const compactQuickPicks = page.getByTestId('analysis-compact-saved-reference-quick-picks');
+      const compactQuickPickButtons = page.getByTestId('analysis-compact-saved-reference-quick-pick');
+
       await page.getByTestId('analysis-use-current-reference').click();
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('Reference Alpha v1.wav');
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('linked');
@@ -994,6 +997,9 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('analysis-active-reference-inline')).not.toContainText(
         'No reference loaded'
       );
+      await expect(compactQuickPicks).toBeVisible();
+      await expect(compactQuickPickButtons).toHaveCount(1);
+      await expect(compactQuickPickButtons.first()).toContainText('Reference Alpha v1.wav');
 
       await page.getByTestId('analysis-clear-reference').click();
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('No reference');
@@ -1010,11 +1016,35 @@ test.describe('playback runtime deep dive', () => {
 
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('Overlay Reference.wav');
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('external');
+      await expect(compactQuickPickButtons).toHaveCount(2);
+      await expect(compactQuickPickButtons.nth(0)).toContainText('Overlay Reference.wav');
+      await expect(compactQuickPickButtons.nth(1)).toContainText('Reference Alpha v1.wav');
 
       await page.getByTestId('analysis-ab-reference').click();
       await expect(page.getByTestId('player-track-name')).toContainText('Overlay Reference.wav');
       await page.getByTestId('analysis-ab-mix').click();
       await expect(page.getByTestId('player-track-name')).toContainText('Reference Alpha v1.wav');
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Reference Beta' }).first().click();
+      await page
+        .getByTestId('inspector-version-row')
+        .filter({ hasText: 'Reference Beta v1.wav' })
+        .getByRole('button', { name: 'Cue' })
+        .click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Reference Beta v1.wav');
+      await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading', {
+        timeout: 12_000,
+      });
+      await page.getByTestId('analysis-use-current-reference').click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('Reference Beta v1.wav');
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('linked');
+      await expect(compactQuickPickButtons).toHaveCount(3);
+      await expect(compactQuickPickButtons.nth(0)).toContainText('Reference Beta v1.wav');
+      await expect(compactQuickPickButtons.nth(1)).toContainText('Overlay Reference.wav');
+      await expect(compactQuickPickButtons.nth(2)).toContainText('Reference Alpha v1.wav');
+
+      await compactQuickPickButtons.nth(2).click();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('Reference Alpha v1.wav');
 
       await page.getByTestId('analysis-clear-reference').click();
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('No reference');

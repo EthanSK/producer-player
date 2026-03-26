@@ -151,8 +151,7 @@ const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
 const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
 const REFERENCE_TRACK_PER_SONG_KEY_PREFIX = 'producer-player.reference-track.';
-const RECENT_REFERENCE_TRACKS_KEY = 'producer-player.recent-reference-tracks.v1';
-const MAX_RECENT_REFERENCE_TRACKS = 3;
+const COMPACT_REFERENCE_QUICK_PICKS_COUNT = 3;
 const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
 const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
@@ -816,41 +815,6 @@ function readReferenceTrackForSong(songId: string): string | null {
   return window.localStorage.getItem(`${REFERENCE_TRACK_PER_SONG_KEY_PREFIX}${songId}`) ?? null;
 }
 
-interface RecentReferenceEntry {
-  filePath: string;
-  fileName: string;
-}
-
-/** Read the recent reference tracks array from localStorage. */
-function readRecentReferenceTracks(): RecentReferenceEntry[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(RECENT_REFERENCE_TRACKS_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((entry: unknown) => {
-      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return [];
-      const c = entry as Partial<RecentReferenceEntry>;
-      if (typeof c.filePath !== 'string' || !c.filePath || typeof c.fileName !== 'string' || !c.fileName) return [];
-      return [{ filePath: c.filePath, fileName: c.fileName }];
-    }).slice(0, MAX_RECENT_REFERENCE_TRACKS);
-  } catch {
-    return [];
-  }
-}
-
-/** Add a reference to the recent list (newest first, max 3). */
-function addToRecentReferenceTracks(entry: RecentReferenceEntry): RecentReferenceEntry[] {
-  const current = readRecentReferenceTracks();
-  const filtered = current.filter((r) => r.filePath !== entry.filePath);
-  const updated = [entry, ...filtered].slice(0, MAX_RECENT_REFERENCE_TRACKS);
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(RECENT_REFERENCE_TRACKS_KEY, JSON.stringify(updated));
-  }
-  return updated;
-}
-
 function formatAlbumDuration(totalSeconds: number | null): string {
   if (totalSeconds === null || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
     return 'Album length unavailable';
@@ -1245,9 +1209,6 @@ export function App(): JSX.Element {
   );
   const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrackEntry[]>(() =>
     readSavedReferenceTracks()
-  );
-  const [recentReferenceTracks, setRecentReferenceTracks] = useState<RecentReferenceEntry[]>(() =>
-    readRecentReferenceTracks()
   );
   const [referenceTrack, setReferenceTrack] = useState<LoadedReferenceTrack | null>(null);
   const [referenceStatus, setReferenceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
@@ -2529,6 +2490,10 @@ export function App(): JSX.Element {
           },
         }
       : null;
+  const compactSavedReferenceQuickPicks = useMemo(
+    () => savedReferenceTracks.slice(0, COMPACT_REFERENCE_QUICK_PICKS_COUNT),
+    [savedReferenceTracks]
+  );
 
   useEffect(() => {
     applyPlaybackGain(volume, appliedNormalizationGainDb);
@@ -3890,11 +3855,6 @@ export function App(): JSX.Element {
       if (selectedSongId) {
         persistReferenceTrackForSong(selectedSongId, selection.filePath);
       }
-
-      // Task 42: Add to recent reference tracks list
-      setRecentReferenceTracks(
-        addToRecentReferenceTracks({ filePath: selection.filePath, fileName: selection.fileName })
-      );
 
       setReferenceStatus('ready');
     } catch (cause: unknown) {
@@ -5706,23 +5666,29 @@ export function App(): JSX.Element {
                 )}
               </div>
 
-              {recentReferenceTracks.length > 0 ? (
-                <div className="recent-reference-tracks" data-testid="recent-reference-tracks">
-                  <span className="analysis-stat-label">Recent references</span>
+              {compactSavedReferenceQuickPicks.length > 0 ? (
+                <div
+                  className="recent-reference-tracks"
+                  data-testid="analysis-compact-saved-reference-quick-picks"
+                >
+                  <span className="analysis-stat-label">Recent saved references</span>
                   <div className="recent-reference-tracks-list">
-                    {recentReferenceTracks.map((recent) => (
+                    {compactSavedReferenceQuickPicks.map((savedReference) => (
                       <button
-                        key={recent.filePath}
+                        key={savedReference.filePath}
                         type="button"
                         className={
                           'recent-reference-track-btn ghost' +
-                          (referenceTrack?.filePath === recent.filePath ? ' active' : '')
+                          (referenceTrack?.filePath === savedReference.filePath ? ' active' : '')
                         }
-                        onClick={() => void handleLoadReferenceByFilePath(recent.filePath)}
+                        onClick={() => {
+                          void handleLoadSavedReferenceTrack(savedReference);
+                        }}
                         disabled={referenceStatus === 'loading'}
-                        title={recent.filePath}
+                        title={savedReference.filePath}
+                        data-testid="analysis-compact-saved-reference-quick-pick"
                       >
-                        {recent.fileName}
+                        {savedReference.fileName}
                       </button>
                     ))}
                   </div>

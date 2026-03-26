@@ -87,6 +87,7 @@ import {
   LOUDNESS_HISTOGRAM_LINKS,
   SPECTROGRAM_LINKS,
 } from './helpTooltipLinks';
+import { buildStatusCardHelpText } from './statusCardHelp';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
@@ -5001,44 +5002,10 @@ export function App(): JSX.Element {
     currentTimeSeconds,
   ]);
 
-  const statusCardHelpText = useMemo(() => {
-    const linkedFolderPathLines =
-      snapshot.linkedFolders.length > 0
-        ? snapshot.linkedFolders
-            .map((folder) => `• ${folder.name}: ${folder.path}`)
-            .join('\n')
-        : '• No linked folders yet. Use Add Folder… above to start tracking exports.';
-
-    const autoOrganizeArchiveLines =
-      snapshot.linkedFolders.length > 0
-        ? snapshot.linkedFolders
-            .map((folder) => `• ${folder.path}/old`)
-            .join('\n')
-        : '• Archive paths appear after you link at least one folder.';
-
-    const iCloudPathLine = iCloudAvailability?.path
-      ? `• iCloud backup folder: ${iCloudAvailability.path}`
-      : iCloudAvailability !== null && !iCloudAvailability.available
-        ? `• iCloud backup folder: unavailable (${iCloudAvailability.reason ?? 'iCloud Drive is not available on this machine.'})`
-        : '• iCloud backup folder: shown here once iCloud Drive is available.';
-
-    return `What this card controls: library scan status plus file-management and backup toggles.
-
-Auto-organize old versions:
-• ON: older non-archived versions are moved into each linked folder's old/ subfolder while the newest version stays where it is.
-• OFF: no automatic moves; versions stay where exported.
-
-Watched folder paths:
-${linkedFolderPathLines}
-
-Auto-organize archive paths:
-${autoOrganizeArchiveLines}
-
-iCloud backup:
-${iCloudPathLine}
-• \"Back up to iCloud\" syncs checklists, ratings, and app preferences only (not audio files).
-• Use the Show button beside iCloud backup to open the exact folder in Finder.`;
-  }, [iCloudAvailability, snapshot.linkedFolders]);
+  const statusCardHelpText = useMemo(
+    () => buildStatusCardHelpText(snapshot.linkedFolders, iCloudAvailability),
+    [iCloudAvailability, snapshot.linkedFolders],
+  );
 
   return (
     <div className="app-shell" data-testid="app-shell">

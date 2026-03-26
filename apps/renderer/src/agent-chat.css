@@ -76,12 +76,43 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.agent-panel-avatar {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.agent-panel-heading-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .agent-panel-title {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.15;
+}
+
+.agent-panel-subtitle {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agent-experimental-label {
@@ -294,6 +325,20 @@
 .agent-settings-key-status {
   font-size: 12px;
   color: var(--success);
+}
+
+.agent-settings-key-error,
+.agent-settings-key-help {
+  margin: 0;
+  font-size: 11px;
+}
+
+.agent-settings-key-error {
+  color: var(--danger);
+}
+
+.agent-settings-key-help {
+  color: var(--text-muted);
 }
 
 .agent-settings-toggle-row {
@@ -790,6 +835,15 @@
 
 .agent-mic-button:hover {
   color: var(--text-main);
+}
+
+.agent-mic-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.agent-mic-button:disabled:hover {
+  color: var(--text-muted);
 }
 
 .agent-mic-button--recording {

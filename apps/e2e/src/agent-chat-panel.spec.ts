@@ -177,7 +177,9 @@ test.describe('Agent Chat Panel', () => {
 
       await page.getByTestId('agent-panel-toggle').click();
       await expect(panel).toHaveClass(/agent-chat-panel--open/);
+      await expect(page.getByTestId('agent-panel-title')).toHaveText('Produceboi agent');
       await expect(page.getByTestId('agent-panel-close')).toBeVisible();
+      await expect(page.getByTestId('agent-panel-close')).toHaveAttribute('title', 'Minimize');
 
       await page.getByTestId('agent-panel-close').click();
       const hasOpenClassAfterClose = await panel.evaluate((el) =>
@@ -229,6 +231,9 @@ test.describe('Agent Chat Panel', () => {
       await expect(systemPromptInput).toBeVisible();
       await expect(systemPromptInput).toHaveValue(/full-access mastering agent/i);
       await expect(page.getByTestId('agent-system-prompt-reset')).toBeVisible();
+      await expect(page.getByTestId('agent-deepgram-key-help')).toContainText(
+        'microphone button appears beside the message box'
+      );
 
       await page.getByTestId('agent-provider-codex').click();
       await expect(modelSelect).toHaveValue('gpt-5.4');
@@ -257,9 +262,57 @@ test.describe('Agent Chat Panel', () => {
       const input = page.getByTestId('agent-composer-input');
       await expect(input).toBeVisible();
 
+      const micButton = page.getByTestId('agent-mic-button');
+      await expect(micButton).toBeVisible();
+      await expect(micButton).toBeDisabled();
+
       await input.fill('Hello agent');
       await expect(input).toHaveValue('Hello agent');
       await expect(page.getByTestId('agent-send-button')).toBeVisible();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('voice button becomes available when a Deepgram key is set, even with the legacy hide flag', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-voice-refresh');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
+
+    try {
+      await page.evaluate(() => {
+        localStorage.setItem('producer-player.agent-hide-voice', 'true');
+      });
+
+      await page.getByTestId('agent-panel-toggle').click();
+
+      const micButton = page.getByTestId('agent-mic-button');
+      await expect(micButton).toBeVisible();
+      await expect(micButton).toBeDisabled();
+
+      await page.getByTestId('agent-settings-toggle').click();
+      await page.getByTestId('agent-deepgram-key-input').fill('dg_test_key');
+      await page.getByTestId('agent-settings-key-save').click();
+      await expect(page.getByTestId('agent-deepgram-key-help')).toBeVisible();
+      await page.getByTestId('agent-settings-toggle').click();
+
+      await expect(micButton).toBeVisible();
+      const voiceSupported = await page.evaluate(() => {
+        return (
+          typeof navigator.mediaDevices?.getUserMedia === 'function' &&
+          typeof MediaRecorder !== 'undefined'
+        );
+      });
+
+      if (voiceSupported) {
+        await expect(micButton).toBeEnabled();
+      } else {
+        await expect(micButton).toBeDisabled();
+        await expect(micButton).toHaveAttribute('title', 'Voice input is not supported in this environment');
+      }
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);

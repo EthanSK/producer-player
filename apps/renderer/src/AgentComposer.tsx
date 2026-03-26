@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
+import { AGENT_VOICE_SETTINGS_UPDATED_EVENT } from './agentVoiceSettings';
 
 interface AgentComposerProps {
   onSend: (message: string) => void | Promise<void>;
@@ -15,6 +16,8 @@ interface AgentComposerProps {
 
 const MAX_ROWS = 6;
 const MIN_ROWS = 1;
+const DEEPGRAM_TRANSCRIBE_URL =
+  'https://api.deepgram.com/v1/listen?model=nova-3&language=en&smart_format=true';
 
 export function AgentComposer({
   onSend,
@@ -25,19 +28,38 @@ export function AgentComposer({
   const [text, setText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [hasDeepgramKey, setHasDeepgramKey] = useState(false);
-  const [hideVoice, setHideVoice] = useState(() => {
-    return localStorage.getItem('producer-player.agent-hide-voice') === 'true';
-  });
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // Check if Deepgram key exists
-  useEffect(() => {
-    void window.producerPlayer.agentGetDeepgramKey().then((key) => {
-      setHasDeepgramKey(key !== null && key.length > 0);
-    });
+  const refreshVoiceSettings = useCallback(async () => {
+    try {
+      const key = await window.producerPlayer.agentGetDeepgramKey();
+      setHasDeepgramKey(Boolean(key && key.trim().length > 0));
+    } catch {
+      setHasDeepgramKey(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void refreshVoiceSettings();
+
+    const handleVoiceSettingsUpdated = () => {
+      void refreshVoiceSettings();
+    };
+
+    window.addEventListener(
+      AGENT_VOICE_SETTINGS_UPDATED_EVENT,
+      handleVoiceSettingsUpdated
+    );
+
+    return () => {
+      window.removeEventListener(
+        AGENT_VOICE_SETTINGS_UPDATED_EVENT,
+        handleVoiceSettingsUpdated
+      );
+    };
+  }, [refreshVoiceSettings]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -68,8 +90,11 @@ export function AgentComposer({
   );
 
   const handleMicToggle = useCallback(async () => {
+    if (!hasDeepgramKey || disabled || isStreaming) {
+      return;
+    }
+
     if (isRecording) {
-      // Stop recording
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.stop();
       }
@@ -77,7 +102,6 @@ export function AgentComposer({
       return;
     }
 
-    // Start recording
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, {
@@ -96,30 +120,25 @@ export function AgentComposer({
       };
 
       mediaRecorder.onstop = async () => {
-        // Stop all tracks
         stream.getTracks().forEach((track) => track.stop());
 
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         audioChunksRef.current = [];
 
-        // Transcribe with Deepgram
         const deepgramKey = await window.producerPlayer.agentGetDeepgramKey();
         if (!deepgramKey) {
           return;
         }
 
         try {
-          const response = await fetch(
-            'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true',
-            {
-              method: 'POST',
-              headers: {
-                Authorization: `Token ${deepgramKey}`,
-                'Content-Type': 'audio/webm',
-              },
-              body: audioBlob,
-            }
-          );
+          const response = await fetch(DEEPGRAM_TRANSCRIBE_URL, {
+            method: 'POST',
+            headers: {
+              Authorization: `Token ${deepgramKey}`,
+              'Content-Type': 'audio/webm',
+            },
+            body: audioBlob,
+          });
 
           if (!response.ok) {
             throw new Error(`Deepgram API error: ${response.status}`);
@@ -130,23 +149,35 @@ export function AgentComposer({
             result?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? '';
 
           if (transcript) {
-            setText((prev) => (prev ? `${prev} ${transcript}` : transcript));
+            setText((previous) => (previous ? `${previous} ${transcript}` : transcript));
             textareaRef.current?.focus();
           }
-        } catch (err) {
-          console.error('Voice transcription failed:', err);
+        } catch (error) {
+          console.error('Voice transcription failed:', error);
         }
       };
 
       mediaRecorder.start();
       setIsRecording(true);
-    } catch (err) {
-      console.error('Failed to start recording:', err);
+    } catch (error) {
+      console.error('Failed to start recording:', error);
     }
-  }, [isRecording]);
+  }, [disabled, hasDeepgramKey, isRecording, isStreaming]);
 
   const canSend = text.trim().length > 0 && !isStreaming && !disabled;
-  const showMic = hasDeepgramKey && !hideVoice;
+  const voiceSupported =
+    typeof navigator !== 'undefined' &&
+    typeof navigator.mediaDevices?.getUserMedia === 'function' &&
+    typeof MediaRecorder !== 'undefined';
+  const showMic = !isStreaming;
+  const micEnabled = hasDeepgramKey && voiceSupported && !disabled;
+  const micTitle = !hasDeepgramKey
+    ? 'Add Deepgram API key in Settings to enable voice input'
+    : !voiceSupported
+      ? 'Voice input is not supported in this environment'
+      : isRecording
+        ? 'Stop recording'
+        : 'Record voice message';
 
   return (
     <div className="agent-composer" data-testid="agent-composer">
@@ -155,30 +186,41 @@ export function AgentComposer({
           ref={textareaRef}
           className="agent-composer-textarea"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(event) => setText(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={disabled ? 'Agent unavailable' : 'Ask about your master...'}
+          placeholder={disabled ? 'Produceboi agent is unavailable' : 'Ask Produceboi about your master...'}
           disabled={disabled || isStreaming}
           rows={MIN_ROWS}
           data-testid="agent-composer-input"
         />
         <div className="agent-composer-buttons">
-          {showMic && !isStreaming && (
+          {showMic ? (
             <button
               type="button"
               className={`agent-mic-button ${isRecording ? 'agent-mic-button--recording' : ''}`}
               onClick={() => void handleMicToggle()}
               data-testid="agent-mic-button"
-              title={isRecording ? 'Stop recording' : 'Record voice message'}
+              title={micTitle}
+              disabled={!micEnabled}
             >
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                 <line x1="12" y1="19" x2="12" y2="23" />
                 <line x1="8" y1="23" x2="16" y2="23" />
               </svg>
             </button>
-          )}
+          ) : null}
+
           {isStreaming ? (
             <button
               type="button"
@@ -200,7 +242,16 @@ export function AgentComposer({
               data-testid="agent-send-button"
               title="Send message"
             >
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <line x1="22" y1="2" x2="11" y2="13" />
                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
               </svg>

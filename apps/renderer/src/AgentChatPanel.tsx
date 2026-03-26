@@ -400,7 +400,17 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
       >
         <div className="agent-panel-header">
           <div className="agent-panel-header-left">
-            <h3 className="agent-panel-title">AI Assistant</h3>
+            <div className="agent-panel-avatar" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 15c2.5-4 5.2-6 8-6s5.5 2 8 6" />
+                <path d="M4 9c2.5-4 5.2-6 8-6s5.5 2 8 6" opacity="0.55" />
+                <path d="M7 18c1.6-1.2 3.3-1.8 5-1.8s3.4.6 5 1.8" />
+              </svg>
+            </div>
+            <div className="agent-panel-heading-copy">
+              <h3 className="agent-panel-title" data-testid="agent-panel-title">Produceboi agent</h3>
+              <p className="agent-panel-subtitle">Mastering wingman for the tricky bits.</p>
+            </div>
             <span className="agent-experimental-label">Experimental</span>
           </div>
           <div className="agent-panel-header-right">
@@ -411,10 +421,18 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
               data-testid="agent-settings-toggle"
               title="Settings"
             >
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                <circle cx="12" cy="5" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <circle cx="12" cy="19" r="2" />
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V22a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H2a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 9.44 4.1V4a2 2 0 1 1 4 0v.09c0 .67.4 1.28 1.01 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01c.24.61.84 1.01 1.51 1.01H20a2 2 0 1 1 0 4h-.09c-.67 0-1.28.4-1.51 1.01z" />
               </svg>
             </button>
             <button
@@ -422,10 +440,10 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
               className="agent-close-button"
               onClick={() => setIsOpen(false)}
               data-testid="agent-panel-close"
-              title="Close"
+              title="Minimize"
             >
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 6L6 18M6 6l12 12" />
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M6 12h12" />
               </svg>
             </button>
           </div>
@@ -494,7 +512,7 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
           {messages.length === 0 && providerAvailable !== false && (
             <div className="agent-empty-state" data-testid="agent-empty-state">
               <p className="agent-empty-state-title">
-                Ask about your tracks, mastering, loudness, or anything audio.
+                Produceboi can help with mastering, loudness, tone, and audio gremlins.
               </p>
               <div className="agent-starter-prompts">
                 {STARTER_PROMPTS.map((prompt) => (

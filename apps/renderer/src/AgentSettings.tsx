@@ -5,6 +5,7 @@ import type {
   AgentProviderId,
 } from '@producer-player/contracts';
 import { AGENT_PROVIDER_LABELS } from './agentModels';
+import { notifyAgentVoiceSettingsUpdated } from './agentVoiceSettings';
 
 interface AgentSettingsProps {
   provider: AgentProviderId;
@@ -35,36 +36,52 @@ export function AgentSettings({
 }: AgentSettingsProps): JSX.Element {
   const [deepgramKey, setDeepgramKey] = useState('');
   const [deepgramKeySet, setDeepgramKeySet] = useState(false);
-  const [hideVoice, setHideVoice] = useState(() => {
-    return localStorage.getItem('producer-player.agent-hide-voice') === 'true';
-  });
+  const [deepgramKeyError, setDeepgramKeyError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
-    void window.producerPlayer.agentGetDeepgramKey().then((key) => {
-      setDeepgramKeySet(key !== null && key.length > 0);
-    });
+    void window.producerPlayer
+      .agentGetDeepgramKey()
+      .then((key) => {
+        setDeepgramKeySet(key !== null && key.length > 0);
+        setDeepgramKeyError(null);
+      })
+      .catch((error: unknown) => {
+        setDeepgramKeySet(false);
+        setDeepgramKeyError(
+          error instanceof Error ? error.message : 'Could not read Deepgram key.'
+        );
+      });
   }, []);
 
   const handleSaveDeepgramKey = useCallback(async () => {
     const trimmed = deepgramKey.trim();
     if (!trimmed) return;
-    await window.producerPlayer.agentStoreDeepgramKey(trimmed);
-    setDeepgramKeySet(true);
-    setDeepgramKey('');
+
+    try {
+      await window.producerPlayer.agentStoreDeepgramKey(trimmed);
+      setDeepgramKeySet(true);
+      setDeepgramKey('');
+      setDeepgramKeyError(null);
+      notifyAgentVoiceSettingsUpdated();
+    } catch (error: unknown) {
+      setDeepgramKeyError(
+        error instanceof Error ? error.message : 'Could not save Deepgram key.'
+      );
+    }
   }, [deepgramKey]);
 
   const handleClearDeepgramKey = useCallback(async () => {
-    await window.producerPlayer.agentClearDeepgramKey();
-    setDeepgramKeySet(false);
-  }, []);
-
-  const handleHideVoiceToggle = useCallback(() => {
-    setHideVoice((prev) => {
-      const next = !prev;
-      localStorage.setItem('producer-player.agent-hide-voice', next ? 'true' : 'false');
-      return next;
-    });
+    try {
+      await window.producerPlayer.agentClearDeepgramKey();
+      setDeepgramKeySet(false);
+      setDeepgramKeyError(null);
+      notifyAgentVoiceSettingsUpdated();
+    } catch (error: unknown) {
+      setDeepgramKeyError(
+        error instanceof Error ? error.message : 'Could not clear Deepgram key.'
+      );
+    }
   }, []);
 
   const handleClearChat = useCallback(() => {
@@ -153,6 +170,7 @@ export function AgentSettings({
               type="button"
               className="agent-settings-key-clear"
               onClick={() => void handleClearDeepgramKey()}
+              data-testid="agent-settings-key-clear"
             >
               Clear
             </button>
@@ -163,7 +181,7 @@ export function AgentSettings({
               type="password"
               className="agent-settings-key-input"
               value={deepgramKey}
-              onChange={(e) => setDeepgramKey(e.target.value)}
+              onChange={(event) => setDeepgramKey(event.target.value)}
               placeholder="Enter API key"
               data-testid="agent-deepgram-key-input"
             />
@@ -172,18 +190,21 @@ export function AgentSettings({
               className="agent-settings-key-save"
               onClick={() => void handleSaveDeepgramKey()}
               disabled={!deepgramKey.trim()}
+              data-testid="agent-settings-key-save"
             >
               Save
             </button>
           </div>
         )}
-      </div>
-
-      <div className="agent-settings-section">
-        <label className="agent-settings-toggle-row">
-          <input type="checkbox" checked={hideVoice} onChange={handleHideVoiceToggle} />
-          <span>Hide voice input</span>
-        </label>
+        {deepgramKeyError ? (
+          <p className="agent-settings-key-error" data-testid="agent-deepgram-key-error">
+            {deepgramKeyError}
+          </p>
+        ) : (
+          <p className="agent-settings-key-help" data-testid="agent-deepgram-key-help">
+            When a key is set, the microphone button appears beside the message box.
+          </p>
+        )}
       </div>
 
       <div className="agent-settings-section agent-settings-section--danger">

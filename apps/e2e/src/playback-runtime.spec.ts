@@ -1081,8 +1081,11 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('analysis-max-momentary-stat')).toContainText('LUFS');
 
       await expect(page.getByTestId('analysis-tonal-balance')).toContainText('Low');
+      await expect(page.getByTestId('analysis-compact-panel-tonal-balance')).toBeVisible();
+      await expect(page.getByTestId('analysis-compact-drag-handle-reference')).toBeVisible();
       await expect(page.getByTestId('analysis-ab-toggle')).toBeVisible();
       await expect(page.getByTestId('analysis-normalization-cap')).toBeVisible();
+      await expect(page.getByTestId('analysis-normalization-policy')).toHaveCount(0);
       await expect(page.getByTestId('analysis-use-current-reference')).toBeEnabled();
 
       await page.getByTestId('analysis-use-current-reference').click();
@@ -1096,11 +1099,15 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('analysis-overlay-status')).toHaveCount(0);
       await expect(page.getByTestId('analysis-overlay-preview-mode')).toContainText('reference ready');
       await expect(page.getByTestId('analysis-choose-reference-overlay')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-drag-handle-visualizations')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-normalization-change')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-normalization-projected')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-normalization-cap')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-normalization-target')).toContainText('LUFS');
-      await expect(page.getByTestId('analysis-overlay-normalization-policy')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-normalization-change')).toContainText(
+        'Applied'
+      );
+      await expect(page.getByTestId('analysis-overlay-normalization-policy')).toHaveCount(0);
 
       await page.getByTestId('analysis-close-button').click();
       await expect(page.getByTestId('analysis-modal')).toHaveCount(0);

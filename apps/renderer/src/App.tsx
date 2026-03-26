@@ -92,6 +92,30 @@ import { buildStatusCardHelpText } from './statusCardHelp';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
+type CompactMasteringPanelId =
+  | 'metrics'
+  | 'normalization'
+  | 'tonal-balance'
+  | 'reference';
+type OverlayMasteringPanelId =
+  | 'visualizations'
+  | 'reference'
+  | 'loudness-history'
+  | 'waveform'
+  | 'stereo-correlation'
+  | 'tonal-balance'
+  | 'loudness-peaks'
+  | 'normalization'
+  | 'comparison'
+  | 'vectorscope'
+  | 'midside'
+  | 'k-metering'
+  | 'pro-indicators'
+  | 'mastering-checklist'
+  | 'crest-factor-history'
+  | 'mid-side-spectrum'
+  | 'loudness-histogram'
+  | 'spectrogram';
 
 type ReferenceTrackSource = 'linked-track' | 'external-file';
 
@@ -156,6 +180,34 @@ const MAX_RECENT_REFERENCE_TRACKS = 3;
 const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
 const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
+const MASTERING_COMPACT_LAYOUT_KEY = 'producer-player.mastering-layout.compact.v1';
+const MASTERING_OVERLAY_LAYOUT_KEY = 'producer-player.mastering-layout.overlay.v1';
+const MASTERING_COMPACT_PANEL_ORDER: readonly CompactMasteringPanelId[] = [
+  'metrics',
+  'normalization',
+  'tonal-balance',
+  'reference',
+];
+const MASTERING_OVERLAY_PANEL_ORDER: readonly OverlayMasteringPanelId[] = [
+  'visualizations',
+  'reference',
+  'loudness-history',
+  'waveform',
+  'stereo-correlation',
+  'tonal-balance',
+  'loudness-peaks',
+  'normalization',
+  'comparison',
+  'vectorscope',
+  'midside',
+  'k-metering',
+  'pro-indicators',
+  'mastering-checklist',
+  'crest-factor-history',
+  'mid-side-spectrum',
+  'loudness-histogram',
+  'spectrogram',
+];
 const MAX_SAVED_REFERENCE_TRACKS = 20;
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
 const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
@@ -234,6 +286,100 @@ function reorderSongIds(
 
   withoutSource.splice(insertionIndex, 0, dragSongId);
   return withoutSource;
+}
+
+function reorderMasteringPanelIds<TPanelId extends string>(
+  panelIds: readonly TPanelId[],
+  draggedPanelId: TPanelId,
+  hoveredPanelId: TPanelId
+): TPanelId[] {
+  if (draggedPanelId === hoveredPanelId) {
+    return [...panelIds];
+  }
+
+  const sourceIndex = panelIds.indexOf(draggedPanelId);
+  const targetIndex = panelIds.indexOf(hoveredPanelId);
+
+  if (sourceIndex === -1 || targetIndex === -1) {
+    return [...panelIds];
+  }
+
+  const nextOrder = [...panelIds];
+  nextOrder.splice(sourceIndex, 1);
+
+  const insertionIndex = nextOrder.indexOf(hoveredPanelId);
+  if (insertionIndex === -1) {
+    return [...panelIds];
+  }
+
+  nextOrder.splice(insertionIndex, 0, draggedPanelId);
+  return nextOrder;
+}
+
+function readStoredMasteringPanelOrder<TPanelId extends string>(
+  storageKey: string,
+  defaultOrder: readonly TPanelId[]
+): TPanelId[] {
+  const fallbackOrder = [...defaultOrder];
+  const raw = window.localStorage.getItem(storageKey);
+
+  if (!raw) {
+    return fallbackOrder;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return fallbackOrder;
+    }
+
+    const allowedIds = new Set(defaultOrder);
+    const seen = new Set<TPanelId>();
+    const nextOrder: TPanelId[] = [];
+
+    for (const item of parsed) {
+      if (typeof item !== 'string') {
+        continue;
+      }
+
+      if (!allowedIds.has(item as TPanelId)) {
+        continue;
+      }
+
+      const normalizedItem = item as TPanelId;
+      if (seen.has(normalizedItem)) {
+        continue;
+      }
+
+      seen.add(normalizedItem);
+      nextOrder.push(normalizedItem);
+    }
+
+    for (const panelId of defaultOrder) {
+      if (!seen.has(panelId)) {
+        nextOrder.push(panelId);
+      }
+    }
+
+    return nextOrder;
+  } catch {
+    return fallbackOrder;
+  }
+}
+
+function persistMasteringPanelOrder(panelIds: readonly string[], storageKey: string): void {
+  window.localStorage.setItem(storageKey, JSON.stringify(panelIds));
+}
+
+const COMPACT_MASTERING_PANEL_IDS = new Set<string>(MASTERING_COMPACT_PANEL_ORDER);
+const OVERLAY_MASTERING_PANEL_IDS = new Set<string>(MASTERING_OVERLAY_PANEL_ORDER);
+
+function isCompactMasteringPanelId(value: string): value is CompactMasteringPanelId {
+  return COMPACT_MASTERING_PANEL_IDS.has(value);
+}
+
+function isOverlayMasteringPanelId(value: string): value is OverlayMasteringPanelId {
+  return OVERLAY_MASTERING_PANEL_IDS.has(value);
 }
 
 function describeMediaErrorCode(code: number | undefined): string {
@@ -449,6 +595,22 @@ function formatSignedLevel(level: number | null | undefined): string {
   }
 
   return `${level >= 0 ? '+' : ''}${level.toFixed(1)} dB`;
+}
+
+function formatAppliedChangeMainText(level: number | null | undefined): string {
+  if (level === null || level === undefined || !Number.isFinite(level)) {
+    return 'Applied change —';
+  }
+
+  if (level < 0) {
+    return `Applied reduction ${Math.abs(level).toFixed(1)} dB`;
+  }
+
+  if (level > 0) {
+    return `Applied boost ${level.toFixed(1)} dB`;
+  }
+
+  return 'Applied change 0.0 dB';
 }
 
 function formatPercent(value: number): string {
@@ -1243,6 +1405,18 @@ export function App(): JSX.Element {
   const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(() =>
     window.localStorage.getItem(MORE_METRICS_EXPANDED_KEY) === 'true'
   );
+  const [compactMasteringPanelOrder, setCompactMasteringPanelOrder] = useState<CompactMasteringPanelId[]>(() =>
+    readStoredMasteringPanelOrder(MASTERING_COMPACT_LAYOUT_KEY, MASTERING_COMPACT_PANEL_ORDER)
+  );
+  const [overlayMasteringPanelOrder, setOverlayMasteringPanelOrder] = useState<OverlayMasteringPanelId[]>(() =>
+    readStoredMasteringPanelOrder(MASTERING_OVERLAY_LAYOUT_KEY, MASTERING_OVERLAY_PANEL_ORDER)
+  );
+  const [compactMasteringPanelDragId, setCompactMasteringPanelDragId] = useState<CompactMasteringPanelId | null>(null);
+  const [compactMasteringPanelDragOverId, setCompactMasteringPanelDragOverId] =
+    useState<CompactMasteringPanelId | null>(null);
+  const [overlayMasteringPanelDragId, setOverlayMasteringPanelDragId] = useState<OverlayMasteringPanelId | null>(null);
+  const [overlayMasteringPanelDragOverId, setOverlayMasteringPanelDragOverId] =
+    useState<OverlayMasteringPanelId | null>(null);
   const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrackEntry[]>(() =>
     readSavedReferenceTracks()
   );
@@ -3411,6 +3585,204 @@ export function App(): JSX.Element {
     setDragOverPosition('before');
   }
 
+  const compactMasteringPanelOrderMap = useMemo(() => {
+    return new Map(compactMasteringPanelOrder.map((panelId, index) => [panelId, index]));
+  }, [compactMasteringPanelOrder]);
+
+  const overlayMasteringPanelOrderMap = useMemo(() => {
+    return new Map(overlayMasteringPanelOrder.map((panelId, index) => [panelId, index]));
+  }, [overlayMasteringPanelOrder]);
+
+  function getCompactMasteringPanelStyle(panelId: CompactMasteringPanelId): CSSProperties {
+    return {
+      order:
+        compactMasteringPanelOrderMap.get(panelId) ??
+        MASTERING_COMPACT_PANEL_ORDER.indexOf(panelId),
+    };
+  }
+
+  function getOverlayMasteringPanelStyle(panelId: OverlayMasteringPanelId): CSSProperties {
+    return {
+      order:
+        overlayMasteringPanelOrderMap.get(panelId) ?? MASTERING_OVERLAY_PANEL_ORDER.indexOf(panelId),
+    };
+  }
+
+  function clearCompactMasteringPanelDragState(): void {
+    setCompactMasteringPanelDragId(null);
+    setCompactMasteringPanelDragOverId(null);
+  }
+
+  function clearOverlayMasteringPanelDragState(): void {
+    setOverlayMasteringPanelDragId(null);
+    setOverlayMasteringPanelDragOverId(null);
+  }
+
+  function handleCompactMasteringPanelDragStart(
+    panelId: CompactMasteringPanelId,
+    event: DragEvent<HTMLElement>
+  ): void {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', panelId);
+    setCompactMasteringPanelDragId(panelId);
+    setCompactMasteringPanelDragOverId(null);
+  }
+
+  function handleCompactMasteringPanelDragOver(
+    panelId: CompactMasteringPanelId,
+    event: DragEvent<HTMLElement>
+  ): void {
+    const draggedPanelId = compactMasteringPanelDragId ?? event.dataTransfer.getData('text/plain');
+    if (!draggedPanelId || !isCompactMasteringPanelId(draggedPanelId) || draggedPanelId === panelId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+
+    if (compactMasteringPanelDragOverId !== panelId) {
+      setCompactMasteringPanelDragOverId(panelId);
+    }
+  }
+
+  function handleCompactMasteringPanelDragLeave(panelId: CompactMasteringPanelId): void {
+    if (compactMasteringPanelDragOverId === panelId) {
+      setCompactMasteringPanelDragOverId(null);
+    }
+  }
+
+  function handleCompactMasteringPanelDrop(
+    panelId: CompactMasteringPanelId,
+    event: DragEvent<HTMLElement>
+  ): void {
+    event.preventDefault();
+    const draggedPanelId = compactMasteringPanelDragId ?? event.dataTransfer.getData('text/plain');
+
+    if (!draggedPanelId || !isCompactMasteringPanelId(draggedPanelId)) {
+      clearCompactMasteringPanelDragState();
+      return;
+    }
+
+    if (draggedPanelId === panelId) {
+      clearCompactMasteringPanelDragState();
+      return;
+    }
+
+    setCompactMasteringPanelOrder((currentOrder) => {
+      const nextOrder = reorderMasteringPanelIds(currentOrder, draggedPanelId, panelId);
+      persistMasteringPanelOrder(nextOrder, MASTERING_COMPACT_LAYOUT_KEY);
+      return nextOrder;
+    });
+    clearCompactMasteringPanelDragState();
+  }
+
+  function handleOverlayMasteringPanelDragStart(
+    panelId: OverlayMasteringPanelId,
+    event: DragEvent<HTMLElement>
+  ): void {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', panelId);
+    setOverlayMasteringPanelDragId(panelId);
+    setOverlayMasteringPanelDragOverId(null);
+  }
+
+  function handleOverlayMasteringPanelDragOver(
+    panelId: OverlayMasteringPanelId,
+    event: DragEvent<HTMLElement>
+  ): void {
+    const draggedPanelId = overlayMasteringPanelDragId ?? event.dataTransfer.getData('text/plain');
+    if (!draggedPanelId || !isOverlayMasteringPanelId(draggedPanelId) || draggedPanelId === panelId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+
+    if (overlayMasteringPanelDragOverId !== panelId) {
+      setOverlayMasteringPanelDragOverId(panelId);
+    }
+  }
+
+  function handleOverlayMasteringPanelDragLeave(panelId: OverlayMasteringPanelId): void {
+    if (overlayMasteringPanelDragOverId === panelId) {
+      setOverlayMasteringPanelDragOverId(null);
+    }
+  }
+
+  function handleOverlayMasteringPanelDrop(
+    panelId: OverlayMasteringPanelId,
+    event: DragEvent<HTMLElement>
+  ): void {
+    event.preventDefault();
+    const draggedPanelId = overlayMasteringPanelDragId ?? event.dataTransfer.getData('text/plain');
+
+    if (!draggedPanelId || !isOverlayMasteringPanelId(draggedPanelId)) {
+      clearOverlayMasteringPanelDragState();
+      return;
+    }
+
+    if (draggedPanelId === panelId) {
+      clearOverlayMasteringPanelDragState();
+      return;
+    }
+
+    setOverlayMasteringPanelOrder((currentOrder) => {
+      const nextOrder = reorderMasteringPanelIds(currentOrder, draggedPanelId, panelId);
+      persistMasteringPanelOrder(nextOrder, MASTERING_OVERLAY_LAYOUT_KEY);
+      return nextOrder;
+    });
+    clearOverlayMasteringPanelDragState();
+  }
+
+  function renderCompactMasteringPanelDragHandle(panelId: CompactMasteringPanelId): JSX.Element {
+    return (
+      <button
+        type="button"
+        className="mastering-panel-drag-handle"
+        draggable
+        onDragStart={(event) => handleCompactMasteringPanelDragStart(panelId, event)}
+        onDragEnd={clearCompactMasteringPanelDragState}
+        title="Drag me to rearrange this panel."
+        aria-label="Drag me to rearrange this panel"
+        data-testid={`analysis-compact-drag-handle-${panelId}`}
+      >
+        ⋮⋮
+      </button>
+    );
+  }
+
+  function renderOverlayMasteringPanelDragHandle(panelId: OverlayMasteringPanelId): JSX.Element {
+    return (
+      <button
+        type="button"
+        className="mastering-panel-drag-handle"
+        draggable
+        onDragStart={(event) => handleOverlayMasteringPanelDragStart(panelId, event)}
+        onDragEnd={clearOverlayMasteringPanelDragState}
+        title="Drag me to rearrange this panel."
+        aria-label="Drag me to rearrange this panel"
+        data-testid={`analysis-overlay-drag-handle-${panelId}`}
+      >
+        ⋮⋮
+      </button>
+    );
+  }
+
+  function getOverlayMasteringPanelClassName(
+    panelId: OverlayMasteringPanelId,
+    extraClassName = ''
+  ): string {
+    return [
+      'analysis-overlay-section',
+      extraClassName,
+      'mastering-draggable-panel',
+      overlayMasteringPanelDragId === panelId ? 'is-dragging' : '',
+      overlayMasteringPanelDragOverId === panelId ? 'is-drag-over' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
   function shouldAutoplayOnTransport(): boolean {
     const audio = audioRef.current;
     if (!audio) {
@@ -4826,6 +5198,15 @@ export function App(): JSX.Element {
       empty: '—',
     }
   );
+  const normalizationAppliedMainText = buildAnalysisValue(
+    analysisStatus,
+    formatAppliedChangeMainText(normalizationPreview?.appliedGainDb),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+      empty: 'Applied change —',
+    }
+  );
   const normalizationProjectedText = buildAnalysisValue(
     analysisStatus,
     formatMeasuredStat(normalizationPreview?.projectedIntegratedLufs, 'LUFS'),
@@ -5361,7 +5742,20 @@ export function App(): JSX.Element {
                 </p>
               ) : null}
 
-              <div className="analysis-stat-grid compact">
+              <div className="analysis-compact-mastering-grid" data-testid="analysis-compact-mastering-grid">
+                <section
+                  className={`analysis-compact-panel mastering-draggable-panel${
+                    compactMasteringPanelDragId === 'metrics' ? ' is-dragging' : ''
+                  }${compactMasteringPanelDragOverId === 'metrics' ? ' is-drag-over' : ''}`}
+                  style={getCompactMasteringPanelStyle('metrics')}
+                  data-testid="analysis-compact-panel-metrics"
+                  onDragOver={(event) => handleCompactMasteringPanelDragOver('metrics', event)}
+                  onDragLeave={() => handleCompactMasteringPanelDragLeave('metrics')}
+                  onDrop={(event) => handleCompactMasteringPanelDrop('metrics', event)}
+                >
+                  {renderCompactMasteringPanelDragHandle('metrics')}
+
+                  <div className="analysis-stat-grid compact">
                 <div
                   className="analysis-stat-card"
                   data-testid="analysis-integrated-stat"
@@ -5442,11 +5836,19 @@ export function App(): JSX.Element {
                   <strong>{measuredMaxMomentaryText}</strong>
                 </div>
               </div>
+                </section>
 
-              <section
-                className="analysis-normalization-panel"
-                data-testid="analysis-normalization-panel"
-              >
+                <section
+                  className={`analysis-normalization-panel analysis-compact-panel mastering-draggable-panel${
+                    compactMasteringPanelDragId === 'normalization' ? ' is-dragging' : ''
+                  }${compactMasteringPanelDragOverId === 'normalization' ? ' is-drag-over' : ''}`}
+                  style={getCompactMasteringPanelStyle('normalization')}
+                  data-testid="analysis-normalization-panel"
+                  onDragOver={(event) => handleCompactMasteringPanelDragOver('normalization', event)}
+                  onDragLeave={() => handleCompactMasteringPanelDragLeave('normalization')}
+                  onDrop={(event) => handleCompactMasteringPanelDrop('normalization', event)}
+                >
+                  {renderCompactMasteringPanelDragHandle('normalization')}
                 <div className="analysis-normalization-header">
                   <div>
                     <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
@@ -5469,10 +5871,15 @@ export function App(): JSX.Element {
                 <div className="analysis-platform-grid" role="group" aria-label="Platform normalization presets">
                   {NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
                     const platformPreview = normalizationPreviewByPlatformId.get(platform.id) ?? null;
-                    const platformChangeText =
-                      analysisStatus === 'ready' && platformPreview
-                        ? formatSignedLevel(platformPreview.appliedGainDb)
-                        : '—';
+                    const platformAppliedMainText = buildAnalysisValue(
+                      analysisStatus,
+                      formatAppliedChangeMainText(platformPreview?.appliedGainDb),
+                      {
+                        loading: 'Loading…',
+                        error: 'Error',
+                        empty: 'Applied change —',
+                      }
+                    );
 
                     return (
                       <button
@@ -5496,11 +5903,11 @@ export function App(): JSX.Element {
                           <span className="analysis-platform-title">{platform.label}</span>
                         </span>
                         <span className="analysis-platform-copy">
+                          <span className="analysis-platform-change analysis-platform-change-main">
+                            {platformAppliedMainText}
+                          </span>
                           <span className="analysis-platform-target">
                             {platform.targetLufs.toFixed(0)} LUFS target
-                          </span>
-                          <span className="analysis-platform-change">
-                            Applied {platformChangeText}
                           </span>
                           <span className="muted">
                             {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
@@ -5513,12 +5920,12 @@ export function App(): JSX.Element {
 
                 <div className="analysis-reference-inline analysis-normalization-inline">
                   <div className="analysis-stat-card compact" data-testid="analysis-normalization-change">
-                    <span className="analysis-stat-label">Applied change</span>
-                    <strong>{normalizationChangeText}</strong>
+                    <span className="analysis-stat-label">Applied reduction / boost</span>
+                    <strong>{normalizationAppliedMainText}</strong>
                     <span className="muted">
                       {normalizationPreviewEnabled
-                        ? 'Previewing now'
-                        : 'Off — tap Preview On to hear it'}
+                        ? `Previewing now · ${normalizationChangeText}`
+                        : `Off — tap Preview On to hear it · ${normalizationChangeText}`}
                     </span>
                   </div>
                   <div className="analysis-stat-card compact" data-testid="analysis-normalization-projected">
@@ -5545,19 +5952,20 @@ export function App(): JSX.Element {
                     </strong>
                     <span className="muted">Platform target</span>
                   </div>
-                  <div className="analysis-stat-card compact" data-testid="analysis-normalization-policy">
-                    <span className="analysis-stat-label">Gain policy</span>
-                    <strong>
-                      {selectedNormalizationPlatform.policy === 'down-only'
-                        ? 'Turn down only'
-                        : 'Turn up & down'}
-                    </strong>
-                    <span className="muted">{selectedNormalizationPlatform.description}</span>
-                  </div>
                 </div>
               </section>
 
-              <div className="analysis-tonal-balance-wrapper">
+                <section
+                  className={`analysis-tonal-balance-wrapper analysis-compact-panel mastering-draggable-panel${
+                    compactMasteringPanelDragId === 'tonal-balance' ? ' is-dragging' : ''
+                  }${compactMasteringPanelDragOverId === 'tonal-balance' ? ' is-drag-over' : ''}`}
+                  style={getCompactMasteringPanelStyle('tonal-balance')}
+                  data-testid="analysis-compact-panel-tonal-balance"
+                  onDragOver={(event) => handleCompactMasteringPanelDragOver('tonal-balance', event)}
+                  onDragLeave={() => handleCompactMasteringPanelDragLeave('tonal-balance')}
+                  onDrop={(event) => handleCompactMasteringPanelDrop('tonal-balance', event)}
+                >
+                  {renderCompactMasteringPanelDragHandle('tonal-balance')}
                 <p className="analysis-tonal-balance-heading" data-testid="analysis-tonal-balance-heading">
                   Tonal balance{refTrackSuffix}
                 </p>
@@ -5588,9 +5996,21 @@ export function App(): JSX.Element {
                     </div>
                   ))}
                 </div>
-              </div>
+                </section>
 
-              <div className="analysis-reference-toolbar producer-reference-toolbar">
+                <section
+                  className={`analysis-reference-panel-card analysis-compact-panel mastering-draggable-panel${
+                    compactMasteringPanelDragId === 'reference' ? ' is-dragging' : ''
+                  }${compactMasteringPanelDragOverId === 'reference' ? ' is-drag-over' : ''}`}
+                  style={getCompactMasteringPanelStyle('reference')}
+                  data-testid="analysis-compact-panel-reference"
+                  onDragOver={(event) => handleCompactMasteringPanelDragOver('reference', event)}
+                  onDragLeave={() => handleCompactMasteringPanelDragLeave('reference')}
+                  onDrop={(event) => handleCompactMasteringPanelDrop('reference', event)}
+                >
+                  {renderCompactMasteringPanelDragHandle('reference')}
+
+                  <div className="analysis-reference-toolbar producer-reference-toolbar">
                 <div>
                   <strong>Reference <HelpTooltip text="Load a professional track you want your mix to sound like, then click A/B to instantly switch between your mix and the reference. This lets you compare EQ balance, dynamics, and overall vibe. When you switch to the reference, the app swaps the entire audio chain to play the reference file instead of your mix. All the analysis meters update to show the reference track's stats so you can compare numbers side by side." links={REFERENCE_TRACK_LINKS} /></strong>
                   <p className="muted" data-testid="analysis-reference-summary">
@@ -5706,28 +6126,30 @@ export function App(): JSX.Element {
                 )}
               </div>
 
-              {recentReferenceTracks.length > 0 ? (
-                <div className="recent-reference-tracks" data-testid="recent-reference-tracks">
-                  <span className="analysis-stat-label">Recent references</span>
-                  <div className="recent-reference-tracks-list">
-                    {recentReferenceTracks.map((recent) => (
-                      <button
-                        key={recent.filePath}
-                        type="button"
-                        className={
-                          'recent-reference-track-btn ghost' +
-                          (referenceTrack?.filePath === recent.filePath ? ' active' : '')
-                        }
-                        onClick={() => void handleLoadReferenceByFilePath(recent.filePath)}
-                        disabled={referenceStatus === 'loading'}
-                        title={recent.filePath}
-                      >
-                        {recent.fileName}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+                  {recentReferenceTracks.length > 0 ? (
+                    <div className="recent-reference-tracks" data-testid="recent-reference-tracks">
+                      <span className="analysis-stat-label">Recent references</span>
+                      <div className="recent-reference-tracks-list">
+                        {recentReferenceTracks.map((recent) => (
+                          <button
+                            key={recent.filePath}
+                            type="button"
+                            className={
+                              'recent-reference-track-btn ghost' +
+                              (referenceTrack?.filePath === recent.filePath ? ' active' : '')
+                            }
+                            onClick={() => void handleLoadReferenceByFilePath(recent.filePath)}
+                            disabled={referenceStatus === 'loading'}
+                            title={recent.filePath}
+                          >
+                            {recent.fileName}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+              </div>
             </>
           ) : (
             <p className="muted" data-testid="analysis-empty-state">
@@ -7098,7 +7520,19 @@ export function App(): JSX.Element {
 
             {selectedPlaybackVersion ? (
               <div className="analysis-overlay-grid">
-                <section className="analysis-overlay-section analysis-overlay-visualizations" data-testid="analysis-overlay-visualizations">
+                <section
+                  className={getOverlayMasteringPanelClassName(
+                    'visualizations',
+                    'analysis-overlay-visualizations'
+                  )}
+                  style={getOverlayMasteringPanelStyle('visualizations')}
+                  data-panel-span="full"
+                  data-testid="analysis-overlay-visualizations"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('visualizations', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('visualizations')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('visualizations', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('visualizations')}
                   <div className="analysis-overlay-viz-row">
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
                       <div className="analysis-section-header">
@@ -7146,7 +7580,16 @@ export function App(): JSX.Element {
                   )}
                 </section>
 
-                <section className="analysis-overlay-section" data-testid="analysis-overlay-reference-panel">
+                <section
+                  className={getOverlayMasteringPanelClassName('reference')}
+                  style={getOverlayMasteringPanelStyle('reference')}
+                  data-panel-span="full"
+                  data-testid="analysis-overlay-reference-panel"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('reference', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('reference')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('reference', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('reference')}
                   <div className="analysis-section-header">
                     <h4>Reference Track <HelpTooltip text="Load a professional track you want your mix to sound like, then use the A/B toggle to flip between your mix and the reference. When you click 'Reference', the player switches to the reference file and all meters update to show its analysis. Click 'Mix' to switch back. This makes it easy to spot differences in loudness, EQ, and dynamics without losing your place." links={REFERENCE_TRACK_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Load a reference track to A/B against your mix</p>
@@ -7318,7 +7761,16 @@ export function App(): JSX.Element {
                 </section>
 
                 {/* Loudness History Graph */}
-                <section className="analysis-overlay-section" data-testid="analysis-loudness-history">
+                <section
+                  className={getOverlayMasteringPanelClassName('loudness-history')}
+                  style={getOverlayMasteringPanelStyle('loudness-history')}
+                  data-panel-span="full"
+                  data-testid="analysis-loudness-history"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('loudness-history', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('loudness-history')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('loudness-history', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('loudness-history')}
                   <h3>Loudness History{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A blue curve showing your track's rolling loudness over time. The dashed line marks the overall loudness estimate for the loaded track, and the white vertical line shows the current playback position. The shaded area makes it easier to see where sections feel denser or lighter.\n\nWhat to look for: A relatively consistent curve usually means controlled loudness. Big dips may point to sections that feel too small; sharp jumps may point to sections that hit harder than intended. Use it to compare sections against each other, then confirm the final number with the Integrated LUFS stat.\n\nTip: Compare the shape against a reference track in the same genre. If your curve is almost flat all the way through, the song may be over-compressed."} links={LOUDNESS_HISTORY_LINKS} /></h3>
                   <LoudnessHistoryGraph
                     analysis={analysis}
@@ -7331,7 +7783,16 @@ export function App(): JSX.Element {
                 </section>
 
                 {/* Waveform Display */}
-                <section className="analysis-overlay-section" data-testid="analysis-waveform">
+                <section
+                  className={getOverlayMasteringPanelClassName('waveform')}
+                  style={getOverlayMasteringPanelStyle('waveform')}
+                  data-panel-span="full"
+                  data-testid="analysis-waveform"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('waveform', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('waveform')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('waveform', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('waveform')}
                   <h3>Waveform{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: Symmetrical bars showing the peak amplitude of your audio at each moment in time. Taller bars = louder moments, shorter bars = quieter. Bars to the left of the white playback cursor are bright blue (already played), bars to the right are dimmer (upcoming). The Y-axis goes from -1.0 to +1.0 (full digital scale).\n\nWhat to look for: A healthy waveform has visible variation — loud choruses and quieter verses. If the bars are all maxed out at 1.0 with no variation, your track is likely over-compressed or clipping. Gaps (no bars) indicate silence.\n\nTip: Compare the height of your loudest and quietest sections. If there's barely any difference, consider backing off your limiter to restore dynamics."} links={WAVEFORM_LINKS} /></h3>
                   <WaveformDisplay
                     waveformPeaks={analysis?.waveformPeaks ?? null}
@@ -7346,7 +7807,16 @@ export function App(): JSX.Element {
                 </section>
 
                 {/* Stereo Correlation Meter */}
-                <section className="analysis-overlay-section" data-testid="analysis-stereo-correlation">
+                <section
+                  className={getOverlayMasteringPanelClassName('stereo-correlation')}
+                  style={getOverlayMasteringPanelStyle('stereo-correlation')}
+                  data-panel-span="full"
+                  data-testid="analysis-stereo-correlation"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('stereo-correlation', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('stereo-correlation')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('stereo-correlation', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('stereo-correlation')}
                   <div className="analysis-section-header">
                     <h4>Stereo Correlation{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A horizontal meter with a glowing indicator that moves between -1 (left) and +1 (right). The background fades from red on the left, through yellow in the center, to green on the right. The numeric value is shown in the top-right corner, colored to match the zone.\n\nWhat to look for: Green zone (+0.5 to +1) = great mono compatibility — your track sounds solid on phone speakers and mono systems. Yellow zone (0 to +0.5) = some stereo content, generally fine. Red zone (below 0) = phase issues — left and right channels are canceling each other, which sounds thin or hollow in mono.\n\nTip: If the indicator dips into the red during certain parts, check for over-widened stereo effects, poorly set up chorus/phaser plugins, or samples that were accidentally phase-inverted."} links={STEREO_CORRELATION_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Phase relationship between L/R channels (+1 = mono compatible, -1 = out of phase)</p>
@@ -7375,9 +7845,16 @@ export function App(): JSX.Element {
                   </p>
                 ) : null}
 
-                <div className="analysis-overlay-side-by-side">
-
-                  <section className="analysis-overlay-section">
+                <section
+                  className={getOverlayMasteringPanelClassName('tonal-balance')}
+                  style={getOverlayMasteringPanelStyle('tonal-balance')}
+                  data-panel-span="half"
+                  data-testid="analysis-overlay-tonal-balance-panel"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('tonal-balance', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('tonal-balance')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('tonal-balance', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('tonal-balance')}
                     <div className="analysis-section-header">
                       <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{refTrackSuffix} <HelpTooltip text="Shows how your audio energy is distributed across three broad frequency bands. Low (20-250 Hz) covers sub and bass. Mid (250-4000 Hz) covers vocals, guitars, synths, and most musical detail. High (4000-20000 Hz) covers presence, air, and brightness. Each band is shown as a percentage of total energy. Use the numbers as a rough guide, not a rulebook: many balanced masters fall somewhere around 30-40% Low, 40-50% Mid, and 15-25% High, but genre and arrangement matter." links={TONAL_BALANCE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Low/mid/high energy distribution</p>
@@ -7409,10 +7886,18 @@ export function App(): JSX.Element {
                         </div>
                       ))}
                     </div>
-                  </section>
-                </div>
+                </section>
 
-                <section className="analysis-overlay-section">
+                <section
+                  className={getOverlayMasteringPanelClassName('loudness-peaks')}
+                  style={getOverlayMasteringPanelStyle('loudness-peaks')}
+                  data-panel-span="full"
+                  data-testid="analysis-overlay-loudness-peaks"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('loudness-peaks', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('loudness-peaks')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('loudness-peaks', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('loudness-peaks')}
                   <h3>Loudness &amp; peaks{isRefMode ? " (Reference)" : ""}</h3>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
@@ -7480,9 +7965,15 @@ export function App(): JSX.Element {
 
 
                 <section
-                  className="analysis-overlay-section"
+                  className={getOverlayMasteringPanelClassName('normalization')}
+                  style={getOverlayMasteringPanelStyle('normalization')}
+                  data-panel-span="full"
                   data-testid="analysis-overlay-normalization-panel"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('normalization', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('normalization')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('normalization', event)}
                 >
+                  {renderOverlayMasteringPanelDragHandle('normalization')}
                   <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
                   <div className="analysis-normalization-header">
                     <div>
@@ -7513,10 +8004,15 @@ export function App(): JSX.Element {
                   >
                     {NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
                       const platformPreview = normalizationPreviewByPlatformId.get(platform.id) ?? null;
-                      const platformChangeText =
-                        analysisStatus === 'ready' && platformPreview
-                          ? formatSignedLevel(platformPreview.appliedGainDb)
-                          : '—';
+                      const platformAppliedMainText = buildAnalysisValue(
+                        analysisStatus,
+                        formatAppliedChangeMainText(platformPreview?.appliedGainDb),
+                        {
+                          loading: 'Loading…',
+                          error: 'Error',
+                          empty: 'Applied change —',
+                        }
+                      );
 
                       return (
                         <button
@@ -7540,11 +8036,11 @@ export function App(): JSX.Element {
                             <span className="analysis-platform-title">{platform.label}</span>
                           </span>
                           <span className="analysis-platform-copy">
+                            <span className="analysis-platform-change analysis-platform-change-main">
+                              {platformAppliedMainText}
+                            </span>
                             <span className="analysis-platform-target">
                               {platform.targetLufs.toFixed(0)} LUFS target
-                            </span>
-                            <span className="analysis-platform-change">
-                              Applied {platformChangeText}
                             </span>
                             <span className="muted">
                               {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
@@ -7557,12 +8053,12 @@ export function App(): JSX.Element {
 
                   <div className="analysis-normalization-metrics-grid">
                     <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-change">
-                      <span className="analysis-stat-label">Applied change</span>
-                      <strong>{normalizationChangeText}</strong>
+                      <span className="analysis-stat-label">Applied reduction / boost</span>
+                      <strong>{normalizationAppliedMainText}</strong>
                       <span className="muted">
                         {normalizationPreviewEnabled
-                          ? 'Previewing now'
-                          : 'Off — tap Preview On to hear it'}
+                          ? `Previewing now · ${normalizationChangeText}`
+                          : `Off — tap Preview On to hear it · ${normalizationChangeText}`}
                       </span>
                     </div>
                     <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-projected">
@@ -7589,19 +8085,19 @@ export function App(): JSX.Element {
                       </strong>
                       <span className="muted">Platform target</span>
                     </div>
-                    <div className="analysis-stat-card" data-testid="analysis-overlay-normalization-policy">
-                      <span className="analysis-stat-label">Gain policy</span>
-                      <strong>
-                        {selectedNormalizationPlatform.policy === 'down-only'
-                          ? 'Turn down only'
-                          : 'Turn up & down'}
-                      </strong>
-                      <span className="muted">{selectedNormalizationPlatform.description}</span>
-                    </div>
                   </div>
                 </section>
 
-                <section className="analysis-overlay-section analysis-comparison-panel">
+                <section
+                  className={getOverlayMasteringPanelClassName('comparison', 'analysis-comparison-panel')}
+                  style={getOverlayMasteringPanelStyle('comparison')}
+                  data-panel-span="full"
+                  data-testid="analysis-overlay-comparison-panel"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('comparison', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('comparison')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('comparison', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('comparison')}
                   <div className="analysis-section-header">
                     <h4>Your Mix vs Reference <HelpTooltip text="Side-by-side comparison of your mix and the loaded reference track. Shows the difference in loudness (LUFS), true peak, and tonal balance. Positive numbers mean your mix is louder/higher; negative means the reference is. Use this to see exactly how your mix stacks up against a professional master." links={REFERENCE_TRACK_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Compare loudness and tonal balance against your reference track</p>
@@ -7646,8 +8142,16 @@ export function App(): JSX.Element {
                 </section>
 
                 {/* Vectorscope & Mid/Side Monitoring */}
-                <div className="analysis-overlay-side-by-side">
-                  <section className="analysis-overlay-section" data-testid="analysis-vectorscope">
+                <section
+                  className={getOverlayMasteringPanelClassName('vectorscope')}
+                  style={getOverlayMasteringPanelStyle('vectorscope')}
+                  data-panel-span="half"
+                  data-testid="analysis-vectorscope"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('vectorscope', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('vectorscope')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('vectorscope', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('vectorscope')}
                     <div className="analysis-section-header">
                       <h4>Vectorscope{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A circular display where blue dots trace your stereo signal in real-time, with a fading trail so you can see the shape over time. The vertical axis (M) is the Mid/mono signal (L+R), and the horizontal axis (S) is the Side signal (L-R). L and R labels mark the diagonal directions for pure left and pure right.\n\nWhat to look for: A tall, narrow vertical shape = mostly mono content (centered vocals, bass). A wider spread = more stereo width. A roughly even shape = balanced stereo image. If it leans consistently toward L or R, your mix is off-center. A thin horizontal line means the signal is pure side information with no center — usually a problem.\n\nTip: Bass and kick should appear mostly vertical (centered). If your low end spreads wide on the vectorscope, consider narrowing it with a mid/side EQ. A natural, full mix typically looks like a fuzzy vertical oval."} links={VECTORSCOPE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Stereo image — wider spread = wider stereo field, vertical = mono</p>
@@ -7662,7 +8166,16 @@ export function App(): JSX.Element {
                     </div>
                   </section>
 
-                  <section className="analysis-overlay-section" data-testid="analysis-midside">
+                <section
+                  className={getOverlayMasteringPanelClassName('midside')}
+                  style={getOverlayMasteringPanelStyle('midside')}
+                  data-panel-span="half"
+                  data-testid="analysis-midside"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('midside', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('midside')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('midside', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('midside')}
                     <div className="analysis-section-header">
                       <h4>Mid/Side Monitoring <HelpTooltip text="Listen to just the center (Mid) or sides (Side) of your stereo mix separately. Mid = vocals, bass, kick. Side = reverb, width, panning. Useful for checking stereo balance." links={MID_SIDE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Listen to Mid (center) or Side (stereo width) in isolation</p>
@@ -7698,11 +8211,19 @@ export function App(): JSX.Element {
                         Listening in <strong>{midSideMode === 'mid' ? 'Mid (L+R)/2' : 'Side (L-R)/2'}</strong> mode
                       </p>
                     ) : null}
-                  </section>
-                </div>
+                </section>
 
                 {/* K-Metering */}
-                <section className="analysis-overlay-section" data-testid="analysis-k-metering">
+                <section
+                  className={getOverlayMasteringPanelClassName('k-metering')}
+                  style={getOverlayMasteringPanelStyle('k-metering')}
+                  data-panel-span="half"
+                  data-testid="analysis-k-metering"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('k-metering', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('k-metering')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('k-metering', event)}
+                >
+                  {renderOverlayMasteringPanelDragHandle('k-metering')}
                   <div className="analysis-section-header">
                     <h4>K-Metering <HelpTooltip text={"What this measures: Bob Katz's K-System metering, which shifts the meter scale so 0 dB represents a calibrated reference level instead of the digital ceiling. K-14 sets 0 dB = -14 dBFS (designed for pop, rock, and electronic music). K-20 sets 0 dB = -20 dBFS (designed for film, classical, and broadcast). The value shown is your track's RMS level on that K-scale.\n\nGood values: On K-14, your average level should hover around 0 dB (meaning your RMS is around -14 dBFS). Peaks above +4 dB on K-14 are loud. On K-20, average around 0 dB means your RMS is around -20 dBFS — typical for dynamic content like film and orchestral music.\n\nIf it's wrong: If your K-14 reading is consistently above +4 dB, you are mastering very loud with limited dynamics. If it reads well below -6 dB on K-14, your track is unusually quiet for commercial music. Use K-14 for most music production and K-20 when working on film, classical, or anything requiring wide dynamic range."} links={K_METERING_LINKS} /></h4>
                     <p className="analysis-section-subtitle">K-weighted meter scales calibrated for different content types — 0 dB on the K-scale represents the reference listening level</p>
@@ -7731,7 +8252,16 @@ export function App(): JSX.Element {
 
                 {/* Pro Indicators: Dynamic Range */}
                 {analysisStatus === 'ready' && analysis ? (
-                  <section className="analysis-overlay-section" data-testid="analysis-pro-indicators">
+                  <section
+                    className={getOverlayMasteringPanelClassName('pro-indicators')}
+                    style={getOverlayMasteringPanelStyle('pro-indicators')}
+                    data-panel-span="half"
+                    data-testid="analysis-pro-indicators"
+                    onDragOver={(event) => handleOverlayMasteringPanelDragOver('pro-indicators', event)}
+                    onDragLeave={() => handleOverlayMasteringPanelDragLeave('pro-indicators')}
+                    onDrop={(event) => handleOverlayMasteringPanelDrop('pro-indicators', event)}
+                  >
+                    {renderOverlayMasteringPanelDragHandle('pro-indicators')}
                     <div className="analysis-section-header">
                       <h4>Quick Diagnostics <HelpTooltip text={"What this measures: A quick classification of your track's dynamic character based on the crest factor (peak-to-RMS difference). High DR means crest factor above 10 dB — your transients and dynamics are well-preserved. Medium DR is 6-10 dB — typical for commercial masters. Low DR means below 6 dB — the track is heavily compressed or limited.\n\nGood values: Depends on genre and intent. Pop/rock: Medium DR (6-10 dB) is normal. EDM/hip-hop: Medium to Low DR is common. Acoustic/jazz/classical: High DR (above 10 dB) is expected. There is no single right answer — it depends on what the music needs.\n\nIf it's wrong: Low DR with a track that should breathe (acoustic, jazz) means you have over-limited. Try reducing limiter gain reduction or using less bus compression. High DR on a track meant to compete on playlists may need more limiting. The goal is to match the dynamic feel that serves the song, not chase a number."} links={DYNAMIC_RANGE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">At-a-glance health checks for your master</p>
@@ -7758,7 +8288,16 @@ export function App(): JSX.Element {
 
                 {/* Mastering Checklist Summary */}
                 {analysisStatus === 'ready' && analysis && measuredAnalysis ? (
-                  <section className="analysis-overlay-section" data-testid="analysis-mastering-checklist">
+                  <section
+                    className={getOverlayMasteringPanelClassName('mastering-checklist')}
+                    style={getOverlayMasteringPanelStyle('mastering-checklist')}
+                    data-panel-span="full"
+                    data-testid="analysis-mastering-checklist"
+                    onDragOver={(event) => handleOverlayMasteringPanelDragOver('mastering-checklist', event)}
+                    onDragLeave={() => handleOverlayMasteringPanelDragLeave('mastering-checklist')}
+                    onDrop={(event) => handleOverlayMasteringPanelDrop('mastering-checklist', event)}
+                  >
+                    {renderOverlayMasteringPanelDragHandle('mastering-checklist')}
                     <div className="analysis-section-header">
                       <h4>Mastering Checklist <HelpTooltip text={"What this measures: An automated technical health check of your master across four critical areas. (1) LUFS: passes if integrated loudness is between -16 and -6 LUFS (the typical streaming range), warns otherwise. (2) True Peak: passes if below -1 dBTP, warns if between -1 and 0 dBTP, fails if at or above 0 dBTP. (3) DC Offset: passes if the mean sample value is 0.001 or less (0.1%), warns if higher. (4) Clipping: passes if zero clipped samples, fails if any samples hit the digital ceiling.\n\nGood values: All four checks showing a pass (checkmark). This means your master is technically clean and ready for distribution.\n\nIf it's wrong: LUFS warning — adjust your overall loudness to match platform targets. True Peak warning — lower your limiter ceiling to -1 dBTP or use a true peak limiter. DC Offset warning — apply a high-pass filter at 10-20 Hz or use DC offset removal. Clipping failure — reduce gain into your final limiter or lower the output ceiling."} links={MASTERING_CHECKLIST_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Auto-generated summary of your master&apos;s technical health</p>
@@ -7814,9 +8353,15 @@ export function App(): JSX.Element {
 
                 {/* Dynamic Range / Crest Factor Meter */}
                 <section
-                  className="analysis-overlay-section"
+                  className={getOverlayMasteringPanelClassName('crest-factor-history')}
+                  style={getOverlayMasteringPanelStyle('crest-factor-history')}
+                  data-panel-span="full"
                   data-testid="analysis-crest-factor-history"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('crest-factor-history', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('crest-factor-history')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('crest-factor-history', event)}
                 >
+                  {renderOverlayMasteringPanelDragHandle('crest-factor-history')}
                   <div className="analysis-section-header">
                     <h4>Dynamic Range / Crest Factor <HelpTooltip text={"What you're seeing: A real-time line graph plotting the crest factor (peak-to-RMS difference) over the last 30 seconds. The crest factor measures how much transient headroom your audio has — the gap between the loudest peak and the average (RMS) level.\n\nColor coding: Green (above 8 dB) means healthy dynamics with well-preserved transients. Yellow (6-8 dB) indicates moderate compression typical of commercial masters. Red (below 6 dB) signals heavily compressed or limited audio — the dynamics are being crushed.\n\nWhat to look for: Watch how the line moves during different sections. Verses might show higher crest factor while choruses drop lower as limiting kicks in. If the line stays consistently in the red zone, you may be over-limiting.\n\nTip: Compare this graph during your loudest chorus vs. your quietest verse. If both sections show similar crest factor, your master might lack dynamic contrast."} links={CREST_FACTOR_HISTORY_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Real-time peak-to-RMS difference — green = healthy dynamics, red = crushed</p>
@@ -7831,9 +8376,15 @@ export function App(): JSX.Element {
 
                 {/* Mid/Side Spectrum */}
                 <section
-                  className="analysis-overlay-section"
+                  className={getOverlayMasteringPanelClassName('mid-side-spectrum')}
+                  style={getOverlayMasteringPanelStyle('mid-side-spectrum')}
+                  data-panel-span="full"
                   data-testid="analysis-mid-side-spectrum"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('mid-side-spectrum', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('mid-side-spectrum')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('mid-side-spectrum', event)}
                 >
+                  {renderOverlayMasteringPanelDragHandle('mid-side-spectrum')}
                   <div className="analysis-section-header">
                     <h4>Mid/Side Spectrum <HelpTooltip text={"What you're seeing: Two overlaid spectrum curves — blue for Mid (L+R summed) and orange for Side (L-R). Both share the same frequency axis as the main spectrum analyzer.\n\nWhat to look for: Bass frequencies (below ~200 Hz) should be predominantly Mid (blue) with minimal Side (orange) — this ensures mono-compatible low end. If orange is dominant in the lows, your bass is too wide and may collapse on mono playback. In the highs, Side content is normal (reverb, panned elements).\n\nTip: Use this alongside the Mid/Side Monitoring controls to listen and compare."} links={MID_SIDE_SPECTRUM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Frequency content split into Mid (center) and Side (stereo width)</p>
@@ -7849,9 +8400,15 @@ export function App(): JSX.Element {
 
                 {/* Loudness Histogram / Distribution */}
                 <section
-                  className="analysis-overlay-section"
+                  className={getOverlayMasteringPanelClassName('loudness-histogram')}
+                  style={getOverlayMasteringPanelStyle('loudness-histogram')}
+                  data-panel-span="full"
                   data-testid="analysis-loudness-histogram"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('loudness-histogram', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('loudness-histogram')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('loudness-histogram', event)}
                 >
+                  {renderOverlayMasteringPanelDragHandle('loudness-histogram')}
                   <div className="analysis-section-header">
                     <h4>Loudness Distribution <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. Green dashed lines mark the streaming target range (-16 to -6 LUFS).\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: This is built from the full-track analysis, so you can inspect the complete distribution immediately without waiting for playback or scroll position."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Statistical distribution of loudness levels across the full analyzed track</p>
@@ -7865,9 +8422,15 @@ export function App(): JSX.Element {
 
                 {/* Spectrogram (Scrolling) */}
                 <section
-                  className="analysis-overlay-section"
+                  className={getOverlayMasteringPanelClassName('spectrogram')}
+                  style={getOverlayMasteringPanelStyle('spectrogram')}
+                  data-panel-span="full"
                   data-testid="analysis-spectrogram"
+                  onDragOver={(event) => handleOverlayMasteringPanelDragOver('spectrogram', event)}
+                  onDragLeave={() => handleOverlayMasteringPanelDragLeave('spectrogram')}
+                  onDrop={(event) => handleOverlayMasteringPanelDrop('spectrogram', event)}
                 >
+                  {renderOverlayMasteringPanelDragHandle('spectrogram')}
                   <div className="analysis-section-header">
                     <h4>Spectrogram <HelpTooltip text={"What you're seeing: A scrolling 2D heatmap — X is time, Y is frequency (20 Hz to 20 kHz, logarithmic), color intensity is amplitude. Dark blue = quiet, green = moderate, yellow = loud, red = very loud.\n\nWhat to look for: A persistent bright horizontal band indicates a resonant frequency that may need EQ. Vertical bright lines are transients (drums, clicks). Gradual color shifts show arrangement dynamics between sections.\n\nTip: Especially useful for spotting issues a real-time spectrum misses — like a rogue frequency that appears briefly, or gradual tonal drift across sections."} links={SPECTROGRAM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Scrolling frequency heatmap — time vs. frequency vs. amplitude</p>

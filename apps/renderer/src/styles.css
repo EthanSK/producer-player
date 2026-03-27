@@ -538,8 +538,9 @@ input[type='range'] {
 }
 
 .analysis-draggable-panel-shell {
-  position: relative;
   min-width: 0;
+  display: grid;
+  gap: 8px;
 }
 
 .analysis-compact-section {
@@ -757,13 +758,12 @@ input[type='range'] {
 .analysis-compact-section,
 .analysis-normalization-panel {
   position: relative;
-  padding-right: 44px;
 }
 
 .analysis-panel-drag-handle {
-  position: absolute;
-  top: 10px;
-  right: 10px;
+  position: static;
+  justify-self: end;
+  align-self: start;
   width: 28px;
   height: 28px;
   border-radius: 8px;
@@ -777,7 +777,6 @@ input[type='range'] {
   line-height: 1;
   cursor: grab;
   user-select: none;
-  z-index: 2;
 }
 
 .analysis-panel-drag-handle:hover {

@@ -106,6 +106,20 @@ function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function getErrorCode(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : null;
+}
+
+function isIgnoredInputStreamError(error: unknown): boolean {
+  const code = getErrorCode(error);
+  return code === 'EPIPE' || code === 'ERR_STREAM_DESTROYED';
+}
+
 function normalizeModel(provider: AgentProviderId, model?: AgentModelId): AgentModelId {
   const trimmed = typeof model === 'string' ? model.trim() : '';
   return trimmed.length > 0 ? trimmed : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
@@ -534,12 +548,14 @@ export function sendTurn(
   const session = currentSession;
 
   if (session.process) {
+    const previousProcess = session.process;
+    session.process = null;
+
     try {
-      session.process.kill('SIGTERM');
+      previousProcess.kill('SIGTERM');
     } catch {
       // ignore
     }
-    session.process = null;
   }
 
   const cliPath = resolveCliPath(getCommandName(session.provider));
@@ -571,11 +587,42 @@ export function sendTurn(
     codexItemTextById: new Map<string, string>(),
   };
 
-  child.stdin?.end(prompt);
+  const stdin = child.stdin;
+  if (stdin) {
+    stdin.on('error', (error: Error) => {
+      if (!session.alive || session.process !== child) {
+        return;
+      }
+
+      if (isIgnoredInputStreamError(error)) {
+        return;
+      }
+
+      emitEvent({
+        type: 'error',
+        code: 'PROCESS_STDIN_ERROR',
+        message: `Agent input stream error: ${error.message}`,
+      });
+    });
+
+    try {
+      stdin.end(prompt);
+    } catch (error: unknown) {
+      if (!session.alive || session.process !== child || isIgnoredInputStreamError(error)) {
+        return;
+      }
+
+      emitEvent({
+        type: 'error',
+        code: 'PROCESS_STDIN_ERROR',
+        message: `Agent input stream error: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
 
   const rl = createInterface({ input: child.stdout! });
   rl.on('line', (line) => {
-    if (!session.alive) return;
+    if (!session.alive || session.process !== child) return;
 
     const trimmed = line.trim();
     if (trimmed.length === 0) return;
@@ -599,11 +646,17 @@ export function sendTurn(
 
   let stderrOutput = '';
   child.stderr?.on('data', (chunk: Buffer) => {
+    if (!session.alive || session.process !== child) {
+      return;
+    }
     stderrOutput += chunk.toString();
   });
 
   child.on('error', (err) => {
-    if (!session.alive) return;
+    if (!session.alive || session.process !== child) return;
+    if (isIgnoredInputStreamError(err)) {
+      return;
+    }
     emitEvent({
       type: 'error',
       code: 'PROCESS_ERROR',
@@ -612,7 +665,7 @@ export function sendTurn(
   });
 
   child.on('exit', (code, signal) => {
-    if (!session.alive) return;
+    if (!session.alive || session.process !== child) return;
 
     const trimmedStderr = stderrOutput.trim();
     if (code !== 0 && code !== null) {
@@ -632,11 +685,15 @@ export function sendTurn(
 
 export function interrupt(): void {
   if (currentSession?.process) {
+    const runningProcess = currentSession.process;
+    currentSession.process = null;
+
     try {
-      currentSession.process.kill('SIGTERM');
+      runningProcess.kill('SIGTERM');
     } catch {
       // ignore
     }
+
     finalizeTurn(currentSession);
   }
 }

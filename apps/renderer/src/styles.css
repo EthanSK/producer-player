@@ -557,6 +557,26 @@ input[type='range'] {
   gap: 2px;
 }
 
+.analysis-inline-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.analysis-inline-header > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.analysis-inline-header-actions {
+  display: flex;
+  align-items: start;
+  justify-content: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .analysis-track-label {
   font-size: 12px;
   font-weight: 600;
@@ -761,9 +781,7 @@ input[type='range'] {
 }
 
 .analysis-panel-drag-handle {
-  position: static;
-  justify-self: end;
-  align-self: start;
+  flex: 0 0 auto;
   width: 28px;
   height: 28px;
   border-radius: 8px;
@@ -1106,8 +1124,26 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   border-radius: 14px;
   padding: 14px;
   display: grid;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 10px;
   background: rgba(255, 255, 255, 0.02);
+}
+
+.analysis-overlay-section > .analysis-panel-drag-handle {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+}
+
+.analysis-overlay-section > .analysis-panel-drag-handle + * {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.analysis-overlay-section > .analysis-panel-drag-handle + * ~ * {
+  grid-column: 1 / -1;
 }
 
 .analysis-reference-slots {

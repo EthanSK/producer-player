@@ -5586,24 +5586,28 @@ export function App(): JSX.Element {
                 onDragOver={(event) => handleCompactMasteringPanelDragOver(event, 'core-metrics')}
                 onDrop={(event) => handleCompactMasteringPanelDrop(event, 'core-metrics')}
               >
-                <button
-                  type="button"
-                  className="analysis-panel-drag-handle"
-                  draggable
-                  onDragStart={(event) => handleCompactMasteringPanelDragStart(event, 'core-metrics')}
-                  onDragEnd={handleCompactMasteringPanelDragEnd}
-                  title="Drag me to rearrange this panel."
-                  aria-label="Drag me to rearrange this panel."
-                  data-testid="analysis-compact-drag-handle-core-metrics"
-                >
-                  ⋮⋮
-                </button>
                 <section className="analysis-compact-section" data-testid="analysis-compact-core-metrics-panel">
-                  <div className="analysis-track-summary">
-                <strong className="analysis-track-label" data-testid="analysis-track-label">
-                  {selectedPlaybackVersion.fileName}
-                </strong>
-              </div>
+                  <div className="analysis-inline-header">
+                    <div className="analysis-track-summary">
+                      <strong className="analysis-track-label" data-testid="analysis-track-label">
+                        {selectedPlaybackVersion.fileName}
+                      </strong>
+                    </div>
+                    <button
+                      type="button"
+                      className="analysis-panel-drag-handle"
+                      draggable
+                      onDragStart={(event) =>
+                        handleCompactMasteringPanelDragStart(event, 'core-metrics')
+                      }
+                      onDragEnd={handleCompactMasteringPanelDragEnd}
+                      title="Drag me to rearrange this panel."
+                      aria-label="Drag me to rearrange this panel."
+                      data-testid="analysis-compact-drag-handle-core-metrics"
+                    >
+                      ⋮⋮
+                    </button>
+                  </div>
 
               {analysisStatus !== 'ready' ? (
                 <p className="muted analysis-loading-line" data-testid="analysis-status">
@@ -5713,19 +5717,6 @@ export function App(): JSX.Element {
                 onDragOver={(event) => handleCompactMasteringPanelDragOver(event, 'normalization')}
                 onDrop={(event) => handleCompactMasteringPanelDrop(event, 'normalization')}
               >
-                <button
-                  type="button"
-                  className="analysis-panel-drag-handle"
-                  draggable
-                  onDragStart={(event) => handleCompactMasteringPanelDragStart(event, 'normalization')}
-                  onDragEnd={handleCompactMasteringPanelDragEnd}
-                  title="Drag me to rearrange this panel."
-                  aria-label="Drag me to rearrange this panel."
-                  data-testid="analysis-compact-drag-handle-normalization"
-                >
-                  ⋮⋮
-                </button>
-
                 <section
                   className="analysis-normalization-panel"
                   data-testid="analysis-normalization-panel"
@@ -5737,16 +5728,32 @@ export function App(): JSX.Element {
                       {normalizationSummaryText}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className={normalizationPreviewEnabled ? '' : 'ghost'}
-                    onClick={() => setNormalizationPreviewEnabled((current) => !current)}
-                    data-testid="analysis-normalization-toggle"
-                    disabled={analysisStatus !== 'ready' || !normalizationPreview}
-                    title="Apply this platform's loudness adjustment to your playback."
-                  >
-                    Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
-                  </button>
+                  <div className="analysis-inline-header-actions">
+                    <button
+                      type="button"
+                      className={normalizationPreviewEnabled ? '' : 'ghost'}
+                      onClick={() => setNormalizationPreviewEnabled((current) => !current)}
+                      data-testid="analysis-normalization-toggle"
+                      disabled={analysisStatus !== 'ready' || !normalizationPreview}
+                      title="Apply this platform's loudness adjustment to your playback."
+                    >
+                      Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
+                    </button>
+                    <button
+                      type="button"
+                      className="analysis-panel-drag-handle"
+                      draggable
+                      onDragStart={(event) =>
+                        handleCompactMasteringPanelDragStart(event, 'normalization')
+                      }
+                      onDragEnd={handleCompactMasteringPanelDragEnd}
+                      title="Drag me to rearrange this panel."
+                      aria-label="Drag me to rearrange this panel."
+                      data-testid="analysis-compact-drag-handle-normalization"
+                    >
+                      ⋮⋮
+                    </button>
+                  </div>
                 </div>
 
                 <div className="analysis-platform-grid" role="group" aria-label="Platform normalization presets">
@@ -5843,24 +5850,27 @@ export function App(): JSX.Element {
                 onDragOver={(event) => handleCompactMasteringPanelDragOver(event, 'tonal-balance')}
                 onDrop={(event) => handleCompactMasteringPanelDrop(event, 'tonal-balance')}
               >
-                <button
-                  type="button"
-                  className="analysis-panel-drag-handle"
-                  draggable
-                  onDragStart={(event) => handleCompactMasteringPanelDragStart(event, 'tonal-balance')}
-                  onDragEnd={handleCompactMasteringPanelDragEnd}
-                  title="Drag me to rearrange this panel."
-                  aria-label="Drag me to rearrange this panel."
-                  data-testid="analysis-compact-drag-handle-tonal-balance"
-                >
-                  ⋮⋮
-                </button>
-
                 <section className="analysis-compact-section" data-testid="analysis-compact-tonal-balance-panel">
                   <div className="analysis-tonal-balance-wrapper">
-                    <p className="analysis-tonal-balance-heading" data-testid="analysis-tonal-balance-heading">
-                      Tonal balance{refTrackSuffix}
-                    </p>
+                    <div className="analysis-inline-header">
+                      <p className="analysis-tonal-balance-heading" data-testid="analysis-tonal-balance-heading">
+                        Tonal balance{refTrackSuffix}
+                      </p>
+                      <button
+                        type="button"
+                        className="analysis-panel-drag-handle"
+                        draggable
+                        onDragStart={(event) =>
+                          handleCompactMasteringPanelDragStart(event, 'tonal-balance')
+                        }
+                        onDragEnd={handleCompactMasteringPanelDragEnd}
+                        title="Drag me to rearrange this panel."
+                        aria-label="Drag me to rearrange this panel."
+                        data-testid="analysis-compact-drag-handle-tonal-balance"
+                      >
+                        ⋮⋮
+                      </button>
+                    </div>
                     <div
                       className="analysis-tonal-balance"
                       data-testid="analysis-tonal-balance"
@@ -5900,18 +5910,6 @@ export function App(): JSX.Element {
                 onDragOver={(event) => handleCompactMasteringPanelDragOver(event, 'reference')}
                 onDrop={(event) => handleCompactMasteringPanelDrop(event, 'reference')}
               >
-                <button
-                  type="button"
-                  className="analysis-panel-drag-handle"
-                  draggable
-                  onDragStart={(event) => handleCompactMasteringPanelDragStart(event, 'reference')}
-                  onDragEnd={handleCompactMasteringPanelDragEnd}
-                  title="Drag me to rearrange this panel."
-                  aria-label="Drag me to rearrange this panel."
-                  data-testid="analysis-compact-drag-handle-reference"
-                >
-                  ⋮⋮
-                </button>
                 <section className="analysis-compact-section analysis-compact-reference-panel" data-testid="analysis-compact-reference-panel">
                   <div className="analysis-reference-toolbar producer-reference-toolbar">
                 <div>
@@ -5926,38 +5924,52 @@ export function App(): JSX.Element {
                         : 'No reference'}
                   </p>
                 </div>
-                <div className="analysis-reference-actions">
+                <div className="analysis-inline-header-actions">
+                  <div className="analysis-reference-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleChooseReferenceTrack();
+                      }}
+                      data-testid="analysis-choose-reference"
+                      title="Choose an external reference file."
+                      disabled={referenceStatus === 'loading'}
+                    >
+                      {referenceStatus === 'loading' ? 'Loading…' : 'Choose File…'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleUseCurrentTrackAsReference();
+                      }}
+                      data-testid="analysis-use-current-reference"
+                      disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
+                      title="Use the current track as the reference."
+                    >
+                      {referenceStatus === 'loading' ? 'Loading…' : 'Use Current'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={handleClearReferenceTrack}
+                      data-testid="analysis-clear-reference"
+                      disabled={!referenceTrack && referenceStatus !== 'error'}
+                      title="Clear the reference."
+                    >
+                      Clear
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      void handleChooseReferenceTrack();
-                    }}
-                    data-testid="analysis-choose-reference"
-                    title="Choose an external reference file."
-                    disabled={referenceStatus === 'loading'}
+                    className="analysis-panel-drag-handle"
+                    draggable
+                    onDragStart={(event) => handleCompactMasteringPanelDragStart(event, 'reference')}
+                    onDragEnd={handleCompactMasteringPanelDragEnd}
+                    title="Drag me to rearrange this panel."
+                    aria-label="Drag me to rearrange this panel."
+                    data-testid="analysis-compact-drag-handle-reference"
                   >
-                    {referenceStatus === 'loading' ? 'Loading…' : 'Choose File…'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleUseCurrentTrackAsReference();
-                    }}
-                    data-testid="analysis-use-current-reference"
-                    disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
-                    title="Use the current track as the reference."
-                  >
-                    {referenceStatus === 'loading' ? 'Loading…' : 'Use Current'}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={handleClearReferenceTrack}
-                    data-testid="analysis-clear-reference"
-                    disabled={!referenceTrack && referenceStatus !== 'error'}
-                    title="Clear the reference."
-                  >
-                    Clear
+                    ⋮⋮
                   </button>
                 </div>
               </div>
@@ -7445,18 +7457,23 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'visualizations')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'visualizations')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleFullscreenMasteringPanelDragStart(event, 'visualizations')}
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-visualizations"
-                  >
-                    ⋮⋮
-                  </button>
+                  <div className="analysis-inline-header">
+                    <h3>Visualizations{refTrackSuffix}</h3>
+                    <button
+                      type="button"
+                      className="analysis-panel-drag-handle"
+                      draggable
+                      onDragStart={(event) =>
+                        handleFullscreenMasteringPanelDragStart(event, 'visualizations')
+                      }
+                      onDragEnd={handleFullscreenMasteringPanelDragEnd}
+                      title="Drag me to rearrange this panel."
+                      aria-label="Drag me to rearrange this panel."
+                      data-testid="analysis-overlay-drag-handle-visualizations"
+                    >
+                      ⋮⋮
+                    </button>
+                  </div>
                   <div className="analysis-overlay-viz-row">
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
                       <div className="analysis-section-header">

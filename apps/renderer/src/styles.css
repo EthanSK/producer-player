@@ -1943,6 +1943,8 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   min-height: 140px;
   max-height: 64vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   padding-right: 2px;
   display: flex;
   flex-direction: column;

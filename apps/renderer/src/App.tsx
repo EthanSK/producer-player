@@ -558,6 +558,11 @@ function findNearestScrollableElement(element: Element | null): HTMLElement | nu
     : null;
 }
 
+function autosizeChecklistTextarea(target: HTMLTextAreaElement): void {
+  target.style.height = 'auto';
+  target.style.height = `${target.scrollHeight}px`;
+}
+
 function formatTrackCount(count: number): string {
   return `${count} track${count === 1 ? '' : 's'}`;
 }
@@ -1490,6 +1495,11 @@ export function App(): JSX.Element {
   const playbackGainNodeRef = useRef<GainNode | null>(null);
   const playbackAnalyserNodeRef = useRef<AnalyserNode | null>(null);
   const bandSoloFiltersRef = useRef<BiquadFilterNode[]>([]);
+  const handleChecklistItemTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
+    if (node) {
+      autosizeChecklistTextarea(node);
+    }
+  }, []);
 
   const iCloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sharedUserStateSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -4861,11 +4871,6 @@ export function App(): JSX.Element {
     checklistInputFocusedRef.current = false;
   }
 
-  function autosizeChecklistTextarea(target: HTMLTextAreaElement): void {
-    target.style.height = 'auto';
-    target.style.height = `${target.scrollHeight}px`;
-  }
-
   function handleChecklistDraftTextChange(nextText: string): void {
     const wasEmpty = checklistDraftTextRef.current.trim().length === 0;
     setChecklistDraftText(nextText);
@@ -7099,11 +7104,7 @@ export function App(): JSX.Element {
                             event.currentTarget.blur();
                           }
                         }}
-                        ref={(node) => {
-                          if (node) {
-                            autosizeChecklistTextarea(node);
-                          }
-                        }}
+                        ref={handleChecklistItemTextareaRef}
                         data-testid="song-checklist-item-text"
                       />
                       <button

@@ -576,6 +576,7 @@ export function sendTurn(
   const rl = createInterface({ input: child.stdout! });
   rl.on('line', (line) => {
     if (!session.alive) return;
+    if (session.process !== child) return;
 
     const trimmed = line.trim();
     if (trimmed.length === 0) return;
@@ -604,6 +605,7 @@ export function sendTurn(
 
   child.on('error', (err) => {
     if (!session.alive) return;
+    if (session.process !== child) return;
     emitEvent({
       type: 'error',
       code: 'PROCESS_ERROR',
@@ -613,6 +615,7 @@ export function sendTurn(
 
   child.on('exit', (code, signal) => {
     if (!session.alive) return;
+    if (session.process !== child) return;
 
     const trimmedStderr = stderrOutput.trim();
     if (code !== 0 && code !== null) {

@@ -74,10 +74,10 @@ export function AgentComposer({
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed || isStreaming || disabled) return;
+    if (!trimmed || disabled) return;
     void onSend(trimmed);
     setText('');
-  }, [text, isStreaming, disabled, onSend]);
+  }, [text, disabled, onSend]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -164,7 +164,7 @@ export function AgentComposer({
     }
   }, [disabled, hasDeepgramKey, isRecording, isStreaming]);
 
-  const canSend = text.trim().length > 0 && !isStreaming && !disabled;
+  const canSend = text.trim().length > 0 && !disabled;
   const voiceSupported =
     typeof navigator !== 'undefined' &&
     typeof navigator.mediaDevices?.getUserMedia === 'function' &&
@@ -189,7 +189,7 @@ export function AgentComposer({
           onChange={(event) => setText(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={disabled ? 'Produceboi agent is unavailable' : 'Ask Produceboi about your master...'}
-          disabled={disabled || isStreaming}
+          disabled={disabled}
           rows={MIN_ROWS}
           data-testid="agent-composer-input"
         />
@@ -233,30 +233,30 @@ export function AgentComposer({
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
             </button>
-          ) : (
-            <button
-              type="button"
-              className="agent-send-button"
-              onClick={handleSend}
-              disabled={!canSend}
-              data-testid="agent-send-button"
-              title="Send message"
+          ) : null}
+
+          <button
+            type="button"
+            className={`agent-send-button ${isStreaming ? 'agent-send-button--steer' : ''}`}
+            onClick={handleSend}
+            disabled={!canSend}
+            data-testid="agent-send-button"
+            title={isStreaming ? 'Steer with follow-up message' : 'Send message'}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="18"
+              height="18"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             >
-              <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="22" y1="2" x2="11" y2="13" />
-                <polygon points="22 2 15 22 11 13 2 9 22 2" />
-              </svg>
-            </button>
-          )}
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>

@@ -391,6 +391,7 @@ export function AgentChatPanel({
   const streamingMessageIdRef = useRef<string | null>(null);
   const onboardingScheduledRef = useRef(false);
   const lastHandledPromptRequestIdRef = useRef<string | null>(null);
+  const ignoredTurnCompleteCountRef = useRef(0);
 
   const availableModels = AGENT_MODEL_OPTIONS_BY_PROVIDER[provider];
   const currentModel = availableModels.some((option) => option.id === modelByProvider[provider])
@@ -505,6 +506,11 @@ export function AgentChatPanel({
         }
 
         case 'turn-complete': {
+          if (ignoredTurnCompleteCountRef.current > 0) {
+            ignoredTurnCompleteCountRef.current -= 1;
+            break;
+          }
+
           const completedId = streamingMessageIdRef.current;
           streamingMessageIdRef.current = null;
           setIsStreaming(false);
@@ -568,6 +574,7 @@ export function AgentChatPanel({
           setSessionActive(false);
           setIsStreaming(false);
           streamingMessageIdRef.current = null;
+          ignoredTurnCompleteCountRef.current = 0;
           break;
         }
 
@@ -585,6 +592,7 @@ export function AgentChatPanel({
       setSessionActive(false);
     }
     streamingMessageIdRef.current = null;
+    ignoredTurnCompleteCountRef.current = 0;
     setIsStreaming(false);
   }, [sessionActive]);
 
@@ -666,8 +674,35 @@ export function AgentChatPanel({
 
   const handleSendMessage = useCallback(
     async (text: string, options?: { bypassHistoryGuard?: boolean }) => {
-      if (!text.trim() || isStreaming) return;
+      const trimmedMessage = text.trim();
+      if (!trimmedMessage) return;
       if (historyOpen && !options?.bypassHistoryGuard) return;
+
+      if (isStreaming) {
+        const interruptedMessageId = streamingMessageIdRef.current;
+
+        if (interruptedMessageId) {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === interruptedMessageId
+                ? { ...message, status: 'stopped' as const }
+                : message
+            )
+          );
+        }
+
+        ignoredTurnCompleteCountRef.current += 1;
+        try {
+          await window.producerPlayer.agentInterrupt();
+        } catch {
+          ignoredTurnCompleteCountRef.current = Math.max(
+            0,
+            ignoredTurnCompleteCountRef.current - 1
+          );
+        }
+        streamingMessageIdRef.current = null;
+        setIsStreaming(false);
+      }
 
       if (!sessionActive) {
         const historySeed = buildHistorySeed(messages);
@@ -685,7 +720,7 @@ export function AgentChatPanel({
       const userMsg: AgentChatMessage = {
         id: nextMessageId(),
         role: 'user',
-        content: text.trim(),
+        content: trimmedMessage,
         timestamp: Date.now(),
         status: 'complete',
       };
@@ -710,7 +745,7 @@ export function AgentChatPanel({
       const uiContext = captureAgentUiContext();
 
       await window.producerPlayer.agentSendTurn({
-        message: text.trim(),
+        message: trimmedMessage,
         context,
         uiContext,
       });

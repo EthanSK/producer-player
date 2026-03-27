@@ -1602,12 +1602,18 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   border: 1px solid rgba(154, 182, 211, 0.5);
   background: rgba(154, 182, 211, 0.12);
   color: #d9e8fb;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
   padding: 0;
   font-size: 12px;
   line-height: 1;
+}
+
+.song-project-clear-button > span {
+  display: block;
+  line-height: 1;
+  transform: translateY(-0.5px);
 }
 
 .song-project-clear-button:hover {

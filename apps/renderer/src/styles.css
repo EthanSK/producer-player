@@ -643,6 +643,11 @@ input[type='range'] {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.analysis-overlay-loudness-peaks-grid {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 .analysis-stat-card {
   border: 1px solid var(--border);
   border-radius: 10px;

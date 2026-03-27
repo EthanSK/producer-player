@@ -813,8 +813,16 @@
   color: var(--bg-0);
 }
 
+.agent-send-button--steer {
+  background: color-mix(in srgb, var(--accent) 74%, #ffca6d 26%);
+}
+
 .agent-send-button:hover:not(:disabled) {
   background: var(--accent-strong);
+}
+
+.agent-send-button--steer:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-strong) 78%, #ffca6d 22%);
 }
 
 .agent-send-button:disabled {

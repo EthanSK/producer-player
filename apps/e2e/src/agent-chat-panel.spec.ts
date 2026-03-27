@@ -670,6 +670,52 @@ test.describe('Agent Chat Panel', () => {
     }
   });
 
+  test('composer stays editable during streaming and send steers the active turn', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-steer-while-streaming');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: {
+        ...fakeCli.env,
+        PRODUCER_PLAYER_FAKE_AGENT_STREAMING: '1',
+        PRODUCER_PLAYER_FAKE_AGENT_CHUNK_DELAY_MS: '420',
+      },
+    });
+
+    try {
+      await page.getByTestId('agent-panel-toggle').click();
+
+      const input = page.getByTestId('agent-composer-input');
+      await input.fill('First steering turn');
+      await page.getByTestId('agent-send-button').click();
+
+      const firstAssistantContent = page
+        .getByTestId('agent-message-agent')
+        .first()
+        .locator('.agent-message-content');
+
+      await expect(firstAssistantContent.locator('.agent-typing-cursor')).toBeVisible();
+      await expect(firstAssistantContent).toContainText('CLAUDE(claude-sonnet-4-6):', {
+        timeout: 5000,
+      });
+
+      await expect(input).toBeEnabled();
+      await input.fill('Second steering turn');
+      await page.getByTestId('agent-send-button').click();
+
+      await expect(page.getByTestId('agent-message-agent').first()).toContainText('(stopped)');
+      await expect(page.getByTestId('agent-message-agent').last()).toContainText(
+        'CLAUDE(claude-sonnet-4-6): Second steering turn'
+      );
+
+      const claudeLogs = await readJsonLines(path.join(fakeCli.logDirectory, 'claude.jsonl'));
+      expect(claudeLogs).toHaveLength(2);
+      expect(String(claudeLogs[1]?.currentMessage ?? '')).toBe('Second steering turn');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
   test('Codex item.delta chunks stream without duplicating the final message', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-codex-streaming');
     const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);

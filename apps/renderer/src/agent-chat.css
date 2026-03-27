@@ -139,7 +139,10 @@
   flex-direction: column;
   gap: 10px;
   background: var(--bg-0);
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .agent-settings-section {

@@ -38,8 +38,14 @@ export interface AgentChatMessage {
   usage?: AgentTokenUsage;
 }
 
+export interface AgentChatPromptRequest {
+  id: string;
+  prompt: string;
+}
+
 interface AgentChatPanelProps {
   getAnalysisContext: () => AgentContext | null;
+  promptRequest?: AgentChatPromptRequest | null;
 }
 
 interface StoredActiveChat {
@@ -323,7 +329,10 @@ function buildHistorySeed(messages: AgentChatMessage[]): AgentConversationHistor
     }));
 }
 
-export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX.Element {
+export function AgentChatPanel({
+  getAnalysisContext,
+  promptRequest = null,
+}: AgentChatPanelProps): JSX.Element {
   const initialActiveChatRef = useRef<StoredActiveChat>(readStoredActiveChat());
 
   const [isOpen, setIsOpen] = useState(false);
@@ -381,6 +390,7 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
   const userScrolledUpRef = useRef(false);
   const streamingMessageIdRef = useRef<string | null>(null);
   const onboardingScheduledRef = useRef(false);
+  const lastHandledPromptRequestIdRef = useRef<string | null>(null);
 
   const availableModels = AGENT_MODEL_OPTIONS_BY_PROVIDER[provider];
   const currentModel = availableModels.some((option) => option.id === modelByProvider[provider])
@@ -655,8 +665,9 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
   }, []);
 
   const handleSendMessage = useCallback(
-    async (text: string) => {
-      if (!text.trim() || isStreaming || historyOpen) return;
+    async (text: string, options?: { bypassHistoryGuard?: boolean }) => {
+      if (!text.trim() || isStreaming) return;
+      if (historyOpen && !options?.bypassHistoryGuard) return;
 
       if (!sessionActive) {
         const historySeed = buildHistorySeed(messages);
@@ -716,6 +727,26 @@ export function AgentChatPanel({ getAnalysisContext }: AgentChatPanelProps): JSX
       sessionActive,
     ]
   );
+
+  useEffect(() => {
+    if (!promptRequest?.id) {
+      return;
+    }
+
+    if (lastHandledPromptRequestIdRef.current === promptRequest.id) {
+      return;
+    }
+
+    lastHandledPromptRequestIdRef.current = promptRequest.id;
+    setIsOpen(true);
+    setSettingsOpen(false);
+    setHistoryOpen(false);
+    setHelpDialogOpen(false);
+    userScrolledUpRef.current = false;
+    localStorage.setItem(AGENT_PANEL_SEEN_STORAGE_KEY, 'true');
+
+    void handleSendMessage(promptRequest.prompt, { bypassHistoryGuard: true });
+  }, [handleSendMessage, promptRequest]);
 
   const handleInterrupt = useCallback(() => {
     void window.producerPlayer.agentInterrupt();

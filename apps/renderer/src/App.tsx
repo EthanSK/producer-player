@@ -45,6 +45,10 @@ import {
   computeSongDateOpacitiesByAge,
   SONG_DATE_OPACITY_RANGE,
 } from './songAgeOpacity';
+import {
+  CHECKLIST_TODO_OPACITY_RANGE,
+  computeChecklistOpacitiesByRemainingTodoCount,
+} from './checklistTodoOpacity';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
 import packageMetadata from '../../../package.json';
 import { ENABLE_AGENT_FEATURES, SHOW_3000AD_BRANDING } from './featureFlags';
@@ -2443,6 +2447,18 @@ export function App(): JSX.Element {
         }))
       ),
     [songs]
+  );
+
+  const songChecklistOpacityBySongId = useMemo(
+    () =>
+      computeChecklistOpacitiesByRemainingTodoCount(
+        songs.map((song) => ({
+          id: song.id,
+          remainingTodoCount: (songChecklists[song.id] ?? []).filter((item) => !item.completed)
+            .length,
+        }))
+      ),
+    [songChecklists, songs]
   );
 
   useEffect(() => {
@@ -6247,7 +6263,13 @@ export function App(): JSX.Element {
             const songRowTitle = getSongDisplayTitle(song);
             const songRowMetadataLabel = getSongRowMetadataLabel(song);
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
-            const songChecklistCount = songChecklists[song.id]?.length ?? 0;
+            const songChecklistItems = songChecklists[song.id] ?? [];
+            const songChecklistCount = songChecklistItems.length;
+            const songChecklistRemainingTodoCount = songChecklistItems.filter(
+              (item) => !item.completed
+            ).length;
+            const songChecklistOpacity =
+              songChecklistOpacityBySongId.get(song.id) ?? CHECKLIST_TODO_OPACITY_RANGE.zeroTodos;
             const songProjectFilePath = songProjectFilePaths[song.id] ?? null;
             const songProjectFileName = songProjectFilePath
               ? getPathTail(songProjectFilePath)
@@ -6379,7 +6401,7 @@ export function App(): JSX.Element {
                       )}
                       <button
                         type="button"
-                        className={`song-checklist-button${songChecklistCount > 0 ? ' has-items' : ''}`}
+                        className={`song-checklist-button${songChecklistRemainingTodoCount > 0 ? ' has-items' : ''}`}
                         onClick={(event) => {
                           event.stopPropagation();
                           handleOpenSongChecklist(song.id);
@@ -6391,6 +6413,7 @@ export function App(): JSX.Element {
                             : 'Open checklist for this song.'
                         }
                         aria-label={`${songRowTitle} checklist`}
+                        style={{ opacity: songChecklistOpacity }}
                       >
                         <span>Checklist</span>
                         {songChecklistCount > 0 ? (

@@ -188,7 +188,11 @@ export function AgentComposer({
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={disabled ? 'Produceboi agent is unavailable' : 'Ask Produceboi about your master...'}
+          placeholder={
+            disabled
+              ? 'Produciboi Agent is unavailable'
+              : 'Ask Produciboi Agent about your master...'
+          }
           disabled={disabled}
           rows={MIN_ROWS}
           data-testid="agent-composer-input"

@@ -935,9 +935,9 @@ export function AgentChatPanel({
             </div>
             <div className="agent-panel-heading-copy">
               <h3 className="agent-panel-title" data-testid="agent-panel-title">
-                Produceboi agent
+                Produciboi Agent
               </h3>
-              <p className="agent-panel-subtitle">Mastering wingman for the tricky bits.</p>
+              <p className="agent-panel-subtitle">mastering wingman</p>
             </div>
           </div>
           <div className="agent-panel-header-right">
@@ -1255,7 +1255,7 @@ export function AgentChatPanel({
           >
             <div className="agent-help-dialog">
               <div className="agent-help-dialog-header">
-                <h4>Set up Produceboi agent</h4>
+                <h4>Set up Produciboi Agent</h4>
                 <button
                   type="button"
                   className="agent-help-close"

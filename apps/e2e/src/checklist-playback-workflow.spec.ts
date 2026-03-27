@@ -247,6 +247,82 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('checklist stays pinned at the bottom while playback is running', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-bottom-scroll-stays-pinned-while-playing'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 8_000,
+      frequencyHz: 490,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await cueSongVersion(page, 'Track A', 'Track A v1.wav');
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const input = page.getByTestId('song-checklist-input');
+      const addButton = page.getByTestId('song-checklist-add');
+      for (let index = 1; index <= 36; index += 1) {
+        await input.fill(`Pinned-bottom check ${index}`);
+        await addButton.click();
+      }
+
+      const scrollRegion = page.getByTestId('song-checklist-scroll-region');
+      const scrollMetrics = await scrollRegion.evaluate((node) => ({
+        scrollHeight: (node as HTMLDivElement).scrollHeight,
+        clientHeight: (node as HTMLDivElement).clientHeight,
+      }));
+      expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight + 120);
+
+      await page.getByTestId('song-checklist-play-toggle').click();
+      await waitForPlaybackSeconds(page, 0.6);
+
+      await scrollRegion.evaluate((node) => {
+        const region = node as HTMLDivElement;
+        region.scrollTop = region.scrollHeight;
+      });
+      await scrollRegion.hover();
+
+      for (let index = 0; index < 5; index += 1) {
+        await page.mouse.wheel(0, 360);
+      }
+
+      const bottomDrift = await scrollRegion.evaluate(async (node) => {
+        const region = node as HTMLDivElement;
+        const maxTop = Math.max(0, region.scrollHeight - region.clientHeight);
+        let worstDistanceFromBottom = maxTop - region.scrollTop;
+        const stopAt = performance.now() + 1200;
+
+        while (performance.now() < stopAt) {
+          worstDistanceFromBottom = Math.max(
+            worstDistanceFromBottom,
+            maxTop - region.scrollTop
+          );
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+
+        return {
+          maxTop,
+          worstDistanceFromBottom,
+          finalDistanceFromBottom: maxTop - region.scrollTop,
+        };
+      });
+
+      expect(bottomDrift.maxTop).toBeGreaterThan(100);
+      expect(bottomDrift.worstDistanceFromBottom).toBeLessThan(14);
+      expect(bottomDrift.finalDistanceFromBottom).toBeLessThan(14);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('adding checklist items does not auto-scroll the checklist dialog', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-no-auto-scroll-on-add'

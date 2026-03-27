@@ -64,7 +64,10 @@ import { LoudnessHistogram } from './LoudnessHistogram';
 import { Spectrogram } from './Spectrogram';
 import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
 import { HelpTooltip } from './HelpTooltip';
-import { AgentChatPanel } from './AgentChatPanel';
+import {
+  AgentChatPanel,
+  type AgentChatPromptRequest,
+} from './AgentChatPanel';
 import type { AgentContext } from '@producer-player/contracts';
 import {
   LUFS_LINKS,
@@ -125,6 +128,91 @@ type FullscreenMasteringPanelId =
   | 'mid-side-spectrum'
   | 'loudness-histogram'
   | 'spectrogram';
+
+type MasteringPanelId = CompactMasteringPanelId | FullscreenMasteringPanelId;
+type MasteringPanelSurface = 'compact' | 'fullscreen';
+
+const MASTERING_PANEL_ASK_AI_META: Record<
+  MasteringPanelId,
+  { label: string; focus: string }
+> = {
+  'core-metrics': {
+    label: 'Core Metrics',
+    focus: 'overall loudness, true peak, loudness range, and short-term loudness behavior',
+  },
+  normalization: {
+    label: 'Platform Normalization',
+    focus: 'platform gain changes, projected LUFS, true-peak headroom caps, and streaming playback impact',
+  },
+  'tonal-balance': {
+    label: 'Tonal Balance',
+    focus: 'low/mid/high energy split and tonal translation across playback systems',
+  },
+  reference: {
+    label: 'Reference Track',
+    focus: 'A/B comparison strategy, level matching, and how the mix differs from the reference master',
+  },
+  visualizations: {
+    label: 'Visualizations',
+    focus: 'spectrum and level-meter behavior with implications for frequency balance and headroom',
+  },
+  'loudness-history': {
+    label: 'Loudness History',
+    focus: 'section-by-section loudness contour, consistency, and dynamic flow over time',
+  },
+  waveform: {
+    label: 'Waveform',
+    focus: 'macro dynamics, transient shape, and whether the waveform suggests over-limiting',
+  },
+  'stereo-correlation': {
+    label: 'Stereo Correlation',
+    focus: 'phase relationships, mono compatibility, and stereo width risk zones',
+  },
+  'loudness-peaks': {
+    label: 'Loudness & Peaks',
+    focus: 'integrated loudness, peak behavior, clipping, and dynamic-range tradeoffs',
+  },
+  comparison: {
+    label: 'Mix vs Reference',
+    focus: 'deltas versus reference and prioritized corrective moves',
+  },
+  vectorscope: {
+    label: 'Vectorscope',
+    focus: 'stereo image geometry, center balance, and width versus mono compatibility',
+  },
+  'mid-side-monitoring': {
+    label: 'Mid/Side Monitoring',
+    focus: 'center versus side energy decisions and practical mid/side mastering checks',
+  },
+  'k-metering': {
+    label: 'K-Metering',
+    focus: 'K-14/K-20 context, loudness calibration, and dynamic intent fit',
+  },
+  'pro-indicators': {
+    label: 'Quick Diagnostics',
+    focus: 'rapid risk callouts from diagnostic indicators and immediate corrective priorities',
+  },
+  'mastering-checklist': {
+    label: 'Mastering Checklist',
+    focus: 'readiness checks, pass/warn/fail interpretation, and fixes needed before release',
+  },
+  'crest-factor-history': {
+    label: 'Crest Factor History',
+    focus: 'transient preservation over time and whether dynamics are getting crushed',
+  },
+  'mid-side-spectrum': {
+    label: 'Mid/Side Spectrum',
+    focus: 'frequency-dependent width, especially low-end mono stability and side buildup',
+  },
+  'loudness-histogram': {
+    label: 'Loudness Distribution',
+    focus: 'loudness distribution shape and what it says about macro-dynamics',
+  },
+  spectrogram: {
+    label: 'Spectrogram',
+    focus: 'time-frequency hotspots, resonances, harshness pockets, and tonal drift',
+  },
+};
 
 type ReferenceTrackSource = 'linked-track' | 'external-file';
 
@@ -7612,10 +7700,12 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'reference')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'reference')}
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'reference')}
-                  <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                    <div className="analysis-section-header">
                     <h4>Reference Track <HelpTooltip text="Load a professional track you want your mix to sound like, then use the A/B toggle to flip between your mix and the reference. When you click 'Reference', the player switches to the reference file and all meters update to show its analysis. Click 'Mix' to switch back. This makes it easy to spot differences in loudness, EQ, and dynamics without losing your place." links={REFERENCE_TRACK_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Load a reference track to A/B against your mix</p>
+                    </div>
+                    {renderMasteringPanelDragHandle('fullscreen', 'reference')}
                   </div>
                   <div className="reference-panel-layout">
                   <div className="reference-panel-controls">
@@ -7793,8 +7883,10 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'loudness-history')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'loudness-history')}
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'loudness-history')}
-                  <h3>Loudness History{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A blue curve showing your track's rolling loudness over time. The dashed line marks the overall loudness estimate for the loaded track, and the white vertical line shows the current playback position. The shaded area makes it easier to see where sections feel denser or lighter.\n\nWhat to look for: A relatively consistent curve usually means controlled loudness. Big dips may point to sections that feel too small; sharp jumps may point to sections that hit harder than intended. Use it to compare sections against each other, then confirm the final number with the Integrated LUFS stat.\n\nTip: Compare the shape against a reference track in the same genre. If your curve is almost flat all the way through, the song may be over-compressed."} links={LOUDNESS_HISTORY_LINKS} /></h3>
+                  <div className="analysis-panel-header-row">
+                    <h3>Loudness History{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A blue curve showing your track's rolling loudness over time. The dashed line marks the overall loudness estimate for the loaded track, and the white vertical line shows the current playback position. The shaded area makes it easier to see where sections feel denser or lighter.\n\nWhat to look for: A relatively consistent curve usually means controlled loudness. Big dips may point to sections that feel too small; sharp jumps may point to sections that hit harder than intended. Use it to compare sections against each other, then confirm the final number with the Integrated LUFS stat.\n\nTip: Compare the shape against a reference track in the same genre. If your curve is almost flat all the way through, the song may be over-compressed."} links={LOUDNESS_HISTORY_LINKS} /></h3>
+                    {renderMasteringPanelDragHandle('fullscreen', 'loudness-history')}
+                  </div>
                   <LoudnessHistoryGraph
                     analysis={analysis}
                     currentTimeSeconds={currentTimeSeconds}
@@ -7815,8 +7907,10 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'waveform')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'waveform')}
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'waveform')}
-                  <h3>Waveform{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: Symmetrical bars showing the peak amplitude of your audio at each moment in time. Taller bars = louder moments, shorter bars = quieter. Bars to the left of the white playback cursor are bright blue (already played), bars to the right are dimmer (upcoming). The Y-axis goes from -1.0 to +1.0 (full digital scale).\n\nWhat to look for: A healthy waveform has visible variation — loud choruses and quieter verses. If the bars are all maxed out at 1.0 with no variation, your track is likely over-compressed or clipping. Gaps (no bars) indicate silence.\n\nTip: Compare the height of your loudest and quietest sections. If there's barely any difference, consider backing off your limiter to restore dynamics."} links={WAVEFORM_LINKS} /></h3>
+                  <div className="analysis-panel-header-row">
+                    <h3>Waveform{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: Symmetrical bars showing the peak amplitude of your audio at each moment in time. Taller bars = louder moments, shorter bars = quieter. Bars to the left of the white playback cursor are bright blue (already played), bars to the right are dimmer (upcoming). The Y-axis goes from -1.0 to +1.0 (full digital scale).\n\nWhat to look for: A healthy waveform has visible variation — loud choruses and quieter verses. If the bars are all maxed out at 1.0 with no variation, your track is likely over-compressed or clipping. Gaps (no bars) indicate silence.\n\nTip: Compare the height of your loudest and quietest sections. If there's barely any difference, consider backing off your limiter to restore dynamics."} links={WAVEFORM_LINKS} /></h3>
+                    {renderMasteringPanelDragHandle('fullscreen', 'waveform')}
+                  </div>
                   <WaveformDisplay
                     waveformPeaks={analysis?.waveformPeaks ?? null}
                     analysis={analysis}
@@ -7841,10 +7935,12 @@ export function App(): JSX.Element {
                   }
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'stereo-correlation')}
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'stereo-correlation')}
-                  <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                    <div className="analysis-section-header">
                     <h4>Stereo Correlation{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A horizontal meter with a glowing indicator that moves between -1 (left) and +1 (right). The background fades from red on the left, through yellow in the center, to green on the right. The numeric value is shown in the top-right corner, colored to match the zone.\n\nWhat to look for: Green zone (+0.5 to +1) = great mono compatibility — your track sounds solid on phone speakers and mono systems. Yellow zone (0 to +0.5) = some stereo content, generally fine. Red zone (below 0) = phase issues — left and right channels are canceling each other, which sounds thin or hollow in mono.\n\nTip: If the indicator dips into the red during certain parts, check for over-widened stereo effects, poorly set up chorus/phaser plugins, or samples that were accidentally phase-inverted."} links={STEREO_CORRELATION_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Phase relationship between L/R channels (+1 = mono compatible, -1 = out of phase)</p>
+                    </div>
+                    {renderMasteringPanelDragHandle('fullscreen', 'stereo-correlation')}
                   </div>
                   <StereoCorrelationMeter
                     analyserNodeL={analyserNodeL}
@@ -7879,10 +7975,12 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'tonal-balance')}
                   data-testid="analysis-overlay-tonal-balance-panel"
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'tonal-balance')}
-                    <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                      <div className="analysis-section-header">
                       <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{refTrackSuffix} <HelpTooltip text="Shows how your audio energy is distributed across three broad frequency bands. Low (20-250 Hz) covers sub and bass. Mid (250-4000 Hz) covers vocals, guitars, synths, and most musical detail. High (4000-20000 Hz) covers presence, air, and brightness. Each band is shown as a percentage of total energy. Use the numbers as a rough guide, not a rulebook: many balanced masters fall somewhere around 30-40% Low, 40-50% Mid, and 15-25% High, but genre and arrangement matter." links={TONAL_BALANCE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Low/mid/high energy distribution</p>
+                      </div>
+                      {renderMasteringPanelDragHandle('fullscreen', 'tonal-balance')}
                     </div>
                     <div
                       className="analysis-tonal-balance detailed"
@@ -7922,8 +8020,10 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'loudness-peaks')}
                   data-testid="analysis-overlay-loudness-peaks"
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'loudness-peaks')}
-                  <h3>Loudness &amp; peaks{isRefMode ? " (Reference)" : ""}</h3>
+                  <div className="analysis-panel-header-row">
+                    <h3>Loudness &amp; peaks{isRefMode ? " (Reference)" : ""}</h3>
+                    {renderMasteringPanelDragHandle('fullscreen', 'loudness-peaks')}
+                  </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
                       <span className="analysis-stat-label">Integrated LUFS{refSuffix} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /></span>
@@ -7998,8 +8098,10 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'normalization')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'normalization')}
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'normalization')}
-                  <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
+                  <div className="analysis-panel-header-row">
+                    <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
+                    {renderMasteringPanelDragHandle('fullscreen', 'normalization')}
+                  </div>
                   <div className="analysis-normalization-header">
                     <div>
                       <strong>Streaming loudness preview</strong>
@@ -8120,10 +8222,12 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'comparison')}
                   data-testid="analysis-overlay-comparison"
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'comparison')}
-                  <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                    <div className="analysis-section-header">
                     <h4>Your Mix vs Reference <HelpTooltip text="Side-by-side comparison of your mix and the loaded reference track. Shows the difference in loudness (LUFS), true peak, and tonal balance. Positive numbers mean your mix is louder/higher; negative means the reference is. Use this to see exactly how your mix stacks up against a professional master." links={REFERENCE_TRACK_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Compare loudness and tonal balance against your reference track</p>
+                    </div>
+                    {renderMasteringPanelDragHandle('fullscreen', 'comparison')}
                   </div>
                   {referenceTrack && activeReferenceComparison ? (
                     <div data-testid="analysis-active-reference">
@@ -8174,10 +8278,12 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'vectorscope')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'vectorscope')}
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'vectorscope')}
-                    <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                      <div className="analysis-section-header">
                       <h4>Vectorscope{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A circular display where blue dots trace your stereo signal in real-time, with a fading trail so you can see the shape over time. The vertical axis (M) is the Mid/mono signal (L+R), and the horizontal axis (S) is the Side signal (L-R). L and R labels mark the diagonal directions for pure left and pure right.\n\nWhat to look for: A tall, narrow vertical shape = mostly mono content (centered vocals, bass). A wider spread = more stereo width. A roughly even shape = balanced stereo image. If it leans consistently toward L or R, your mix is off-center. A thin horizontal line means the signal is pure side information with no center — usually a problem.\n\nTip: Bass and kick should appear mostly vertical (centered). If your low end spreads wide on the vectorscope, consider narrowing it with a mid/side EQ. A natural, full mix typically looks like a fuzzy vertical oval."} links={VECTORSCOPE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Stereo image — wider spread = wider stereo field, vertical = mono</p>
+                      </div>
+                      {renderMasteringPanelDragHandle('fullscreen', 'vectorscope')}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
                       <Vectorscope
@@ -8202,10 +8308,12 @@ export function App(): JSX.Element {
                     handleFullscreenMasteringPanelDrop(event, 'mid-side-monitoring')
                   }
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'mid-side-monitoring')}
-                    <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                      <div className="analysis-section-header">
                       <h4>Mid/Side Monitoring <HelpTooltip text="Listen to just the center (Mid) or sides (Side) of your stereo mix separately. Mid = vocals, bass, kick. Side = reverb, width, panning. Useful for checking stereo balance." links={MID_SIDE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Listen to Mid (center) or Side (stereo width) in isolation</p>
+                      </div>
+                      {renderMasteringPanelDragHandle('fullscreen', 'mid-side-monitoring')}
                     </div>
                     <div className="analysis-ab-actions" role="group" aria-label="Mid/Side toggle" style={{ display: 'flex', gap: 6 }}>
                       <button
@@ -8250,10 +8358,12 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'k-metering')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'k-metering')}
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'k-metering')}
-                  <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                    <div className="analysis-section-header">
                     <h4>K-Metering <HelpTooltip text={"What this measures: Bob Katz's K-System metering, which shifts the meter scale so 0 dB represents a calibrated reference level instead of the digital ceiling. K-14 sets 0 dB = -14 dBFS (designed for pop, rock, and electronic music). K-20 sets 0 dB = -20 dBFS (designed for film, classical, and broadcast). The value shown is your track's RMS level on that K-scale.\n\nGood values: On K-14, your average level should hover around 0 dB (meaning your RMS is around -14 dBFS). Peaks above +4 dB on K-14 are loud. On K-20, average around 0 dB means your RMS is around -20 dBFS — typical for dynamic content like film and orchestral music.\n\nIf it's wrong: If your K-14 reading is consistently above +4 dB, you are mastering very loud with limited dynamics. If it reads well below -6 dB on K-14, your track is unusually quiet for commercial music. Use K-14 for most music production and K-20 when working on film, classical, or anything requiring wide dynamic range."} links={K_METERING_LINKS} /></h4>
                     <p className="analysis-section-subtitle">K-weighted meter scales calibrated for different content types — 0 dB on the K-scale represents the reference listening level</p>
+                    </div>
+                    {renderMasteringPanelDragHandle('fullscreen', 'k-metering')}
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card" title="K-14: 0 dB on meter = -14 dBFS. Best for most music.">
@@ -8290,10 +8400,12 @@ export function App(): JSX.Element {
                     }
                     onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'pro-indicators')}
                   >
-                    {renderMasteringPanelDragHandle('fullscreen', 'pro-indicators')}
-                    <div className="analysis-section-header">
+                    <div className="analysis-panel-header-row">
+                      <div className="analysis-section-header">
                       <h4>Quick Diagnostics <HelpTooltip text={"What this measures: A quick classification of your track's dynamic character based on the crest factor (peak-to-RMS difference). High DR means crest factor above 10 dB — your transients and dynamics are well-preserved. Medium DR is 6-10 dB — typical for commercial masters. Low DR means below 6 dB — the track is heavily compressed or limited.\n\nGood values: Depends on genre and intent. Pop/rock: Medium DR (6-10 dB) is normal. EDM/hip-hop: Medium to Low DR is common. Acoustic/jazz/classical: High DR (above 10 dB) is expected. There is no single right answer — it depends on what the music needs.\n\nIf it's wrong: Low DR with a track that should breathe (acoustic, jazz) means you have over-limited. Try reducing limiter gain reduction or using less bus compression. High DR on a track meant to compete on playlists may need more limiting. The goal is to match the dynamic feel that serves the song, not chase a number."} links={DYNAMIC_RANGE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">At-a-glance health checks for your master</p>
+                      </div>
+                      {renderMasteringPanelDragHandle('fullscreen', 'pro-indicators')}
                     </div>
                     <div className="analysis-pro-indicators">
                       <div className={`analysis-pro-indicator ${
@@ -8332,10 +8444,12 @@ export function App(): JSX.Element {
                       handleFullscreenMasteringPanelDrop(event, 'mastering-checklist')
                     }
                   >
-                    {renderMasteringPanelDragHandle('fullscreen', 'mastering-checklist')}
-                    <div className="analysis-section-header">
+                    <div className="analysis-panel-header-row">
+                      <div className="analysis-section-header">
                       <h4>Mastering Checklist <HelpTooltip text={"What this measures: An automated technical health check of your master across four critical areas. (1) LUFS: passes if integrated loudness is between -16 and -6 LUFS (the typical streaming range), warns otherwise. (2) True Peak: passes if below -1 dBTP, warns if between -1 and 0 dBTP, fails if at or above 0 dBTP. (3) DC Offset: passes if the mean sample value is 0.001 or less (0.1%), warns if higher. (4) Clipping: passes if zero clipped samples, fails if any samples hit the digital ceiling.\n\nGood values: All four checks showing a pass (checkmark). This means your master is technically clean and ready for distribution.\n\nIf it's wrong: LUFS warning — adjust your overall loudness to match platform targets. True Peak warning — lower your limiter ceiling to -1 dBTP or use a true peak limiter. DC Offset warning — apply a high-pass filter at 10-20 Hz or use DC offset removal. Clipping failure — reduce gain into your final limiter or lower the output ceiling."} links={MASTERING_CHECKLIST_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Auto-generated summary of your master&apos;s technical health</p>
+                      </div>
+                      {renderMasteringPanelDragHandle('fullscreen', 'mastering-checklist')}
                     </div>
                     <div className="mastering-checklist-summary">
                       <div className={`mastering-checklist-row ${
@@ -8402,10 +8516,12 @@ export function App(): JSX.Element {
                     handleFullscreenMasteringPanelDrop(event, 'crest-factor-history')
                   }
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'crest-factor-history')}
-                  <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                    <div className="analysis-section-header">
                     <h4>Dynamic Range / Crest Factor <HelpTooltip text={"What you're seeing: A real-time line graph plotting the crest factor (peak-to-RMS difference) over the last 30 seconds. The crest factor measures how much transient headroom your audio has — the gap between the loudest peak and the average (RMS) level.\n\nColor coding: Green (above 8 dB) means healthy dynamics with well-preserved transients. Yellow (6-8 dB) indicates moderate compression typical of commercial masters. Red (below 6 dB) signals heavily compressed or limited audio — the dynamics are being crushed.\n\nWhat to look for: Watch how the line moves during different sections. Verses might show higher crest factor while choruses drop lower as limiting kicks in. If the line stays consistently in the red zone, you may be over-limiting.\n\nTip: Compare this graph during your loudest chorus vs. your quietest verse. If both sections show similar crest factor, your master might lack dynamic contrast."} links={CREST_FACTOR_HISTORY_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Real-time peak-to-RMS difference — green = healthy dynamics, red = crushed</p>
+                    </div>
+                    {renderMasteringPanelDragHandle('fullscreen', 'crest-factor-history')}
                   </div>
                   <CrestFactorGraph
                     analyserNode={analyserNode}
@@ -8427,10 +8543,12 @@ export function App(): JSX.Element {
                   }
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'mid-side-spectrum')}
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'mid-side-spectrum')}
-                  <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                    <div className="analysis-section-header">
                     <h4>Mid/Side Spectrum <HelpTooltip text={"What you're seeing: Two overlaid spectrum curves — blue for Mid (L+R summed) and orange for Side (L-R). Both share the same frequency axis as the main spectrum analyzer.\n\nWhat to look for: Bass frequencies (below ~200 Hz) should be predominantly Mid (blue) with minimal Side (orange) — this ensures mono-compatible low end. If orange is dominant in the lows, your bass is too wide and may collapse on mono playback. In the highs, Side content is normal (reverb, panned elements).\n\nTip: Use this alongside the Mid/Side Monitoring controls to listen and compare."} links={MID_SIDE_SPECTRUM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Frequency content split into Mid (center) and Side (stereo width)</p>
+                    </div>
+                    {renderMasteringPanelDragHandle('fullscreen', 'mid-side-spectrum')}
                   </div>
                   <MidSideSpectrum
                     analyserNodeL={analyserNodeL}
@@ -8455,10 +8573,12 @@ export function App(): JSX.Element {
                     handleFullscreenMasteringPanelDrop(event, 'loudness-histogram')
                   }
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'loudness-histogram')}
-                  <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                    <div className="analysis-section-header">
                     <h4>Loudness Distribution <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. Green dashed lines mark the streaming target range (-16 to -6 LUFS).\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: This is built from the full-track analysis, so you can inspect the complete distribution immediately without waiting for playback or scroll position."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Statistical distribution of loudness levels across the full analyzed track</p>
+                    </div>
+                    {renderMasteringPanelDragHandle('fullscreen', 'loudness-histogram')}
                   </div>
                   <LoudnessHistogram
                     frameLoudnessDbfs={analysis?.frameLoudnessDbfs ?? []}
@@ -8477,10 +8597,12 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'spectrogram')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'spectrogram')}
                 >
-                  {renderMasteringPanelDragHandle('fullscreen', 'spectrogram')}
-                  <div className="analysis-section-header">
+                  <div className="analysis-panel-header-row">
+                    <div className="analysis-section-header">
                     <h4>Spectrogram <HelpTooltip text={"What you're seeing: A scrolling 2D heatmap — X is time, Y is frequency (20 Hz to 20 kHz, logarithmic), color intensity is amplitude. Dark blue = quiet, green = moderate, yellow = loud, red = very loud.\n\nWhat to look for: A persistent bright horizontal band indicates a resonant frequency that may need EQ. Vertical bright lines are transients (drums, clicks). Gradual color shifts show arrangement dynamics between sections.\n\nTip: Especially useful for spotting issues a real-time spectrum misses — like a rogue frequency that appears briefly, or gradual tonal drift across sections."} links={SPECTROGRAM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Scrolling frequency heatmap — time vs. frequency vs. amplitude</p>
+                    </div>
+                    {renderMasteringPanelDragHandle('fullscreen', 'spectrogram')}
                   </div>
                   <Spectrogram
                     analyserNode={analyserNode}

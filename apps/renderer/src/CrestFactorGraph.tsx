@@ -30,6 +30,7 @@ export function CrestFactorGraph({
 }: CrestFactorGraphProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
+  const redrawAfterScrollRafRef = useRef<number | null>(null);
   const historyRef = useRef<CrestSample[]>([]);
   const lastSampleTimeRef = useRef<number>(0);
 
@@ -226,12 +227,51 @@ export function CrestFactorGraph({
   }, [analyserNode, width, height, isPlaying, getColor]);
 
   useEffect(() => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = 0;
+    }
+
     if (isPlaying) {
       animFrameRef.current = requestAnimationFrame(draw);
+    } else {
+      // Keep a rendered frame when paused so the graph doesn't blank after scroll reflow.
+      draw();
     }
+
     return () => {
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = 0;
+      }
+    };
+  }, [draw, isPlaying]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      return;
+    }
+
+    const scheduleRedraw = () => {
+      if (redrawAfterScrollRafRef.current !== null) {
+        return;
+      }
+
+      redrawAfterScrollRafRef.current = requestAnimationFrame(() => {
+        redrawAfterScrollRafRef.current = null;
+        draw();
+      });
+    };
+
+    window.addEventListener('scroll', scheduleRedraw, true);
+    window.addEventListener('resize', scheduleRedraw);
+
+    return () => {
+      window.removeEventListener('scroll', scheduleRedraw, true);
+      window.removeEventListener('resize', scheduleRedraw);
+      if (redrawAfterScrollRafRef.current !== null) {
+        cancelAnimationFrame(redrawAfterScrollRafRef.current);
+        redrawAfterScrollRafRef.current = null;
       }
     };
   }, [draw, isPlaying]);

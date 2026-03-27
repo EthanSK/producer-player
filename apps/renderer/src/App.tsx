@@ -2605,6 +2605,8 @@ export function App(): JSX.Element {
   const isRefMode = playbackPreviewMode === 'reference' && referenceTrack !== null;
   const refSuffix = isRefMode ? ' (Reference)' : '';
   const refTrackSuffix = isRefMode ? ' (Reference Track)' : '';
+  const activePreviewAnalysis = isRefMode ? referenceTrack?.previewAnalysis ?? null : analysis;
+  const activePreviewAnalysisStatus = isRefMode ? referenceStatus : analysisStatus;
   const desiredPlaybackSource =
     playbackPreviewMode === 'reference'
       ? referenceTrack?.playbackSource ?? null
@@ -5250,6 +5252,38 @@ export function App(): JSX.Element {
     {
       loading: 'Loading…',
       error: 'Error',
+    }
+  );
+  const k14MeteringText = buildAnalysisValue(
+    activePreviewAnalysisStatus,
+    activePreviewAnalysis
+      ? `${(activePreviewAnalysis.rmsDbfs + 14).toFixed(1)} dB`
+      : '—',
+    {
+      loading: 'Loading…',
+      error: 'Error',
+      empty: '—',
+    }
+  );
+  const k20MeteringText = buildAnalysisValue(
+    activePreviewAnalysisStatus,
+    activePreviewAnalysis
+      ? `${(activePreviewAnalysis.rmsDbfs + 20).toFixed(1)} dB`
+      : '—',
+    {
+      loading: 'Loading…',
+      error: 'Error',
+      empty: '—',
+    }
+  );
+  const activeCrestFactorDb = activePreviewAnalysis?.crestFactorDb ?? null;
+  const activeCrestFactorText = buildAnalysisValue(
+    activePreviewAnalysisStatus,
+    activeCrestFactorDb !== null ? `${activeCrestFactorDb.toFixed(1)} dB` : '—',
+    {
+      loading: 'Loading…',
+      error: 'Error',
+      empty: '—',
     }
   );
   const activeTonalBalance = isRefMode
@@ -8059,11 +8093,7 @@ export function App(): JSX.Element {
                     </div>
                     <div className="analysis-stat-card" title="Crest Factor — difference between peak and RMS levels. Higher values indicate more dynamic range.">
                       <span className="analysis-stat-label">Crest Factor{refSuffix} <HelpTooltip text={"What this measures: The difference between the sample peak level and the RMS (average) level, in dB. Formula: Crest Factor = Peak dBFS minus RMS dBFS. A higher crest factor means your transients stick out further above the average level — the music has more punch and snap. A lower value means the waveform is more like a brick wall.\n\nGood values: Unmastered/raw mixes: 12-18 dB. Well-mastered pop/rock: 8-12 dB. Heavily limited EDM/hip-hop: 4-8 dB. Extremely squashed masters: under 4 dB. Classical and jazz: 15-20+ dB.\n\nIf it's wrong: Below 6 dB usually means aggressive limiting has crushed your transients — the track will sound loud but lifeless and fatiguing. Above 18 dB could mean uncontrolled peaks that waste headroom. Use a limiter to tame peaks or back off limiting to restore dynamics, depending on which direction you need to go."} links={CREST_FACTOR_LINKS} /></span>
-                      <strong>
-                        {analysisStatus === 'ready' && analysis
-                          ? `${analysis.crestFactorDb.toFixed(1)} dB`
-                          : 'Loading…'}
-                      </strong>
+                      <strong>{activeCrestFactorText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Number of samples at or above 0 dBFS (digital clipping).">
                       <span className="analysis-stat-label">Clip Count{refSuffix} <HelpTooltip text={"What this measures: The number of individual samples in the file whose absolute value reaches or exceeds 1.0 (0 dBFS) — the digital ceiling. Each clipped sample represents a moment where the signal was too loud to be represented digitally and was hard-clipped, causing distortion.\n\nGood values: Zero. Any non-zero clip count means digital distortion is present in the file. Even a single clipped sample is technically distortion, though a handful may not be audible. Hundreds or thousands of clips will be clearly audible as harsh, crunchy distortion.\n\nIf it's wrong: Reduce gain before your limiter, or lower the limiter output ceiling. If clips are coming from the mix bus, pull down your fader or gain-stage your plugins. Note: some producers intentionally use hard clipping as a creative effect (e.g., clip-to-zero mastering in hip-hop), but the clips should be intentional and controlled, not accidental."} links={CLIP_COUNT_LINKS} /></span>
@@ -8368,27 +8398,19 @@ export function App(): JSX.Element {
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card" title="K-14: 0 dB on meter = -14 dBFS. Best for most music.">
                       <span className="analysis-stat-label">K-14 Metering{refSuffix}</span>
-                      <strong>
-                        {analysisStatus === 'ready' && analysis
-                          ? `${(analysis.rmsDbfs + 14).toFixed(1)} dB`
-                          : 'Loading…'}
-                      </strong>
+                      <strong>{k14MeteringText}</strong>
                       <span className="muted">Reference: 0 dB = -14 dBFS (pop/rock/electronic)</span>
                     </div>
                     <div className="analysis-stat-card" title="K-20: 0 dB on meter = -20 dBFS. Best for film/classical.">
                       <span className="analysis-stat-label">K-20 Metering{refSuffix}</span>
-                      <strong>
-                        {analysisStatus === 'ready' && analysis
-                          ? `${(analysis.rmsDbfs + 20).toFixed(1)} dB`
-                          : 'Loading…'}
-                      </strong>
+                      <strong>{k20MeteringText}</strong>
                       <span className="muted">Reference: 0 dB = -20 dBFS (film/classical/broadcast)</span>
                     </div>
                   </div>
                 </section>
 
                 {/* Pro Indicators: Dynamic Range */}
-                {analysisStatus === 'ready' && analysis ? (
+                {activePreviewAnalysisStatus === 'ready' && activeCrestFactorDb !== null ? (
                   <section
                     className={`analysis-overlay-section${
                       fullscreenMasteringDropTargetPanelId === 'pro-indicators' ? ' drop-target' : ''
@@ -8409,17 +8431,17 @@ export function App(): JSX.Element {
                     </div>
                     <div className="analysis-pro-indicators">
                       <div className={`analysis-pro-indicator ${
-                        (analysis.crestFactorDb) > 10 ? 'pass' : (analysis.crestFactorDb) >= 6 ? 'warn' : 'fail'
+                        activeCrestFactorDb > 10 ? 'pass' : activeCrestFactorDb >= 6 ? 'warn' : 'fail'
                       }`} data-testid="analysis-dynamic-range-indicator">
-                        <span className="indicator-icon">{(analysis.crestFactorDb) > 10 ? '\u2728' : (analysis.crestFactorDb) >= 6 ? '\u26a0\ufe0f' : '\u26d4'}</span>
+                        <span className="indicator-icon">{activeCrestFactorDb > 10 ? '\u2728' : activeCrestFactorDb >= 6 ? '\u26a0\ufe0f' : '\u26d4'}</span>
                         <div className="indicator-content">
                           <span className="indicator-label">Dynamic Range</span>
                           <span className="indicator-value">
-                            {(analysis.crestFactorDb) > 10
-                              ? `High DR (${analysis.crestFactorDb.toFixed(1)} dB)`
-                              : (analysis.crestFactorDb) >= 6
-                                ? `Medium DR (${analysis.crestFactorDb.toFixed(1)} dB)`
-                                : `Low DR (${analysis.crestFactorDb.toFixed(1)} dB)`}
+                            {activeCrestFactorDb > 10
+                              ? `High DR (${activeCrestFactorDb.toFixed(1)} dB)`
+                              : activeCrestFactorDb >= 6
+                                ? `Medium DR (${activeCrestFactorDb.toFixed(1)} dB)`
+                                : `Low DR (${activeCrestFactorDb.toFixed(1)} dB)`}
                           </span>
                         </div>
                       </div>

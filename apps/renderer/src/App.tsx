@@ -519,6 +519,18 @@ function isUnmodifiedShiftTab(
   );
 }
 
+function isUnmodifiedTab(
+  event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'altKey'>
+): boolean {
+  return (
+    event.key === 'Tab' &&
+    !event.shiftKey &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey
+  );
+}
+
 function canElementScroll(element: HTMLElement): boolean {
   const style = window.getComputedStyle(element);
   const canScrollY =
@@ -7014,7 +7026,7 @@ export function App(): JSX.Element {
           <div ref={checklistModalCardRef} className="checklist-modal-card">
             <div className="checklist-modal-header">
               <div>
-                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, and revisions you need to make for this track.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song.\n\nWhy you'd want to: Keep a structured record of what needs fixing in each song so nothing slips through the cracks between sessions.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab from the text input jumps to the time-jump controls, and Shift+Tab on those controls moves backward naturally."} /></h2>
+                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, and revisions you need to make for this track.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song.\n\nWhy you'd want to: Keep a structured record of what needs fixing in each song so nothing slips through the cracks between sessions.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles focus between the text input and the time-jump controls, and Tab on +10s loops back to −10s."} /></h2>
                 <p className="muted">
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
@@ -7147,24 +7159,10 @@ export function App(): JSX.Element {
                 onKeyDown={(event) => {
                   if (isUnmodifiedShiftTab(event)) {
                     event.preventDefault();
-
-                    const lastFocusedTransport = lastFocusedChecklistTransportRef.current;
-                    const hasUsableLastFocusedTransport =
-                      lastFocusedTransport &&
-                      lastFocusedTransport.isConnected &&
-                      checklistModalCardRef.current?.contains(lastFocusedTransport);
-
-                    const fallbackTransportButton =
+                    const targetTransportButton =
                       checklistSkipBackTenButtonRef.current ??
                       checklistSkipBackFiveButtonRef.current;
-                    const targetTransportButton = hasUsableLastFocusedTransport
-                      ? lastFocusedTransport
-                      : fallbackTransportButton;
-
                     targetTransportButton?.focus();
-                    if (targetTransportButton) {
-                      lastFocusedChecklistTransportRef.current = targetTransportButton;
-                    }
                     return;
                   }
 
@@ -7285,6 +7283,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip back 5 seconds"
@@ -7302,6 +7306,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip back 2 seconds"
@@ -7324,6 +7334,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                     >
@@ -7339,6 +7355,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip forward 2 seconds"
@@ -7356,6 +7378,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip forward 5 seconds"
@@ -7373,6 +7401,18 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                          return;
+                        }
+
+                        if (isUnmodifiedTab(event)) {
+                          event.preventDefault();
+                          checklistSkipBackTenButtonRef.current?.focus();
                         }
                       }}
                       title="Skip forward 10 seconds"
@@ -7435,7 +7475,7 @@ export function App(): JSX.Element {
               >
                 Mastering <span aria-hidden="true">⤢</span>
               </button>
-              <span className="checklist-transport-hint">Shift+Tab from the text input jumps to time-jump controls</span>
+              <span className="checklist-transport-hint">Shift+Tab toggles between the text input and time-jump controls • Tab on +10s loops to −10s</span>
               <button
                 type="button"
                 className="ghost"

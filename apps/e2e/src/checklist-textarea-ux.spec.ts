@@ -153,7 +153,7 @@ test.describe('Checklist textarea UX', () => {
     }
   });
 
-  test('Shift+Tab reverses inside transport controls and resets after reopening checklist', async () => {
+  test('transport focus stays in the checklist loop and resets after reopening checklist', async () => {
     const directories = await createE2ETestDirectories('producer-player-checklist-shift-tab-toggle');
 
     await writeFixtureFiles(directories.fixtureDirectory, [
@@ -168,7 +168,6 @@ test.describe('Checklist textarea UX', () => {
       const composer = page.getByTestId('song-checklist-input');
       const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
       const skipForwardTen = page.getByTestId('song-checklist-skip-forward-10');
-      const skipForwardFive = page.getByTestId('song-checklist-skip-forward-5');
 
       await composer.focus();
       await composer.press('Shift+Tab');
@@ -179,9 +178,12 @@ test.describe('Checklist textarea UX', () => {
 
       await skipForwardTen.focus();
       await skipForwardTen.press('Shift+Tab');
-      await expect(skipForwardFive).toBeFocused();
+      await expect(composer).toBeFocused();
 
       await skipForwardTen.focus();
+      await skipForwardTen.press('Tab');
+      await expect(skipBackTen).toBeFocused();
+
       await page.getByRole('button', { name: 'Done' }).click();
       await expect(page.getByTestId('song-checklist-modal')).toBeHidden();
 

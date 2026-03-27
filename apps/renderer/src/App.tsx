@@ -6142,18 +6142,6 @@ export function App(): JSX.Element {
                       Clear
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleCompactMasteringPanelDragStart(event, 'reference')}
-                    onDragEnd={handleCompactMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-compact-drag-handle-reference"
-                  >
-                    ⋮⋮
-                  </button>
                 </div>
                 {renderMasteringPanelDragHandle('compact', 'reference')}
               </div>

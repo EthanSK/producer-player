@@ -1311,6 +1311,8 @@ export function App(): JSX.Element {
     useState<FullscreenMasteringPanelId | null>(null);
   const [fullscreenMasteringDropTargetPanelId, setFullscreenMasteringDropTargetPanelId] =
     useState<FullscreenMasteringPanelId | null>(null);
+  const [agentChatPromptRequest, setAgentChatPromptRequest] =
+    useState<AgentChatPromptRequest | null>(null);
   const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrackEntry[]>(() =>
     readSavedReferenceTracks()
   );
@@ -2764,6 +2766,140 @@ export function App(): JSX.Element {
     setDraggingFullscreenMasteringPanelId(null);
     setFullscreenMasteringDropTargetPanelId(null);
   }, []);
+
+  const buildMasteringPanelAskAiPrompt = useCallback(
+    (panelId: MasteringPanelId, surface: MasteringPanelSurface): string => {
+      const panelMeta = MASTERING_PANEL_ASK_AI_META[panelId];
+      const trackTitle = selectedSong?.title ?? selectedPlaybackVersion?.fileName ?? 'Current track';
+      const fileName = selectedPlaybackVersion?.fileName ?? null;
+      const surfaceLabel =
+        surface === 'fullscreen'
+          ? 'full-screen mastering workspace'
+          : 'compact mastering panel';
+      const listeningLine =
+        playbackPreviewMode === 'reference'
+          ? referenceTrack
+            ? `I am currently auditioning the reference track "${referenceTrack.fileName}" while comparing to my mix.`
+            : 'Reference playback mode is active, but no reference track is currently loaded.'
+          : 'I am currently auditioning my mix.';
+
+      return [
+        `I’m mastering "${trackTitle}" in Producer Player.`,
+        fileName && fileName !== trackTitle ? `File/version: ${fileName}.` : null,
+        `Panel clicked: ${panelMeta.label} (${surfaceLabel}).`,
+        `Panel focus: ${panelMeta.focus}.`,
+        listeningLine,
+        referenceTrack
+          ? `Reference loaded: ${referenceTrack.fileName}.`
+          : 'Reference loaded: none.',
+        `Selected normalization platform: ${selectedNormalizationPlatform.label}.`,
+        'Please use the current analysis context to:',
+        '1) Diagnose what this panel says about the track right now,',
+        '2) Explain why it matters for translation/streaming,',
+        '3) Give 3–5 prioritized mastering moves with concrete target ranges where relevant,',
+        '4) Tell me exactly what to re-check in this panel after changes.',
+        'Keep it practical and specific to this track.',
+      ]
+        .filter((line): line is string => Boolean(line))
+        .join('\n');
+    },
+    [
+      playbackPreviewMode,
+      referenceTrack,
+      selectedNormalizationPlatform.label,
+      selectedPlaybackVersion,
+      selectedSong,
+    ]
+  );
+
+  const handleAskAiForMasteringPanel = useCallback(
+    (panelId: MasteringPanelId, surface: MasteringPanelSurface) => {
+      if (!selectedPlaybackVersion) {
+        return;
+      }
+
+      setAgentChatPromptRequest({
+        id: `${panelId}-${surface}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        prompt: buildMasteringPanelAskAiPrompt(panelId, surface),
+      });
+    },
+    [buildMasteringPanelAskAiPrompt, selectedPlaybackVersion]
+  );
+
+  function renderMasteringPanelDragHandle(
+    surface: 'compact',
+    panelId: CompactMasteringPanelId,
+  ): JSX.Element;
+  function renderMasteringPanelDragHandle(
+    surface: 'fullscreen',
+    panelId: FullscreenMasteringPanelId,
+  ): JSX.Element;
+  function renderMasteringPanelDragHandle(
+    surface: 'compact' | 'fullscreen',
+    panelId: CompactMasteringPanelId | FullscreenMasteringPanelId,
+  ): JSX.Element {
+    const isCompact = surface === 'compact';
+    const panelMeta = MASTERING_PANEL_ASK_AI_META[panelId];
+    const dataTestId = isCompact
+      ? `analysis-compact-drag-handle-${panelId}`
+      : `analysis-overlay-drag-handle-${panelId}`;
+    const askAiTitle = selectedPlaybackVersion
+      ? `Ask AI about ${panelMeta.label} for this track.`
+      : `Select a track to ask AI about ${panelMeta.label}.`;
+
+    return (
+      <div className="analysis-panel-controls-row">
+        {ENABLE_AGENT_FEATURES ? (
+          <button
+            type="button"
+            className="analysis-panel-ask-ai-button"
+            onClick={() => handleAskAiForMasteringPanel(panelId, surface)}
+            title={askAiTitle}
+            aria-label={askAiTitle}
+            data-testid={`analysis-ask-ai-${surface}-${panelId}`}
+            disabled={!selectedPlaybackVersion}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="analysis-panel-drag-handle"
+          draggable
+          onDragStart={(event) => {
+            if (isCompact) {
+              handleCompactMasteringPanelDragStart(event, panelId as CompactMasteringPanelId);
+              return;
+            }
+
+            handleFullscreenMasteringPanelDragStart(event, panelId as FullscreenMasteringPanelId);
+          }}
+          onDragEnd={
+            isCompact
+              ? handleCompactMasteringPanelDragEnd
+              : handleFullscreenMasteringPanelDragEnd
+          }
+          title="Drag me to rearrange this panel."
+          aria-label="Drag me to rearrange this panel."
+          data-testid={dataTestId}
+        >
+          ⋮⋮
+        </button>
+      </div>
+    );
+  }
 
   useEffect(() => {
     applyPlaybackGain(volume, appliedNormalizationGainDb);
@@ -5587,26 +5723,13 @@ export function App(): JSX.Element {
                 onDrop={(event) => handleCompactMasteringPanelDrop(event, 'core-metrics')}
               >
                 <section className="analysis-compact-section" data-testid="analysis-compact-core-metrics-panel">
-                  <div className="analysis-inline-header">
+                  <div className="analysis-panel-header-row">
                     <div className="analysis-track-summary">
                       <strong className="analysis-track-label" data-testid="analysis-track-label">
                         {selectedPlaybackVersion.fileName}
                       </strong>
                     </div>
-                    <button
-                      type="button"
-                      className="analysis-panel-drag-handle"
-                      draggable
-                      onDragStart={(event) =>
-                        handleCompactMasteringPanelDragStart(event, 'core-metrics')
-                      }
-                      onDragEnd={handleCompactMasteringPanelDragEnd}
-                      title="Drag me to rearrange this panel."
-                      aria-label="Drag me to rearrange this panel."
-                      data-testid="analysis-compact-drag-handle-core-metrics"
-                    >
-                      ⋮⋮
-                    </button>
+                    {renderMasteringPanelDragHandle('compact', 'core-metrics')}
                   </div>
 
               {analysisStatus !== 'ready' ? (
@@ -5721,14 +5844,13 @@ export function App(): JSX.Element {
                   className="analysis-normalization-panel"
                   data-testid="analysis-normalization-panel"
                 >
-                <div className="analysis-normalization-header">
-                  <div>
-                    <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
-                    <p className="muted" data-testid="analysis-normalization-summary">
-                      {normalizationSummaryText}
-                    </p>
-                  </div>
-                  <div className="analysis-inline-header-actions">
+                  <div className="analysis-normalization-header">
+                    <div>
+                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
+                      <p className="muted" data-testid="analysis-normalization-summary">
+                        {normalizationSummaryText}
+                      </p>
+                    </div>
                     <button
                       type="button"
                       className={normalizationPreviewEnabled ? '' : 'ghost'}
@@ -5739,22 +5861,8 @@ export function App(): JSX.Element {
                     >
                       Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
                     </button>
-                    <button
-                      type="button"
-                      className="analysis-panel-drag-handle"
-                      draggable
-                      onDragStart={(event) =>
-                        handleCompactMasteringPanelDragStart(event, 'normalization')
-                      }
-                      onDragEnd={handleCompactMasteringPanelDragEnd}
-                      title="Drag me to rearrange this panel."
-                      aria-label="Drag me to rearrange this panel."
-                      data-testid="analysis-compact-drag-handle-normalization"
-                    >
-                      ⋮⋮
-                    </button>
+                    {renderMasteringPanelDragHandle('compact', 'normalization')}
                   </div>
-                </div>
 
                 <div className="analysis-platform-grid" role="group" aria-label="Platform normalization presets">
                   {NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
@@ -5852,24 +5960,11 @@ export function App(): JSX.Element {
               >
                 <section className="analysis-compact-section" data-testid="analysis-compact-tonal-balance-panel">
                   <div className="analysis-tonal-balance-wrapper">
-                    <div className="analysis-inline-header">
+                    <div className="analysis-panel-header-row">
                       <p className="analysis-tonal-balance-heading" data-testid="analysis-tonal-balance-heading">
                         Tonal balance{refTrackSuffix}
                       </p>
-                      <button
-                        type="button"
-                        className="analysis-panel-drag-handle"
-                        draggable
-                        onDragStart={(event) =>
-                          handleCompactMasteringPanelDragStart(event, 'tonal-balance')
-                        }
-                        onDragEnd={handleCompactMasteringPanelDragEnd}
-                        title="Drag me to rearrange this panel."
-                        aria-label="Drag me to rearrange this panel."
-                        data-testid="analysis-compact-drag-handle-tonal-balance"
-                      >
-                        ⋮⋮
-                      </button>
+                      {renderMasteringPanelDragHandle('compact', 'tonal-balance')}
                     </div>
                     <div
                       className="analysis-tonal-balance"
@@ -5972,6 +6067,7 @@ export function App(): JSX.Element {
                     ⋮⋮
                   </button>
                 </div>
+                {renderMasteringPanelDragHandle('compact', 'reference')}
               </div>
 
               <div className="analysis-ab-toggle" data-testid="analysis-ab-toggle">
@@ -7457,28 +7553,14 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'visualizations')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'visualizations')}
                 >
-                  <div className="analysis-inline-header">
-                    <h3>Visualizations{refTrackSuffix}</h3>
-                    <button
-                      type="button"
-                      className="analysis-panel-drag-handle"
-                      draggable
-                      onDragStart={(event) =>
-                        handleFullscreenMasteringPanelDragStart(event, 'visualizations')
-                      }
-                      onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                      title="Drag me to rearrange this panel."
-                      aria-label="Drag me to rearrange this panel."
-                      data-testid="analysis-overlay-drag-handle-visualizations"
-                    >
-                      ⋮⋮
-                    </button>
-                  </div>
                   <div className="analysis-overlay-viz-row">
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
-                      <div className="analysis-section-header">
-                        <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{refTrackSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high).\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
-                        <p className="analysis-section-subtitle">Real-time frequency content — click bands to solo frequency ranges</p>
+                      <div className="analysis-panel-header-row">
+                        <div className="analysis-section-header">
+                          <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{refTrackSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high).\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
+                          <p className="analysis-section-subtitle">Real-time frequency content — click bands to solo frequency ranges</p>
+                        </div>
+                        {renderMasteringPanelDragHandle('fullscreen', 'visualizations')}
                       </div>
                       <SpectrumAnalyzer
                         analyserNode={analyserNode}
@@ -7530,18 +7612,7 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'reference')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'reference')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleFullscreenMasteringPanelDragStart(event, 'reference')}
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-reference"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'reference')}
                   <div className="analysis-section-header">
                     <h4>Reference Track <HelpTooltip text="Load a professional track you want your mix to sound like, then use the A/B toggle to flip between your mix and the reference. When you click 'Reference', the player switches to the reference file and all meters update to show its analysis. Click 'Mix' to switch back. This makes it easy to spot differences in loudness, EQ, and dynamics without losing your place." links={REFERENCE_TRACK_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Load a reference track to A/B against your mix</p>
@@ -7722,18 +7793,7 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'loudness-history')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'loudness-history')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleFullscreenMasteringPanelDragStart(event, 'loudness-history')}
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-loudness-history"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'loudness-history')}
                   <h3>Loudness History{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A blue curve showing your track's rolling loudness over time. The dashed line marks the overall loudness estimate for the loaded track, and the white vertical line shows the current playback position. The shaded area makes it easier to see where sections feel denser or lighter.\n\nWhat to look for: A relatively consistent curve usually means controlled loudness. Big dips may point to sections that feel too small; sharp jumps may point to sections that hit harder than intended. Use it to compare sections against each other, then confirm the final number with the Integrated LUFS stat.\n\nTip: Compare the shape against a reference track in the same genre. If your curve is almost flat all the way through, the song may be over-compressed."} links={LOUDNESS_HISTORY_LINKS} /></h3>
                   <LoudnessHistoryGraph
                     analysis={analysis}
@@ -7755,18 +7815,7 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'waveform')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'waveform')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleFullscreenMasteringPanelDragStart(event, 'waveform')}
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-waveform"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'waveform')}
                   <h3>Waveform{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: Symmetrical bars showing the peak amplitude of your audio at each moment in time. Taller bars = louder moments, shorter bars = quieter. Bars to the left of the white playback cursor are bright blue (already played), bars to the right are dimmer (upcoming). The Y-axis goes from -1.0 to +1.0 (full digital scale).\n\nWhat to look for: A healthy waveform has visible variation — loud choruses and quieter verses. If the bars are all maxed out at 1.0 with no variation, your track is likely over-compressed or clipping. Gaps (no bars) indicate silence.\n\nTip: Compare the height of your loudest and quietest sections. If there's barely any difference, consider backing off your limiter to restore dynamics."} links={WAVEFORM_LINKS} /></h3>
                   <WaveformDisplay
                     waveformPeaks={analysis?.waveformPeaks ?? null}
@@ -7792,20 +7841,7 @@ export function App(): JSX.Element {
                   }
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'stereo-correlation')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) =>
-                      handleFullscreenMasteringPanelDragStart(event, 'stereo-correlation')
-                    }
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-stereo-correlation"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'stereo-correlation')}
                   <div className="analysis-section-header">
                     <h4>Stereo Correlation{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A horizontal meter with a glowing indicator that moves between -1 (left) and +1 (right). The background fades from red on the left, through yellow in the center, to green on the right. The numeric value is shown in the top-right corner, colored to match the zone.\n\nWhat to look for: Green zone (+0.5 to +1) = great mono compatibility — your track sounds solid on phone speakers and mono systems. Yellow zone (0 to +0.5) = some stereo content, generally fine. Red zone (below 0) = phase issues — left and right channels are canceling each other, which sounds thin or hollow in mono.\n\nTip: If the indicator dips into the red during certain parts, check for over-widened stereo effects, poorly set up chorus/phaser plugins, or samples that were accidentally phase-inverted."} links={STEREO_CORRELATION_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Phase relationship between L/R channels (+1 = mono compatible, -1 = out of phase)</p>
@@ -7843,20 +7879,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'tonal-balance')}
                   data-testid="analysis-overlay-tonal-balance-panel"
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) =>
-                      handleFullscreenMasteringPanelDragStart(event, 'tonal-balance')
-                    }
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-tonal-balance"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'tonal-balance')}
                     <div className="analysis-section-header">
                       <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{refTrackSuffix} <HelpTooltip text="Shows how your audio energy is distributed across three broad frequency bands. Low (20-250 Hz) covers sub and bass. Mid (250-4000 Hz) covers vocals, guitars, synths, and most musical detail. High (4000-20000 Hz) covers presence, air, and brightness. Each band is shown as a percentage of total energy. Use the numbers as a rough guide, not a rulebook: many balanced masters fall somewhere around 30-40% Low, 40-50% Mid, and 15-25% High, but genre and arrangement matter." links={TONAL_BALANCE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Low/mid/high energy distribution</p>
@@ -7899,20 +7922,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'loudness-peaks')}
                   data-testid="analysis-overlay-loudness-peaks"
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) =>
-                      handleFullscreenMasteringPanelDragStart(event, 'loudness-peaks')
-                    }
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-loudness-peaks"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'loudness-peaks')}
                   <h3>Loudness &amp; peaks{isRefMode ? " (Reference)" : ""}</h3>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
@@ -7988,18 +7998,7 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'normalization')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'normalization')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleFullscreenMasteringPanelDragStart(event, 'normalization')}
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-normalization"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'normalization')}
                   <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
                   <div className="analysis-normalization-header">
                     <div>
@@ -8121,18 +8120,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'comparison')}
                   data-testid="analysis-overlay-comparison"
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleFullscreenMasteringPanelDragStart(event, 'comparison')}
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-comparison"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'comparison')}
                   <div className="analysis-section-header">
                     <h4>Your Mix vs Reference <HelpTooltip text="Side-by-side comparison of your mix and the loaded reference track. Shows the difference in loudness (LUFS), true peak, and tonal balance. Positive numbers mean your mix is louder/higher; negative means the reference is. Use this to see exactly how your mix stacks up against a professional master." links={REFERENCE_TRACK_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Compare loudness and tonal balance against your reference track</p>
@@ -8186,18 +8174,7 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'vectorscope')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'vectorscope')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleFullscreenMasteringPanelDragStart(event, 'vectorscope')}
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-vectorscope"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'vectorscope')}
                     <div className="analysis-section-header">
                       <h4>Vectorscope{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A circular display where blue dots trace your stereo signal in real-time, with a fading trail so you can see the shape over time. The vertical axis (M) is the Mid/mono signal (L+R), and the horizontal axis (S) is the Side signal (L-R). L and R labels mark the diagonal directions for pure left and pure right.\n\nWhat to look for: A tall, narrow vertical shape = mostly mono content (centered vocals, bass). A wider spread = more stereo width. A roughly even shape = balanced stereo image. If it leans consistently toward L or R, your mix is off-center. A thin horizontal line means the signal is pure side information with no center — usually a problem.\n\nTip: Bass and kick should appear mostly vertical (centered). If your low end spreads wide on the vectorscope, consider narrowing it with a mid/side EQ. A natural, full mix typically looks like a fuzzy vertical oval."} links={VECTORSCOPE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Stereo image — wider spread = wider stereo field, vertical = mono</p>
@@ -8225,20 +8202,7 @@ export function App(): JSX.Element {
                     handleFullscreenMasteringPanelDrop(event, 'mid-side-monitoring')
                   }
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) =>
-                      handleFullscreenMasteringPanelDragStart(event, 'mid-side-monitoring')
-                    }
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-mid-side-monitoring"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'mid-side-monitoring')}
                     <div className="analysis-section-header">
                       <h4>Mid/Side Monitoring <HelpTooltip text="Listen to just the center (Mid) or sides (Side) of your stereo mix separately. Mid = vocals, bass, kick. Side = reverb, width, panning. Useful for checking stereo balance." links={MID_SIDE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Listen to Mid (center) or Side (stereo width) in isolation</p>
@@ -8286,18 +8250,7 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'k-metering')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'k-metering')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleFullscreenMasteringPanelDragStart(event, 'k-metering')}
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-k-metering"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'k-metering')}
                   <div className="analysis-section-header">
                     <h4>K-Metering <HelpTooltip text={"What this measures: Bob Katz's K-System metering, which shifts the meter scale so 0 dB represents a calibrated reference level instead of the digital ceiling. K-14 sets 0 dB = -14 dBFS (designed for pop, rock, and electronic music). K-20 sets 0 dB = -20 dBFS (designed for film, classical, and broadcast). The value shown is your track's RMS level on that K-scale.\n\nGood values: On K-14, your average level should hover around 0 dB (meaning your RMS is around -14 dBFS). Peaks above +4 dB on K-14 are loud. On K-20, average around 0 dB means your RMS is around -20 dBFS — typical for dynamic content like film and orchestral music.\n\nIf it's wrong: If your K-14 reading is consistently above +4 dB, you are mastering very loud with limited dynamics. If it reads well below -6 dB on K-14, your track is unusually quiet for commercial music. Use K-14 for most music production and K-20 when working on film, classical, or anything requiring wide dynamic range."} links={K_METERING_LINKS} /></h4>
                     <p className="analysis-section-subtitle">K-weighted meter scales calibrated for different content types — 0 dB on the K-scale represents the reference listening level</p>
@@ -8337,20 +8290,7 @@ export function App(): JSX.Element {
                     }
                     onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'pro-indicators')}
                   >
-                    <button
-                      type="button"
-                      className="analysis-panel-drag-handle"
-                      draggable
-                      onDragStart={(event) =>
-                        handleFullscreenMasteringPanelDragStart(event, 'pro-indicators')
-                      }
-                      onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                      title="Drag me to rearrange this panel."
-                      aria-label="Drag me to rearrange this panel."
-                      data-testid="analysis-overlay-drag-handle-pro-indicators"
-                    >
-                      ⋮⋮
-                    </button>
+                    {renderMasteringPanelDragHandle('fullscreen', 'pro-indicators')}
                     <div className="analysis-section-header">
                       <h4>Quick Diagnostics <HelpTooltip text={"What this measures: A quick classification of your track's dynamic character based on the crest factor (peak-to-RMS difference). High DR means crest factor above 10 dB — your transients and dynamics are well-preserved. Medium DR is 6-10 dB — typical for commercial masters. Low DR means below 6 dB — the track is heavily compressed or limited.\n\nGood values: Depends on genre and intent. Pop/rock: Medium DR (6-10 dB) is normal. EDM/hip-hop: Medium to Low DR is common. Acoustic/jazz/classical: High DR (above 10 dB) is expected. There is no single right answer — it depends on what the music needs.\n\nIf it's wrong: Low DR with a track that should breathe (acoustic, jazz) means you have over-limited. Try reducing limiter gain reduction or using less bus compression. High DR on a track meant to compete on playlists may need more limiting. The goal is to match the dynamic feel that serves the song, not chase a number."} links={DYNAMIC_RANGE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">At-a-glance health checks for your master</p>
@@ -8392,20 +8332,7 @@ export function App(): JSX.Element {
                       handleFullscreenMasteringPanelDrop(event, 'mastering-checklist')
                     }
                   >
-                    <button
-                      type="button"
-                      className="analysis-panel-drag-handle"
-                      draggable
-                      onDragStart={(event) =>
-                        handleFullscreenMasteringPanelDragStart(event, 'mastering-checklist')
-                      }
-                      onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                      title="Drag me to rearrange this panel."
-                      aria-label="Drag me to rearrange this panel."
-                      data-testid="analysis-overlay-drag-handle-mastering-checklist"
-                    >
-                      ⋮⋮
-                    </button>
+                    {renderMasteringPanelDragHandle('fullscreen', 'mastering-checklist')}
                     <div className="analysis-section-header">
                       <h4>Mastering Checklist <HelpTooltip text={"What this measures: An automated technical health check of your master across four critical areas. (1) LUFS: passes if integrated loudness is between -16 and -6 LUFS (the typical streaming range), warns otherwise. (2) True Peak: passes if below -1 dBTP, warns if between -1 and 0 dBTP, fails if at or above 0 dBTP. (3) DC Offset: passes if the mean sample value is 0.001 or less (0.1%), warns if higher. (4) Clipping: passes if zero clipped samples, fails if any samples hit the digital ceiling.\n\nGood values: All four checks showing a pass (checkmark). This means your master is technically clean and ready for distribution.\n\nIf it's wrong: LUFS warning — adjust your overall loudness to match platform targets. True Peak warning — lower your limiter ceiling to -1 dBTP or use a true peak limiter. DC Offset warning — apply a high-pass filter at 10-20 Hz or use DC offset removal. Clipping failure — reduce gain into your final limiter or lower the output ceiling."} links={MASTERING_CHECKLIST_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Auto-generated summary of your master&apos;s technical health</p>
@@ -8475,20 +8402,7 @@ export function App(): JSX.Element {
                     handleFullscreenMasteringPanelDrop(event, 'crest-factor-history')
                   }
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) =>
-                      handleFullscreenMasteringPanelDragStart(event, 'crest-factor-history')
-                    }
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-crest-factor-history"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'crest-factor-history')}
                   <div className="analysis-section-header">
                     <h4>Dynamic Range / Crest Factor <HelpTooltip text={"What you're seeing: A real-time line graph plotting the crest factor (peak-to-RMS difference) over the last 30 seconds. The crest factor measures how much transient headroom your audio has — the gap between the loudest peak and the average (RMS) level.\n\nColor coding: Green (above 8 dB) means healthy dynamics with well-preserved transients. Yellow (6-8 dB) indicates moderate compression typical of commercial masters. Red (below 6 dB) signals heavily compressed or limited audio — the dynamics are being crushed.\n\nWhat to look for: Watch how the line moves during different sections. Verses might show higher crest factor while choruses drop lower as limiting kicks in. If the line stays consistently in the red zone, you may be over-limiting.\n\nTip: Compare this graph during your loudest chorus vs. your quietest verse. If both sections show similar crest factor, your master might lack dynamic contrast."} links={CREST_FACTOR_HISTORY_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Real-time peak-to-RMS difference — green = healthy dynamics, red = crushed</p>
@@ -8513,20 +8427,7 @@ export function App(): JSX.Element {
                   }
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'mid-side-spectrum')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) =>
-                      handleFullscreenMasteringPanelDragStart(event, 'mid-side-spectrum')
-                    }
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-mid-side-spectrum"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'mid-side-spectrum')}
                   <div className="analysis-section-header">
                     <h4>Mid/Side Spectrum <HelpTooltip text={"What you're seeing: Two overlaid spectrum curves — blue for Mid (L+R summed) and orange for Side (L-R). Both share the same frequency axis as the main spectrum analyzer.\n\nWhat to look for: Bass frequencies (below ~200 Hz) should be predominantly Mid (blue) with minimal Side (orange) — this ensures mono-compatible low end. If orange is dominant in the lows, your bass is too wide and may collapse on mono playback. In the highs, Side content is normal (reverb, panned elements).\n\nTip: Use this alongside the Mid/Side Monitoring controls to listen and compare."} links={MID_SIDE_SPECTRUM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Frequency content split into Mid (center) and Side (stereo width)</p>
@@ -8554,20 +8455,7 @@ export function App(): JSX.Element {
                     handleFullscreenMasteringPanelDrop(event, 'loudness-histogram')
                   }
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) =>
-                      handleFullscreenMasteringPanelDragStart(event, 'loudness-histogram')
-                    }
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-loudness-histogram"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'loudness-histogram')}
                   <div className="analysis-section-header">
                     <h4>Loudness Distribution <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. Green dashed lines mark the streaming target range (-16 to -6 LUFS).\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: This is built from the full-track analysis, so you can inspect the complete distribution immediately without waiting for playback or scroll position."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Statistical distribution of loudness levels across the full analyzed track</p>
@@ -8589,18 +8477,7 @@ export function App(): JSX.Element {
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'spectrogram')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'spectrogram')}
                 >
-                  <button
-                    type="button"
-                    className="analysis-panel-drag-handle"
-                    draggable
-                    onDragStart={(event) => handleFullscreenMasteringPanelDragStart(event, 'spectrogram')}
-                    onDragEnd={handleFullscreenMasteringPanelDragEnd}
-                    title="Drag me to rearrange this panel."
-                    aria-label="Drag me to rearrange this panel."
-                    data-testid="analysis-overlay-drag-handle-spectrogram"
-                  >
-                    ⋮⋮
-                  </button>
+                  {renderMasteringPanelDragHandle('fullscreen', 'spectrogram')}
                   <div className="analysis-section-header">
                     <h4>Spectrogram <HelpTooltip text={"What you're seeing: A scrolling 2D heatmap — X is time, Y is frequency (20 Hz to 20 kHz, logarithmic), color intensity is amplitude. Dark blue = quiet, green = moderate, yellow = loud, red = very loud.\n\nWhat to look for: A persistent bright horizontal band indicates a resonant frequency that may need EQ. Vertical bright lines are transients (drums, clicks). Gradual color shifts show arrangement dynamics between sections.\n\nTip: Especially useful for spotting issues a real-time spectrum misses — like a rogue frequency that appears briefly, or gradual tonal drift across sections."} links={SPECTROGRAM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Scrolling frequency heatmap — time vs. frequency vs. amplitude</p>
@@ -8806,7 +8683,10 @@ export function App(): JSX.Element {
         </div>
       ) : null}
       {ENABLE_AGENT_FEATURES ? (
-        <AgentChatPanel getAnalysisContext={getAnalysisContext} />
+        <AgentChatPanel
+          getAnalysisContext={getAnalysisContext}
+          promptRequest={agentChatPromptRequest}
+        />
       ) : null}
     </div>
   );

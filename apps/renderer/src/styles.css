@@ -726,6 +726,25 @@ input[type='range'] {
   align-items: start;
 }
 
+.analysis-panel-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 10px;
+}
+
+.analysis-panel-header-row > :first-child,
+.producer-reference-toolbar > :first-child,
+.analysis-normalization-header > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.producer-reference-toolbar > .analysis-reference-actions,
+.analysis-normalization-header > button {
+  margin-left: auto;
+}
+
 .analysis-ab-row {
   display: flex;
   gap: 10px;
@@ -780,8 +799,15 @@ input[type='range'] {
   position: relative;
 }
 
-.analysis-panel-drag-handle {
+.analysis-panel-controls-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: end;
   flex: 0 0 auto;
+}
+
+.analysis-panel-drag-handle {
   width: 28px;
   height: 28px;
   border-radius: 8px;
@@ -804,6 +830,37 @@ input[type='range'] {
 
 .analysis-panel-drag-handle:active {
   cursor: grabbing;
+}
+
+.analysis-panel-ask-ai-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(92, 167, 255, 0.45);
+  background: radial-gradient(circle at top, rgba(98, 206, 255, 0.24), rgba(27, 42, 59, 0.92));
+  color: #cde6ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 120ms ease, transform 120ms ease, filter 120ms ease;
+}
+
+.analysis-panel-ask-ai-button:hover {
+  border-color: rgba(148, 214, 255, 0.9);
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.analysis-panel-ask-ai-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+.analysis-panel-ask-ai-button:focus-visible {
+  outline: 2px solid rgba(144, 206, 255, 0.85);
+  outline-offset: 1px;
 }
 
 .analysis-overlay-section.drop-target,
@@ -1130,19 +1187,18 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.analysis-overlay-section > .analysis-panel-drag-handle {
+.analysis-overlay-section > .analysis-panel-controls-row {
   grid-column: 2;
   grid-row: 1;
-  align-self: start;
 }
 
-.analysis-overlay-section > .analysis-panel-drag-handle + * {
+.analysis-overlay-section > .analysis-panel-controls-row + * {
   grid-column: 1;
   grid-row: 1;
   min-width: 0;
 }
 
-.analysis-overlay-section > .analysis-panel-drag-handle + * ~ * {
+.analysis-overlay-section > .analysis-panel-controls-row + * ~ * {
   grid-column: 1 / -1;
 }
 

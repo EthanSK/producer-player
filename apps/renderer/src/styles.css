@@ -717,7 +717,6 @@ input[type='range'] {
   background: linear-gradient(90deg, rgba(95, 210, 143, 0.65), rgba(92, 167, 255, 0.95));
 }
 
-.analysis-reference-toolbar,
 .analysis-reference-actions,
 .analysis-reference-slot-actions,
 .analysis-reference-metrics {
@@ -726,9 +725,26 @@ input[type='range'] {
   flex-wrap: wrap;
 }
 
-.producer-reference-toolbar {
-  justify-content: space-between;
-  align-items: start;
+.analysis-panel-header-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.analysis-panel-header-title-block {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.analysis-panel-header-title-block strong {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.analysis-panel-header-title-block .muted {
+  margin: 0;
 }
 
 .analysis-panel-header-row {
@@ -743,14 +759,12 @@ input[type='range'] {
   margin-left: auto;
 }
 
-.analysis-panel-header-row > :first-child,
-.producer-reference-toolbar > :first-child,
+.analysis-panel-header-row > :not(.analysis-panel-controls-row),
 .analysis-normalization-header > :first-child {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.producer-reference-toolbar > .analysis-reference-actions,
 .analysis-normalization-header > button {
   margin-left: auto;
 }
@@ -889,8 +903,7 @@ input[type='range'] {
   flex-wrap: wrap;
 }
 
-.analysis-normalization-header strong,
-.analysis-reference-toolbar strong {
+.analysis-normalization-header strong {
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
@@ -2633,7 +2646,6 @@ button.checklist-play-toggle[data-playing='true'] {
     padding: 12px;
   }
 
-  .producer-reference-toolbar,
   .analysis-normalization-header,
   .checklist-modal-header,
   .checklist-modal-actions {

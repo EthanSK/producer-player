@@ -5989,24 +5989,28 @@ export function App(): JSX.Element {
                   className="analysis-normalization-panel"
                   data-testid="analysis-normalization-panel"
                 >
-                  <div className="analysis-normalization-header">
-                    <div>
-                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
-                      <p className="muted" data-testid="analysis-normalization-summary">
-                        {normalizationSummaryText}
-                      </p>
+                  <div className="analysis-panel-header-stack">
+                    <div className="analysis-panel-header-row">
+                      <div className="analysis-panel-header-title-block">
+                        <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
+                        <p className="muted" data-testid="analysis-normalization-summary">
+                          {normalizationSummaryText}
+                        </p>
+                      </div>
+                      {renderMasteringPanelDragHandle('compact', 'normalization')}
                     </div>
-                    <button
-                      type="button"
-                      className={normalizationPreviewEnabled ? '' : 'ghost'}
-                      onClick={() => setNormalizationPreviewEnabled((current) => !current)}
-                      data-testid="analysis-normalization-toggle"
-                      disabled={analysisStatus !== 'ready' || !normalizationPreview}
-                      title="Apply this platform's loudness adjustment to your playback."
-                    >
-                      Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
-                    </button>
-                    {renderMasteringPanelDragHandle('compact', 'normalization')}
+                    <div className="analysis-inline-header-actions">
+                      <button
+                        type="button"
+                        className={normalizationPreviewEnabled ? '' : 'ghost'}
+                        onClick={() => setNormalizationPreviewEnabled((current) => !current)}
+                        data-testid="analysis-normalization-toggle"
+                        disabled={analysisStatus !== 'ready' || !normalizationPreview}
+                        title="Apply this platform's loudness adjustment to your playback."
+                      >
+                        Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
+                      </button>
+                    </div>
                   </div>
 
                 <div className="analysis-platform-grid" role="group" aria-label="Platform normalization presets">
@@ -6151,57 +6155,59 @@ export function App(): JSX.Element {
                 onDrop={(event) => handleCompactMasteringPanelDrop(event, 'reference')}
               >
                 <section className="analysis-compact-section analysis-compact-reference-panel" data-testid="analysis-compact-reference-panel">
-                  <div className="analysis-reference-toolbar producer-reference-toolbar">
-                <div>
-                  <strong>Reference <HelpTooltip text="Load a professional track you want your mix to sound like, then click A/B to instantly switch between your mix and the reference. This lets you compare EQ balance, dynamics, and overall vibe. When you switch to the reference, the app swaps the entire audio chain to play the reference file instead of your mix. All the analysis meters update to show the reference track's stats so you can compare numbers side by side." links={REFERENCE_TRACK_LINKS} /></strong>
-                  <p className="muted" data-testid="analysis-reference-summary">
-                    {referenceTrack
-                      ? `${referenceTrack.fileName} · ${
-                          referenceTrack.sourceType === 'external-file' ? 'external' : 'linked'
-                        }`
-                      : referenceStatus === 'loading'
-                        ? 'Loading…'
-                        : 'No reference'}
-                  </p>
-                </div>
-                <div className="analysis-inline-header-actions">
-                  <div className="analysis-reference-actions">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleChooseReferenceTrack();
-                      }}
-                      data-testid="analysis-choose-reference"
-                      title="Choose an external reference file."
-                      disabled={referenceStatus === 'loading'}
-                    >
-                      {referenceStatus === 'loading' ? 'Loading…' : 'Choose File…'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleUseCurrentTrackAsReference();
-                      }}
-                      data-testid="analysis-use-current-reference"
-                      disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
-                      title="Use the current track as the reference."
-                    >
-                      {referenceStatus === 'loading' ? 'Loading…' : 'Use Current'}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={handleClearReferenceTrack}
-                      data-testid="analysis-clear-reference"
-                      disabled={!referenceTrack && referenceStatus !== 'error'}
-                      title="Clear the reference."
-                    >
-                      Clear
-                    </button>
+                  <div className="analysis-panel-header-stack">
+                    <div className="analysis-panel-header-row">
+                      <div className="analysis-panel-header-title-block">
+                        <strong>Reference <HelpTooltip text="Load a professional track you want your mix to sound like, then click A/B to instantly switch between your mix and the reference. This lets you compare EQ balance, dynamics, and overall vibe. When you switch to the reference, the app swaps the entire audio chain to play the reference file instead of your mix. All the analysis meters update to show the reference track's stats so you can compare numbers side by side." links={REFERENCE_TRACK_LINKS} /></strong>
+                        <p className="muted" data-testid="analysis-reference-summary">
+                          {referenceTrack
+                            ? `${referenceTrack.fileName} · ${
+                                referenceTrack.sourceType === 'external-file' ? 'external' : 'linked'
+                              }`
+                            : referenceStatus === 'loading'
+                              ? 'Loading…'
+                              : 'No reference'}
+                        </p>
+                      </div>
+                      {renderMasteringPanelDragHandle('compact', 'reference')}
+                    </div>
+                    <div className="analysis-inline-header-actions">
+                      <div className="analysis-reference-actions">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleChooseReferenceTrack();
+                          }}
+                          data-testid="analysis-choose-reference"
+                          title="Choose an external reference file."
+                          disabled={referenceStatus === 'loading'}
+                        >
+                          {referenceStatus === 'loading' ? 'Loading…' : 'Choose File…'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleUseCurrentTrackAsReference();
+                          }}
+                          data-testid="analysis-use-current-reference"
+                          disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
+                          title="Use the current track as the reference."
+                        >
+                          {referenceStatus === 'loading' ? 'Loading…' : 'Use Current'}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={handleClearReferenceTrack}
+                          data-testid="analysis-clear-reference"
+                          disabled={!referenceTrack && referenceStatus !== 'error'}
+                          title="Clear the reference."
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                {renderMasteringPanelDragHandle('compact', 'reference')}
-              </div>
 
               <div className="analysis-ab-toggle" data-testid="analysis-ab-toggle">
                 <span className="analysis-ab-label">Quick A/B</span>

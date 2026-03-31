@@ -347,7 +347,7 @@ test.describe('Agent Chat Panel', () => {
 
       await page.getByTestId('agent-panel-toggle').click();
       await expect(panel).toHaveClass(/agent-chat-panel--open/);
-      await expect(page.getByTestId('agent-panel-title')).toHaveText('Producey Boy');
+      await expect(page.getByTestId('agent-panel-title')).toHaveText('Produciboi');
       await expect(page.locator('.agent-experimental-label')).toHaveCount(0);
       await expect(page.getByTestId('agent-help-toggle')).toHaveAttribute('title', 'Assistant setup help');
       await expect(page.getByTestId('agent-history-toggle')).toHaveAttribute('title', 'Chat history');
@@ -530,7 +530,7 @@ test.describe('Agent Chat Panel', () => {
 
       const helpDialog = page.getByTestId('agent-help-dialog');
       await expect(helpDialog).toBeVisible();
-      await expect(helpDialog).toContainText('Set up Producey Boy');
+      await expect(helpDialog).toContainText('Set up Produciboi');
       await expect(helpDialog).toContainText('claude auth');
       await expect(helpDialog).toContainText('existing subscription');
       await expect(helpDialog).toContainText('automatic compaction has not been verified');

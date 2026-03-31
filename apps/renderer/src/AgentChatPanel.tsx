@@ -924,8 +924,8 @@ export function AgentChatPanel({
         className="agent-toggle-button"
         onClick={handleTogglePanel}
         data-testid="agent-panel-toggle"
-        title={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'}
-        aria-label={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'}
+        title={isOpen ? 'Minimize Produciboi' : 'Open Produciboi'}
+        aria-label={isOpen ? 'Minimize Produciboi' : 'Open Produciboi'}
       >
         <svg
           viewBox="0 0 24 24"
@@ -966,7 +966,7 @@ export function AgentChatPanel({
             </div>
             <div className="agent-panel-heading-copy">
               <h3 className="agent-panel-title" data-testid="agent-panel-title">
-                Producey Boy
+                Produciboi
               </h3>
               <p className="agent-panel-subtitle">mastering wingman</p>
             </div>
@@ -1290,7 +1290,7 @@ export function AgentChatPanel({
           >
             <div className="agent-help-dialog">
               <div className="agent-help-dialog-header">
-                <h4>Set up Producey Boy</h4>
+                <h4>Set up Produciboi</h4>
                 <button
                   type="button"
                   className="agent-help-close"

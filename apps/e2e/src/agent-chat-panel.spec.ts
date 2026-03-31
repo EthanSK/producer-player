@@ -347,9 +347,10 @@ test.describe('Agent Chat Panel', () => {
 
       await page.getByTestId('agent-panel-toggle').click();
       await expect(panel).toHaveClass(/agent-chat-panel--open/);
-      await expect(page.getByTestId('agent-panel-title')).toHaveText('Produciboi Agent');
+      await expect(page.getByTestId('agent-panel-title')).toHaveText('Producey Boy');
       await expect(page.locator('.agent-experimental-label')).toHaveCount(0);
       await expect(page.getByTestId('agent-help-toggle')).toHaveAttribute('title', 'Assistant setup help');
+      await expect(page.getByTestId('agent-history-toggle')).toHaveAttribute('title', 'Chat history');
       await expect(page.getByTestId('agent-settings-toggle')).toHaveAttribute('title', 'Assistant settings');
       await expect(page.getByTestId('agent-panel-close')).toBeVisible();
       await expect(page.getByTestId('agent-panel-close')).toHaveAttribute('title', 'Minimize');
@@ -432,6 +433,93 @@ test.describe('Agent Chat Panel', () => {
     }
   });
 
+  test('reset settings restores assistant defaults without touching shared user data', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-reset-settings');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
+
+    const seededSharedState = {
+      ratings: {
+        'song-reset-test': 4,
+      },
+      checklists: {
+        'song-reset-test': [
+          {
+            id: 'check-reset-test',
+            text: 'Keep transient detail',
+            completed: false,
+            timestampSeconds: 12.5,
+            versionNumber: 2,
+          },
+        ],
+      },
+      projectFilePaths: {
+        'song-reset-test': '/tmp/reset-test.logicx',
+      },
+    };
+
+    try {
+      await page.getByTestId('agent-panel-toggle').click();
+      await page.getByTestId('agent-settings-toggle').click();
+
+      await page.evaluate(async (state) => {
+        const bridge = (window as unknown as { producerPlayer: { setSharedUserState: (payload: unknown) => Promise<unknown> } }).producerPlayer;
+        await bridge.setSharedUserState(state);
+      }, seededSharedState);
+
+      const sharedStateBeforeReset = (await page.evaluate(async () => {
+        const bridge = (window as unknown as { producerPlayer: { getSharedUserState: () => Promise<unknown> } }).producerPlayer;
+        return bridge.getSharedUserState();
+      })) as {
+        ratings: Record<string, number>;
+        checklists: Record<string, unknown>;
+        projectFilePaths: Record<string, string>;
+      };
+
+      expect(sharedStateBeforeReset.ratings).toEqual(seededSharedState.ratings);
+      expect(sharedStateBeforeReset.checklists).toEqual(seededSharedState.checklists);
+      expect(sharedStateBeforeReset.projectFilePaths).toEqual(
+        seededSharedState.projectFilePaths
+      );
+
+      const modelSelect = page.getByTestId('agent-model-select');
+      const thinkingSelect = page.getByTestId('agent-thinking-select');
+      const systemPromptInput = page.getByTestId('agent-system-prompt-input');
+
+      await page.getByTestId('agent-provider-codex').click();
+      await modelSelect.selectOption('gpt-5.3-codex');
+      await thinkingSelect.selectOption('low');
+      await systemPromptInput.fill('Temporary reset test prompt');
+
+      await page.getByTestId('agent-system-prompt-reset').click();
+
+      await expect(page.getByTestId('agent-provider-claude')).toHaveClass(/--active/);
+      await expect(modelSelect).toHaveValue('claude-sonnet-4-6');
+      await expect(thinkingSelect).toHaveValue('high');
+      await expect(systemPromptInput).toHaveValue(/full-access mastering agent/i);
+
+      const sharedStateAfterReset = (await page.evaluate(async () => {
+        const bridge = (window as unknown as { producerPlayer: { getSharedUserState: () => Promise<unknown> } }).producerPlayer;
+        return bridge.getSharedUserState();
+      })) as {
+        ratings: Record<string, number>;
+        checklists: Record<string, unknown>;
+        projectFilePaths: Record<string, string>;
+      };
+
+      expect(sharedStateAfterReset.ratings).toEqual(seededSharedState.ratings);
+      expect(sharedStateAfterReset.checklists).toEqual(seededSharedState.checklists);
+      expect(sharedStateAfterReset.projectFilePaths).toEqual(
+        seededSharedState.projectFilePaths
+      );
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
   test('header help dialog explains CLI setup and low-cost model', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-help-dialog');
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
@@ -442,7 +530,7 @@ test.describe('Agent Chat Panel', () => {
 
       const helpDialog = page.getByTestId('agent-help-dialog');
       await expect(helpDialog).toBeVisible();
-      await expect(helpDialog).toContainText('Set up Produciboi Agent');
+      await expect(helpDialog).toContainText('Set up Producey Boy');
       await expect(helpDialog).toContainText('claude auth');
       await expect(helpDialog).toContainText('existing subscription');
       await expect(helpDialog).toContainText('automatic compaction has not been verified');

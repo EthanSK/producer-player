@@ -190,8 +190,8 @@ export function AgentComposer({
           onKeyDown={handleKeyDown}
           placeholder={
             disabled
-              ? 'Produciboi Agent is unavailable'
-              : 'Ask Produciboi Agent about your master...'
+              ? 'Producey Boy is unavailable'
+              : 'Ask Producey Boy about your master...'
           }
           disabled={disabled}
           rows={MIN_ROWS}

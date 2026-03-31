@@ -264,6 +264,13 @@
   cursor: not-allowed;
 }
 
+.agent-settings-reset-help {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
 .agent-settings-key-row {
   display: flex;
   gap: 6px;

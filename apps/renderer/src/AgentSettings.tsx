@@ -186,10 +186,15 @@ export function AgentSettings({
             onClick={onResetSystemPrompt}
             disabled={controlsDisabled}
             data-testid="agent-system-prompt-reset"
+            title="Reset assistant settings"
           >
-            Reset default
+            Reset settings
           </button>
         </div>
+        <p className="agent-settings-reset-help">
+          Resets assistant settings only (provider, model, thinking, prompt). Song order,
+          checklist items, ratings, and files are not changed.
+        </p>
       </div>
 
       <div className="agent-settings-section">

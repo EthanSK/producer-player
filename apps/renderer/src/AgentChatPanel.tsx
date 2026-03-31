@@ -862,10 +862,40 @@ export function AgentChatPanel({
     [resetActiveSession]
   );
 
-  const handleResetSystemPrompt = useCallback(() => {
+  const handleResetAssistantSettings = useCallback(() => {
+    const defaultProvider: AgentProviderId = 'claude';
+
     resetActiveSession();
+
+    // Reset assistant-specific settings only. Intentionally does not touch
+    // shared user data (song ordering, checklist items, ratings, etc.).
+    localStorage.removeItem(AGENT_PROVIDER_STORAGE_KEY);
     localStorage.removeItem(AGENT_SYSTEM_PROMPT_STORAGE_KEY);
+    (['claude', 'codex'] as const).forEach((providerId) => {
+      localStorage.removeItem(`${AGENT_MODEL_STORAGE_PREFIX}${providerId}`);
+      localStorage.removeItem(`${AGENT_THINKING_STORAGE_PREFIX}${providerId}`);
+    });
+
+    setProvider(defaultProvider);
+    setModelByProvider({
+      claude: DEFAULT_AGENT_MODEL_BY_PROVIDER.claude,
+      codex: DEFAULT_AGENT_MODEL_BY_PROVIDER.codex,
+    });
+    setThinkingByProvider({
+      claude: DEFAULT_AGENT_THINKING_BY_PROVIDER.claude,
+      codex: DEFAULT_AGENT_THINKING_BY_PROVIDER.codex,
+    });
     setSystemPrompt(DEFAULT_AGENT_SYSTEM_PROMPT);
+    setProviderAvailable(null);
+
+    void window.producerPlayer
+      .agentCheckProvider(defaultProvider)
+      .then((available) => {
+        setProviderAvailable(available);
+      })
+      .catch(() => {
+        setProviderAvailable(null);
+      });
   }, [resetActiveSession]);
 
   const providerUnavailableCopy =
@@ -894,7 +924,8 @@ export function AgentChatPanel({
         className="agent-toggle-button"
         onClick={handleTogglePanel}
         data-testid="agent-panel-toggle"
-        title={isOpen ? 'Minimize AI assistant' : 'Open AI assistant'}
+        title={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'}
+        aria-label={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'}
       >
         <svg
           viewBox="0 0 24 24"
@@ -935,7 +966,7 @@ export function AgentChatPanel({
             </div>
             <div className="agent-panel-heading-copy">
               <h3 className="agent-panel-title" data-testid="agent-panel-title">
-                Produciboi Agent
+                Producey Boy
               </h3>
               <p className="agent-panel-subtitle">mastering wingman</p>
             </div>
@@ -947,6 +978,7 @@ export function AgentChatPanel({
               onClick={handleToggleHelp}
               data-testid="agent-help-toggle"
               title="Assistant setup help"
+              aria-label="Assistant setup help"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -969,6 +1001,7 @@ export function AgentChatPanel({
               onClick={handleToggleHistory}
               data-testid="agent-history-toggle"
               title="Chat history"
+              aria-label="Chat history"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -991,6 +1024,7 @@ export function AgentChatPanel({
               onClick={handleToggleSettings}
               data-testid="agent-settings-toggle"
               title="Assistant settings"
+              aria-label="Assistant settings"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -1017,6 +1051,7 @@ export function AgentChatPanel({
               }}
               data-testid="agent-panel-close"
               title="Minimize"
+              aria-label="Minimize"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -1045,7 +1080,7 @@ export function AgentChatPanel({
             onModelChange={handleModelChange}
             onThinkingChange={handleThinkingChange}
             onSystemPromptChange={handleSystemPromptChange}
-            onResetSystemPrompt={handleResetSystemPrompt}
+            onResetSystemPrompt={handleResetAssistantSettings}
             onNewChat={handleNewChat}
             onOpenHistory={() => setHistoryOpen(true)}
             hasHistory={chatHistory.length > 0}
@@ -1255,7 +1290,7 @@ export function AgentChatPanel({
           >
             <div className="agent-help-dialog">
               <div className="agent-help-dialog-header">
-                <h4>Set up Produciboi Agent</h4>
+                <h4>Set up Producey Boy</h4>
                 <button
                   type="button"
                   className="agent-help-close"
@@ -1273,7 +1308,8 @@ export function AgentChatPanel({
               <p className="agent-help-note">
                 Long-chat note: automatic compaction has not been verified in this desktop flow yet.
                 If the context gets too long or stale, use <strong>Start new chat</strong> in
-                Settings to reset the conversation cleanly.
+                Settings to reset the conversation cleanly. <strong>Reset settings</strong> only
+                resets assistant preferences and never touches song order or checklist data.
               </p>
               <ol className="agent-help-steps">
                 {EMPTY_CHAT_SETUP_STEPS.map((step) => (

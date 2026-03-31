@@ -51,32 +51,62 @@ export function Vectorscope({
       const cy = size / 2;
       const radius = (size - 16) / 2;
 
-      // Draw circular boundary
+      // Draw circular boundary + guide rings
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Draw crosshairs
+      const guideRings = [0.25, 0.5, 0.75];
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.035)';
+      guideRings.forEach((factor) => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius * factor, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+
+      // Draw axes + channel diagonals
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
       ctx.beginPath();
       ctx.moveTo(cx - radius, cy);
       ctx.lineTo(cx + radius, cy);
-      ctx.stroke();
-      ctx.beginPath();
       ctx.moveTo(cx, cy - radius);
       ctx.lineTo(cx, cy + radius);
       ctx.stroke();
 
-      // Labels — M (top), S (right), and L/R on diagonals
+      ctx.setLineDash([2, 2]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.045)';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx - radius * 0.72, cy - radius * 0.72);
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + radius * 0.72, cy - radius * 0.72);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Labels — explicit axis directions + L/R guides
       ctx.font = '9px Inter, sans-serif';
       ctx.fillStyle = '#6b8199';
+      ctx.textBaseline = 'middle';
+
       ctx.textAlign = 'center';
-      ctx.fillText('M', cx, cy - radius - 4);
-      ctx.fillText('S', cx + radius + 4, cy + 3);
-      ctx.fillText('L', cx - radius * 0.7 - 8, cy - radius * 0.7 - 2);
-      ctx.fillText('R', cx + radius * 0.7 + 6, cy - radius * 0.7 - 2);
+      ctx.fillText('M+', cx, cy - radius - 6);
+      ctx.fillText('M−', cx, cy + radius + 6);
+
+      ctx.textAlign = 'right';
+      ctx.fillText('S−', cx - radius - 6, cy);
+      ctx.textAlign = 'left';
+      ctx.fillText('S+', cx + radius + 6, cy);
+
+      ctx.textAlign = 'center';
+      ctx.fillText('L', cx - radius * 0.72 - 7, cy - radius * 0.72 - 4);
+      ctx.fillText('R', cx + radius * 0.72 + 7, cy - radius * 0.72 - 4);
+
+      ctx.fillStyle = 'rgba(156, 180, 205, 0.7)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 1.2, 0, Math.PI * 2);
+      ctx.fill();
       ctx.textBaseline = 'alphabetic';
 
       if (!analyserNodeL || !analyserNodeR) {

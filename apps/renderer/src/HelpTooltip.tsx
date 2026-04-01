@@ -178,19 +178,18 @@ function HelpModal({
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  // Separate YouTube links (for thumbnails) from non-YouTube links
+  const tutorialLinks = links;
+
+  // Separate YouTube links (for thumbnails) from non-YouTube links.
   const youtubeLinks: (HelpTooltipLink & { videoId: string })[] = [];
-  const otherLinks: HelpTooltipLink[] = [];
-  for (const link of links) {
+  for (const link of tutorialLinks) {
     const id = extractYouTubeId(link.url);
     if (id) {
       youtubeLinks.push({ ...link, videoId: id });
-    } else {
-      otherLinks.push(link);
     }
   }
 
-  // Show up to 3 YouTube thumbnails
+  // Keep thumbnail grid compact, but still expose all ranked links below.
   const videoThumbs = youtubeLinks.slice(0, 3);
 
   return createPortal(
@@ -218,10 +217,10 @@ function HelpModal({
 
         <div style={helpTextStyle}>{text}</div>
 
-        {otherLinks.length > 0 && (
+        {tutorialLinks.length > 0 && (
           <div style={linkSectionStyle}>
-            <span style={linkLabelStyle}>Learn more:</span>
-            {otherLinks.map((link, i) => (
+            <span style={linkLabelStyle}>AI-ranked tutorials:</span>
+            {tutorialLinks.map((link, i) => (
               <a
                 key={i}
                 href={link.url}

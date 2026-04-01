@@ -52,7 +52,7 @@ export function SpectrumAnalyzer({
   const frequencyDataRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const smoothedDataRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const hasReceivedDataRef = useRef(false);
-  const needsRedrawRef = useRef(false);
+  const isBandToggleEnabled = typeof onBandToggle === 'function';
 
   const { mousePosRef } = useCrosshairOverlay({
     canvasRef,
@@ -129,8 +129,10 @@ export function SpectrumAnalyzer({
       ctx.fillStyle = isFullScreen ? 'rgba(9, 14, 19, 0.85)' : 'rgba(9, 14, 19, 0.6)';
       ctx.fillRect(0, 0, width, height);
 
-      // Draw band regions in full screen mode
-      if (isFullScreen) {
+      const showBandSelectionUi = isBandToggleEnabled;
+
+      // Draw selectable frequency-band regions (shared by fullscreen and mini player)
+      if (showBandSelectionUi) {
         for (let i = 0; i < FREQUENCY_BANDS.length; i++) {
           const band = FREQUENCY_BANDS[i];
           const x1 = frequencyToX(band.minHz, width, MIN_FREQ, MAX_FREQ);
@@ -138,12 +140,12 @@ export function SpectrumAnalyzer({
           const isBandActive = activeBands?.has(i) ?? false;
 
           if (isBandActive) {
-            ctx.fillStyle = 'rgba(92, 167, 255, 0.15)';
+            ctx.fillStyle = isFullScreen ? 'rgba(92, 167, 255, 0.15)' : 'rgba(92, 167, 255, 0.22)';
             ctx.fillRect(x1, 0, x2 - x1, height);
 
             // Brighter border for active band
-            ctx.strokeStyle = 'rgba(92, 167, 255, 0.6)';
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = isFullScreen ? 'rgba(92, 167, 255, 0.6)' : 'rgba(92, 167, 255, 0.82)';
+            ctx.lineWidth = isFullScreen ? 2 : 1;
             ctx.beginPath();
             ctx.moveTo(x1, 0);
             ctx.lineTo(x1, height);
@@ -152,13 +154,20 @@ export function SpectrumAnalyzer({
             ctx.stroke();
           } else {
             // Subtle alternating background
-            ctx.fillStyle = i % 2 === 0 ? 'rgba(255, 255, 255, 0.015)' : 'rgba(255, 255, 255, 0.005)';
+            ctx.fillStyle =
+              i % 2 === 0
+                ? isFullScreen
+                  ? 'rgba(255, 255, 255, 0.015)'
+                  : 'rgba(255, 255, 255, 0.03)'
+                : isFullScreen
+                  ? 'rgba(255, 255, 255, 0.005)'
+                  : 'rgba(255, 255, 255, 0.015)';
             ctx.fillRect(x1, 0, x2 - x1, height);
           }
 
           // Band divider lines
           if (i > 0) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+            ctx.strokeStyle = isFullScreen ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.12)';
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(x1, 0);
@@ -204,8 +213,8 @@ export function SpectrumAnalyzer({
         }
       }
 
-      // Draw band labels in full screen
-      if (isFullScreen) {
+      // Draw band labels in both fullscreen and mini modes for visible mini feedback
+      if (showBandSelectionUi) {
         for (let i = 0; i < FREQUENCY_BANDS.length; i++) {
           const band = FREQUENCY_BANDS[i];
           const x1 = frequencyToX(band.minHz, width, MIN_FREQ, MAX_FREQ);
@@ -213,10 +222,22 @@ export function SpectrumAnalyzer({
           const cx = (x1 + x2) / 2;
           const isBandActive = activeBands?.has(i) ?? false;
 
-          ctx.fillStyle = isBandActive ? 'rgba(92, 167, 255, 0.9)' : 'rgba(156, 175, 196, 0.45)';
-          ctx.font = isBandActive ? 'bold 11px Inter, sans-serif' : '10px Inter, sans-serif';
+          ctx.fillStyle = isBandActive
+            ? isFullScreen
+              ? 'rgba(92, 167, 255, 0.9)'
+              : 'rgba(142, 210, 255, 1)'
+            : isFullScreen
+              ? 'rgba(156, 175, 196, 0.45)'
+              : 'rgba(156, 175, 196, 0.62)';
+          ctx.font = isBandActive
+            ? isFullScreen
+              ? 'bold 11px Inter, sans-serif'
+              : '600 9px Inter, sans-serif'
+            : isFullScreen
+              ? '10px Inter, sans-serif'
+              : '9px Inter, sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText(band.shortLabel, cx, 14);
+          ctx.fillText(band.shortLabel, cx, isFullScreen ? 14 : 11);
         }
       }
 
@@ -449,9 +470,17 @@ export function SpectrumAnalyzer({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyserNode, width, height, isFullScreen, isPlaying, activeBandsKey, dbToY, mousePosRef]);
-
-  const isBandToggleEnabled = typeof onBandToggle === 'function';
+  }, [
+    analyserNode,
+    width,
+    height,
+    isFullScreen,
+    isPlaying,
+    activeBandsKey,
+    isBandToggleEnabled,
+    dbToY,
+    mousePosRef,
+  ]);
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -484,6 +513,7 @@ export function SpectrumAnalyzer({
         cursor: isBandToggleEnabled ? (isFullScreen ? 'crosshair' : 'pointer') : 'default',
       }}
       onClick={handleClick}
+      data-active-bands={activeBandsKey}
       data-testid={isFullScreen ? 'spectrum-analyzer-full' : 'spectrum-analyzer-mini'}
     />
   );

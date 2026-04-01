@@ -63,12 +63,8 @@ jobs:
           npm run build -w apps/electron
 
   runtime-smoke:
-    name: Runtime smoke (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    name: Runtime smoke (ubuntu)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -86,3 +82,60 @@ jobs:
         env:
           PLAYWRIGHT_WORKERS: 2
         run: npm run e2e:smoke
+
+  windows-ci:
+    name: Windows CI
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck workspaces
+        run: |
+          npm run build -w packages/contracts
+          npm run build -w packages/domain
+          npm run typecheck -w apps/renderer
+          npm run typecheck -w apps/electron
+          npm run typecheck -w apps/e2e
+
+      - name: Run domain unit tests
+        run: npm test -w packages/domain
+
+      - name: Build workspaces
+        run: |
+          npm run build -w packages/contracts
+          npm run build -w packages/domain
+          npm run build -w apps/renderer
+          npm run build -w apps/electron
+
+      - name: Verify Electron main entry exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "apps/electron/dist/main.cjs")) {
+            Write-Error "Electron main entry not found at apps/electron/dist/main.cjs"
+            exit 1
+          }
+          Write-Host "Electron main entry exists: apps/electron/dist/main.cjs"
+
+      - name: Verify renderer build output exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "apps/renderer/dist/index.html")) {
+            Write-Error "Renderer build output not found at apps/renderer/dist/index.html"
+            exit 1
+          }
+          Write-Host "Renderer build output exists: apps/renderer/dist/index.html"
+
+      - name: Run E2E smoke tests
+        env:
+          PLAYWRIGHT_WORKERS: 2
+        run: npm run ci:smoke -w @producer-player/e2e

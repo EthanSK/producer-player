@@ -96,6 +96,14 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.ANALYZE_AUDIO_FILE, filePath);
   },
 
+  async getMasteringAnalysisCache() {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_MASTERING_ANALYSIS_CACHE);
+  },
+
+  async writeMasteringAnalysisCache(payload) {
+    return ipcRenderer.invoke(IPC_CHANNELS.WRITE_MASTERING_ANALYSIS_CACHE, payload);
+  },
+
   async pickReferenceTrack() {
     return ipcRenderer.invoke(IPC_CHANNELS.PICK_REFERENCE_TRACK);
   },
@@ -196,6 +204,18 @@ const bridge: ProducerPlayerBridge = {
 
   async agentClearDeepgramKey() {
     await ipcRenderer.invoke(IPC_CHANNELS.AGENT_CLEAR_DEEPGRAM_KEY);
+  },
+
+  async agentStoreAssemblyAiKey(key: string) {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_STORE_ASSEMBLYAI_KEY, key);
+  },
+
+  async agentGetAssemblyAiKey() {
+    return ipcRenderer.invoke(IPC_CHANNELS.AGENT_GET_ASSEMBLYAI_KEY);
+  },
+
+  async agentClearAssemblyAiKey() {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_CLEAR_ASSEMBLYAI_KEY);
   },
 
   onAgentEvent(listener: AgentEventListener) {

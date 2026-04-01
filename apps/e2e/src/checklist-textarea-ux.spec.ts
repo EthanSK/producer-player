@@ -153,8 +153,46 @@ test.describe('Checklist textarea UX', () => {
     }
   });
 
-  test('transport focus stays in the checklist loop and resets after reopening checklist', async () => {
-    const directories = await createE2ETestDirectories('producer-player-checklist-shift-tab-toggle');
+  test('checklist transport tab flow uses natural order without forced input/loop jumps', async () => {
+    const directories = await createE2ETestDirectories('producer-player-checklist-tab-flow');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkSingleSongAndOpenChecklist(page, directories.fixtureDirectory);
+
+      const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
+      const skipForwardTwo = page.getByTestId('song-checklist-skip-forward-2');
+      const skipForwardFive = page.getByTestId('song-checklist-skip-forward-5');
+      const skipForwardTen = page.getByTestId('song-checklist-skip-forward-10');
+      const miniPlayerPrev = page.getByTestId('song-checklist-mini-player-prev');
+      const miniPlayerNext = page.getByTestId('song-checklist-mini-player-next');
+
+      await skipForwardTen.focus();
+      await skipForwardTen.press('Tab');
+      await expect(miniPlayerNext).toBeFocused();
+
+      await skipBackTen.focus();
+      await skipBackTen.press('Shift+Tab');
+      await expect(miniPlayerPrev).toBeFocused();
+
+      await skipForwardFive.focus();
+      await skipForwardFive.press('Shift+Tab');
+      await expect(skipForwardTwo).toBeFocused();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('Shift+Tab from checklist input reselects the last focused transport button and resets after reopening', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-shift-tab-focus-memory'
+    );
 
     await writeFixtureFiles(directories.fixtureDirectory, [
       { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
@@ -169,20 +207,19 @@ test.describe('Checklist textarea UX', () => {
       const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
       const skipForwardTen = page.getByTestId('song-checklist-skip-forward-10');
 
+      await expect(skipBackTen).toBeVisible();
+      await expect(skipForwardTen).toBeVisible();
+
       await composer.focus();
       await composer.press('Shift+Tab');
       await expect(skipBackTen).toBeFocused();
 
-      await skipBackTen.press('Shift+Tab');
-      await expect(composer).toBeFocused();
-
       await skipForwardTen.focus();
-      await skipForwardTen.press('Shift+Tab');
-      await expect(composer).toBeFocused();
+      await expect(skipForwardTen).toBeFocused();
 
-      await skipForwardTen.focus();
-      await skipForwardTen.press('Tab');
-      await expect(skipBackTen).toBeFocused();
+      await composer.focus();
+      await composer.press('Shift+Tab');
+      await expect(skipForwardTen).toBeFocused();
 
       await page.getByRole('button', { name: 'Done' }).click();
       await expect(page.getByTestId('song-checklist-modal')).toBeHidden();

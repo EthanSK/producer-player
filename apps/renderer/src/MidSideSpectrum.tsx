@@ -203,15 +203,15 @@ export function MidSideSpectrum({
   }, [analyserNodeL, analyserNodeR, width, height, isPlaying]);
 
   useEffect(() => {
-    if (isPlaying) {
-      animFrameRef.current = requestAnimationFrame(draw);
-    }
+    // Always render at least one frame so the panel is populated before first playback.
+    animFrameRef.current = requestAnimationFrame(draw);
+
     return () => {
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [draw, isPlaying]);
+  }, [draw]);
 
   return (
     <canvas

@@ -105,12 +105,14 @@
       "target": [
         "zip"
       ],
+      "icon": "assets/icon/png",
       "artifactName": "Producer-Player-${version}-linux-${arch}.${ext}"
     },
     "win": {
       "target": [
         "zip"
       ],
+      "icon": "assets/icon/png/icon-256.png",
       "artifactName": "Producer-Player-${version}-win-${arch}.${ext}"
     }
   },

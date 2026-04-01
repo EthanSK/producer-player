@@ -347,7 +347,8 @@ test.describe('Agent Chat Panel', () => {
 
       await page.getByTestId('agent-panel-toggle').click();
       await expect(panel).toHaveClass(/agent-chat-panel--open/);
-      await expect(page.getByTestId('agent-panel-title')).toHaveText('Produciboi');
+      await expect(page.getByTestId('agent-panel-title')).toHaveText('Producey Boy');
+      await expect(page.locator('.agent-panel-subtitle')).toHaveCount(0);
       await expect(page.locator('.agent-experimental-label')).toHaveCount(0);
       await expect(page.getByTestId('agent-help-toggle')).toHaveAttribute('title', 'Assistant setup help');
       await expect(page.getByTestId('agent-history-toggle')).toHaveAttribute('title', 'Chat history');
@@ -427,6 +428,54 @@ test.describe('Agent Chat Panel', () => {
 
       await page.getByTestId('agent-settings-toggle').click();
       await expect(page.getByTestId('agent-settings')).not.toBeVisible();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('sidebar settings button opens assistant settings', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-branding-settings-button');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
+
+    try {
+      await expect(page.getByTestId('producer-player-settings-button')).toBeVisible();
+      const panel = page.getByTestId('agent-chat-panel');
+      await expect(panel).toBeAttached();
+      await expect(page.getByTestId('agent-settings')).toHaveCount(0);
+
+      await page.getByTestId('producer-player-settings-button').click();
+
+      await expect(panel).toHaveClass(/agent-chat-panel--open/);
+      await expect(page.getByTestId('agent-settings')).toBeVisible();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('Cmd/Ctrl+, opens assistant settings', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-settings-shortcut');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
+
+    try {
+      const panel = page.getByTestId('agent-chat-panel');
+      await expect(panel).toBeAttached();
+      await expect(page.getByTestId('agent-settings')).toHaveCount(0);
+
+      const modifierKey = process.platform === 'darwin' ? 'Meta' : 'Control';
+      await page.keyboard.down(modifierKey);
+      await page.keyboard.press(',');
+      await page.keyboard.up(modifierKey);
+
+      await expect(panel).toHaveClass(/agent-chat-panel--open/);
+      await expect(page.getByTestId('agent-settings')).toBeVisible();
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
@@ -530,12 +579,21 @@ test.describe('Agent Chat Panel', () => {
 
       const helpDialog = page.getByTestId('agent-help-dialog');
       await expect(helpDialog).toBeVisible();
-      await expect(helpDialog).toContainText('Set up Produciboi');
+      await expect(helpDialog).toContainText('Set up Producey Boy');
       await expect(helpDialog).toContainText('claude auth');
       await expect(helpDialog).toContainText('existing subscription');
       await expect(helpDialog).toContainText('automatic compaction has not been verified');
+      await expect(page.getByTestId('agent-help-tutorial-sources')).toContainText(
+        'Tutorial source context'
+      );
+      await expect(page.getByTestId('agent-help-tutorial-sources')).toContainText(
+        'Producer Player GitHub repo'
+      );
+      await expect(page.getByTestId('agent-help-tutorial-sources')).toContainText(
+        'Published docs / guide site'
+      );
 
-      await page.getByTestId('agent-help-close').click();
+      await page.getByTestId('agent-help-close').dispatchEvent('click');
       await expect(helpDialog).toHaveCount(0);
     } finally {
       await electronApp.close();
@@ -603,6 +661,68 @@ test.describe('Agent Chat Panel', () => {
       } else {
         await expect(micButton).toBeDisabled();
         await expect(micButton).toHaveAttribute('title', 'Voice input is not supported in this environment');
+      }
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('voice button follows the selected STT provider key', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-voice-provider-switch');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+    const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+      extraEnv: fakeCli.env,
+    });
+
+    try {
+      await page.getByTestId('agent-panel-toggle').click();
+
+      const micButton = page.getByTestId('agent-mic-button');
+      await expect(micButton).toBeVisible();
+      await expect(micButton).toBeDisabled();
+
+      const voiceSupported = await page.evaluate(() => {
+        return (
+          typeof navigator.mediaDevices?.getUserMedia === 'function' &&
+          typeof MediaRecorder !== 'undefined'
+        );
+      });
+
+      await page.getByTestId('agent-settings-toggle').click();
+      await page.getByTestId('agent-stt-provider-assemblyai').click();
+      await page.getByTestId('agent-assemblyai-key-input').fill('aa_test_key');
+      await page.getByTestId('agent-assemblyai-key-save').click();
+      await expect(page.getByTestId('agent-assemblyai-key-help')).toBeVisible();
+      await page.getByTestId('agent-settings-toggle').click();
+
+      if (voiceSupported) {
+        await expect(micButton).toBeEnabled();
+        await expect(micButton).toHaveAttribute('title', /AssemblyAI/i);
+      } else {
+        await expect(micButton).toBeDisabled();
+      }
+
+      await page.getByTestId('agent-settings-toggle').click();
+      await page.getByTestId('agent-stt-provider-deepgram').click();
+      await page.getByTestId('agent-settings-toggle').click();
+
+      await expect(micButton).toBeDisabled();
+      if (voiceSupported) {
+        await expect(micButton).toHaveAttribute('title', /Deepgram/i);
+      }
+
+      await page.getByTestId('agent-settings-toggle').click();
+      await page.getByTestId('agent-deepgram-key-input').fill('dg_test_key');
+      await page.getByTestId('agent-settings-key-save').click();
+      await expect(page.getByTestId('agent-deepgram-key-help')).toBeVisible();
+      await page.getByTestId('agent-settings-toggle').click();
+
+      if (voiceSupported) {
+        await expect(micButton).toBeEnabled();
+        await expect(micButton).toHaveAttribute('title', /Deepgram/i);
+      } else {
+        await expect(micButton).toBeDisabled();
       }
     } finally {
       await electronApp.close();
@@ -739,7 +859,7 @@ test.describe('Agent Chat Panel', () => {
         .last()
         .locator('.agent-message-content');
 
-      await expect(content.locator('.agent-typing-cursor')).toBeVisible();
+      await expect(content.locator('.agent-thinking-label')).toBeVisible();
       await expect(content).toContainText('CLAUDE(claude-sonnet-4-6):', { timeout: 5000 });
 
       const fullText = 'CLAUDE(claude-sonnet-4-6): Claude streaming check';
@@ -751,7 +871,7 @@ test.describe('Agent Chat Panel', () => {
         .toBe(true);
 
       await expect(content).toContainText(fullText);
-      await expect(content.locator('.agent-typing-cursor')).toHaveCount(0);
+      await expect(content.locator('.agent-thinking-label')).toHaveCount(0);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
@@ -781,7 +901,7 @@ test.describe('Agent Chat Panel', () => {
         .first()
         .locator('.agent-message-content');
 
-      await expect(firstAssistantContent.locator('.agent-typing-cursor')).toBeVisible();
+      await expect(firstAssistantContent.locator('.agent-thinking-label')).toBeVisible();
       await expect(firstAssistantContent).toContainText('CLAUDE(claude-sonnet-4-6):', {
         timeout: 5000,
       });
@@ -831,12 +951,12 @@ test.describe('Agent Chat Panel', () => {
         .last()
         .locator('.agent-message-content');
 
-      await expect(content.locator('.agent-typing-cursor')).toBeVisible();
+      await expect(content.locator('.agent-thinking-label')).toBeVisible();
       await expect(content).toContainText('CODEX(gpt-5.3-codex):', { timeout: 5000 });
 
       const fullText = 'CODEX(gpt-5.3-codex): Codex streaming check';
       await expect(content).toContainText(fullText);
-      await expect(content.locator('.agent-typing-cursor')).toHaveCount(0);
+      await expect(content.locator('.agent-thinking-label')).toHaveCount(0);
 
       const finalText = (await content.innerText()).trim();
       expect(finalText).toBe(fullText);

@@ -123,6 +123,10 @@ test.describe('Producer Player desktop shell', () => {
       await expect(page.getByTestId('naming-guide')).toContainText(
         'File names must end with v1, v2, v3'
       );
+      await expect(page.getByTestId('naming-guide')).toContainText('Required:');
+      await expect(page.getByTestId('naming-guide')).toContainText(
+        'Without the version suffix, Producer Player cannot reliably group exports under one song.'
+      );
       await expect(page.getByTestId('naming-guide')).not.toContainText('opinionated by design');
       await expect(page.getByRole('heading', { name: 'Album' })).toHaveCount(1);
       await expect(page.getByTestId('organize-button')).toHaveText('Organize');
@@ -1040,13 +1044,13 @@ test.describe('Producer Player desktop shell', () => {
       await page.getByTestId('player-next').click();
 
       await page.getByTestId('player-repeat').click();
-      await expect(page.getByTestId('player-repeat')).toContainText('Repeat: One');
+      await expect(page.getByTestId('player-repeat')).toHaveAttribute('aria-label', 'Repeat One');
 
       await page.getByTestId('player-repeat').click();
-      await expect(page.getByTestId('player-repeat')).toContainText('Repeat: All');
+      await expect(page.getByTestId('player-repeat')).toHaveAttribute('aria-label', 'Repeat All');
 
       await page.getByTestId('player-repeat').click();
-      await expect(page.getByTestId('player-repeat')).toContainText('Repeat: Off');
+      await expect(page.getByTestId('player-repeat')).toHaveAttribute('aria-label', 'Repeat Off');
 
       const scrubber = page.getByTestId('player-scrubber');
       await expect(scrubber).toBeEnabled();

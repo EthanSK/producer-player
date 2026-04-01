@@ -9,7 +9,93 @@ import type { HelpTooltipLink } from './HelpTooltip';
  * thumbnail will show a grey placeholder instead of an actual image.
  */
 
-export const LUFS_LINKS: HelpTooltipLink[] = [
+
+const TUTORIALS_PER_DIALOG = 9;
+
+const MASTERING_TUTORIAL_FALLBACKS: readonly HelpTooltipLink[] = [
+  {
+    label: 'Mastering with a Reference Track using Audiolens - iZotope',
+    url: 'https://www.youtube.com/watch?v=IpjL-hCPBEE',
+  },
+  {
+    label: "You don't need to master to -14 LUFS - iZotope",
+    url: 'https://www.youtube.com/watch?v=SfVchGaKqmo',
+  },
+  {
+    label: 'How To Mix With a Spectrum Analyser - SPAN Tutorial - In The Mix',
+    url: 'https://www.youtube.com/watch?v=Enj39FWxHJ4',
+  },
+  {
+    label: 'True Peak Limiting: What You Need to Know - Streaky',
+    url: 'https://www.youtube.com/watch?v=IsFdGr3VeL0',
+  },
+  {
+    label: 'How to Use Tonal Balance Control for Mixing & Mastering - Splice',
+    url: 'https://www.youtube.com/watch?v=Y1kTO5KW17E',
+  },
+  {
+    label: 'K-System Metering Introduction - MeterPlugs',
+    url: 'https://www.youtube.com/watch?v=GnREPzUfUgU',
+  },
+  {
+    label: 'What Is DC Offset? - Sweetwater',
+    url: 'https://www.youtube.com/watch?v=40rKM0rbqeA',
+  },
+  {
+    label: 'How to Understand a Phase Correlation Meter - AM Music',
+    url: 'https://www.youtube.com/watch?v=180X8yzIskE',
+  },
+  {
+    label: 'Hard Clipping vs Soft Clipping & Oversampling Explained - Radium Records',
+    url: 'https://www.youtube.com/watch?v=yDQ7C92REGo',
+  },
+  {
+    label: 'Mid Side EQ Simplified - In The Mix',
+    url: 'https://www.youtube.com/watch?v=kEiILPm1VSc',
+  },
+  {
+    label: 'LUFS Meter Explained - SoundOracle',
+    url: 'https://www.youtube.com/watch?v=hbYtzaRhAX0',
+  },
+  {
+    label: '5 Stereo Width Tips For Wider Mixes - Cableguys',
+    url: 'https://www.youtube.com/watch?v=Uv8Q-m7RDG8',
+  },
+];
+
+function stripAiRankPrefix(label: string): string {
+  return label.replace(/^AI-ranked\s*#?\d+[:.)-]?\s*/i, '').trim();
+}
+
+function withAiRankedTutorials(sourceLinks: readonly HelpTooltipLink[]): HelpTooltipLink[] {
+  const merged = [...sourceLinks, ...MASTERING_TUTORIAL_FALLBACKS];
+  const ranked: HelpTooltipLink[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const link of merged) {
+    const url = link.url?.trim();
+    if (!url || seenUrls.has(url)) {
+      continue;
+    }
+
+    seenUrls.add(url);
+    ranked.push({
+      label: stripAiRankPrefix(link.label),
+      url,
+    });
+
+    if (ranked.length >= TUTORIALS_PER_DIALOG) {
+      break;
+    }
+  }
+
+  return ranked.map((link, index) => ({
+    label: `AI-ranked #${index + 1}: ${link.label}`,
+    url: link.url,
+  }));
+}
+
+export const LUFS_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'LUFS Explained - Music Production Terminology - Ben Kestok',
     url: 'https://www.youtube.com/watch?v=jkH2huVRmjU',
@@ -22,9 +108,9 @@ export const LUFS_LINKS: HelpTooltipLink[] = [
     label: 'Loudness LUFS & RMS in Mastering Explained - mymixlab',
     url: 'https://www.youtube.com/watch?v=naNOHSj6ABI',
   },
-];
+]);
 
-export const TRUE_PEAK_LINKS: HelpTooltipLink[] = [
+export const TRUE_PEAK_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'What is True Peak vs Absolute Peak and Why It Matters - Sage Audio',
     url: 'https://www.youtube.com/watch?v=3yovLokwNMs',
@@ -37,9 +123,9 @@ export const TRUE_PEAK_LINKS: HelpTooltipLink[] = [
     label: 'True Peak Limiting Explained - Panorama Mixing & Mastering',
     url: 'https://www.youtube.com/watch?v=4wm1B76pc6k',
   },
-];
+]);
 
-export const LRA_LINKS: HelpTooltipLink[] = [
+export const LRA_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Dynamic Range LRA in Mixing Explained - Sound Freak Studios',
     url: 'https://www.youtube.com/watch?v=CBTCdDVgpLQ',
@@ -52,9 +138,9 @@ export const LRA_LINKS: HelpTooltipLink[] = [
     label: 'Audio Loudness Range (LRA) Explained - Dana Tucker',
     url: 'https://www.youtube.com/watch?v=4UC2rlmTXpE',
   },
-];
+]);
 
-export const STEREO_CORRELATION_LINKS: HelpTooltipLink[] = [
+export const STEREO_CORRELATION_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'How to Understand a Phase Correlation Meter - AM Music',
     url: 'https://www.youtube.com/watch?v=180X8yzIskE',
@@ -67,9 +153,9 @@ export const STEREO_CORRELATION_LINKS: HelpTooltipLink[] = [
     label: 'How To Use A Stereo Vectorscope Meter - Cableguys',
     url: 'https://www.youtube.com/watch?v=z7_yMcomycw',
   },
-];
+]);
 
-export const SPECTRUM_ANALYZER_LINKS: HelpTooltipLink[] = [
+export const SPECTRUM_ANALYZER_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'How To Mix With a Spectrum Analyser - SPAN Tutorial - In The Mix',
     url: 'https://www.youtube.com/watch?v=Enj39FWxHJ4',
@@ -82,9 +168,9 @@ export const SPECTRUM_ANALYZER_LINKS: HelpTooltipLink[] = [
     label: "Don't Make This Mistake With a Spectrum Analyzer - Sam Smyers",
     url: 'https://www.youtube.com/watch?v=SvGdIX3FDBs',
   },
-];
+]);
 
-export const LEVEL_METER_LINKS: HelpTooltipLink[] = [
+export const LEVEL_METER_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Understanding LUFS vs RMS in Your Mix - Mixed by Inesen',
     url: 'https://www.youtube.com/watch?v=SZ5Mvy14Utw',
@@ -97,9 +183,9 @@ export const LEVEL_METER_LINKS: HelpTooltipLink[] = [
     label: 'Loudness LUFS & RMS in Mastering Explained - mymixlab',
     url: 'https://www.youtube.com/watch?v=naNOHSj6ABI',
   },
-];
+]);
 
-export const WAVEFORM_LINKS: HelpTooltipLink[] = [
+export const WAVEFORM_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: "What's Wrong With This Waveform for Mastering? - Distinct Mastering",
     url: 'https://www.youtube.com/watch?v=pj7tMtpD0jk',
@@ -112,9 +198,9 @@ export const WAVEFORM_LINKS: HelpTooltipLink[] = [
     label: 'Clipping vs Limiting Explained - Cableguys',
     url: 'https://www.youtube.com/watch?v=aFe9Gv5YvuI',
   },
-];
+]);
 
-export const VECTORSCOPE_LINKS: HelpTooltipLink[] = [
+export const VECTORSCOPE_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'How To Use A Stereo Vectorscope Meter - Cableguys',
     url: 'https://www.youtube.com/watch?v=z7_yMcomycw',
@@ -127,9 +213,9 @@ export const VECTORSCOPE_LINKS: HelpTooltipLink[] = [
     label: 'Stop Mixing Out-of-Phase Audio - Martin Rieger',
     url: 'https://www.youtube.com/watch?v=fOz3sliiC9o',
   },
-];
+]);
 
-export const PLATFORM_NORMALIZATION_LINKS: HelpTooltipLink[] = [
+export const PLATFORM_NORMALIZATION_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Debunking -14 LUFS Spotify Normalization - Panorama Mixing & Mastering',
     url: 'https://www.youtube.com/watch?v=vLYK0VQq4B4',
@@ -142,9 +228,9 @@ export const PLATFORM_NORMALIZATION_LINKS: HelpTooltipLink[] = [
     label: 'Spotify Loudness Explained - URM Academy',
     url: 'https://www.youtube.com/watch?v=RGktG9qbJGw',
   },
-];
+]);
 
-export const REFERENCE_TRACK_LINKS: HelpTooltipLink[] = [
+export const REFERENCE_TRACK_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Mixing References with Shawn Everett - Mix with the Masters',
     url: 'https://www.youtube.com/watch?v=dok10GRuBMs',
@@ -157,9 +243,9 @@ export const REFERENCE_TRACK_LINKS: HelpTooltipLink[] = [
     label: 'How to Actually Mix with References (Free Tools) - Zahand / LotusTunes',
     url: 'https://www.youtube.com/watch?v=eh5glnKEjoo',
   },
-];
+]);
 
-export const MID_SIDE_LINKS: HelpTooltipLink[] = [
+export const MID_SIDE_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Mid Side EQ Simplified - In The Mix',
     url: 'https://www.youtube.com/watch?v=kEiILPm1VSc',
@@ -172,9 +258,9 @@ export const MID_SIDE_LINKS: HelpTooltipLink[] = [
     label: 'Mid/Side Magic - Streaky',
     url: 'https://www.youtube.com/watch?v=Q7-vDealMF8',
   },
-];
+]);
 
-export const K_METERING_LINKS: HelpTooltipLink[] = [
+export const K_METERING_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'K-System Metering Introduction - MeterPlugs',
     url: 'https://www.youtube.com/watch?v=GnREPzUfUgU',
@@ -187,9 +273,9 @@ export const K_METERING_LINKS: HelpTooltipLink[] = [
     label: 'Bob Katz K-Metering Setup Tutorial - ADSR Pro',
     url: 'https://www.youtube.com/watch?v=Wjxs34eEvEU',
   },
-];
+]);
 
-export const CREST_FACTOR_LINKS: HelpTooltipLink[] = [
+export const CREST_FACTOR_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Clipping to Manage Crest Factor - Panorama Mixing & Mastering',
     url: 'https://www.youtube.com/watch?v=DvszBRX3rtU',
@@ -202,9 +288,9 @@ export const CREST_FACTOR_LINKS: HelpTooltipLink[] = [
     label: 'Mastering Crest Factor: Softening Peaks in Audio - E-Clip Music',
     url: 'https://www.youtube.com/watch?v=SLAK1dyfHkQ',
   },
-];
+]);
 
-export const DC_OFFSET_LINKS: HelpTooltipLink[] = [
+export const DC_OFFSET_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'What Is DC Offset? - Sweetwater',
     url: 'https://www.youtube.com/watch?v=40rKM0rbqeA',
@@ -217,9 +303,9 @@ export const DC_OFFSET_LINKS: HelpTooltipLink[] = [
     label: 'DC Offset Explained - Beat School',
     url: 'https://www.youtube.com/watch?v=iKLEjrtHOTs',
   },
-];
+]);
 
-export const DYNAMIC_RANGE_LINKS: HelpTooltipLink[] = [
+export const DYNAMIC_RANGE_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'The Loudness War - Matt Mayfield Music',
     url: 'https://www.youtube.com/watch?v=3Gmex_4hreQ',
@@ -232,9 +318,9 @@ export const DYNAMIC_RANGE_LINKS: HelpTooltipLink[] = [
     label: 'The Importance of Preserving Dynamic Range - Thomas Tellem',
     url: 'https://www.youtube.com/watch?v=TERNZ9QOFI8',
   },
-];
+]);
 
-export const TONAL_BALANCE_LINKS: HelpTooltipLink[] = [
+export const TONAL_BALANCE_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'How to Use Tonal Balance Control for Mixing & Mastering - Splice',
     url: 'https://www.youtube.com/watch?v=Y1kTO5KW17E',
@@ -247,9 +333,9 @@ export const TONAL_BALANCE_LINKS: HelpTooltipLink[] = [
     label: 'Tonal Balance Helps Your Track Sound Great Everywhere - iZotope',
     url: 'https://www.youtube.com/watch?v=vwUZs4TEAdI',
   },
-];
+]);
 
-export const LOUDNESS_HISTORY_LINKS: HelpTooltipLink[] = [
+export const LOUDNESS_HISTORY_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'LUFS Meter Explained - SoundOracle',
     url: 'https://www.youtube.com/watch?v=hbYtzaRhAX0',
@@ -262,9 +348,9 @@ export const LOUDNESS_HISTORY_LINKS: HelpTooltipLink[] = [
     label: 'Understanding LUFS for Mixing and Mastering - Sonic Gold Productions',
     url: 'https://www.youtube.com/watch?v=rbYvUGkdUGk',
   },
-];
+]);
 
-export const CLIP_COUNT_LINKS: HelpTooltipLink[] = [
+export const CLIP_COUNT_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Hard Clipping vs Soft Clipping & Oversampling Explained - Radium Records',
     url: 'https://www.youtube.com/watch?v=yDQ7C92REGo',
@@ -277,9 +363,9 @@ export const CLIP_COUNT_LINKS: HelpTooltipLink[] = [
     label: 'Clipping vs Limiting Explained - Cableguys',
     url: 'https://www.youtube.com/watch?v=aFe9Gv5YvuI',
   },
-];
+]);
 
-export const MEAN_VOLUME_LINKS: HelpTooltipLink[] = [
+export const MEAN_VOLUME_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Dynamics, RMS and Peak Levels - iZotope Pro Audio Essentials',
     url: 'https://www.youtube.com/watch?v=_z7VvE_2Sac',
@@ -292,9 +378,9 @@ export const MEAN_VOLUME_LINKS: HelpTooltipLink[] = [
     label: 'Understanding LUFS vs RMS in Your Mix - Mixed by Inesen',
     url: 'https://www.youtube.com/watch?v=SZ5Mvy14Utw',
   },
-];
+]);
 
-export const MASTERING_CHECKLIST_LINKS: HelpTooltipLink[] = [
+export const MASTERING_CHECKLIST_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: '4 Signs Your Mix is Ready for Mastering - Will Borza',
     url: 'https://www.youtube.com/watch?v=7udvdxHyRho',
@@ -307,9 +393,9 @@ export const MASTERING_CHECKLIST_LINKS: HelpTooltipLink[] = [
     label: 'Mastering Pre-Release Checklist - Audio Sweetener',
     url: 'https://www.youtube.com/watch?v=drmyvhW-8ys',
   },
-];
+]);
 
-export const CREST_FACTOR_HISTORY_LINKS: HelpTooltipLink[] = [
+export const CREST_FACTOR_HISTORY_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Mastering Crest Factor: Softening Peaks in Audio - E-Clip Music',
     url: 'https://www.youtube.com/watch?v=SLAK1dyfHkQ',
@@ -322,9 +408,9 @@ export const CREST_FACTOR_HISTORY_LINKS: HelpTooltipLink[] = [
     label: 'Peak, Crest Factor & Loudness Explained - MIXXIN Academy',
     url: 'https://www.youtube.com/watch?v=-1_2jHg1AHI',
   },
-];
+]);
 
-export const MID_SIDE_SPECTRUM_LINKS: HelpTooltipLink[] = [
+export const MID_SIDE_SPECTRUM_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Mid Side EQ Simplified - In The Mix',
     url: 'https://www.youtube.com/watch?v=kEiILPm1VSc',
@@ -337,9 +423,9 @@ export const MID_SIDE_SPECTRUM_LINKS: HelpTooltipLink[] = [
     label: 'Advanced SPAN Setup for Mid/Side Visualization',
     url: 'https://www.youtube.com/watch?v=wnNgF9uZ_4g',
   },
-];
+]);
 
-export const LOUDNESS_HISTOGRAM_LINKS: HelpTooltipLink[] = [
+export const LOUDNESS_HISTOGRAM_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'LUFS Meter Explained - SoundOracle',
     url: 'https://www.youtube.com/watch?v=hbYtzaRhAX0',
@@ -352,9 +438,9 @@ export const LOUDNESS_HISTOGRAM_LINKS: HelpTooltipLink[] = [
     label: 'How Loud Should You Master to? - Panorama Mixing & Mastering',
     url: 'https://www.youtube.com/watch?v=vLYK0VQq4B4',
   },
-];
+]);
 
-export const SPECTROGRAM_LINKS: HelpTooltipLink[] = [
+export const SPECTROGRAM_LINKS: HelpTooltipLink[] = withAiRankedTutorials([
   {
     label: 'Spectrogram: What to Look Out For - Plugin Boutique',
     url: 'https://www.youtube.com/watch?v=oRLMvMAC1oY',
@@ -367,4 +453,4 @@ export const SPECTROGRAM_LINKS: HelpTooltipLink[] = [
     label: 'Identifying Audio Problems in the RX Spectrogram - iZotope',
     url: 'https://www.youtube.com/watch?v=UsyRPoCT7Yk',
   },
-];
+]);

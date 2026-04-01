@@ -227,6 +227,15 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   });
 }
 
+async function linkFixtureFolder(
+  page: Awaited<ReturnType<typeof launchProducerPlayer>>['page'],
+  fixtureDirectory: string
+): Promise<void> {
+  await page.evaluate(async (targetPath) => {
+    await (window as any).producerPlayer.linkFolder(targetPath);
+  }, fixtureDirectory);
+}
+
 async function writeRealAudioFixtures(fixtureDirectory: string): Promise<Record<string, string>> {
   const fixtures: Array<{ format: string; outputName: string; codecArgs: string[] }> = [
     { format: 'wav', outputName: 'Probe wav v1.wav', codecArgs: ['-c:a', 'pcm_s16le'] },
@@ -365,8 +374,7 @@ test.describe('playback runtime deep dive', () => {
     }> = [];
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(5);
 
@@ -531,8 +539,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
@@ -566,8 +573,7 @@ test.describe('playback runtime deep dive', () => {
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(0);
 
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
       await page.getByTestId('main-list-row').filter({ hasText: 'Flow Alpha' }).first().click();
@@ -620,8 +626,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
@@ -722,8 +727,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await page.getByTestId('main-list-row').filter({ hasText: 'Archive Check' }).first().click();
       await expect(page.getByTestId('inspector-version-row')).toHaveCount(2);
@@ -815,8 +819,7 @@ test.describe('playback runtime deep dive', () => {
     });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
@@ -969,8 +972,7 @@ test.describe('playback runtime deep dive', () => {
     });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
       await page.getByTestId('main-list-row').filter({ hasText: 'Reference Alpha' }).first().click();
@@ -1043,8 +1045,15 @@ test.describe('playback runtime deep dive', () => {
       await expect(compactQuickPickButtons.nth(1)).toContainText('Overlay Reference.wav');
       await expect(compactQuickPickButtons.nth(2)).toContainText('Reference Alpha v1.wav');
 
-      await compactQuickPickButtons.nth(2).click();
+      const alphaSavedQuickPick = compactQuickPickButtons.nth(2);
+
+      await alphaSavedQuickPick.click();
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('Reference Alpha v1.wav');
+      await expect(page.getByTestId('player-track-name')).toContainText('Reference Beta v1.wav');
+
+      await alphaSavedQuickPick.dblclick();
+      await expect(page.getByTestId('analysis-reference-summary')).toContainText('Reference Alpha v1.wav');
+      await expect(page.getByTestId('player-track-name')).toContainText('Reference Alpha v1.wav');
 
       await page.getByTestId('analysis-clear-reference').click();
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('No reference');
@@ -1086,8 +1095,7 @@ test.describe('playback runtime deep dive', () => {
     try {
       await expect(page.getByTestId('analysis-empty-state')).toBeVisible();
 
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await page.getByTestId('main-list-row').first().click();
@@ -1172,8 +1180,7 @@ test.describe('playback runtime deep dive', () => {
     });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 
       await page.getByTestId('main-list-row').first().click();
@@ -1259,8 +1266,7 @@ test.describe('playback runtime deep dive', () => {
     });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
       await page.getByTestId('main-list-row').filter({ hasText: 'AB Alpha' }).first().click();
@@ -1377,8 +1383,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await page.getByTestId('main-list-row').first().click();
@@ -1507,8 +1512,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 
       await page.getByTestId('main-list-row').first().click();
@@ -1614,8 +1618,7 @@ test.describe('playback runtime deep dive', () => {
 
     try {
       firstLaunch = await launchProducerPlayer(userDataDirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(firstLaunch.page, fixtureDirectory);
 
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(firstLaunch.page.getByTestId('album-duration-label')).toContainText('0:12');
@@ -1694,8 +1697,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(3);
 
@@ -1764,8 +1766,7 @@ test.describe('playback runtime deep dive', () => {
     });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('player-play-toggle').click();
@@ -1834,8 +1835,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(3);
 
@@ -1978,8 +1978,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
       await page.getByTestId('main-list-row').filter({ hasText: 'Reset Alpha' }).first().click();
@@ -2045,8 +2044,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
       await page.getByTestId('main-list-row').filter({ hasText: 'Near End Alpha' }).first().click();
@@ -2116,8 +2114,7 @@ test.describe('playback runtime deep dive', () => {
     const firstLaunch = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await firstLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await firstLaunch.page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(firstLaunch.page, fixtureDirectory);
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
 
       await firstLaunch.page
@@ -2181,8 +2178,7 @@ test.describe('playback runtime deep dive', () => {
 
     try {
       if ((await secondLaunch.page.getByTestId('main-list-row').count()) === 0) {
-        await secondLaunch.page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-        await secondLaunch.page.getByTestId('link-folder-path-button').click();
+        await linkFixtureFolder(secondLaunch.page, fixtureDirectory);
       }
 
       await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
@@ -2245,8 +2241,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
@@ -2254,7 +2249,7 @@ test.describe('playback runtime deep dive', () => {
 
       await page.getByTestId('player-repeat').click();
       await page.getByTestId('player-repeat').click();
-      await expect(page.getByTestId('player-repeat')).toContainText('Repeat: All');
+      await expect(page.getByTestId('player-repeat')).toHaveAttribute('aria-label', 'Repeat All');
 
       await page.getByTestId('player-play-toggle').click();
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
@@ -2321,8 +2316,7 @@ test.describe('playback runtime deep dive', () => {
     };
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
       const firstTrackName =
@@ -2412,8 +2406,7 @@ test.describe('playback runtime deep dive', () => {
     };
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
       const firstRow = page.getByTestId('main-list-row').nth(0);
@@ -2481,8 +2474,7 @@ test.describe('playback runtime deep dive', () => {
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
 
       await page.getByTestId('main-list-row').filter({ hasText: 'Transport Alpha' }).first().click();

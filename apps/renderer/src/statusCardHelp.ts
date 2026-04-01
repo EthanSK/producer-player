@@ -1,4 +1,4 @@
-import type { ICloudAvailabilityResult, LinkedFolder } from '@producer-player/contracts';
+import type { ICloudAvailabilityResult, LinkedFolder, ProducerPlayerEnvironment } from '@producer-player/contracts';
 
 const ORDER_SIDECAR_DIRECTORY = '.producer-player';
 const ORDER_SIDECAR_FILE = 'order-state.json';
@@ -55,10 +55,18 @@ function buildICloudSection(iCloudAvailability: ICloudAvailabilityResult | null)
   ].join('\n');
 }
 
+function fileManagerLabel(platform: string): string {
+  if (platform === 'win32') return 'Explorer';
+  if (platform === 'linux') return 'File Manager';
+  return 'Finder';
+}
+
 export function buildStatusCardHelpText(
   linkedFolders: LinkedFolder[],
   iCloudAvailability: ICloudAvailabilityResult | null,
+  environment?: Pick<ProducerPlayerEnvironment, 'platform'> | null,
 ): string {
+  const fmLabel = fileManagerLabel(environment?.platform ?? 'darwin');
   const linkedFolderPathLines =
     linkedFolders.length > 0
       ? linkedFolders.map((folder) => `• ${folder.name}: ${folder.path}`).join('\n')
@@ -101,10 +109,10 @@ ${orderMetadataLines}
 
 Per-folder state mirror:
 ${folderStateMirrorLines}
-• These .producer-player paths hold playlist-order metadata and a shortcut to the app state folder for Finder-level backup/debugging.
+• These .producer-player paths hold playlist-order metadata and a shortcut to the app state folder for ${fmLabel}-level backup/debugging.
 
 iCloud backup:
 ${buildICloudSection(iCloudAvailability)}
 • "Back up to iCloud" syncs checklists, ratings, and app preferences only (not audio files).
-• Use the Show button beside iCloud backup to open the exact backup folder in Finder.`;
+• Use the Show button beside iCloud backup to open the exact backup folder in ${fmLabel}.`;
 }

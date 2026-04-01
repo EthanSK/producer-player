@@ -71,7 +71,23 @@ const EMPTY_CHAT_SETUP_STEPS = [
   'Install Claude Code or Codex CLI.',
   'Sign in with your CLI subscription (for example, `claude auth` or `codex login`).',
   'Open settings to choose provider, model, and thinking level.',
+  'Optional: add a Deepgram or AssemblyAI key to enable microphone transcription.',
 ];
+
+const APP_TUTORIAL_SOURCE_LINKS = [
+  {
+    label: 'Producer Player GitHub repo',
+    url: 'https://github.com/EthanSK/producer-player',
+  },
+  {
+    label: 'README walkthrough (main branch)',
+    url: 'https://github.com/EthanSK/producer-player/blob/main/README.md',
+  },
+  {
+    label: 'Published docs / guide site',
+    url: 'https://ethansk.github.io/producer-player/',
+  },
+] as const;
 
 const AGENT_PROVIDER_STORAGE_KEY = 'producer-player.agent-provider';
 const AGENT_MODEL_STORAGE_PREFIX = 'producer-player.agent-model.';
@@ -84,6 +100,8 @@ const AGENT_CHAT_HISTORY_STORAGE_KEY = 'producer-player.agent-chat-history.v1';
 const AGENT_AUTO_OPEN_DELAY_DEFAULT_MS = 2 * 60 * 1000;
 const AGENT_AUTO_OPEN_DELAY_TEST_MS = 1200;
 const AGENT_CHAT_HISTORY_LIMIT = 20;
+
+export const OPEN_AGENT_SETTINGS_EVENT = 'producer-player:open-agent-settings';
 
 let messageIdCounter = 0;
 function nextMessageId(): string {
@@ -660,6 +678,27 @@ export function AgentChatPanel({
     setHelpDialogOpen(false);
   }, []);
 
+  const handleOpenSettings = useCallback(() => {
+    setIsOpen(true);
+    setSettingsOpen(true);
+    setHistoryOpen(false);
+    setHelpDialogOpen(false);
+    userScrolledUpRef.current = false;
+    localStorage.setItem(AGENT_PANEL_SEEN_STORAGE_KEY, 'true');
+  }, []);
+
+  useEffect(() => {
+    const handleOpenSettingsRequest = () => {
+      handleOpenSettings();
+    };
+
+    window.addEventListener(OPEN_AGENT_SETTINGS_EVENT, handleOpenSettingsRequest);
+
+    return () => {
+      window.removeEventListener(OPEN_AGENT_SETTINGS_EVENT, handleOpenSettingsRequest);
+    };
+  }, [handleOpenSettings]);
+
   const handleToggleHistory = useCallback(() => {
     setHistoryOpen((prev) => !prev);
     setSettingsOpen(false);
@@ -671,6 +710,33 @@ export function AgentChatPanel({
     setSettingsOpen(false);
     setHistoryOpen(false);
   }, []);
+
+  const handleOpenTutorialSource = useCallback((url: string) => {
+    void window.producerPlayer.openExternalUrl(url);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const hasPreferencesModifier = event.metaKey || event.ctrlKey;
+      const isPreferencesShortcut =
+        hasPreferencesModifier &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === ',' || event.code === 'Comma');
+
+      if (!isPreferencesShortcut) {
+        return;
+      }
+
+      event.preventDefault();
+      handleOpenSettings();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleOpenSettings]);
 
   const handleSendMessage = useCallback(
     async (text: string, options?: { bypassHistoryGuard?: boolean }) => {
@@ -924,8 +990,8 @@ export function AgentChatPanel({
         className="agent-toggle-button"
         onClick={handleTogglePanel}
         data-testid="agent-panel-toggle"
-        title={isOpen ? 'Minimize Produciboi' : 'Open Produciboi'}
-        aria-label={isOpen ? 'Minimize Produciboi' : 'Open Produciboi'}
+        title={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'}
+        aria-label={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'}
       >
         <svg
           viewBox="0 0 24 24"
@@ -966,9 +1032,8 @@ export function AgentChatPanel({
             </div>
             <div className="agent-panel-heading-copy">
               <h3 className="agent-panel-title" data-testid="agent-panel-title">
-                Produciboi
+                Producey Boy
               </h3>
-              <p className="agent-panel-subtitle">mastering wingman</p>
             </div>
           </div>
           <div className="agent-panel-header-right">
@@ -1235,12 +1300,22 @@ export function AgentChatPanel({
                 >
                   <div className="agent-message-bubble">
                     <div className="agent-message-content">
-                      {msg.role === 'agent' ? (
+                      {msg.role === 'agent' &&
+                      msg.status === 'streaming' &&
+                      msg.content.trim().length === 0 ? (
+                        <span className="agent-thinking-label" data-testid="agent-thinking-label">
+                          Thinking
+                          <span className="agent-thinking-dots" aria-hidden="true">
+                            <span>.</span>
+                            <span>.</span>
+                            <span>.</span>
+                          </span>
+                        </span>
+                      ) : msg.role === 'agent' ? (
                         <AgentMarkdownContent content={msg.content} />
                       ) : (
                         <span>{msg.content}</span>
                       )}
-                      {msg.status === 'streaming' && <span className="agent-typing-cursor" />}
                       {msg.status === 'stopped' && (
                         <span className="agent-stopped-label"> (stopped)</span>
                       )}
@@ -1264,9 +1339,14 @@ export function AgentChatPanel({
 
               {isStreaming && !streamingMessageIdRef.current && (
                 <div className="agent-typing-indicator" data-testid="agent-typing-indicator">
-                  <span className="agent-typing-dot" />
-                  <span className="agent-typing-dot" />
-                  <span className="agent-typing-dot" />
+                  <span className="agent-thinking-label">
+                    Thinking
+                    <span className="agent-thinking-dots" aria-hidden="true">
+                      <span>.</span>
+                      <span>.</span>
+                      <span>.</span>
+                    </span>
+                  </span>
                 </div>
               )}
             </>
@@ -1290,7 +1370,7 @@ export function AgentChatPanel({
           >
             <div className="agent-help-dialog">
               <div className="agent-help-dialog-header">
-                <h4>Set up Produciboi</h4>
+                <h4>Set up Producey Boy</h4>
                 <button
                   type="button"
                   className="agent-help-close"
@@ -1327,6 +1407,26 @@ export function AgentChatPanel({
                   <code>codex --version</code>
                   <code>codex login</code>
                 </div>
+              </div>
+              <div className="agent-help-sources" data-testid="agent-help-tutorial-sources">
+                <strong>Tutorial source context</strong>
+                <p>
+                  For app walkthroughs, Producey Boy can ground instructions in the public Producer
+                  Player repo/docs:
+                </p>
+                <ul>
+                  {APP_TUTORIAL_SOURCE_LINKS.map((source) => (
+                    <li key={source.url}>
+                      <button
+                        type="button"
+                        className="agent-help-source-link"
+                        onClick={() => handleOpenTutorialSource(source.url)}
+                      >
+                        {source.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           </div>

@@ -12,6 +12,7 @@ import type {
   AgentSendTurnPayload,
   AgentRespondApprovalPayload,
   AudioFileAnalysis,
+  MasteringAnalysisCachePayload,
   ICloudAvailabilityResult,
   ICloudBackupData,
   ICloudLoadResult,
@@ -49,6 +50,9 @@ const STATE_DIRECTORY_SYMLINK_NAME = 'state';
 const PLAYBACK_PROTOCOL = 'producer-media';
 const PLAYBACK_PROTOCOL_HOST = 'file';
 const PLAYBACK_CACHE_DIRECTORY = 'playback-cache';
+const MASTERING_CACHE_DIRECTORY = 'mastering-cache';
+const MASTERING_CACHE_FILE_NAME = 'mastering-analysis-cache.v1.json';
+const MASTERING_CACHE_SCHEMA_VERSION = 1;
 const FFMPEG_BINARY_DIRECTORY = 'bin';
 const AIFF_LIKE_EXTENSIONS = new Set(['aiff', 'aif', 'aifc']);
 const IS_MAC_APP_STORE_SANDBOX = process.mas === true;
@@ -1488,6 +1492,110 @@ function getPlaybackCacheDirectoryPath(): string {
   return join(getStateDirectoryPath(), PLAYBACK_CACHE_DIRECTORY);
 }
 
+function getMasteringCacheDirectoryPath(): string {
+  return join(getStateDirectoryPath(), MASTERING_CACHE_DIRECTORY);
+}
+
+function getMasteringCacheFilePath(): string {
+  return join(getMasteringCacheDirectoryPath(), MASTERING_CACHE_FILE_NAME);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseMasteringAnalysisCachePayload(raw: unknown): MasteringAnalysisCachePayload {
+  const fallback: MasteringAnalysisCachePayload = {
+    schemaVersion: MASTERING_CACHE_SCHEMA_VERSION,
+    updatedAt: new Date(0).toISOString(),
+    entries: [],
+  };
+
+  if (!isRecord(raw)) {
+    return fallback;
+  }
+
+  const schemaVersion =
+    typeof raw.schemaVersion === 'number' && Number.isFinite(raw.schemaVersion)
+      ? Math.trunc(raw.schemaVersion)
+      : MASTERING_CACHE_SCHEMA_VERSION;
+
+  const updatedAt =
+    typeof raw.updatedAt === 'string' && raw.updatedAt.trim().length > 0
+      ? raw.updatedAt
+      : fallback.updatedAt;
+
+  const entries = Array.isArray(raw.entries) ? raw.entries.filter(isRecord) : [];
+
+  return {
+    schemaVersion,
+    updatedAt,
+    entries: entries as unknown as MasteringAnalysisCachePayload['entries'],
+  };
+}
+
+async function readMasteringAnalysisCacheState(): Promise<{
+  cacheDirectoryPath: string;
+  cacheFilePath: string;
+  payload: MasteringAnalysisCachePayload;
+}> {
+  const cacheDirectoryPath = getMasteringCacheDirectoryPath();
+  const cacheFilePath = getMasteringCacheFilePath();
+
+  try {
+    const raw = await fs.readFile(cacheFilePath, 'utf8');
+    const parsed = parseMasteringAnalysisCachePayload(JSON.parse(raw));
+
+    return {
+      cacheDirectoryPath,
+      cacheFilePath,
+      payload:
+        parsed.schemaVersion === MASTERING_CACHE_SCHEMA_VERSION
+          ? parsed
+          : {
+              schemaVersion: MASTERING_CACHE_SCHEMA_VERSION,
+              updatedAt: parsed.updatedAt,
+              entries: [],
+            },
+    };
+  } catch {
+    return {
+      cacheDirectoryPath,
+      cacheFilePath,
+      payload: {
+        schemaVersion: MASTERING_CACHE_SCHEMA_VERSION,
+        updatedAt: new Date(0).toISOString(),
+        entries: [],
+      },
+    };
+  }
+}
+
+async function writeMasteringAnalysisCacheState(
+  payload: MasteringAnalysisCachePayload
+): Promise<{
+  cacheDirectoryPath: string;
+  cacheFilePath: string;
+  payload: MasteringAnalysisCachePayload;
+}> {
+  const cacheDirectoryPath = getMasteringCacheDirectoryPath();
+  const cacheFilePath = getMasteringCacheFilePath();
+  const normalized: MasteringAnalysisCachePayload = {
+    schemaVersion: MASTERING_CACHE_SCHEMA_VERSION,
+    updatedAt: payload.updatedAt,
+    entries: Array.isArray(payload.entries) ? payload.entries : [],
+  };
+
+  await fs.mkdir(cacheDirectoryPath, { recursive: true });
+  await writeJsonAtomic(cacheFilePath, normalized);
+
+  return {
+    cacheDirectoryPath,
+    cacheFilePath,
+    payload: normalized,
+  };
+}
+
 function getBundledFfmpegPath(): string {
   if (typeof process.env.PRODUCER_PLAYER_FFMPEG_PATH === 'string') {
     return process.env.PRODUCER_PLAYER_FFMPEG_PATH;
@@ -2328,6 +2436,7 @@ function buildEnvironmentInfo(): ProducerPlayerEnvironment {
     canLinkFolderByPath: !IS_MAC_APP_STORE_SANDBOX,
     canRequestSecurityScopedBookmarks: IS_MAC_APP_STORE_SANDBOX,
     isTestMode: IS_TEST_MODE,
+    platform: process.platform,
   };
 }
 
@@ -2382,7 +2491,25 @@ async function createMainWindow(): Promise<void> {
   });
 
   mainWindow.webContents.session.setPermissionRequestHandler(
-    (_webContents, _permission, callback) => callback(false)
+    (webContents, permission, callback, details) => {
+      if (webContents !== mainWindow?.webContents) {
+        callback(false);
+        return;
+      }
+
+      if (permission === 'media') {
+        const mediaTypes =
+          'mediaTypes' in details && Array.isArray(details.mediaTypes)
+            ? details.mediaTypes
+            : [];
+        const requestsAudio = mediaTypes.includes('audio');
+        const requestsVideo = mediaTypes.includes('video');
+        callback(requestsAudio && !requestsVideo);
+        return;
+      }
+
+      callback(false);
+    }
   );
 
   // Inject a Content-Security-Policy that allows YouTube thumbnail images to
@@ -2980,6 +3107,17 @@ function registerIpcHandlers(service: FileLibraryService): void {
     return analyzeAudioFile(filePath);
   });
 
+  ipcMain.handle(IPC_CHANNELS.GET_MASTERING_ANALYSIS_CACHE, async () => {
+    return readMasteringAnalysisCacheState();
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.WRITE_MASTERING_ANALYSIS_CACHE,
+    async (_event, payload: MasteringAnalysisCachePayload) => {
+      return writeMasteringAnalysisCacheState(payload);
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.PICK_REFERENCE_TRACK, async () => {
     return pickReferenceTrack();
   });
@@ -3135,6 +3273,38 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.AGENT_CLEAR_DEEPGRAM_KEY, async () => {
     const statePath = join(app.getPath('userData'), 'deepgram-key.enc');
+    try {
+      await fs.unlink(statePath);
+    } catch {
+      // ignore if doesn't exist
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_STORE_ASSEMBLYAI_KEY,
+    async (_event, key: string) => {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error('Encryption is not available on this system.');
+      }
+      const encrypted = safeStorage.encryptString(key);
+      const statePath = join(app.getPath('userData'), 'assemblyai-key.enc');
+      await fs.writeFile(statePath, encrypted);
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_GET_ASSEMBLYAI_KEY, async () => {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    const statePath = join(app.getPath('userData'), 'assemblyai-key.enc');
+    try {
+      const encrypted = await fs.readFile(statePath);
+      return safeStorage.decryptString(encrypted);
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_CLEAR_ASSEMBLYAI_KEY, async () => {
+    const statePath = join(app.getPath('userData'), 'assemblyai-key.enc');
     try {
       await fs.unlink(statePath);
     } catch {

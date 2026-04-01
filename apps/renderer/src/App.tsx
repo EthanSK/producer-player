@@ -66,9 +66,16 @@ import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
 import { HelpTooltip } from './HelpTooltip';
 import {
   AgentChatPanel,
+  OPEN_AGENT_SETTINGS_EVENT,
   type AgentChatPromptRequest,
 } from './AgentChatPanel';
-import type { AgentContext } from '@producer-player/contracts';
+import type {
+  AgentContext,
+  AgentPlatformNormalization,
+  AgentStaticAnalysis,
+  MasteringAnalysisCachePayload,
+  MasteringCacheEntry,
+} from '@producer-player/contracts';
 import {
   LUFS_LINKS,
   TRUE_PEAK_LINKS,
@@ -250,7 +257,14 @@ const EMPTY_ENVIRONMENT: ProducerPlayerEnvironment = {
   canLinkFolderByPath: true,
   canRequestSecurityScopedBookmarks: false,
   isTestMode: false,
+  platform: 'darwin',
 };
+
+function fileManagerLabel(platform: string): string {
+  if (platform === 'win32') return 'Explorer';
+  if (platform === 'linux') return 'File Manager';
+  return 'Finder';
+}
 
 const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
   off: 'Off',
@@ -273,6 +287,7 @@ const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
 const REFERENCE_TRACK_PER_SONG_KEY_PREFIX = 'producer-player.reference-track.';
 const COMPACT_REFERENCE_QUICK_PICKS_COUNT = 3;
+const SAVED_REFERENCE_SINGLE_CLICK_DELAY_MS = 300;
 const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
 const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
@@ -280,11 +295,87 @@ const COMPACT_MASTERING_PANEL_LAYOUT_KEY = 'producer-player.mastering-layout.com
 const FULLSCREEN_MASTERING_PANEL_LAYOUT_KEY =
   'producer-player.mastering-layout.fullscreen.v1';
 const MAX_SAVED_REFERENCE_TRACKS = 20;
+const MASTERING_ANALYSIS_CACHE_LIMIT = 40;
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
 const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
 const PUBLIC_PAGES_URL = 'https://ethansk.github.io/producer-player/';
 const BUG_REPORT_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=bug_report.yml`;
 const FEATURE_REQUEST_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=feature_request.yml`;
+const MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION = 1;
+const MASTERING_CACHE_DISCLOSURE_REMINDER =
+  'If you reference cached track analyses, explicitly tell the user those values came from the mastering cache.';
+
+interface MasteringCacheStatusState {
+  status: 'fresh' | 'stale' | 'missing' | 'pending' | 'error';
+  error: string | null;
+}
+
+function toAgentStaticAnalysis(measured: AudioFileAnalysis): AgentStaticAnalysis {
+  return {
+    integratedLufs: measured.integratedLufs,
+    loudnessRangeLufs: measured.loudnessRangeLufs,
+    truePeakDbfs: measured.truePeakDbfs,
+    samplePeakDbfs: measured.samplePeakDbfs,
+    meanVolumeDbfs: measured.meanVolumeDbfs,
+    maxMomentaryLufs: measured.maxMomentaryLufs,
+    maxShortTermLufs: measured.maxShortTermLufs,
+    sampleRateHz: measured.sampleRateHz,
+  };
+}
+
+function toAgentPlatformNormalization(
+  measured: AudioFileAnalysis
+): AgentPlatformNormalization {
+  return {
+    platforms: NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
+      const preview = computePlatformNormalizationPreview(measured, platform);
+      return {
+        platformId: platform.id,
+        platformLabel: platform.label,
+        targetLufs: platform.targetLufs,
+        truePeakCeilingDbtp: platform.truePeakCeilingDbtp,
+        policy: platform.policy,
+        rawGainDb: preview?.rawGainDb ?? null,
+        appliedGainDb: preview?.appliedGainDb ?? null,
+        projectedIntegratedLufs: preview?.projectedIntegratedLufs ?? null,
+        headroomCapDb: preview?.headroomCapDb ?? null,
+        limitedByHeadroom: preview?.limitedByHeadroom ?? false,
+        explanation: preview?.explanation ?? '',
+      };
+    }),
+  };
+}
+
+function parseVersionModifiedAtMs(version: SongVersion): number {
+  const parsed = Number(new Date(version.modifiedAt).getTime());
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return parsed;
+}
+
+function buildMasteringCacheKey(version: SongVersion): string {
+  return [
+    MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
+    version.filePath,
+    version.sizeBytes,
+    parseVersionModifiedAtMs(version),
+  ].join('::');
+}
+
+function isMasteringCacheEntryFresh(
+  entry: MasteringCacheEntry | undefined,
+  version: SongVersion
+): boolean {
+  if (!entry) {
+    return false;
+  }
+
+  return (
+    entry.schemaVersion === MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION &&
+    entry.cacheKey === buildMasteringCacheKey(version)
+  );
+}
 
 const DEFAULT_COMPACT_MASTERING_PANEL_ORDER: readonly CompactMasteringPanelId[] = [
   'core-metrics',
@@ -313,6 +404,31 @@ const DEFAULT_FULLSCREEN_MASTERING_PANEL_ORDER: readonly FullscreenMasteringPane
   'loudness-histogram',
   'spectrogram',
 ];
+
+function cacheMasteringAnalysisValue<T>(
+  cache: Map<string, T>,
+  key: string,
+  value: T,
+  limit: number = MASTERING_ANALYSIS_CACHE_LIMIT
+): void {
+  if (!key) {
+    return;
+  }
+
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+
+  cache.set(key, value);
+
+  while (cache.size > limit) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (!oldestKey) {
+      break;
+    }
+    cache.delete(oldestKey);
+  }
+}
 
 function PlatformIcon({ platformId }: { platformId: NormalizationPlatformId }): JSX.Element {
   switch (platformId) {
@@ -519,18 +635,6 @@ function isUnmodifiedShiftTab(
   );
 }
 
-function isUnmodifiedTab(
-  event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'altKey'>
-): boolean {
-  return (
-    event.key === 'Tab' &&
-    !event.shiftKey &&
-    !event.metaKey &&
-    !event.ctrlKey &&
-    !event.altKey
-  );
-}
-
 function canElementScroll(element: HTMLElement): boolean {
   const style = window.getComputedStyle(element);
   const canScrollY =
@@ -629,7 +733,7 @@ function formatAppliedChangeMainText(level: number | null | undefined): string {
   }
 
   if (level > 0) {
-    return `Applied boost ${level.toFixed(1)} dB`;
+    return `Applied boost +${level.toFixed(1)} dB`;
   }
 
   return 'Applied change 0.0 dB';
@@ -1388,6 +1492,19 @@ export function App(): JSX.Element {
     'idle'
   );
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [masteringCacheFilePath, setMasteringCacheFilePath] = useState<string | null>(null);
+  const [masteringCacheDirectoryPath, setMasteringCacheDirectoryPath] = useState<string | null>(
+    null
+  );
+  const [masteringCacheUpdatedAt, setMasteringCacheUpdatedAt] = useState<string | null>(null);
+  const [masteringCacheByVersionId, setMasteringCacheByVersionId] = useState<
+    Record<string, MasteringCacheEntry>
+  >({});
+  const masteringCacheByVersionIdRef = useRef<Record<string, MasteringCacheEntry>>({});
+  const masteringCachePendingVersionIdsRef = useRef<Set<string>>(new Set());
+  const [masteringCacheStatusByVersionId, setMasteringCacheStatusByVersionId] = useState<
+    Record<string, MasteringCacheStatusState>
+  >({});
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
   const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(() =>
     window.localStorage.getItem(MORE_METRICS_EXPANDED_KEY) === 'true'
@@ -1482,6 +1599,7 @@ export function App(): JSX.Element {
   const playbackSourceRef = useRef<PlaybackSourceInfo | null>(null);
   const expectedSourceUrlRef = useRef<string | null>(null);
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedReferenceClickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sourceRequestIdRef = useRef(0);
   const playbackSourceSupportRef = useRef<'unknown' | 'maybe' | 'probably' | 'no'>('unknown');
   const playbackSourceReadyRef = useRef(false);
@@ -1521,6 +1639,27 @@ export function App(): JSX.Element {
   const [soloedBands, setSoloedBands] = useState<Set<number>>(new Set());
   const [spectrumFullWidth, setSpectrumFullWidth] = useState(860);
   const spectrumFullContainerRef = useRef<HTMLDivElement | null>(null);
+  const previewAnalysisCacheRef = useRef<Map<string, TrackAnalysisResult>>(new Map());
+  const measuredAnalysisCacheRef = useRef<Map<string, AudioFileAnalysis>>(new Map());
+
+  const getCachedMasteringAnalysis = useCallback((cacheKey: string) => {
+    return {
+      previewAnalysis: previewAnalysisCacheRef.current.get(cacheKey) ?? null,
+      measuredAnalysis: measuredAnalysisCacheRef.current.get(cacheKey) ?? null,
+    };
+  }, []);
+
+  const cacheMasteringAnalysis = useCallback(
+    (
+      cacheKey: string,
+      previewAnalysis: TrackAnalysisResult,
+      measuredAnalysis: AudioFileAnalysis
+    ) => {
+      cacheMasteringAnalysisValue(previewAnalysisCacheRef.current, cacheKey, previewAnalysis);
+      cacheMasteringAnalysisValue(measuredAnalysisCacheRef.current, cacheKey, measuredAnalysis);
+    },
+    []
+  );
 
   const applyPlaybackGain = useCallback(
     (nextVolume: number, nextNormalizationGainDb: number) => {
@@ -1542,6 +1681,76 @@ export function App(): JSX.Element {
       if (audio) {
         audio.volume = Math.max(0, Math.min(totalGainLinear, 1));
       }
+    },
+    []
+  );
+
+  const persistMasteringCache = useCallback(
+    async (nextEntriesByVersionId: Record<string, MasteringCacheEntry>) => {
+      const payload: MasteringAnalysisCachePayload = {
+        schemaVersion: MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
+        updatedAt: new Date().toISOString(),
+        entries: Object.values(nextEntriesByVersionId),
+      };
+
+      const nextState = await window.producerPlayer.writeMasteringAnalysisCache(payload);
+      setMasteringCacheFilePath(nextState.cacheFilePath);
+      setMasteringCacheDirectoryPath(nextState.cacheDirectoryPath);
+      setMasteringCacheUpdatedAt(nextState.payload.updatedAt);
+    },
+    []
+  );
+
+  const upsertMasteringCacheEntry = useCallback(
+    (entry: MasteringCacheEntry) => {
+      const nextEntriesByVersionId = {
+        ...masteringCacheByVersionIdRef.current,
+        [entry.versionId]: entry,
+      };
+
+      masteringCacheByVersionIdRef.current = nextEntriesByVersionId;
+      setMasteringCacheByVersionId(nextEntriesByVersionId);
+      cacheMasteringAnalysisValue(
+        measuredAnalysisCacheRef.current,
+        entry.cacheKey,
+        entry.measuredAnalysis
+      );
+      setMasteringCacheStatusByVersionId((previous) => ({
+        ...previous,
+        [entry.versionId]: { status: 'fresh', error: null },
+      }));
+      void persistMasteringCache(nextEntriesByVersionId).catch(() => undefined);
+    },
+    [persistMasteringCache]
+  );
+
+  const createMasteringCacheEntry = useCallback(
+    (input: {
+      source: MasteringCacheEntry['source'];
+      version: SongVersion;
+      song: SongWithVersions;
+      measured: AudioFileAnalysis;
+    }): MasteringCacheEntry => {
+      const { source, version, song, measured } = input;
+      return {
+        schemaVersion: MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
+        cacheKey: buildMasteringCacheKey(version),
+        source,
+        analyzedAt: new Date().toISOString(),
+        songId: song.id,
+        songTitle: song.title,
+        folderId: song.folderId,
+        versionId: version.id,
+        filePath: version.filePath,
+        fileName: version.fileName,
+        extension: version.extension,
+        durationSeconds: version.durationMs === null ? null : version.durationMs / 1000,
+        fileSizeBytes: version.sizeBytes,
+        fileModifiedAtMs: parseVersionModifiedAtMs(version),
+        measuredAnalysis: measured,
+        staticAnalysis: toAgentStaticAnalysis(measured),
+        platformNormalization: toAgentPlatformNormalization(measured),
+      };
     },
     []
   );
@@ -1570,6 +1779,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     currentTimeSecondsRef.current = currentTimeSeconds;
   }, [currentTimeSeconds]);
+
+  useEffect(() => {
+    masteringCacheByVersionIdRef.current = masteringCacheByVersionId;
+  }, [masteringCacheByVersionId]);
 
   useEffect(() => {
     durationSecondsRef.current = durationSeconds;
@@ -1639,26 +1852,60 @@ export function App(): JSX.Element {
       return;
     }
 
+    const analysisCacheKey = selectedVersion
+      ? buildMasteringCacheKey(selectedVersion)
+      : analysisFilePath;
+    const cached = getCachedMasteringAnalysis(analysisCacheKey);
+
+    if (cached.previewAnalysis && cached.measuredAnalysis) {
+      setAnalysis(cached.previewAnalysis);
+      setMeasuredAnalysis(cached.measuredAnalysis);
+      setAnalysisStatus('ready');
+      setAnalysisError(null);
+      return;
+    }
+
     const controller = new AbortController();
     let cancelled = false;
 
-    setAnalysis(null);
-    setMeasuredAnalysis(null);
+    setAnalysis(cached.previewAnalysis);
+    setMeasuredAnalysis(cached.measuredAnalysis);
     setAnalysisStatus('loading');
     setAnalysisError(null);
 
-    void Promise.all([
-      analyzeTrackFromUrl(mixPlaybackSource.url, controller.signal),
-      window.producerPlayer.analyzeAudioFile(analysisFilePath),
-    ])
+    const previewPromise = cached.previewAnalysis
+      ? Promise.resolve(cached.previewAnalysis)
+      : analyzeTrackFromUrl(mixPlaybackSource.url, controller.signal);
+    const measuredPromise = cached.measuredAnalysis
+      ? Promise.resolve(cached.measuredAnalysis)
+      : window.producerPlayer.analyzeAudioFile(analysisFilePath);
+
+    void Promise.all([previewPromise, measuredPromise])
       .then(([previewResult, measuredResult]) => {
         if (cancelled) {
           return;
         }
 
+        cacheMasteringAnalysis(analysisCacheKey, previewResult, measuredResult);
         setAnalysis(previewResult);
         setMeasuredAnalysis(measuredResult);
         setAnalysisStatus('ready');
+
+        if (selectedVersion) {
+          const selectedVersionSong =
+            snapshot.songs.find((song) => song.id === selectedVersion.songId) ?? null;
+
+          if (selectedVersionSong) {
+            upsertMasteringCacheEntry(
+              createMasteringCacheEntry({
+                source: 'selected-track',
+                version: selectedVersion,
+                song: selectedVersionSong,
+                measured: measuredResult,
+              })
+            );
+          }
+        }
       })
       .catch((analysisIssue: unknown) => {
         if (
@@ -1672,8 +1919,8 @@ export function App(): JSX.Element {
           return;
         }
 
-        setAnalysis(null);
-        setMeasuredAnalysis(null);
+        setAnalysis(cached.previewAnalysis);
+        setMeasuredAnalysis(cached.measuredAnalysis);
         setAnalysisStatus('error');
         setAnalysisError(
           analysisIssue instanceof Error
@@ -1686,7 +1933,16 @@ export function App(): JSX.Element {
       cancelled = true;
       controller.abort();
     };
-  }, [mixPlaybackSource?.url, selectedPlaybackVersionId, snapshot.versions]);
+  }, [
+    cacheMasteringAnalysis,
+    createMasteringCacheEntry,
+    getCachedMasteringAnalysis,
+    mixPlaybackSource?.url,
+    selectedPlaybackVersionId,
+    snapshot.songs,
+    snapshot.versions,
+    upsertMasteringCacheEntry,
+  ]);
 
   useEffect(() => {
     setAnalysisCompactStatsExpanded(
@@ -2017,6 +2273,15 @@ export function App(): JSX.Element {
       setPlaybackPreviewMode('mix');
     }
   }, [playbackPreviewMode, referenceTrack]);
+
+  useEffect(() => {
+    return () => {
+      if (savedReferenceClickTimeoutRef.current !== null) {
+        clearTimeout(savedReferenceClickTimeoutRef.current);
+        savedReferenceClickTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   function rememberSongPlayhead(
     songId: string | null,
@@ -2486,6 +2751,49 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    window.producerPlayer
+      .getMasteringAnalysisCache()
+      .then((state) => {
+        if (cancelled) {
+          return;
+        }
+
+        const loadedEntriesByVersionId = Object.fromEntries(
+          state.payload.entries
+            .filter((entry) => typeof entry.versionId === 'string' && entry.versionId.length > 0)
+            .map((entry) => [entry.versionId, entry])
+        );
+
+        const mergedEntriesByVersionId = {
+          ...loadedEntriesByVersionId,
+          ...masteringCacheByVersionIdRef.current,
+        };
+
+        masteringCacheByVersionIdRef.current = mergedEntriesByVersionId;
+        setMasteringCacheByVersionId(mergedEntriesByVersionId);
+        for (const entry of Object.values(mergedEntriesByVersionId)) {
+          if (entry.cacheKey && entry.measuredAnalysis) {
+            cacheMasteringAnalysisValue(
+              measuredAnalysisCacheRef.current,
+              entry.cacheKey,
+              entry.measuredAnalysis
+            );
+          }
+        }
+        setMasteringCacheDirectoryPath(state.cacheDirectoryPath);
+        setMasteringCacheFilePath(state.cacheFilePath);
+        setMasteringCacheUpdatedAt(state.payload.updatedAt);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (snapshot.linkedFolders.length === 0) {
       setSelectedFolderId(null);
       return;
@@ -2500,12 +2808,18 @@ export function App(): JSX.Element {
     }
   }, [snapshot.linkedFolders, selectedFolderId]);
 
+  const albumSongs = useMemo(
+    () =>
+      selectedFolderId
+        ? snapshot.songs.filter((song) => song.folderId === selectedFolderId)
+        : snapshot.songs,
+    [selectedFolderId, snapshot.songs]
+  );
+
   const { songs, matchedVersionNamesBySongId } = useMemo(() => {
     const query = searchText.trim().toLowerCase();
     const matchedVersions = new Map<string, string[]>();
-    const folderScopedSongs = selectedFolderId
-      ? snapshot.songs.filter((song) => song.folderId === selectedFolderId)
-      : snapshot.songs;
+    const folderScopedSongs = albumSongs;
 
     if (query.length === 0) {
       return {
@@ -2548,7 +2862,7 @@ export function App(): JSX.Element {
       songs: filteredSongs,
       matchedVersionNamesBySongId: matchedVersions,
     };
-  }, [searchText, selectedFolderId, snapshot.songs]);
+  }, [albumSongs, searchText]);
 
   const songDateOpacityBySongId = useMemo(
     () =>
@@ -2590,6 +2904,20 @@ export function App(): JSX.Element {
 
   const inspectorVersions = selectedSong ? sortVersions(selectedSong.versions) : [];
 
+  const albumActiveVersions = useMemo(
+    () =>
+      albumSongs
+        .map((song) => ({
+          song,
+          version: getActiveSongVersion(song),
+        }))
+        .filter(
+          (entry): entry is { song: SongWithVersions; version: SongVersion } =>
+            entry.version !== null
+        ),
+    [albumSongs]
+  );
+
   useEffect(() => {
     if (!selectedSong) {
       setSelectedPlaybackVersionId(null);
@@ -2618,6 +2946,88 @@ export function App(): JSX.Element {
   const selectedPlaybackFilePath = selectedPlaybackVersion?.filePath ?? null;
   const selectedPlaybackSongId = selectedPlaybackVersion?.songId ?? null;
   selectedPlaybackSongIdRef.current = selectedPlaybackSongId;
+
+  useEffect(() => {
+    if (!selectedFolderId || albumActiveVersions.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      for (const entry of albumActiveVersions) {
+        if (cancelled) {
+          return;
+        }
+
+        const { song, version } = entry;
+        const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
+        const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
+
+        if (isFresh) {
+          setMasteringCacheStatusByVersionId((previous) => ({
+            ...previous,
+            [version.id]: { status: 'fresh', error: null },
+          }));
+          continue;
+        }
+
+        if (masteringCachePendingVersionIdsRef.current.has(version.id)) {
+          continue;
+        }
+
+        masteringCachePendingVersionIdsRef.current.add(version.id);
+        setMasteringCacheStatusByVersionId((previous) => ({
+          ...previous,
+          [version.id]: {
+            status: 'pending',
+            error: null,
+          },
+        }));
+
+        try {
+          const measured = await window.producerPlayer.analyzeAudioFile(version.filePath);
+
+          if (cancelled) {
+            return;
+          }
+
+          upsertMasteringCacheEntry(
+            createMasteringCacheEntry({
+              source: 'background-preload',
+              version,
+              song,
+              measured,
+            })
+          );
+        } catch (error: unknown) {
+          if (cancelled) {
+            return;
+          }
+
+          setMasteringCacheStatusByVersionId((previous) => ({
+            ...previous,
+            [version.id]: {
+              status: 'error',
+              error: error instanceof Error ? error.message : 'Could not analyze this track yet.',
+            },
+          }));
+        } finally {
+          masteringCachePendingVersionIdsRef.current.delete(version.id);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    albumActiveVersions,
+    createMasteringCacheEntry,
+    selectedFolderId,
+    upsertMasteringCacheEntry,
+  ]);
+
   const activeMixPlaybackSource =
     selectedPlaybackFilePath &&
     mixPlaybackSourceSelectedFilePath === selectedPlaybackFilePath
@@ -2625,8 +3035,9 @@ export function App(): JSX.Element {
       : null;
   const referencePlaybackKey = getReferencePlaybackKey(referenceTrack);
   const isRefMode = playbackPreviewMode === 'reference' && referenceTrack !== null;
-  const refSuffix = isRefMode ? ' (Reference)' : '';
-  const refTrackSuffix = isRefMode ? ' (Reference Track)' : '';
+  const referenceModeSuffix = isRefMode ? ' (Using Reference)' : '';
+  const showingReferenceSuffix = referenceModeSuffix;
+  const usingReferenceSuffix = referenceModeSuffix;
   const activePreviewAnalysis = isRefMode ? referenceTrack?.previewAnalysis ?? null : analysis;
   const activePreviewAnalysisStatus = isRefMode ? referenceStatus : analysisStatus;
   const desiredPlaybackSource =
@@ -2675,6 +3086,61 @@ export function App(): JSX.Element {
     }
     return map;
   }, [measuredAnalysis]);
+  const masteringCacheTrackSummaries = useMemo(() => {
+    return albumActiveVersions.map(({ song, version }) => {
+      const cachedEntry = masteringCacheByVersionId[version.id];
+      const statusState = masteringCacheStatusByVersionId[version.id];
+      const isPending = statusState?.status === 'pending';
+      const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
+
+      const cacheStatus: 'fresh' | 'stale' | 'missing' | 'pending' | 'error' = isPending
+        ? 'pending'
+        : statusState?.status === 'error'
+          ? 'error'
+          : cachedEntry
+            ? isFresh
+              ? 'fresh'
+              : 'stale'
+            : statusState?.status === 'stale'
+              ? 'stale'
+              : 'missing';
+
+      return {
+        songId: song.id,
+        songTitle: song.title,
+        versionId: version.id,
+        fileName: version.fileName,
+        filePath: version.filePath,
+        cacheStatus,
+        analyzedAt: cachedEntry?.analyzedAt ?? null,
+        staticAnalysis: cachedEntry?.staticAnalysis ?? null,
+        platformNormalization: cachedEntry?.platformNormalization ?? null,
+      };
+    });
+  }, [albumActiveVersions, masteringCacheByVersionId, masteringCacheStatusByVersionId]);
+  const masteringCacheContext = useMemo(
+    () => ({
+      schemaVersion: MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
+      cacheDirectoryPath: masteringCacheDirectoryPath,
+      cacheFilePath: masteringCacheFilePath,
+      updatedAt: masteringCacheUpdatedAt,
+      trackCount: masteringCacheTrackSummaries.length,
+      cachedTrackCount: masteringCacheTrackSummaries.filter((track) => track.cacheStatus === 'fresh').length,
+      pendingTrackCount: masteringCacheTrackSummaries.filter((track) => track.cacheStatus === 'pending').length,
+      tracks: masteringCacheTrackSummaries,
+      cacheEntryFormat:
+        'Each entry stores schemaVersion, cacheKey, source, analyzedAt, song/version metadata, measuredAnalysis, staticAnalysis, and platformNormalization.',
+      cacheInvalidationStrategy:
+        'An entry is fresh only when schemaVersion and cacheKey both match. cacheKey = schemaVersion + filePath + sizeBytes + modifiedAtMs.',
+      disclosureReminder: MASTERING_CACHE_DISCLOSURE_REMINDER,
+    }),
+    [
+      masteringCacheDirectoryPath,
+      masteringCacheFilePath,
+      masteringCacheTrackSummaries,
+      masteringCacheUpdatedAt,
+    ]
+  );
   const referenceLevelMatchGainDb = (() => {
     if (
       !referenceLevelMatchEnabled ||
@@ -4336,12 +4802,17 @@ export function App(): JSX.Element {
     setReferenceError(null);
 
     try {
+      const cached = getCachedMasteringAnalysis(selection.filePath);
       const previewAnalysis =
         options.previewAnalysis ??
+        cached.previewAnalysis ??
         (await analyzeTrackFromUrl(selection.playbackSource.url));
       const nextMeasuredAnalysis =
         options.measuredAnalysis ??
+        cached.measuredAnalysis ??
         (await window.producerPlayer.analyzeAudioFile(selection.filePath));
+
+      cacheMasteringAnalysis(selection.filePath, previewAnalysis, nextMeasuredAnalysis);
 
       setReferenceTrack({
         sourceType,
@@ -4442,6 +4913,29 @@ export function App(): JSX.Element {
     });
   }
 
+  function clearPendingSavedReferenceClick(): void {
+    if (savedReferenceClickTimeoutRef.current !== null) {
+      clearTimeout(savedReferenceClickTimeoutRef.current);
+      savedReferenceClickTimeoutRef.current = null;
+    }
+  }
+
+  function handleSavedReferenceTrackClick(savedReference: SavedReferenceTrackEntry): void {
+    clearPendingSavedReferenceClick();
+    savedReferenceClickTimeoutRef.current = setTimeout(() => {
+      savedReferenceClickTimeoutRef.current = null;
+      void handleLoadSavedReferenceTrack(savedReference);
+    }, SAVED_REFERENCE_SINGLE_CLICK_DELAY_MS);
+  }
+
+  async function handleSavedReferenceTrackDoubleClick(
+    savedReference: SavedReferenceTrackEntry
+  ): Promise<void> {
+    clearPendingSavedReferenceClick();
+    await handleLoadSavedReferenceTrack(savedReference);
+    setPlaybackPreviewMode('reference');
+  }
+
   function handleRemoveSavedReferenceTrack(filePath: string): void {
     setSavedReferenceTracks((current) => {
       const next = current.filter((savedReference) => savedReference.filePath !== filePath);
@@ -4504,6 +4998,29 @@ export function App(): JSX.Element {
 
   function handleOpenSupportLink(url: string): void {
     void runVoidTask(() => window.producerPlayer.openExternalUrl(url));
+  }
+
+  function handleOpenAssistantSettings(): void {
+    window.dispatchEvent(new Event(OPEN_AGENT_SETTINGS_EVENT));
+  }
+
+  function handleResetFullscreenMasteringSession(): void {
+    setPlaybackPreviewMode('mix');
+    setNormalizationPreviewEnabled(false);
+    setSelectedNormalizationPlatformId('spotify');
+    setReferenceLevelMatchEnabled(false);
+    setMidSideMode('stereo');
+    handleClearSoloedBands();
+    setReferenceTrack(null);
+    setReferenceStatus('idle');
+    setReferenceError(null);
+    setFullscreenMasteringPanelOrder([...DEFAULT_FULLSCREEN_MASTERING_PANEL_ORDER]);
+    persistPanelOrder(
+      FULLSCREEN_MASTERING_PANEL_LAYOUT_KEY,
+      DEFAULT_FULLSCREEN_MASTERING_PANEL_ORDER
+    );
+    setDraggingFullscreenMasteringPanelId(null);
+    setFullscreenMasteringDropTargetPanelId(null);
   }
 
   async function handleCheckForUpdates(): Promise<void> {
@@ -5413,7 +5930,7 @@ export function App(): JSX.Element {
           sampleRateHz: measuredAnalysis?.sampleRateHz ?? null,
           albumName:
             snapshot.linkedFolders.find((f) => f.id === selectedFolderId)?.name ?? null,
-          albumTrackCount: songs.length,
+          albumTrackCount: albumSongs.length,
           referenceTrack: referenceTrack
             ? { fileName: referenceTrack.fileName, filePath: referenceTrack.filePath }
             : null,
@@ -5567,6 +6084,7 @@ export function App(): JSX.Element {
       platformNormalization: platformNormData,
       reference: refData,
       checklist: checklistData,
+      masteringCache: masteringCacheContext,
       activePlatformId: selectedNormalizationPlatformId,
       isPlaying,
       currentTimeSeconds,
@@ -5576,66 +6094,104 @@ export function App(): JSX.Element {
     selectedSong,
     selectedFolderId,
     snapshot.linkedFolders,
-    songs,
+    albumSongs,
     measuredAnalysis,
     analysis,
     referenceTrack,
     normalizationPreviewByPlatformId,
     songChecklists,
+    masteringCacheContext,
     selectedNormalizationPlatformId,
     isPlaying,
     currentTimeSeconds,
   ]);
 
   const statusCardHelpText = useMemo(
-    () => buildStatusCardHelpText(snapshot.linkedFolders, iCloudAvailability),
-    [iCloudAvailability, snapshot.linkedFolders],
+    () => buildStatusCardHelpText(snapshot.linkedFolders, iCloudAvailability, environment),
+    [iCloudAvailability, snapshot.linkedFolders, environment],
   );
+
+  const sortedSoloBandIndices = Array.from(soloedBands).sort((a, b) => a - b);
+  const soloedBandSummaryText = sortedSoloBandIndices
+    .map((bandIndex) => FREQUENCY_BANDS[bandIndex]?.label)
+    .filter((label): label is string => Boolean(label))
+    .join(' + ');
 
   return (
     <div className="app-shell" data-testid="app-shell">
       <aside className="panel panel-left">
-        <button
-          type="button"
-          className="sidebar-branding sidebar-branding-button"
-          data-testid="producer-player-branding"
-          onClick={() => handleOpenSupportLink(PUBLIC_PAGES_URL)}
-          title="Open Producer Player website."
-        >
-          <img
-            src={producerPlayerIconUrl}
-            alt="Producer Player logo"
-            className="sidebar-branding-logo"
-            data-testid="producer-player-branding-logo"
-          />
-          <div className="sidebar-branding-copy">
-            <div className="sidebar-branding-title-row">
-              <strong>Producer Player</strong>
-              <span
-                className="sidebar-branding-version"
-                data-testid="producer-player-branding-version"
-                title={`Current app version ${packageMetadata.version}`}
-              >
-                {packageMetadata.version}
-              </span>
+        <div className="sidebar-branding-container">
+          <button
+            type="button"
+            className={`sidebar-branding sidebar-branding-button${
+              ENABLE_AGENT_FEATURES ? ' sidebar-branding-button--with-settings' : ''
+            }`}
+            data-testid="producer-player-branding"
+            onClick={() => handleOpenSupportLink(PUBLIC_PAGES_URL)}
+            title="Open Producer Player website."
+          >
+            <img
+              src={producerPlayerIconUrl}
+              alt="Producer Player logo"
+              className="sidebar-branding-logo"
+              data-testid="producer-player-branding-logo"
+            />
+            <div className="sidebar-branding-copy">
+              <div className="sidebar-branding-title-row">
+                <strong>Producer Player</strong>
+                <span
+                  className="sidebar-branding-version"
+                  data-testid="producer-player-branding-version"
+                  title={`Current app version ${packageMetadata.version}`}
+                >
+                  {packageMetadata.version}
+                </span>
+              </div>
+              {SHOW_3000AD_BRANDING && (
+                <a
+                  className="sidebar-by-line"
+                  href="https://lnkfi.re/3000AD"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void window.producerPlayer.openExternalUrl('https://lnkfi.re/3000AD');
+                  }}
+                  title="by 3000 AD"
+                  data-testid="sidebar-by-3000ad"
+                >
+                  by 3000 AD
+                </a>
+              )}
             </div>
-            {SHOW_3000AD_BRANDING && (
-              <a
-                className="sidebar-by-line"
-                href="https://lnkfi.re/3000AD"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void window.producerPlayer.openExternalUrl('https://lnkfi.re/3000AD');
-                }}
-                title="by 3000 AD"
-                data-testid="sidebar-by-3000ad"
+          </button>
+
+          {ENABLE_AGENT_FEATURES ? (
+            <button
+              type="button"
+              className="sidebar-branding-settings-button"
+              data-testid="producer-player-settings-button"
+              onClick={handleOpenAssistantSettings}
+              title="Open assistant settings"
+              aria-label="Open assistant settings"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
               >
-                by 3000 AD
-              </a>
-            )}
-          </div>
-        </button>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V22a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H2a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 9.44 4.1V4a2 2 0 1 1 4 0v.09c0 .67.4 1.28 1.01 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01c.24.61.84 1.01 1.51 1.01H20a2 2 0 1 1 0 4h-.09c-.67 0-1.28.4-1.51 1.01z" />
+              </svg>
+              <span>Settings</span>
+            </button>
+          ) : null}
+        </div>
 
         <section className="folder-tools-card" data-testid="folder-tools-card">
           <section className="folder-add-cta">
@@ -5651,7 +6207,7 @@ export function App(): JSX.Element {
               >
                 Add Folder…
               </button>
-              <HelpTooltip text={"What this is: Folder linking connects Producer Player to a folder on your disk where your exported audio files live (WAV, MP3, AAC/M4A). The app watches this folder and automatically picks up new or updated files.\n\nHow to use it: Click 'Add Folder…' and select the folder where you export your mixes from your DAW. You can link multiple folders (e.g. one per album). Click a folder name to filter the song list. Use the unlink button (×) to remove a folder.\n\nWhy you'd want to: Keep the app in sync with your DAW exports — every time you bounce a new version, it appears automatically.\n\nTip: Name your exported files with version suffixes (e.g. 'Track Name v2.wav') so the app can group versions together under one song."} />
+              <HelpTooltip text={"What this is: Folder linking connects Producer Player to a folder on your disk where your exported audio files live (WAV, MP3, AAC/M4A). The app watches this folder and automatically picks up new or updated files.\n\nHow to use it: Click 'Add Folder…' and select the folder where you export your mixes from your DAW. You can link multiple folders (e.g. one per album). Click a folder name to filter the song list. Use the unlink button (×) to remove a folder.\n\nWhy you'd want to: Keep the app in sync with your DAW exports — every time you bounce a new version, it appears automatically.\n\nRequirement: Name your exported files with version suffixes (e.g. 'Track Name v2.wav'). Producer Player relies on this naming pattern to group versions under one song."} />
             </div>
             {environment.isMacAppStoreSandboxed ? (
               <p
@@ -5670,15 +6226,19 @@ export function App(): JSX.Element {
           <section
             className="naming-guide"
             data-testid="naming-guide"
-            title="File names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
+            title="Required naming format: file names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
           >
             <p className="naming-guide-copy">
               <span className="naming-guide-icon" aria-hidden="true">
-                💡
+                ⚠️
               </span>
               <span>
+                <span className="naming-guide-emphasis">Required:</span>{' '}
                 File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.
               </span>
+            </p>
+            <p className="naming-guide-detail">
+              Without the version suffix, Producer Player cannot reliably group exports under one song.
             </p>
           </section>
         </section>
@@ -5744,7 +6304,7 @@ export function App(): JSX.Element {
                 <button
                   type="button"
                   className="icloud-show-folder-btn"
-                  title="Show iCloud folder in Finder"
+                  title={`Show iCloud folder in ${fileManagerLabel(environment.platform)}`}
                   data-testid="icloud-show-folder-btn"
                   onClick={() => {
                     void window.producerPlayer.openFolder(iCloudAvailability.path!);
@@ -5797,9 +6357,9 @@ export function App(): JSX.Element {
                       event.stopPropagation();
                       void runVoidTask(() => window.producerPlayer.openFolder(folder.path));
                     }}
-                    title="Open this watched folder in Finder."
+                    title={`Open this watched folder in ${fileManagerLabel(environment.platform)}.`}
                   >
-                    Open in Finder
+                    {`Open in ${fileManagerLabel(environment.platform)}`}
                   </button>
                 ) : null}
                 <button
@@ -5899,7 +6459,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-integrated-stat"
                   title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file."
                 >
-                  <span className="analysis-stat-label">Integrated LUFS{refSuffix} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /></span>
+                  <span className="analysis-stat-label">Integrated LUFS{showingReferenceSuffix} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /></span>
                   <strong>{measuredIntegratedText}</strong>
                 </div>
                 <div
@@ -5907,7 +6467,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-short-term-stat"
                   title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback."
                 >
-                  <span className="analysis-stat-label">Current loudness{refSuffix} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /></span>
+                  <span className="analysis-stat-label">Current loudness{showingReferenceSuffix} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /></span>
                   <strong>{shortTermEstimateText}</strong>
                 </div>
               </div>
@@ -5946,7 +6506,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-lra-stat"
                   title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units."
                 >
-                  <span className="analysis-stat-label">Loudness range{refSuffix} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /></span>
+                  <span className="analysis-stat-label">Loudness range{showingReferenceSuffix} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /></span>
                   <strong>{measuredLraText}</strong>
                 </div>
                 <div
@@ -5954,7 +6514,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-true-peak-stat"
                   title="True Peak — the highest inter-sample peak level in the track, measured via oversampling."
                 >
-                  <span className="analysis-stat-label">True Peak{refSuffix} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /></span>
+                  <span className="analysis-stat-label">True Peak{showingReferenceSuffix} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /></span>
                   <strong>{measuredTruePeakText}</strong>
                 </div>
                 <div
@@ -5962,7 +6522,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-max-short-term-stat"
                   title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time."
                 >
-                  <span className="analysis-stat-label">Peak short-term{refSuffix} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /></span>
+                  <span className="analysis-stat-label">Peak short-term{showingReferenceSuffix} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /></span>
                   <strong>{measuredMaxShortTermText}</strong>
                 </div>
                 <div
@@ -5970,7 +6530,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-max-momentary-stat"
                   title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time."
                 >
-                  <span className="analysis-stat-label">Peak momentary{refSuffix} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /></span>
+                  <span className="analysis-stat-label">Peak momentary{showingReferenceSuffix} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /></span>
                   <strong>{measuredMaxMomentaryText}</strong>
                 </div>
               </div>
@@ -5989,17 +6549,14 @@ export function App(): JSX.Element {
                   className="analysis-normalization-panel"
                   data-testid="analysis-normalization-panel"
                 >
-                  <div className="analysis-panel-header-stack">
-                    <div className="analysis-panel-header-row">
-                      <div className="analysis-panel-header-title-block">
-                        <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
-                        <p className="muted" data-testid="analysis-normalization-summary">
-                          {normalizationSummaryText}
-                        </p>
-                      </div>
-                      {renderMasteringPanelDragHandle('compact', 'normalization')}
+                  <div className="analysis-panel-header-row analysis-normalization-header-row-compact">
+                    <div className="analysis-panel-header-title-block">
+                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
+                      <p className="muted" data-testid="analysis-normalization-summary">
+                        {normalizationSummaryText}
+                      </p>
                     </div>
-                    <div className="analysis-inline-header-actions">
+                    <div className="analysis-normalization-header-actions">
                       <button
                         type="button"
                         className={normalizationPreviewEnabled ? '' : 'ghost'}
@@ -6010,6 +6567,7 @@ export function App(): JSX.Element {
                       >
                         Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
                       </button>
+                      {renderMasteringPanelDragHandle('compact', 'normalization')}
                     </div>
                   </div>
 
@@ -6111,7 +6669,7 @@ export function App(): JSX.Element {
                   <div className="analysis-tonal-balance-wrapper">
                     <div className="analysis-panel-header-row">
                       <p className="analysis-tonal-balance-heading" data-testid="analysis-tonal-balance-heading">
-                        Tonal balance{refTrackSuffix}
+                        Tonal balance{usingReferenceSuffix}
                       </p>
                       {renderMasteringPanelDragHandle('compact', 'tonal-balance')}
                     </div>
@@ -6292,7 +6850,10 @@ export function App(): JSX.Element {
                           (referenceTrack?.filePath === savedReference.filePath ? ' active' : '')
                         }
                         onClick={() => {
-                          void handleLoadSavedReferenceTrack(savedReference);
+                          handleSavedReferenceTrackClick(savedReference);
+                        }}
+                        onDoubleClick={() => {
+                          void handleSavedReferenceTrackDoubleClick(savedReference);
                         }}
                         disabled={referenceStatus === 'loading'}
                         title={savedReference.filePath}
@@ -6745,6 +7306,34 @@ export function App(): JSX.Element {
                   height={20}
                   isPlaying={isPlaying}
                 />
+                <div
+                  className="spectrum-solo-summary spectrum-solo-summary-mini"
+                  data-testid="player-dock-spectrum-solo-summary"
+                >
+                  <p
+                    className={`spectrum-solo-label spectrum-solo-label-mini${soloedBands.size === 0 ? ' spectrum-solo-label-mini-idle' : ''}`}
+                    data-testid="player-dock-spectrum-solo-label"
+                  >
+                    {soloedBands.size > 0 ? (
+                      <>
+                        Soloing: <strong>{soloedBandSummaryText}</strong>
+                      </>
+                    ) : (
+                      'Click a band to solo • Shift+click to exclude'
+                    )}
+                  </p>
+                  {soloedBands.size > 0 ? (
+                    <button
+                      type="button"
+                      className="ghost spectrum-clear-solo-button spectrum-clear-solo-button-mini"
+                      data-testid="player-dock-clear-solo-bands"
+                      onClick={handleClearSoloedBands}
+                      title="Stop soloing and return to full-spectrum playback."
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <button
                 type="button"
@@ -6754,14 +7343,14 @@ export function App(): JSX.Element {
                     void window.producerPlayer.revealFile(activePlaybackFilePath);
                   }
                 }}
-                title="Open this version in Finder."
+                title={`Open this version in ${fileManagerLabel(environment.platform)}.`}
               >
-                Open in Finder
+                {`Open in ${fileManagerLabel(environment.platform)}`}
               </button>
             </div>
 
             <div className="player-transport">
-              <HelpTooltip text={"What this is: The main playback controls — play/pause, skip forward/back, previous/next track, repeat mode, and volume.\n\nHow to use it: Press the play button or hit Space anywhere in the app to toggle playback. Use the skip buttons (±1s, ±10s) for fine seeking. Click ◀◀ / ▶▶ to move between tracks. Drag the scrubber to jump to any position. Adjust volume with the slider.\n\nWhy you'd want to: Quickly navigate through your songs and compare sections without leaving the app.\n\nTip: Space bar toggles play/pause globally (unless you're typing in a text field). The previous-track button restarts the current song if past 2 seconds, or goes to the previous track if near the start."} />
+              <HelpTooltip text={"What this is: The main playback controls — play/pause, skip forward/back, previous/next track, repeat mode, and volume.\n\nHow to use it: Press the play button or hit Space anywhere in the app to toggle playback. Use the skip buttons (±1s, ±5s, ±10s) for fine seeking. Click ◀◀ / ▶▶ to move between tracks. Drag the scrubber to jump to any position. Adjust volume with the slider.\n\nWhy you'd want to: Quickly navigate through your songs and compare sections without leaving the app.\n\nTip: Space bar toggles play/pause globally (unless you're typing in a text field). The previous-track button restarts the current song if past 2 seconds, or goes to the previous track if near the start."} />
               <div className="transport-nav-group">
                 <div className="transport-skip-row">
                   <button
@@ -6772,6 +7361,24 @@ export function App(): JSX.Element {
                     title="Skip back 10 seconds."
                   >
                     −10s
+                  </button>
+                  <button
+                    type="button"
+                    className="skip-button skip-button-small"
+                    data-testid="player-skip-back-5"
+                    onClick={() => handleSkipSeconds(-5)}
+                    title="Skip back 5 seconds."
+                  >
+                    −5s
+                  </button>
+                  <button
+                    type="button"
+                    className="skip-button skip-button-small"
+                    data-testid="player-skip-forward-5"
+                    onClick={() => handleSkipSeconds(5)}
+                    title="Skip forward 5 seconds."
+                  >
+                    +5s
                   </button>
                   <button
                     type="button"
@@ -6939,7 +7546,7 @@ export function App(): JSX.Element {
           )}
 
           <section className="inspector-card">
-            <h3>Version History <HelpTooltip text={"What this is: A timeline of every exported version of this song — each time you bounce/export from your DAW with a version number (e.g. v1, v2, v3), it shows up here.\n\nHow to use it: Click 'Cue' on any version to load it into the player. Click 'Open in Finder' to locate the file on disk. The newest version is selected by default.\n\nWhy you'd want to: Quickly A/B your latest mix against an older version to hear if your changes actually improved the track.\n\nTip: Name your exports with version suffixes (e.g. 'My Song v3.wav') — Producer Player groups them automatically."} /></h3>
+            <h3>Version History <HelpTooltip text={`What this is: A timeline of every exported version of this song — each time you bounce/export from your DAW with a version number (e.g. v1, v2, v3), it shows up here.\n\nHow to use it: Click 'Cue' on any version to load it into the player. Click 'Open in ${fileManagerLabel(environment.platform)}' to locate the file on disk. The newest version is selected by default.\n\nWhy you'd want to: Quickly A/B your latest mix against an older version to hear if your changes actually improved the track.\n\nRequirement: Name your exports with version suffixes (e.g. 'My Song v3.wav'). Producer Player relies on this naming pattern to group versions automatically.`} /></h3>
             <ul className="version-list">
               {inspectorVersions.map((version) => (
                 <li
@@ -6972,9 +7579,9 @@ export function App(): JSX.Element {
                       onClick={() => {
                         void window.producerPlayer.revealFile(version.filePath);
                       }}
-                      title="Open this version in Finder."
+                      title={`Open this version in ${fileManagerLabel(environment.platform)}.`}
                     >
-                      Open in Finder
+                      {`Open in ${fileManagerLabel(environment.platform)}`}
                     </button>
                   </div>
                 </li>
@@ -7065,7 +7672,7 @@ export function App(): JSX.Element {
           <div ref={checklistModalCardRef} className="checklist-modal-card">
             <div className="checklist-modal-header">
               <div>
-                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, and revisions you need to make for this track.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song.\n\nWhy you'd want to: Keep a structured record of what needs fixing in each song so nothing slips through the cracks between sessions.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles focus between the text input and the time-jump controls, and Tab on +10s loops back to −10s."} /></h2>
+                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, and revisions you need to make for this track.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song.\n\nWhy you'd want to: Keep a structured record of what needs fixing in each song so nothing slips through the cracks between sessions.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes."} /></h2>
                 <p className="muted">
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
@@ -7194,9 +7801,14 @@ export function App(): JSX.Element {
                 onKeyDown={(event) => {
                   if (isUnmodifiedShiftTab(event)) {
                     event.preventDefault();
-                    const targetTransportButton =
+                    const rememberedTransportButton = lastFocusedChecklistTransportRef.current;
+                    const fallbackTransportButton =
                       checklistSkipBackTenButtonRef.current ??
                       checklistSkipBackFiveButtonRef.current;
+                    const targetTransportButton =
+                      rememberedTransportButton && rememberedTransportButton.isConnected
+                        ? rememberedTransportButton
+                        : fallbackTransportButton;
                     targetTransportButton?.focus();
                     return;
                   }
@@ -7294,12 +7906,6 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
-                          return;
-                        }
-
-                        if (isUnmodifiedShiftTab(event)) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip back 10 seconds"
@@ -7318,12 +7924,6 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
-                          return;
-                        }
-
-                        if (isUnmodifiedShiftTab(event)) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip back 5 seconds"
@@ -7341,12 +7941,6 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
-                          return;
-                        }
-
-                        if (isUnmodifiedShiftTab(event)) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip back 2 seconds"
@@ -7369,12 +7963,6 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
-                          return;
-                        }
-
-                        if (isUnmodifiedShiftTab(event)) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                     >
@@ -7390,12 +7978,6 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
-                          return;
-                        }
-
-                        if (isUnmodifiedShiftTab(event)) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip forward 2 seconds"
@@ -7413,12 +7995,6 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
-                          return;
-                        }
-
-                        if (isUnmodifiedShiftTab(event)) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip forward 5 seconds"
@@ -7436,18 +8012,6 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
-                          return;
-                        }
-
-                        if (isUnmodifiedShiftTab(event)) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
-                          return;
-                        }
-
-                        if (isUnmodifiedTab(event)) {
-                          event.preventDefault();
-                          checklistSkipBackTenButtonRef.current?.focus();
                         }
                       }}
                       title="Skip forward 10 seconds"
@@ -7510,7 +8074,6 @@ export function App(): JSX.Element {
               >
                 Mastering <span aria-hidden="true">⤢</span>
               </button>
-              <span className="checklist-transport-hint">Shift+Tab toggles between the text input and time-jump controls • Tab on +10s loops to −10s</span>
               <button
                 type="button"
                 className="ghost"
@@ -7697,6 +8260,15 @@ export function App(): JSX.Element {
               <button
                 type="button"
                 className="ghost"
+                onClick={handleResetFullscreenMasteringSession}
+                data-testid="analysis-overlay-reset-session"
+                title="Reset temporary full-screen mastering session state."
+              >
+                Reset session
+              </button>
+              <button
+                type="button"
+                className="ghost"
                 onClick={() => setAnalysisExpanded(false)}
                 data-testid="analysis-close-button"
                 title="Close the full-screen mastering view."
@@ -7720,7 +8292,7 @@ export function App(): JSX.Element {
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
                       <div className="analysis-panel-header-row">
                         <div className="analysis-section-header">
-                          <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{refTrackSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high).\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
+                          <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{usingReferenceSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high).\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
                           <p className="analysis-section-subtitle">Real-time frequency content — click bands to solo frequency ranges</p>
                         </div>
                         {renderMasteringPanelDragHandle('fullscreen', 'visualizations')}
@@ -7751,7 +8323,7 @@ export function App(): JSX.Element {
                   {soloedBands.size > 0 && (
                     <div className="spectrum-solo-summary">
                       <p className="spectrum-solo-label" data-testid="spectrum-solo-label">
-                        Soloing: <strong>{Array.from(soloedBands).sort().map(i => FREQUENCY_BANDS[i].label).join(' + ')}</strong>
+                        Soloing: <strong>{soloedBandSummaryText}</strong>
                       </p>
                       <button
                         type="button"
@@ -7903,7 +8475,7 @@ export function App(): JSX.Element {
                   </div>
                   {savedReferenceTracks.length > 0 ? (
                     <div className="saved-reference-tracks">
-                      <h4>Saved References <HelpTooltip text="Your reference tracks are saved automatically so you don't have to re-load them every session. Each entry stores the file path, measured LUFS, and the date you last used it. Click any saved track to load it instantly as your active reference. Up to 20 references are kept, with the most recently used at the top." links={REFERENCE_TRACK_LINKS} /></h4>
+                      <h4>Saved References <HelpTooltip text="Your reference tracks are saved automatically so you don't have to re-load them every session. Each entry stores the file path, measured LUFS, and the date you last used it. Click any saved track to load it as your active reference. Double-click a saved track to load it and jump straight into Reference playback mode. Up to 20 references are kept, with the most recently used at the top." links={REFERENCE_TRACK_LINKS} /></h4>
                       <div className="saved-reference-tracks-list">
                         {savedReferenceTracks.map((saved) => (
                           <div
@@ -7917,7 +8489,10 @@ export function App(): JSX.Element {
                               type="button"
                               className="saved-reference-track-load"
                               onClick={() => {
-                                void handleLoadSavedReferenceTrack(saved);
+                                handleSavedReferenceTrackClick(saved);
+                              }}
+                              onDoubleClick={() => {
+                                void handleSavedReferenceTrackDoubleClick(saved);
                               }}
                               disabled={referenceStatus === 'loading'}
                               title={saved.filePath}
@@ -7959,7 +8534,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'loudness-history')}
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Loudness History{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A blue curve showing your track's rolling loudness over time. The dashed line marks the overall loudness estimate for the loaded track, and the white vertical line shows the current playback position. The shaded area makes it easier to see where sections feel denser or lighter.\n\nWhat to look for: A relatively consistent curve usually means controlled loudness. Big dips may point to sections that feel too small; sharp jumps may point to sections that hit harder than intended. Use it to compare sections against each other, then confirm the final number with the Integrated LUFS stat.\n\nTip: Compare the shape against a reference track in the same genre. If your curve is almost flat all the way through, the song may be over-compressed."} links={LOUDNESS_HISTORY_LINKS} /></h3>
+                    <h3>Loudness History{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: A blue curve showing your track's rolling loudness over time. The dashed line marks the overall loudness estimate for the loaded track, and the white vertical line shows the current playback position. The shaded area makes it easier to see where sections feel denser or lighter.\n\nWhat to look for: A relatively consistent curve usually means controlled loudness. Big dips may point to sections that feel too small; sharp jumps may point to sections that hit harder than intended. Use it to compare sections against each other, then confirm the final number with the Integrated LUFS stat.\n\nTip: Compare the shape against a reference track in the same genre. If your curve is almost flat all the way through, the song may be over-compressed."} links={LOUDNESS_HISTORY_LINKS} /></h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'loudness-history')}
                   </div>
                   <LoudnessHistoryGraph
@@ -7983,7 +8558,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'waveform')}
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Waveform{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: Symmetrical bars showing the peak amplitude of your audio at each moment in time. Taller bars = louder moments, shorter bars = quieter. Bars to the left of the white playback cursor are bright blue (already played), bars to the right are dimmer (upcoming). The Y-axis goes from -1.0 to +1.0 (full digital scale).\n\nWhat to look for: A healthy waveform has visible variation — loud choruses and quieter verses. If the bars are all maxed out at 1.0 with no variation, your track is likely over-compressed or clipping. Gaps (no bars) indicate silence.\n\nTip: Compare the height of your loudest and quietest sections. If there's barely any difference, consider backing off your limiter to restore dynamics."} links={WAVEFORM_LINKS} /></h3>
+                    <h3>Waveform{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: Symmetrical bars showing the peak amplitude of your audio at each moment in time. Taller bars = louder moments, shorter bars = quieter. Bars to the left of the white playback cursor are bright blue (already played), bars to the right are dimmer (upcoming). The Y-axis goes from -1.0 to +1.0 (full digital scale).\n\nWhat to look for: A healthy waveform has visible variation — loud choruses and quieter verses. If the bars are all maxed out at 1.0 with no variation, your track is likely over-compressed or clipping. Gaps (no bars) indicate silence.\n\nTip: Compare the height of your loudest and quietest sections. If there's barely any difference, consider backing off your limiter to restore dynamics."} links={WAVEFORM_LINKS} /></h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'waveform')}
                   </div>
                   <WaveformDisplay
@@ -8012,7 +8587,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                     <div className="analysis-section-header">
-                    <h4>Stereo Correlation{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A horizontal meter with a glowing indicator that moves between -1 (left) and +1 (right). The background fades from red on the left, through yellow in the center, to green on the right. The numeric value is shown in the top-right corner, colored to match the zone.\n\nWhat to look for: Green zone (+0.5 to +1) = great mono compatibility — your track sounds solid on phone speakers and mono systems. Yellow zone (0 to +0.5) = some stereo content, generally fine. Red zone (below 0) = phase issues — left and right channels are canceling each other, which sounds thin or hollow in mono.\n\nTip: If the indicator dips into the red during certain parts, check for over-widened stereo effects, poorly set up chorus/phaser plugins, or samples that were accidentally phase-inverted."} links={STEREO_CORRELATION_LINKS} /></h4>
+                    <h4>Stereo Correlation{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: A horizontal meter with a glowing indicator that moves between -1 (left) and +1 (right). The background fades from red on the left, through yellow in the center, to green on the right. The numeric value is shown in the top-right corner, colored to match the zone.\n\nWhat to look for: Green zone (+0.5 to +1) = great mono compatibility — your track sounds solid on phone speakers and mono systems. Yellow zone (0 to +0.5) = some stereo content, generally fine. Red zone (below 0) = phase issues — left and right channels are canceling each other, which sounds thin or hollow in mono.\n\nTip: If the indicator dips into the red during certain parts, check for over-widened stereo effects, poorly set up chorus/phaser plugins, or samples that were accidentally phase-inverted."} links={STEREO_CORRELATION_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Phase relationship between L/R channels (+1 = mono compatible, -1 = out of phase)</p>
                     </div>
                     {renderMasteringPanelDragHandle('fullscreen', 'stereo-correlation')}
@@ -8052,7 +8627,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                       <div className="analysis-section-header">
-                      <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{refTrackSuffix} <HelpTooltip text="Shows how your audio energy is distributed across three broad frequency bands. Low (20-250 Hz) covers sub and bass. Mid (250-4000 Hz) covers vocals, guitars, synths, and most musical detail. High (4000-20000 Hz) covers presence, air, and brightness. Each band is shown as a percentage of total energy. Use the numbers as a rough guide, not a rulebook: many balanced masters fall somewhere around 30-40% Low, 40-50% Mid, and 15-25% High, but genre and arrangement matter." links={TONAL_BALANCE_LINKS} /></h4>
+                      <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{usingReferenceSuffix} <HelpTooltip text="Shows how your audio energy is distributed across three broad frequency bands. Low (20-250 Hz) covers sub and bass. Mid (250-4000 Hz) covers vocals, guitars, synths, and most musical detail. High (4000-20000 Hz) covers presence, air, and brightness. Each band is shown as a percentage of total energy. Use the numbers as a rough guide, not a rulebook: many balanced masters fall somewhere around 30-40% Low, 40-50% Mid, and 15-25% High, but genre and arrangement matter." links={TONAL_BALANCE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Low/mid/high energy distribution</p>
                       </div>
                       {renderMasteringPanelDragHandle('fullscreen', 'tonal-balance')}
@@ -8096,48 +8671,48 @@ export function App(): JSX.Element {
                   data-testid="analysis-overlay-loudness-peaks"
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Loudness &amp; peaks{isRefMode ? " (Reference)" : ""}</h3>
+                    <h3>Loudness &amp; peaks{showingReferenceSuffix}</h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'loudness-peaks')}
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide analysis-overlay-loudness-peaks-grid">
                     <div className="analysis-stat-card" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
-                      <span className="analysis-stat-label">Integrated LUFS{refSuffix} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /></span>
+                      <span className="analysis-stat-label">Integrated LUFS{showingReferenceSuffix} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /></span>
                       <strong>{measuredIntegratedText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
-                      <span className="analysis-stat-label">Current loudness{refSuffix} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /></span>
+                      <span className="analysis-stat-label">Current loudness{showingReferenceSuffix} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /></span>
                       <strong>{shortTermEstimateText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
-                      <span className="analysis-stat-label">Loudness range{refSuffix} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /></span>
+                      <span className="analysis-stat-label">Loudness range{showingReferenceSuffix} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /></span>
                       <strong>{measuredLraText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="True Peak — the highest inter-sample peak level in the track, measured via oversampling.">
-                      <span className="analysis-stat-label">True Peak{refSuffix} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /></span>
+                      <span className="analysis-stat-label">True Peak{showingReferenceSuffix} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /></span>
                       <strong>{measuredTruePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Sample Peak — the highest digital sample value in the track, without oversampling.">
-                      <span className="analysis-stat-label">Sample peak{refSuffix} <HelpTooltip text={"What this measures: The highest absolute sample value found in the audio file, measured directly from the digital samples without oversampling. This is what your DAW's standard peak meter shows. It will always be equal to or lower than True Peak because it cannot detect peaks that form between samples during reconstruction.\n\nGood values: Below 0 dBFS. If sample peak is at 0 dBFS, the signal is hitting the digital ceiling. For a properly mastered track, sample peak should be below -0.3 dBFS at minimum, but True Peak is the more important number to watch.\n\nIf it's wrong: If sample peak is at 0 dBFS, you are almost certainly clipping on playback (True Peak will be even higher). Use a true peak limiter with the ceiling set to -1 dBTP. Sample peak matters most when working in contexts where true peak metering is unavailable, or when checking raw recordings before mastering."} links={TRUE_PEAK_LINKS} /></span>
+                      <span className="analysis-stat-label">Sample peak{showingReferenceSuffix} <HelpTooltip text={"What this measures: The highest absolute sample value found in the audio file, measured directly from the digital samples without oversampling. This is what your DAW's standard peak meter shows. It will always be equal to or lower than True Peak because it cannot detect peaks that form between samples during reconstruction.\n\nGood values: Below 0 dBFS. If sample peak is at 0 dBFS, the signal is hitting the digital ceiling. For a properly mastered track, sample peak should be below -0.3 dBFS at minimum, but True Peak is the more important number to watch.\n\nIf it's wrong: If sample peak is at 0 dBFS, you are almost certainly clipping on playback (True Peak will be even higher). Use a true peak limiter with the ceiling set to -1 dBTP. Sample peak matters most when working in contexts where true peak metering is unavailable, or when checking raw recordings before mastering."} links={TRUE_PEAK_LINKS} /></span>
                       <strong>{measuredSamplePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time.">
-                      <span className="analysis-stat-label">Peak short-term{refSuffix} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /></span>
+                      <span className="analysis-stat-label">Peak short-term{showingReferenceSuffix} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /></span>
                       <strong>{measuredMaxShortTermText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
-                      <span className="analysis-stat-label">Peak momentary{refSuffix} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /></span>
+                      <span className="analysis-stat-label">Peak momentary{showingReferenceSuffix} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /></span>
                       <strong>{measuredMaxMomentaryText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Average volume level across the entire track (RMS-based), in dBFS.">
-                      <span className="analysis-stat-label">Mean volume{refSuffix} <HelpTooltip text={"What this measures: The average (RMS) level of your entire track expressed in dBFS. RMS stands for Root Mean Square — it squares every sample, averages them, then takes the square root, giving a value that correlates closely with perceived loudness. Unlike LUFS, it does not apply perceptual weighting, so it is a purely mathematical average of signal energy.\n\nGood values: For a mastered pop/rock track, typically -10 to -16 dBFS. Unmastered mixes are usually -18 to -24 dBFS. A heavily limited master might read -8 to -6 dBFS. Classical and acoustic music: -20 to -30 dBFS.\n\nIf it's wrong: Mean volume that is very close to the peak level means the track is heavily limited (low crest factor). If it is very far from the peak (more than 18 dB), the track has large untamed transients. Compare with the crest factor reading to assess your dynamic balance."} links={MEAN_VOLUME_LINKS} /></span>
+                      <span className="analysis-stat-label">Mean volume{showingReferenceSuffix} <HelpTooltip text={"What this measures: The average (RMS) level of your entire track expressed in dBFS. RMS stands for Root Mean Square — it squares every sample, averages them, then takes the square root, giving a value that correlates closely with perceived loudness. Unlike LUFS, it does not apply perceptual weighting, so it is a purely mathematical average of signal energy.\n\nGood values: For a mastered pop/rock track, typically -10 to -16 dBFS. Unmastered mixes are usually -18 to -24 dBFS. A heavily limited master might read -8 to -6 dBFS. Classical and acoustic music: -20 to -30 dBFS.\n\nIf it's wrong: Mean volume that is very close to the peak level means the track is heavily limited (low crest factor). If it is very far from the peak (more than 18 dB), the track has large untamed transients. Compare with the crest factor reading to assess your dynamic balance."} links={MEAN_VOLUME_LINKS} /></span>
                       <strong>{measuredMeanVolumeText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Crest Factor — difference between peak and RMS levels. Higher values indicate more dynamic range.">
-                      <span className="analysis-stat-label">Crest Factor{refSuffix} <HelpTooltip text={"What this measures: The difference between the sample peak level and the RMS (average) level, in dB. Formula: Crest Factor = Peak dBFS minus RMS dBFS. A higher crest factor means your transients stick out further above the average level — the music has more punch and snap. A lower value means the waveform is more like a brick wall.\n\nGood values: Unmastered/raw mixes: 12-18 dB. Well-mastered pop/rock: 8-12 dB. Heavily limited EDM/hip-hop: 4-8 dB. Extremely squashed masters: under 4 dB. Classical and jazz: 15-20+ dB.\n\nIf it's wrong: Below 6 dB usually means aggressive limiting has crushed your transients — the track will sound loud but lifeless and fatiguing. Above 18 dB could mean uncontrolled peaks that waste headroom. Use a limiter to tame peaks or back off limiting to restore dynamics, depending on which direction you need to go."} links={CREST_FACTOR_LINKS} /></span>
+                      <span className="analysis-stat-label">Crest Factor{showingReferenceSuffix} <HelpTooltip text={"What this measures: The difference between the sample peak level and the RMS (average) level, in dB. Formula: Crest Factor = Peak dBFS minus RMS dBFS. A higher crest factor means your transients stick out further above the average level — the music has more punch and snap. A lower value means the waveform is more like a brick wall.\n\nGood values: Unmastered/raw mixes: 12-18 dB. Well-mastered pop/rock: 8-12 dB. Heavily limited EDM/hip-hop: 4-8 dB. Extremely squashed masters: under 4 dB. Classical and jazz: 15-20+ dB.\n\nIf it's wrong: Below 6 dB usually means aggressive limiting has crushed your transients — the track will sound loud but lifeless and fatiguing. Above 18 dB could mean uncontrolled peaks that waste headroom. Use a limiter to tame peaks or back off limiting to restore dynamics, depending on which direction you need to go."} links={CREST_FACTOR_LINKS} /></span>
                       <strong>{activeCrestFactorText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Number of samples at or above 0 dBFS (digital clipping).">
-                      <span className="analysis-stat-label">Clip Count{refSuffix} <HelpTooltip text={"What this measures: The number of individual samples in the file whose absolute value reaches or exceeds 1.0 (0 dBFS) — the digital ceiling. Each clipped sample represents a moment where the signal was too loud to be represented digitally and was hard-clipped, causing distortion.\n\nGood values: Zero. Any non-zero clip count means digital distortion is present in the file. Even a single clipped sample is technically distortion, though a handful may not be audible. Hundreds or thousands of clips will be clearly audible as harsh, crunchy distortion.\n\nIf it's wrong: Reduce gain before your limiter, or lower the limiter output ceiling. If clips are coming from the mix bus, pull down your fader or gain-stage your plugins. Note: some producers intentionally use hard clipping as a creative effect (e.g., clip-to-zero mastering in hip-hop), but the clips should be intentional and controlled, not accidental."} links={CLIP_COUNT_LINKS} /></span>
+                      <span className="analysis-stat-label">Clip Count{showingReferenceSuffix} <HelpTooltip text={"What this measures: The number of individual samples in the file whose absolute value reaches or exceeds 1.0 (0 dBFS) — the digital ceiling. Each clipped sample represents a moment where the signal was too loud to be represented digitally and was hard-clipped, causing distortion.\n\nGood values: Zero. Any non-zero clip count means digital distortion is present in the file. Even a single clipped sample is technically distortion, though a handful may not be audible. Hundreds or thousands of clips will be clearly audible as harsh, crunchy distortion.\n\nIf it's wrong: Reduce gain before your limiter, or lower the limiter output ceiling. If clips are coming from the mix bus, pull down your fader or gain-stage your plugins. Note: some producers intentionally use hard clipping as a creative effect (e.g., clip-to-zero mastering in hip-hop), but the clips should be intentional and controlled, not accidental."} links={CLIP_COUNT_LINKS} /></span>
                       <strong>
                         {analysisStatus === 'ready' && analysis
                           ? analysis.clipCount > 0
@@ -8147,7 +8722,7 @@ export function App(): JSX.Element {
                       </strong>
                     </div>
                     <div className="analysis-stat-card" title="DC Offset — mean sample value. Non-zero DC offset wastes headroom.">
-                      <span className="analysis-stat-label">DC Offset{refSuffix} <HelpTooltip text={"What this measures: The mean (average) of all sample values in the file. A perfectly centered waveform has a DC offset of 0. A non-zero value means the entire waveform is shifted above or below the center line. The threshold for a warning here is 0.1% (mean sample value > 0.001).\n\nGood values: As close to 0% as possible. Anything under 0.1% is considered clean. Above 0.1% triggers a warning because it wastes headroom — if your waveform is shifted up by 0.5%, you lose 0.5% of your available peak range.\n\nIf it's wrong: DC offset is usually caused by faulty hardware (cheap audio interfaces, phantom power leakage), certain analog-modeled plugins, or recording with a bad cable. Fix it by applying a high-pass filter at a very low frequency (10-20 Hz) or use your DAW's DC offset removal tool (most have one in the audio editor). Always fix DC offset before mastering."} links={DC_OFFSET_LINKS} /></span>
+                      <span className="analysis-stat-label">DC Offset{showingReferenceSuffix} <HelpTooltip text={"What this measures: The mean (average) of all sample values in the file. A perfectly centered waveform has a DC offset of 0. A non-zero value means the entire waveform is shifted above or below the center line. The threshold for a warning here is 0.1% (mean sample value > 0.001).\n\nGood values: As close to 0% as possible. Anything under 0.1% is considered clean. Above 0.1% triggers a warning because it wastes headroom — if your waveform is shifted up by 0.5%, you lose 0.5% of your available peak range.\n\nIf it's wrong: DC offset is usually caused by faulty hardware (cheap audio interfaces, phantom power leakage), certain analog-modeled plugins, or recording with a bad cable. Fix it by applying a high-pass filter at a very low frequency (10-20 Hz) or use your DAW's DC offset removal tool (most have one in the audio editor). Always fix DC offset before mastering."} links={DC_OFFSET_LINKS} /></span>
                       <strong>
                         {analysisStatus === 'ready' && analysis
                           ? Math.abs(analysis.dcOffset) > 0.001
@@ -8351,7 +8926,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                       <div className="analysis-section-header">
-                      <h4>Vectorscope{isRefMode ? " (Reference)" : ""} <HelpTooltip text={"What you're seeing: A circular display where blue dots trace your stereo signal in real-time, with a fading trail so you can see the shape over time. The vertical axis (M) is the Mid/mono signal (L+R), and the horizontal axis (S) is the Side signal (L-R). L and R labels mark the diagonal directions for pure left and pure right.\n\nWhat to look for: A tall, narrow vertical shape = mostly mono content (centered vocals, bass). A wider spread = more stereo width. A roughly even shape = balanced stereo image. If it leans consistently toward L or R, your mix is off-center. A thin horizontal line means the signal is pure side information with no center — usually a problem.\n\nTip: Bass and kick should appear mostly vertical (centered). If your low end spreads wide on the vectorscope, consider narrowing it with a mid/side EQ. A natural, full mix typically looks like a fuzzy vertical oval."} links={VECTORSCOPE_LINKS} /></h4>
+                      <h4>Vectorscope{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: A circular display where blue dots trace your stereo signal in real-time, with a fading trail so you can see the shape over time. The vertical axis (M) is the Mid/mono signal (L+R), and the horizontal axis (S) is the Side signal (L-R). L and R labels mark the diagonal directions for pure left and pure right.\n\nWhat to look for: A tall, narrow vertical shape = mostly mono content (centered vocals, bass). A wider spread = more stereo width. A roughly even shape = balanced stereo image. If it leans consistently toward L or R, your mix is off-center. A thin horizontal line means the signal is pure side information with no center — usually a problem.\n\nTip: Bass and kick should appear mostly vertical (centered). If your low end spreads wide on the vectorscope, consider narrowing it with a mid/side EQ. A natural, full mix typically looks like a fuzzy vertical oval."} links={VECTORSCOPE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Stereo image — wider spread = wider stereo field, vertical = mono</p>
                       </div>
                       {renderMasteringPanelDragHandle('fullscreen', 'vectorscope')}
@@ -8438,12 +9013,12 @@ export function App(): JSX.Element {
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card" title="K-14: 0 dB on meter = -14 dBFS. Best for most music.">
-                      <span className="analysis-stat-label">K-14 Metering{refSuffix}</span>
+                      <span className="analysis-stat-label">K-14 Metering{showingReferenceSuffix}</span>
                       <strong>{k14MeteringText}</strong>
                       <span className="muted">Reference: 0 dB = -14 dBFS (pop/rock/electronic)</span>
                     </div>
                     <div className="analysis-stat-card" title="K-20: 0 dB on meter = -20 dBFS. Best for film/classical.">
-                      <span className="analysis-stat-label">K-20 Metering{refSuffix}</span>
+                      <span className="analysis-stat-label">K-20 Metering{showingReferenceSuffix}</span>
                       <strong>{k20MeteringText}</strong>
                       <span className="muted">Reference: 0 dB = -20 dBFS (film/classical/broadcast)</span>
                     </div>

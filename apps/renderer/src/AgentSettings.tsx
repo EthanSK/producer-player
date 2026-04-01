@@ -7,7 +7,13 @@ import type {
   AgentThinkingOption,
 } from '@producer-player/contracts';
 import { AGENT_PROVIDER_LABELS } from './agentModels';
-import { notifyAgentVoiceSettingsUpdated } from './agentVoiceSettings';
+import {
+  AGENT_STT_PROVIDER_LABELS,
+  type AgentSttProviderId,
+  notifyAgentVoiceSettingsUpdated,
+  readStoredAgentSttProvider,
+  writeStoredAgentSttProvider,
+} from './agentVoiceSettings';
 
 interface AgentSettingsProps {
   provider: AgentProviderId;
@@ -46,23 +52,45 @@ export function AgentSettings({
   onClose,
   controlsDisabled = false,
 }: AgentSettingsProps): JSX.Element {
+  const [sttProvider, setSttProvider] = useState<AgentSttProviderId>(() =>
+    readStoredAgentSttProvider()
+  );
+
   const [deepgramKey, setDeepgramKey] = useState('');
   const [deepgramKeySet, setDeepgramKeySet] = useState(false);
   const [deepgramKeyError, setDeepgramKeyError] = useState<string | null>(null);
 
+  const [assemblyAiKey, setAssemblyAiKey] = useState('');
+  const [assemblyAiKeySet, setAssemblyAiKeySet] = useState(false);
+  const [assemblyAiKeyError, setAssemblyAiKeyError] = useState<string | null>(null);
+
   useEffect(() => {
-    void window.producerPlayer
-      .agentGetDeepgramKey()
-      .then((key) => {
-        setDeepgramKeySet(key !== null && key.length > 0);
+    let cancelled = false;
+
+    void Promise.all([
+      window.producerPlayer.agentGetDeepgramKey(),
+      window.producerPlayer.agentGetAssemblyAiKey(),
+    ])
+      .then(([storedDeepgramKey, storedAssemblyAiKey]) => {
+        if (cancelled) return;
+        setDeepgramKeySet(storedDeepgramKey !== null && storedDeepgramKey.length > 0);
+        setAssemblyAiKeySet(storedAssemblyAiKey !== null && storedAssemblyAiKey.length > 0);
         setDeepgramKeyError(null);
+        setAssemblyAiKeyError(null);
       })
       .catch((error: unknown) => {
+        if (cancelled) return;
+        const fallback = 'Could not read saved speech-to-text keys.';
+        const message = error instanceof Error ? error.message : fallback;
         setDeepgramKeySet(false);
-        setDeepgramKeyError(
-          error instanceof Error ? error.message : 'Could not read Deepgram key.'
-        );
+        setAssemblyAiKeySet(false);
+        setDeepgramKeyError(message);
+        setAssemblyAiKeyError(message);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSaveDeepgramKey = useCallback(async () => {
@@ -93,6 +121,41 @@ export function AgentSettings({
         error instanceof Error ? error.message : 'Could not clear Deepgram key.'
       );
     }
+  }, []);
+
+  const handleSaveAssemblyAiKey = useCallback(async () => {
+    const trimmed = assemblyAiKey.trim();
+    if (!trimmed) return;
+
+    try {
+      await window.producerPlayer.agentStoreAssemblyAiKey(trimmed);
+      setAssemblyAiKeySet(true);
+      setAssemblyAiKey('');
+      setAssemblyAiKeyError(null);
+      notifyAgentVoiceSettingsUpdated();
+    } catch (error: unknown) {
+      setAssemblyAiKeyError(
+        error instanceof Error ? error.message : 'Could not save AssemblyAI key.'
+      );
+    }
+  }, [assemblyAiKey]);
+
+  const handleClearAssemblyAiKey = useCallback(async () => {
+    try {
+      await window.producerPlayer.agentClearAssemblyAiKey();
+      setAssemblyAiKeySet(false);
+      setAssemblyAiKeyError(null);
+      notifyAgentVoiceSettingsUpdated();
+    } catch (error: unknown) {
+      setAssemblyAiKeyError(
+        error instanceof Error ? error.message : 'Could not clear AssemblyAI key.'
+      );
+    }
+  }, []);
+
+  const handleSttProviderChange = useCallback((nextProvider: AgentSttProviderId) => {
+    setSttProvider(nextProvider);
+    writeStoredAgentSttProvider(nextProvider);
   }, []);
 
   const handleNewChatClick = useCallback(() => {
@@ -198,7 +261,28 @@ export function AgentSettings({
       </div>
 
       <div className="agent-settings-section">
-        <label className="agent-settings-label">Deepgram API Key</label>
+        <label className="agent-settings-label">Speech-to-text provider</label>
+        <div className="agent-settings-provider-row agent-settings-provider-row--stt">
+          {(['deepgram', 'assemblyai'] as const).map((providerId) => (
+            <button
+              key={providerId}
+              type="button"
+              className={`agent-settings-provider-option ${sttProvider === providerId ? 'agent-settings-provider-option--active' : ''}`}
+              onClick={() => handleSttProviderChange(providerId)}
+              disabled={controlsDisabled}
+              data-testid={`agent-stt-provider-${providerId}`}
+            >
+              {AGENT_STT_PROVIDER_LABELS[providerId]}
+            </button>
+          ))}
+        </div>
+        <p className="agent-settings-key-help" data-testid="agent-stt-provider-help">
+          Save both keys if you want, then switch between providers any time.
+        </p>
+      </div>
+
+      <div className="agent-settings-section">
+        <label className="agent-settings-label">Deepgram API key</label>
         {deepgramKeySet ? (
           <div className="agent-settings-key-row">
             <span className="agent-settings-key-status">Key set</span>
@@ -238,7 +322,57 @@ export function AgentSettings({
           </p>
         ) : (
           <p className="agent-settings-key-help" data-testid="agent-deepgram-key-help">
-            When a key is set, the microphone button appears beside the message box.
+            {sttProvider === 'deepgram'
+              ? 'When selected, the microphone button appears beside the message box and uses Deepgram.'
+              : 'Saved for quick switching. Select Deepgram above when you want to use it.'}
+          </p>
+        )}
+      </div>
+
+      <div className="agent-settings-section">
+        <label className="agent-settings-label">AssemblyAI Universal-3 Pro API key</label>
+        {assemblyAiKeySet ? (
+          <div className="agent-settings-key-row">
+            <span className="agent-settings-key-status">Key set</span>
+            <button
+              type="button"
+              className="agent-settings-key-clear"
+              onClick={() => void handleClearAssemblyAiKey()}
+              data-testid="agent-assemblyai-key-clear"
+            >
+              Clear
+            </button>
+          </div>
+        ) : (
+          <div className="agent-settings-key-row">
+            <input
+              type="password"
+              className="agent-settings-key-input"
+              value={assemblyAiKey}
+              onChange={(event) => setAssemblyAiKey(event.target.value)}
+              placeholder="Enter API key"
+              data-testid="agent-assemblyai-key-input"
+            />
+            <button
+              type="button"
+              className="agent-settings-key-save"
+              onClick={() => void handleSaveAssemblyAiKey()}
+              disabled={!assemblyAiKey.trim()}
+              data-testid="agent-assemblyai-key-save"
+            >
+              Save
+            </button>
+          </div>
+        )}
+        {assemblyAiKeyError ? (
+          <p className="agent-settings-key-error" data-testid="agent-assemblyai-key-error">
+            {assemblyAiKeyError}
+          </p>
+        ) : (
+          <p className="agent-settings-key-help" data-testid="agent-assemblyai-key-help">
+            {sttProvider === 'assemblyai'
+              ? 'When selected, the microphone button uses AssemblyAI Universal-3 Pro.'
+              : 'Saved for quick switching. Select AssemblyAI above when you want to use it.'}
           </p>
         )}
       </div>

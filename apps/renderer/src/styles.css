@@ -280,8 +280,13 @@ input[type='range'] {
   padding: 0;
 }
 
-.sidebar-branding {
+.sidebar-branding-container {
+  position: relative;
   margin: 10px 10px 0;
+}
+
+.sidebar-branding {
+  width: 100%;
   padding: 10px 12px;
   border: 1px solid rgba(92, 167, 255, 0.34);
   border-radius: 12px;
@@ -297,9 +302,11 @@ input[type='range'] {
 }
 
 .sidebar-branding-button {
-  width: calc(100% - 20px);
   text-align: left;
-  padding: 10px 12px;
+}
+
+.sidebar-branding-button--with-settings {
+  padding-right: 102px;
 }
 
 .sidebar-branding-button:hover:not(:disabled) {
@@ -309,6 +316,35 @@ input[type='range'] {
     rgba(92, 167, 255, 0.28),
     rgba(16, 25, 39, 0.96) 72%
   );
+}
+
+.sidebar-branding-settings-button {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(156, 175, 196, 0.4);
+  background: rgba(8, 14, 23, 0.72);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.sidebar-branding-settings-button:hover:not(:disabled) {
+  border-color: #80b8ff;
+  color: var(--text-main);
+  background: rgba(23, 37, 56, 0.86);
+}
+
+.sidebar-branding-settings-button svg {
+  flex-shrink: 0;
 }
 
 .sidebar-branding-logo {
@@ -420,17 +456,18 @@ input[type='range'] {
 
 .naming-guide {
   margin: 0 10px 10px;
-  border: 1px solid rgba(95, 210, 143, 0.75);
+  border: 1px solid rgba(248, 191, 36, 0.85);
   border-radius: 10px;
   padding: 10px;
-  background: rgba(95, 210, 143, 0.12);
+  background: linear-gradient(180deg, rgba(248, 191, 36, 0.2), rgba(248, 113, 113, 0.12));
+  box-shadow: inset 0 0 0 1px rgba(248, 191, 36, 0.15);
 }
 
 .naming-guide-copy {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: #84f1b5;
+  color: #ffe7b3;
   line-height: 1.3;
   display: flex;
   gap: 8px;
@@ -443,6 +480,19 @@ input[type='range'] {
   display: inline-flex;
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+.naming-guide-emphasis {
+  color: #ffd36b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.naming-guide-detail {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #f9d89f;
 }
 
 .sidebar-section-divider {
@@ -763,6 +813,24 @@ input[type='range'] {
 .analysis-normalization-header > :first-child {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.analysis-normalization-header-row-compact > .analysis-normalization-header-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.analysis-normalization-header-actions {
+  display: inline-flex;
+  align-items: start;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.analysis-normalization-header-actions > .analysis-panel-controls-row {
+  margin-left: 0;
 }
 
 .analysis-normalization-header > button {
@@ -1736,6 +1804,8 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   display: flex;
   gap: 6px;
   justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .transport-main-row {
@@ -2221,16 +2291,6 @@ button.checklist-mini-player-button:hover {
   color: var(--text-primary, #e0eaf5);
 }
 
-.checklist-transport-hint {
-  font-size: 10px;
-  color: var(--text-muted);
-  opacity: 0.7;
-  text-align: center;
-  display: block;
-  flex: 1;
-  line-height: 1;
-}
-
 .checklist-transport-group {
   display: flex;
   align-items: center;
@@ -2468,6 +2528,31 @@ button.checklist-play-toggle[data-playing='true'] {
 
 .spectrum-clear-solo-button {
   white-space: nowrap;
+}
+
+.spectrum-solo-summary-mini {
+  width: 100%;
+  max-width: 180px;
+  justify-content: center;
+  gap: 6px;
+}
+
+.spectrum-solo-label-mini {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.spectrum-solo-label-mini-idle {
+  color: rgba(156, 175, 196, 0.86);
+  border-color: rgba(156, 175, 196, 0.24);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.spectrum-clear-solo-button-mini {
+  font-size: 11px;
+  padding: 2px 8px;
 }
 
 /* Section header with subtitle */

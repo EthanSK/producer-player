@@ -616,15 +616,48 @@ test.describe('checklist playback workflow', () => {
 
       await referenceModeButton.click();
       await expect(page.getByTestId('analysis-overlay-tonal-balance-heading')).toContainText(
-        'Reference Track'
+        'Using Reference'
       );
       await expect(page.getByTestId('analysis-overlay-spectrum-heading')).toContainText(
-        'Reference Track'
+        'Using Reference'
       );
       await expect(page.getByTestId('analysis-overlay-tonal-balance')).toHaveAttribute(
         'data-source',
         'reference-track'
       );
+
+      await page
+        .getByTestId('analysis-overlay-spectrum-heading')
+        .locator('.help-tooltip-trigger')
+        .click();
+      await expect(page.getByText('AI-ranked tutorials:')).toBeVisible();
+      const rankedTutorialLinks = page.locator('a[title^="AI-ranked #"]');
+      await expect(rankedTutorialLinks).toHaveCount(9);
+      await expect(page.locator('a[title^="AI-ranked #9:"]')).toBeVisible();
+      await page.locator('button[aria-label="Close"]').first().click();
+      await expect(page.getByText('AI-ranked tutorials:')).toHaveCount(0);
+      await expect(page.getByTestId('analysis-overlay-loudness-peaks')).toContainText(
+        'Using Reference'
+      );
+
+      const normalizationToggle = page.getByTestId('analysis-overlay-normalization-toggle');
+      await expect(normalizationToggle).toBeEnabled();
+      await normalizationToggle.click();
+      await expect(normalizationToggle).toContainText('Preview On');
+
+      const resetSessionButton = page.getByTestId('analysis-overlay-reset-session');
+      await expect(resetSessionButton).toBeVisible();
+      await resetSessionButton.click();
+
+      await expect(page.getByTestId('analysis-overlay-ab-mix')).toHaveClass(/active/);
+      await expect(page.getByTestId('analysis-overlay-ab-reference')).toBeDisabled();
+      await expect(page.getByTestId('analysis-overlay-tonal-balance-heading')).not.toContainText(
+        'Using Reference'
+      );
+      await expect(page.getByTestId('analysis-overlay-loudness-peaks')).not.toContainText(
+        'Using Reference'
+      );
+      await expect(normalizationToggle).toContainText('Preview Off');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
@@ -636,7 +669,7 @@ test.describe('checklist playback workflow', () => {
       'producer-player-analysis-overlay-click-outside-clear-bands'
     );
     await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
-      durationMs: 3_000,
+      durationMs: 12_000,
       frequencyHz: 500,
     });
 
@@ -659,6 +692,38 @@ test.describe('checklist playback workflow', () => {
         Math.round(element.getBoundingClientRect().width)
       );
       expect(miniLevelMeterWidth).toBe(miniSpectrumWidth);
+
+      const skipBack5 = page.getByTestId('player-skip-back-5');
+      const skipForward5 = page.getByTestId('player-skip-forward-5');
+      await expect(skipBack5).toBeVisible();
+      await expect(skipForward5).toBeVisible();
+
+      const scrubber = page.getByTestId('player-scrubber');
+      const scrubberStart = Number(await scrubber.inputValue());
+      await skipForward5.click();
+      await expect.poll(async () => Number(await scrubber.inputValue())).toBeGreaterThan(
+        scrubberStart + 1
+      );
+      await skipBack5.click();
+      await expect.poll(async () => Number(await scrubber.inputValue())).toBeLessThanOrEqual(
+        scrubberStart + 0.1
+      );
+
+      const miniSpectrumStatus = page.getByTestId('player-dock-spectrum-solo-label');
+      await expect(miniSpectrumStatus).toContainText('Click a band to solo');
+
+      await miniSpectrum.click({ position: { x: 120, y: 24 } });
+      await expect(miniSpectrum).toHaveAttribute('data-active-bands', /^[0-5]$/);
+      await expect(miniSpectrumStatus).toContainText('Soloing:');
+      await expect(page.getByTestId('player-dock-clear-solo-bands')).toBeVisible();
+
+      await miniSpectrum.click({ position: { x: 120, y: 24 }, modifiers: ['Shift'] });
+      await expect(miniSpectrum).toHaveAttribute('data-active-bands', /,/);
+      await expect(miniSpectrumStatus).toContainText('+');
+
+      await page.getByTestId('player-dock-clear-solo-bands').click();
+      await expect(miniSpectrum).toHaveAttribute('data-active-bands', '');
+      await expect(miniSpectrumStatus).toContainText('Click a band to solo');
 
       await miniSpectrum.click({ position: { x: 120, y: 24 } });
 

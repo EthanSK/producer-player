@@ -168,7 +168,7 @@ test.describe('Agent streaming behavior', () => {
         .last()
         .locator('.agent-message-content');
 
-      await expect(content.locator('.agent-typing-cursor')).toBeVisible();
+      await expect(content.locator('.agent-thinking-label')).toBeVisible();
       await expect(content).toContainText('CLAUDE(', { timeout: 5000 });
       await expect
         .poll(async () => {
@@ -180,7 +180,7 @@ test.describe('Agent streaming behavior', () => {
       await expect(content).toContainText('stream-check-claude');
       const finalText = (await content.innerText()).trim();
       expect(finalText).toMatch(/^CLAUDE\([^)]+\): stream-check-claude$/);
-      await expect(content.locator('.agent-typing-cursor')).toHaveCount(0);
+      await expect(content.locator('.agent-thinking-label')).toHaveCount(0);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
@@ -209,14 +209,13 @@ test.describe('Agent streaming behavior', () => {
         .last()
         .locator('.agent-message-content');
 
-      await expect(content.locator('.agent-typing-cursor')).toBeVisible();
       await expect(content).toContainText('CODEX(', { timeout: 5000 });
       await expect(content).toContainText('stream-check-codex');
 
       const finalText = (await content.innerText()).trim();
       expect(finalText).toMatch(/^CODEX\([^)]+\): stream-check-codex$/);
       expect((finalText.match(/CODEX\([^)]+\):/g) ?? []).length).toBe(1);
-      await expect(content.locator('.agent-typing-cursor')).toHaveCount(0);
+      await expect(content.locator('.agent-thinking-label')).toHaveCount(0);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);

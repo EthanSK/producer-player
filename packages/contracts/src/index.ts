@@ -104,6 +104,7 @@ export interface ProducerPlayerEnvironment {
   canLinkFolderByPath: boolean;
   canRequestSecurityScopedBookmarks: boolean;
   isTestMode: boolean;
+  platform: 'darwin' | 'win32' | 'linux' | string;
 }
 
 export interface PlaylistOrderExportSelection {
@@ -163,6 +164,8 @@ export const IPC_CHANNELS = {
   TO_FILE_URL: 'producer-player:to-file-url',
   RESOLVE_PLAYBACK_SOURCE: 'producer-player:resolve-playback-source',
   ANALYZE_AUDIO_FILE: 'producer-player:analyze-audio-file',
+  GET_MASTERING_ANALYSIS_CACHE: 'producer-player:get-mastering-analysis-cache',
+  WRITE_MASTERING_ANALYSIS_CACHE: 'producer-player:write-mastering-analysis-cache',
   PICK_REFERENCE_TRACK: 'producer-player:pick-reference-track',
   PICK_PROJECT_FILE: 'producer-player:pick-project-file',
   SNAPSHOT_UPDATED: 'producer-player:snapshot-updated',
@@ -184,6 +187,9 @@ export const IPC_CHANNELS = {
   AGENT_STORE_DEEPGRAM_KEY: 'producer-player:agent-store-deepgram-key',
   AGENT_GET_DEEPGRAM_KEY: 'producer-player:agent-get-deepgram-key',
   AGENT_CLEAR_DEEPGRAM_KEY: 'producer-player:agent-clear-deepgram-key',
+  AGENT_STORE_ASSEMBLYAI_KEY: 'producer-player:agent-store-assemblyai-key',
+  AGENT_GET_ASSEMBLYAI_KEY: 'producer-player:agent-get-assemblyai-key',
+  AGENT_CLEAR_ASSEMBLYAI_KEY: 'producer-player:agent-clear-assemblyai-key',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
@@ -438,6 +444,64 @@ export interface AgentChecklistStatus {
   totalCount: number;
 }
 
+export interface MasteringCacheEntry {
+  schemaVersion: number;
+  cacheKey: string;
+  source: 'selected-track' | 'background-preload' | 'manual-request';
+  analyzedAt: string;
+  songId: string;
+  songTitle: string;
+  folderId: string;
+  versionId: string;
+  filePath: string;
+  fileName: string;
+  extension: string;
+  durationSeconds: number | null;
+  fileSizeBytes: number;
+  fileModifiedAtMs: number;
+  measuredAnalysis: AudioFileAnalysis;
+  staticAnalysis: AgentStaticAnalysis;
+  platformNormalization: AgentPlatformNormalization;
+}
+
+export interface MasteringAnalysisCachePayload {
+  schemaVersion: number;
+  updatedAt: string;
+  entries: MasteringCacheEntry[];
+}
+
+export interface MasteringAnalysisCacheState {
+  cacheDirectoryPath: string;
+  cacheFilePath: string;
+  payload: MasteringAnalysisCachePayload;
+}
+
+export interface AgentMasteringCacheTrackSummary {
+  songId: string;
+  songTitle: string;
+  versionId: string;
+  fileName: string;
+  filePath: string;
+  cacheStatus: 'fresh' | 'stale' | 'missing' | 'pending' | 'error';
+  analyzedAt: string | null;
+  staticAnalysis: AgentStaticAnalysis | null;
+  platformNormalization: AgentPlatformNormalization | null;
+}
+
+export interface AgentMasteringCache {
+  schemaVersion: number;
+  cacheDirectoryPath: string | null;
+  cacheFilePath: string | null;
+  updatedAt: string | null;
+  trackCount: number;
+  cachedTrackCount: number;
+  pendingTrackCount: number;
+  tracks: AgentMasteringCacheTrackSummary[];
+  cacheEntryFormat: string;
+  cacheInvalidationStrategy: string;
+  disclosureReminder: string;
+}
+
 export interface AgentContext {
   track: AgentTrackInfo | null;
   staticAnalysis: AgentStaticAnalysis | null;
@@ -445,6 +509,7 @@ export interface AgentContext {
   platformNormalization: AgentPlatformNormalization | null;
   reference: AgentReferenceAnalysis | null;
   checklist: AgentChecklistStatus | null;
+  masteringCache: AgentMasteringCache | null;
   activePlatformId: string | null;
   isPlaying: boolean;
   currentTimeSeconds: number;
@@ -475,6 +540,10 @@ export interface ProducerPlayerBridge {
   toFileUrl(filePath: string): Promise<string>;
   resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo>;
   analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis>;
+  getMasteringAnalysisCache(): Promise<MasteringAnalysisCacheState>;
+  writeMasteringAnalysisCache(
+    payload: MasteringAnalysisCachePayload
+  ): Promise<MasteringAnalysisCacheState>;
   pickReferenceTrack(): Promise<ReferenceTrackSelection | null>;
   pickProjectFile(initialPath?: string | null): Promise<ProjectFileSelection | null>;
   getSharedUserState(): Promise<SharedUserState>;
@@ -495,6 +564,9 @@ export interface ProducerPlayerBridge {
   agentStoreDeepgramKey(key: string): Promise<void>;
   agentGetDeepgramKey(): Promise<string | null>;
   agentClearDeepgramKey(): Promise<void>;
+  agentStoreAssemblyAiKey(key: string): Promise<void>;
+  agentGetAssemblyAiKey(): Promise<string | null>;
+  agentClearAssemblyAiKey(): Promise<void>;
   onAgentEvent(listener: AgentEventListener): () => void;
 }
 

@@ -617,20 +617,39 @@
   color: var(--accent);
 }
 
-/* Typing indicators */
-.agent-typing-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 14px;
-  background: var(--accent);
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  animation: agent-cursor-blink 0.8s step-end infinite;
+/* Thinking indicators */
+.agent-thinking-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+  letter-spacing: 0.01em;
 }
 
-@keyframes agent-cursor-blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
+.agent-thinking-dots {
+  display: inline-flex;
+  min-width: 1.4em;
+  justify-content: flex-start;
+}
+
+.agent-thinking-dots span {
+  opacity: 0.25;
+  animation: agent-thinking-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.agent-thinking-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.agent-thinking-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes agent-thinking-dot-pulse {
+  0%, 60%, 100% { opacity: 0.25; }
+  30% { opacity: 1; }
 }
 
 .agent-stopped-label {
@@ -642,29 +661,7 @@
 .agent-typing-indicator {
   display: flex;
   align-items: center;
-  gap: 4px;
   padding: 8px 12px;
-}
-
-.agent-typing-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  animation: agent-typing-bounce 1.2s ease-in-out infinite;
-}
-
-.agent-typing-dot:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.agent-typing-dot:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes agent-typing-bounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
-  30% { transform: translateY(-4px); opacity: 1; }
 }
 
 /* Markdown rendering */
@@ -1259,4 +1256,52 @@
   font-size: 11px;
   color: var(--accent);
   word-break: break-word;
+}
+
+.agent-help-sources {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--bg-0);
+}
+
+.agent-help-sources > strong {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.agent-help-sources p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.agent-help-sources ul {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 4px;
+}
+
+.agent-help-source-link {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.agent-help-source-link:hover,
+.agent-help-source-link:focus-visible {
+  color: #9ec7ff;
 }

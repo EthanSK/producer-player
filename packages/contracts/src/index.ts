@@ -99,12 +99,20 @@ export interface LibrarySnapshot {
   matcherSettings: MatcherSettings;
 }
 
+export interface ProducerPlayerAppVersion {
+  semanticVersion: string;
+  buildNumber: number | null;
+  commitShortSha: string | null;
+  displayVersion: string;
+}
+
 export interface ProducerPlayerEnvironment {
   isMacAppStoreSandboxed: boolean;
   canLinkFolderByPath: boolean;
   canRequestSecurityScopedBookmarks: boolean;
   isTestMode: boolean;
   platform: 'darwin' | 'win32' | 'linux' | string;
+  appVersion: ProducerPlayerAppVersion;
 }
 
 export interface PlaylistOrderExportSelection {

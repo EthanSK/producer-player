@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import ffmpegStatic from 'ffmpeg-static';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { chmod, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,8 +10,81 @@ import { gunzipSync } from 'node:zlib';
 const execFileAsync = promisify(execFile);
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const appDirectory = resolve(scriptDirectory, '..');
+const repositoryDirectory = resolve(appDirectory, '../..');
 const outputDirectory = resolve(appDirectory, 'dist');
 const binaryOutputDirectory = resolve(outputDirectory, 'bin');
+
+function parsePositiveInteger(rawValue) {
+  if (typeof rawValue !== 'string') {
+    return null;
+  }
+
+  const normalized = rawValue.trim();
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return Math.trunc(parsed);
+}
+
+function resolveBuildNumber() {
+  const explicitValue = parsePositiveInteger(process.env.PRODUCER_PLAYER_BUILD_NUMBER);
+  if (explicitValue !== null) {
+    return String(explicitValue);
+  }
+
+  const githubRunNumber = parsePositiveInteger(process.env.GITHUB_RUN_NUMBER);
+  if (githubRunNumber !== null) {
+    return String(githubRunNumber);
+  }
+
+  try {
+    const commitCount = execFileSync('git', ['rev-list', '--count', 'HEAD'], {
+      cwd: repositoryDirectory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+
+    const parsedCount = parsePositiveInteger(commitCount);
+    return parsedCount === null ? '' : String(parsedCount);
+  } catch {
+    return '';
+  }
+}
+
+function resolveCommitSha() {
+  const explicitSha =
+    typeof process.env.PRODUCER_PLAYER_COMMIT_SHA === 'string'
+      ? process.env.PRODUCER_PLAYER_COMMIT_SHA.trim()
+      : '';
+  if (/^[0-9a-f]{7,40}$/i.test(explicitSha)) {
+    return explicitSha.slice(0, 12).toLowerCase();
+  }
+
+  const githubSha =
+    typeof process.env.GITHUB_SHA === 'string' ? process.env.GITHUB_SHA.trim() : '';
+  if (/^[0-9a-f]{7,40}$/i.test(githubSha)) {
+    return githubSha.slice(0, 12).toLowerCase();
+  }
+
+  try {
+    return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], {
+      cwd: repositoryDirectory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
+const resolvedBuildNumber = resolveBuildNumber();
+const resolvedCommitSha = resolveCommitSha();
 
 await build({
   entryPoints: [resolve(appDirectory, 'src/main.ts'), resolve(appDirectory, 'src/preload.ts')],
@@ -25,8 +98,19 @@ await build({
   outExtension: {
     '.js': '.cjs',
   },
+  define: {
+    __PRODUCER_PLAYER_BUILD_NUMBER__: JSON.stringify(resolvedBuildNumber),
+    __PRODUCER_PLAYER_COMMIT_SHA__: JSON.stringify(resolvedCommitSha),
+  },
   logLevel: 'info',
 });
+
+if (resolvedBuildNumber || resolvedCommitSha) {
+  console.info('[producer-player/electron] Embedded app build metadata', {
+    buildNumber: resolvedBuildNumber || null,
+    commitSha: resolvedCommitSha || null,
+  });
+}
 
 await rm(binaryOutputDirectory, { recursive: true, force: true });
 

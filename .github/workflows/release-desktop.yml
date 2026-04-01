@@ -139,6 +139,8 @@ jobs:
 
       - name: Build desktop package
         env:
+          PRODUCER_PLAYER_BUILD_NUMBER: ${{ github.run_number }}
+          PRODUCER_PLAYER_COMMIT_SHA: ${{ github.sha }}
           # macOS signing (only populated when secrets exist)
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}

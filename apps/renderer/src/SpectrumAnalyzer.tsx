@@ -116,7 +116,6 @@ export function SpectrumAnalyzer({
 
     const sampleRate = analyserNode.context.sampleRate;
     const fftSize = analyserNode.fftSize;
-    const hasActiveBands = activeBands && activeBands.size > 0;
 
     // Render one frame from smoothedDataRef (used by both live and frozen paths)
     const renderFrame = () => {
@@ -351,22 +350,6 @@ export function SpectrumAnalyzer({
         ctx.restore();
       }
 
-      // Instruction / status text in full screen
-      if (isFullScreen && !hasActiveBands) {
-        ctx.fillStyle = 'rgba(156, 175, 196, 0.3)';
-        ctx.font = '11px Inter, sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText('Click a band to solo \u2022 Shift+click to exclude', width - 8, height - 16);
-      } else if (isFullScreen && hasActiveBands) {
-        const activeLabels = Array.from(activeBands!)
-          .sort((a, b) => a - b)
-          .map((i) => FREQUENCY_BANDS[i].label)
-          .join(', ');
-        ctx.fillStyle = 'rgba(92, 167, 255, 0.9)';
-        ctx.font = 'bold 12px Inter, sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(`Soloing: ${activeLabels}`, width - 8, height - 16);
-      }
 
       // Crosshair overlay (fullscreen only)
       if (isFullScreen) {

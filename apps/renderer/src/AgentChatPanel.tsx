@@ -48,7 +48,7 @@ interface AgentChatPanelProps {
   promptRequest?: AgentChatPromptRequest | null;
 }
 
-interface StoredActiveChat {
+interface StoredLegacyActiveChat {
   id: string;
   messages: AgentChatMessage[];
 }
@@ -58,6 +58,12 @@ interface AgentChatHistoryEntry {
   title: string;
   updatedAt: number;
   messages: AgentChatMessage[];
+}
+
+interface StoredAgentChatPersistence {
+  activeConversationId: string;
+  activeMessages: AgentChatMessage[];
+  history: AgentChatHistoryEntry[];
 }
 
 const STARTER_PROMPTS = [
@@ -97,6 +103,7 @@ const AGENT_PANEL_ONBOARDING_ARMED_STORAGE_KEY =
   'producer-player.agent-panel-onboarding-armed';
 const AGENT_ACTIVE_CHAT_STORAGE_KEY = 'producer-player.agent-chat-active.v1';
 const AGENT_CHAT_HISTORY_STORAGE_KEY = 'producer-player.agent-chat-history.v1';
+const AGENT_CHAT_PERSISTENCE_STORAGE_KEY = 'producer-player.agent-chat-persistence.v2';
 const AGENT_AUTO_OPEN_DELAY_DEFAULT_MS = 2 * 60 * 1000;
 const AGENT_AUTO_OPEN_DELAY_TEST_MS = 1200;
 const AGENT_CHAT_HISTORY_LIMIT = 20;
@@ -224,8 +231,8 @@ function sanitizeStoredMessages(value: unknown): AgentChatMessage[] {
     );
 }
 
-function readStoredActiveChat(): StoredActiveChat {
-  const fallback: StoredActiveChat = {
+function readStoredLegacyActiveChat(): StoredLegacyActiveChat {
+  const fallback: StoredLegacyActiveChat = {
     id: createConversationId(),
     messages: [],
   };
@@ -253,17 +260,81 @@ function readStoredActiveChat(): StoredActiveChat {
   }
 }
 
-function writeStoredActiveChat(chat: StoredActiveChat): void {
-  localStorage.setItem(
-    AGENT_ACTIVE_CHAT_STORAGE_KEY,
-    JSON.stringify({
-      id: chat.id,
-      messages: normalizeMessagesForPersistence(chat.messages),
-    })
+function sanitizeStoredHistoryEntry(value: unknown): AgentChatHistoryEntry | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const messages = sanitizeStoredMessages(value.messages);
+  if (messages.length === 0) {
+    return null;
+  }
+
+  const id =
+    typeof value.id === 'string' && value.id.trim().length > 0
+      ? value.id
+      : createConversationId();
+  const title =
+    typeof value.title === 'string' && value.title.trim().length > 0
+      ? value.title
+      : buildHistoryTitle(messages);
+  const updatedAt =
+    typeof value.updatedAt === 'number' && Number.isFinite(value.updatedAt)
+      ? value.updatedAt
+      : Math.max(...messages.map((message) => message.timestamp), Date.now());
+
+  return {
+    id,
+    title,
+    updatedAt,
+    messages: normalizeMessagesForPersistence(messages),
+  };
+}
+
+function normalizeChatHistory(
+  history: AgentChatHistoryEntry[],
+  activeConversationId: string
+): AgentChatHistoryEntry[] {
+  const byId = new Map<string, AgentChatHistoryEntry>();
+
+  for (const entry of history) {
+    if (entry.messages.length === 0) {
+      continue;
+    }
+
+    const normalizedEntry: AgentChatHistoryEntry = {
+      ...entry,
+      title: entry.title.trim().length > 0 ? entry.title : buildHistoryTitle(entry.messages),
+      updatedAt:
+        Number.isFinite(entry.updatedAt) && entry.updatedAt > 0
+          ? entry.updatedAt
+          : Math.max(...entry.messages.map((message) => message.timestamp), Date.now()),
+      messages: normalizeMessagesForPersistence(entry.messages),
+    };
+
+    const existing = byId.get(normalizedEntry.id);
+    if (!existing || normalizedEntry.updatedAt >= existing.updatedAt) {
+      byId.set(normalizedEntry.id, normalizedEntry);
+    }
+  }
+
+  const sorted = [...byId.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+
+  if (sorted.length <= AGENT_CHAT_HISTORY_LIMIT) {
+    return sorted;
+  }
+
+  const activeIndex = sorted.findIndex((entry) => entry.id === activeConversationId);
+  if (activeIndex < 0 || activeIndex < AGENT_CHAT_HISTORY_LIMIT) {
+    return sorted.slice(0, AGENT_CHAT_HISTORY_LIMIT);
+  }
+
+  return [...sorted.slice(0, AGENT_CHAT_HISTORY_LIMIT - 1), sorted[activeIndex]].sort(
+    (left, right) => right.updatedAt - left.updatedAt
   );
 }
 
-function readStoredChatHistory(): AgentChatHistoryEntry[] {
+function readStoredLegacyChatHistory(): AgentChatHistoryEntry[] {
   const raw = localStorage.getItem(AGENT_CHAT_HISTORY_STORAGE_KEY);
   if (!raw) return [];
 
@@ -271,52 +342,131 @@ function readStoredChatHistory(): AgentChatHistoryEntry[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
 
-    return parsed
-      .map((entry) => {
-        if (!isRecord(entry)) return null;
+    const entries = parsed
+      .map((entry) => sanitizeStoredHistoryEntry(entry))
+      .filter((entry): entry is AgentChatHistoryEntry => entry !== null);
 
-        const id =
-          typeof entry.id === 'string' && entry.id.trim().length > 0
-            ? entry.id
-            : createConversationId();
-        const title =
-          typeof entry.title === 'string' && entry.title.trim().length > 0
-            ? entry.title
-            : 'Untitled chat';
-        const updatedAt =
-          typeof entry.updatedAt === 'number' && Number.isFinite(entry.updatedAt)
-            ? entry.updatedAt
-            : Date.now();
-        const messages = sanitizeStoredMessages(entry.messages);
-
-        if (messages.length === 0) {
-          return null;
-        }
-
-        return {
-          id,
-          title,
-          updatedAt,
-          messages,
-        } satisfies AgentChatHistoryEntry;
-      })
-      .filter((entry): entry is AgentChatHistoryEntry => entry !== null)
-      .slice(0, AGENT_CHAT_HISTORY_LIMIT);
+    return normalizeChatHistory(entries, '');
   } catch {
     return [];
   }
 }
 
-function writeStoredChatHistory(history: AgentChatHistoryEntry[]): void {
-  localStorage.setItem(
-    AGENT_CHAT_HISTORY_STORAGE_KEY,
-    JSON.stringify(
-      history.slice(0, AGENT_CHAT_HISTORY_LIMIT).map((entry) => ({
-        ...entry,
-        messages: normalizeMessagesForPersistence(entry.messages),
-      }))
-    )
+function createHistoryEntryFromConversation(
+  conversationId: string,
+  messages: AgentChatMessage[]
+): AgentChatHistoryEntry {
+  const normalizedMessages = normalizeMessagesForPersistence(messages);
+  const updatedAt = Math.max(
+    ...normalizedMessages.map((message) => message.timestamp),
+    Date.now()
   );
+
+  return {
+    id: conversationId,
+    title: buildHistoryTitle(normalizedMessages),
+    updatedAt,
+    messages: normalizedMessages,
+  };
+}
+
+function upsertChatHistoryEntry(
+  history: AgentChatHistoryEntry[],
+  entry: AgentChatHistoryEntry,
+  activeConversationId: string
+): AgentChatHistoryEntry[] {
+  return normalizeChatHistory(
+    [entry, ...history.filter((existingEntry) => existingEntry.id !== entry.id)],
+    activeConversationId
+  );
+}
+
+function writeStoredChatPersistence(state: StoredAgentChatPersistence): void {
+  const baseHistory = normalizeChatHistory(state.history, state.activeConversationId);
+  const nextHistory =
+    state.activeMessages.length > 0
+      ? upsertChatHistoryEntry(
+          baseHistory,
+          createHistoryEntryFromConversation(
+            state.activeConversationId,
+            state.activeMessages
+          ),
+          state.activeConversationId
+        )
+      : baseHistory;
+
+  const payload = {
+    version: 2,
+    activeConversationId: state.activeConversationId,
+    history: nextHistory.map((entry) => ({
+      ...entry,
+      messages: normalizeMessagesForPersistence(entry.messages),
+    })),
+  };
+
+  try {
+    localStorage.setItem(AGENT_CHAT_PERSISTENCE_STORAGE_KEY, JSON.stringify(payload));
+  } catch (error: unknown) {
+    console.warn('[producer-player:agent-chat] could not persist chat history', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function readStoredChatPersistence(): StoredAgentChatPersistence {
+  const raw = localStorage.getItem(AGENT_CHAT_PERSISTENCE_STORAGE_KEY);
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+
+      if (isRecord(parsed) && parsed.version === 2) {
+        const activeConversationId =
+          typeof parsed.activeConversationId === 'string' &&
+          parsed.activeConversationId.trim().length > 0
+            ? parsed.activeConversationId
+            : createConversationId();
+
+        const storedHistory = Array.isArray(parsed.history)
+          ? parsed.history
+              .map((entry) => sanitizeStoredHistoryEntry(entry))
+              .filter((entry): entry is AgentChatHistoryEntry => entry !== null)
+          : [];
+
+        const history = normalizeChatHistory(storedHistory, activeConversationId);
+        const activeMessages =
+          history.find((entry) => entry.id === activeConversationId)?.messages ?? [];
+
+        return {
+          activeConversationId,
+          activeMessages,
+          history,
+        };
+      }
+    } catch {
+      // Fall through to legacy migration.
+    }
+  }
+
+  const legacyActiveChat = readStoredLegacyActiveChat();
+  let history = normalizeChatHistory(readStoredLegacyChatHistory(), legacyActiveChat.id);
+
+  if (legacyActiveChat.messages.length > 0) {
+    history = upsertChatHistoryEntry(
+      history,
+      createHistoryEntryFromConversation(legacyActiveChat.id, legacyActiveChat.messages),
+      legacyActiveChat.id
+    );
+  }
+
+  const migratedState: StoredAgentChatPersistence = {
+    activeConversationId: legacyActiveChat.id,
+    activeMessages: legacyActiveChat.messages,
+    history,
+  };
+
+  writeStoredChatPersistence(migratedState);
+  return migratedState;
 }
 
 function buildHistoryTitle(messages: AgentChatMessage[]): string {
@@ -351,17 +501,19 @@ export function AgentChatPanel({
   getAnalysisContext,
   promptRequest = null,
 }: AgentChatPanelProps): JSX.Element {
-  const initialActiveChatRef = useRef<StoredActiveChat>(readStoredActiveChat());
+  const initialChatPersistenceRef = useRef<StoredAgentChatPersistence>(
+    readStoredChatPersistence()
+  );
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState(
-    initialActiveChatRef.current.id
+    initialChatPersistenceRef.current.activeConversationId
   );
   const [messages, setMessages] = useState<AgentChatMessage[]>(
-    initialActiveChatRef.current.messages
+    initialChatPersistenceRef.current.activeMessages
   );
-  const [chatHistory, setChatHistory] = useState<AgentChatHistoryEntry[]>(() =>
-    readStoredChatHistory()
+  const [chatHistory, setChatHistory] = useState<AgentChatHistoryEntry[]>(
+    initialChatPersistenceRef.current.history
   );
   const [historyOpen, setHistoryOpen] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
@@ -420,12 +572,21 @@ export function AgentChatPanel({
   const effectiveSystemPrompt = systemPrompt.trim() || DEFAULT_AGENT_SYSTEM_PROMPT;
 
   useEffect(() => {
-    writeStoredActiveChat({ id: activeConversationId, messages });
+    if (messages.length === 0) {
+      return;
+    }
+
+    const entry = createHistoryEntryFromConversation(activeConversationId, messages);
+    setChatHistory((prev) => upsertChatHistoryEntry(prev, entry, activeConversationId));
   }, [activeConversationId, messages]);
 
   useEffect(() => {
-    writeStoredChatHistory(chatHistory);
-  }, [chatHistory]);
+    writeStoredChatPersistence({
+      activeConversationId,
+      activeMessages: messages,
+      history: chatHistory,
+    });
+  }, [activeConversationId, chatHistory, messages]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -614,29 +775,13 @@ export function AgentChatPanel({
     setIsStreaming(false);
   }, [sessionActive]);
 
-  const archiveCurrentConversation = useCallback(() => {
-    if (messages.length === 0) {
-      return;
-    }
-
-    const entry: AgentChatHistoryEntry = {
-      id: activeConversationId,
-      title: buildHistoryTitle(messages),
-      updatedAt: Date.now(),
-      messages: normalizeMessagesForPersistence(messages),
-    };
-
-    setChatHistory((prev) => [entry, ...prev.filter((item) => item.id !== entry.id)].slice(0, AGENT_CHAT_HISTORY_LIMIT));
-  }, [activeConversationId, messages]);
-
   const handleNewChat = useCallback(() => {
-    archiveCurrentConversation();
     resetActiveSession();
     setMessages([]);
     setActiveConversationId(createConversationId());
     setHistoryOpen(false);
     userScrolledUpRef.current = false;
-  }, [archiveCurrentConversation, resetActiveSession]);
+  }, [resetActiveSession]);
 
   const handleRestoreHistory = useCallback(
     (conversationId: string) => {
@@ -646,7 +791,6 @@ export function AgentChatPanel({
       resetActiveSession();
       setMessages(normalizeMessagesForPersistence(selected.messages));
       setActiveConversationId(selected.id);
-      setChatHistory((prev) => prev.filter((entry) => entry.id !== conversationId));
       setHistoryOpen(false);
       setHelpDialogOpen(false);
       userScrolledUpRef.current = false;
@@ -654,9 +798,24 @@ export function AgentChatPanel({
     [chatHistory, resetActiveSession]
   );
 
-  const handleDeleteHistoryEntry = useCallback((conversationId: string) => {
-    setChatHistory((prev) => prev.filter((entry) => entry.id !== conversationId));
-  }, []);
+  const handleDeleteHistoryEntry = useCallback(
+    (conversationId: string) => {
+      setChatHistory((prev) =>
+        normalizeChatHistory(
+          prev.filter((entry) => entry.id !== conversationId),
+          activeConversationId
+        )
+      );
+
+      if (conversationId === activeConversationId) {
+        resetActiveSession();
+        setMessages([]);
+        setActiveConversationId(createConversationId());
+        userScrolledUpRef.current = false;
+      }
+    },
+    [activeConversationId, resetActiveSession]
+  );
 
   const handleTogglePanel = useCallback(() => {
     setIsOpen((prev) => {
@@ -928,42 +1087,6 @@ export function AgentChatPanel({
     [resetActiveSession]
   );
 
-  const handleResetAssistantSettings = useCallback(() => {
-    const defaultProvider: AgentProviderId = 'claude';
-
-    resetActiveSession();
-
-    // Reset assistant-specific settings only. Intentionally does not touch
-    // shared user data (song ordering, checklist items, ratings, etc.).
-    localStorage.removeItem(AGENT_PROVIDER_STORAGE_KEY);
-    localStorage.removeItem(AGENT_SYSTEM_PROMPT_STORAGE_KEY);
-    (['claude', 'codex'] as const).forEach((providerId) => {
-      localStorage.removeItem(`${AGENT_MODEL_STORAGE_PREFIX}${providerId}`);
-      localStorage.removeItem(`${AGENT_THINKING_STORAGE_PREFIX}${providerId}`);
-    });
-
-    setProvider(defaultProvider);
-    setModelByProvider({
-      claude: DEFAULT_AGENT_MODEL_BY_PROVIDER.claude,
-      codex: DEFAULT_AGENT_MODEL_BY_PROVIDER.codex,
-    });
-    setThinkingByProvider({
-      claude: DEFAULT_AGENT_THINKING_BY_PROVIDER.claude,
-      codex: DEFAULT_AGENT_THINKING_BY_PROVIDER.codex,
-    });
-    setSystemPrompt(DEFAULT_AGENT_SYSTEM_PROMPT);
-    setProviderAvailable(null);
-
-    void window.producerPlayer
-      .agentCheckProvider(defaultProvider)
-      .then((available) => {
-        setProviderAvailable(available);
-      })
-      .catch(() => {
-        setProviderAvailable(null);
-      });
-  }, [resetActiveSession]);
-
   const providerUnavailableCopy =
     provider === 'claude'
       ? {
@@ -1145,7 +1268,6 @@ export function AgentChatPanel({
             onModelChange={handleModelChange}
             onThinkingChange={handleThinkingChange}
             onSystemPromptChange={handleSystemPromptChange}
-            onResetSystemPrompt={handleResetAssistantSettings}
             onNewChat={handleNewChat}
             onOpenHistory={() => setHistoryOpen(true)}
             hasHistory={chatHistory.length > 0}
@@ -1180,14 +1302,82 @@ export function AgentChatPanel({
         )}
 
         <div
-          className="agent-timeline"
+          className={`agent-timeline ${helpDialogOpen ? 'agent-timeline--help' : ''}`}
           ref={timelineRef}
           onScroll={handleTimelineScroll}
           role="log"
           aria-live="polite"
           data-testid="agent-timeline"
         >
-          {historyOpen ? (
+          {helpDialogOpen ? (
+            <div
+              className="agent-help-state"
+              role="region"
+              aria-label="Assistant setup help"
+              data-testid="agent-help-dialog"
+            >
+              <div className="agent-help-dialog agent-help-dialog--inline">
+                <div className="agent-help-dialog-header">
+                  <h4>Set up Producey Boy</h4>
+                  <button
+                    type="button"
+                    className="agent-help-close"
+                    onClick={() => setHelpDialogOpen(false)}
+                    data-testid="agent-help-close"
+                    title="Close help"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p>
+                  This assistant uses your local CLI login, so you can run sessions through your
+                  existing subscription without wiring separate per-message API billing in-app.
+                </p>
+                <p className="agent-help-note">
+                  Long-chat note: automatic compaction has not been verified in this desktop flow
+                  yet. If the context gets too long or stale, use <strong>Start new chat</strong>{' '}
+                  in Settings to reset the conversation cleanly.
+                </p>
+                <ol className="agent-help-steps">
+                  {EMPTY_CHAT_SETUP_STEPS.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+                <div className="agent-help-commands">
+                  <div>
+                    <strong>Claude Code</strong>
+                    <code>npm i -g @anthropic-ai/claude-code</code>
+                    <code>claude auth</code>
+                  </div>
+                  <div>
+                    <strong>Codex</strong>
+                    <code>codex --version</code>
+                    <code>codex login</code>
+                  </div>
+                </div>
+                <div className="agent-help-sources" data-testid="agent-help-tutorial-sources">
+                  <strong>Tutorial source context</strong>
+                  <p>
+                    For app walkthroughs, Producey Boy can ground instructions in the public
+                    Producer Player repo/docs:
+                  </p>
+                  <ul>
+                    {APP_TUTORIAL_SOURCE_LINKS.map((source) => (
+                      <li key={source.url}>
+                        <button
+                          type="button"
+                          className="agent-help-source-link"
+                          onClick={() => handleOpenTutorialSource(source.url)}
+                        >
+                          {source.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ) : historyOpen ? (
             <div className="agent-history-state" data-testid="agent-history-state">
               <div className="agent-history-header-row">
                 <h4 className="agent-history-title">Chat history</h4>
@@ -1204,7 +1394,7 @@ export function AgentChatPanel({
 
               {chatHistory.length === 0 ? (
                 <p className="agent-history-empty" data-testid="agent-history-empty">
-                  No saved chats yet. Start a new chat and your previous one will appear here.
+                  No saved chats yet. Messages are saved automatically and will appear here.
                 </p>
               ) : (
                 <ul className="agent-history-list">
@@ -1357,80 +1547,9 @@ export function AgentChatPanel({
           onSend={handleSendMessage}
           onInterrupt={handleInterrupt}
           isStreaming={isStreaming}
-          disabled={providerAvailable === false || historyOpen}
+          disabled={providerAvailable === false || historyOpen || helpDialogOpen}
         />
 
-        {helpDialogOpen && (
-          <div
-            className="agent-help-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Assistant setup help"
-            data-testid="agent-help-dialog"
-          >
-            <div className="agent-help-dialog">
-              <div className="agent-help-dialog-header">
-                <h4>Set up Producey Boy</h4>
-                <button
-                  type="button"
-                  className="agent-help-close"
-                  onClick={() => setHelpDialogOpen(false)}
-                  data-testid="agent-help-close"
-                  title="Close help"
-                >
-                  ✕
-                </button>
-              </div>
-              <p>
-                This assistant uses your local CLI login, so you can run sessions through your
-                existing subscription without wiring separate per-message API billing in-app.
-              </p>
-              <p className="agent-help-note">
-                Long-chat note: automatic compaction has not been verified in this desktop flow yet.
-                If the context gets too long or stale, use <strong>Start new chat</strong> in
-                Settings to reset the conversation cleanly. <strong>Reset settings</strong> only
-                resets assistant preferences and never touches song order or checklist data.
-              </p>
-              <ol className="agent-help-steps">
-                {EMPTY_CHAT_SETUP_STEPS.map((step) => (
-                  <li key={step}>{step}</li>
-                ))}
-              </ol>
-              <div className="agent-help-commands">
-                <div>
-                  <strong>Claude Code</strong>
-                  <code>npm i -g @anthropic-ai/claude-code</code>
-                  <code>claude auth</code>
-                </div>
-                <div>
-                  <strong>Codex</strong>
-                  <code>codex --version</code>
-                  <code>codex login</code>
-                </div>
-              </div>
-              <div className="agent-help-sources" data-testid="agent-help-tutorial-sources">
-                <strong>Tutorial source context</strong>
-                <p>
-                  For app walkthroughs, Producey Boy can ground instructions in the public Producer
-                  Player repo/docs:
-                </p>
-                <ul>
-                  {APP_TUTORIAL_SOURCE_LINKS.map((source) => (
-                    <li key={source.url}>
-                      <button
-                        type="button"
-                        className="agent-help-source-link"
-                        onClick={() => handleOpenTutorialSource(source.url)}
-                      >
-                        {source.label}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </>
   );

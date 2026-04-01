@@ -123,10 +123,6 @@ test.describe('Producer Player desktop shell', () => {
       await expect(page.getByTestId('naming-guide')).toContainText(
         'File names must end with v1, v2, v3'
       );
-      await expect(page.getByTestId('naming-guide')).toContainText('Required:');
-      await expect(page.getByTestId('naming-guide')).toContainText(
-        'Without the version suffix, Producer Player cannot reliably group exports under one song.'
-      );
       await expect(page.getByTestId('naming-guide')).not.toContainText('opinionated by design');
       await expect(page.getByRole('heading', { name: 'Album' })).toHaveCount(1);
       await expect(page.getByTestId('organize-button')).toHaveText('Organize');

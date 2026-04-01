@@ -50,7 +50,6 @@ import {
   computeChecklistOpacitiesByRemainingTodoCount,
 } from './checklistTodoOpacity';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
-import packageMetadata from '../../../package.json';
 import { ENABLE_AGENT_FEATURES, SHOW_3000AD_BRANDING } from './featureFlags';
 import { SpectrumAnalyzer } from './SpectrumAnalyzer';
 import { LevelMeter } from './LevelMeter';
@@ -66,7 +65,6 @@ import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
 import { HelpTooltip } from './HelpTooltip';
 import {
   AgentChatPanel,
-  OPEN_AGENT_SETTINGS_EVENT,
   type AgentChatPromptRequest,
 } from './AgentChatPanel';
 import type {
@@ -258,6 +256,12 @@ const EMPTY_ENVIRONMENT: ProducerPlayerEnvironment = {
   canRequestSecurityScopedBookmarks: false,
   isTestMode: false,
   platform: 'darwin',
+  appVersion: {
+    semanticVersion: '0.0.0',
+    buildNumber: null,
+    commitShortSha: null,
+    displayVersion: '0.0.0',
+  },
 };
 
 function fileManagerLabel(platform: string): string {
@@ -5000,10 +5004,6 @@ export function App(): JSX.Element {
     void runVoidTask(() => window.producerPlayer.openExternalUrl(url));
   }
 
-  function handleOpenAssistantSettings(): void {
-    window.dispatchEvent(new Event(OPEN_AGENT_SETTINGS_EVENT));
-  }
-
   function handleResetFullscreenMasteringSession(): void {
     setPlaybackPreviewMode('mix');
     setNormalizationPreviewEnabled(false);
@@ -6120,78 +6120,47 @@ export function App(): JSX.Element {
   return (
     <div className="app-shell" data-testid="app-shell">
       <aside className="panel panel-left">
-        <div className="sidebar-branding-container">
-          <button
-            type="button"
-            className={`sidebar-branding sidebar-branding-button${
-              ENABLE_AGENT_FEATURES ? ' sidebar-branding-button--with-settings' : ''
-            }`}
-            data-testid="producer-player-branding"
-            onClick={() => handleOpenSupportLink(PUBLIC_PAGES_URL)}
-            title="Open Producer Player website."
-          >
-            <img
-              src={producerPlayerIconUrl}
-              alt="Producer Player logo"
-              className="sidebar-branding-logo"
-              data-testid="producer-player-branding-logo"
-            />
-            <div className="sidebar-branding-copy">
-              <div className="sidebar-branding-title-row">
-                <strong>Producer Player</strong>
-                <span
-                  className="sidebar-branding-version"
-                  data-testid="producer-player-branding-version"
-                  title={`Current app version ${packageMetadata.version}`}
-                >
-                  {packageMetadata.version}
-                </span>
-              </div>
-              {SHOW_3000AD_BRANDING && (
-                <a
-                  className="sidebar-by-line"
-                  href="https://lnkfi.re/3000AD"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    void window.producerPlayer.openExternalUrl('https://lnkfi.re/3000AD');
-                  }}
-                  title="by 3000 AD"
-                  data-testid="sidebar-by-3000ad"
-                >
-                  by 3000 AD
-                </a>
-              )}
-            </div>
-          </button>
-
-          {ENABLE_AGENT_FEATURES ? (
-            <button
-              type="button"
-              className="sidebar-branding-settings-button"
-              data-testid="producer-player-settings-button"
-              onClick={handleOpenAssistantSettings}
-              title="Open assistant settings"
-              aria-label="Open assistant settings"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="12"
-                height="12"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+        <button
+          type="button"
+          className="sidebar-branding sidebar-branding-button"
+          data-testid="producer-player-branding"
+          onClick={() => handleOpenSupportLink(PUBLIC_PAGES_URL)}
+          title="Open Producer Player website."
+        >
+          <img
+            src={producerPlayerIconUrl}
+            alt="Producer Player logo"
+            className="sidebar-branding-logo"
+            data-testid="producer-player-branding-logo"
+          />
+          <div className="sidebar-branding-copy">
+            <div className="sidebar-branding-title-row">
+              <strong>Producer Player</strong>
+              <span
+                className="sidebar-branding-version"
+                data-testid="producer-player-branding-version"
+                title={`Current app version ${environment.appVersion.displayVersion}`}
               >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V22a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H2a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 9.44 4.1V4a2 2 0 1 1 4 0v.09c0 .67.4 1.28 1.01 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01c.24.61.84 1.01 1.51 1.01H20a2 2 0 1 1 0 4h-.09c-.67 0-1.28.4-1.51 1.01z" />
-              </svg>
-              <span>Settings</span>
-            </button>
-          ) : null}
-        </div>
+                {environment.appVersion.displayVersion}
+              </span>
+            </div>
+            {SHOW_3000AD_BRANDING && (
+              <a
+                className="sidebar-by-line"
+                href="https://lnkfi.re/3000AD"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void window.producerPlayer.openExternalUrl('https://lnkfi.re/3000AD');
+                }}
+                title="by 3000 AD"
+                data-testid="sidebar-by-3000ad"
+              >
+                by 3000 AD
+              </a>
+            )}
+          </div>
+        </button>
 
         <section className="folder-tools-card" data-testid="folder-tools-card">
           <section className="folder-add-cta">
@@ -6226,19 +6195,15 @@ export function App(): JSX.Element {
           <section
             className="naming-guide"
             data-testid="naming-guide"
-            title="Required naming format: file names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
+            title="File names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
           >
             <p className="naming-guide-copy">
               <span className="naming-guide-icon" aria-hidden="true">
-                ⚠️
+                💡
               </span>
               <span>
-                <span className="naming-guide-emphasis">Required:</span>{' '}
                 File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.
               </span>
-            </p>
-            <p className="naming-guide-detail">
-              Without the version suffix, Producer Player cannot reliably group exports under one song.
             </p>
           </section>
         </section>
@@ -7306,23 +7271,17 @@ export function App(): JSX.Element {
                   height={20}
                   isPlaying={isPlaying}
                 />
-                <div
-                  className="spectrum-solo-summary spectrum-solo-summary-mini"
-                  data-testid="player-dock-spectrum-solo-summary"
-                >
-                  <p
-                    className={`spectrum-solo-label spectrum-solo-label-mini${soloedBands.size === 0 ? ' spectrum-solo-label-mini-idle' : ''}`}
-                    data-testid="player-dock-spectrum-solo-label"
+                {soloedBands.size > 0 ? (
+                  <div
+                    className="spectrum-solo-summary spectrum-solo-summary-mini"
+                    data-testid="player-dock-spectrum-solo-summary"
                   >
-                    {soloedBands.size > 0 ? (
-                      <>
-                        Soloing: <strong>{soloedBandSummaryText}</strong>
-                      </>
-                    ) : (
-                      'Click a band to solo • Shift+click to exclude'
-                    )}
-                  </p>
-                  {soloedBands.size > 0 ? (
+                    <p
+                      className="spectrum-solo-label spectrum-solo-label-mini"
+                      data-testid="player-dock-spectrum-solo-label"
+                    >
+                      Soloing: <strong>{soloedBandSummaryText}</strong>
+                    </p>
                     <button
                       type="button"
                       className="ghost spectrum-clear-solo-button spectrum-clear-solo-button-mini"
@@ -7332,8 +7291,8 @@ export function App(): JSX.Element {
                     >
                       Clear
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
               </div>
               <button
                 type="button"
@@ -8112,7 +8071,7 @@ export function App(): JSX.Element {
             }}
           >
             <div className="analysis-overlay-header">
-              <div>
+              <div className="analysis-overlay-header-title">
                 <h2>
                   Mastering{selectedPlaybackVersion ? ` — ${selectedPlaybackVersion.fileName}` : ''}
                   {normalizationPreviewEnabled && (
@@ -8135,146 +8094,150 @@ export function App(): JSX.Element {
                   <p className="muted">LUFS · peaks · tone · refs · normalization</p>
                 )}
               </div>
-              {selectedPlaybackVersion ? (
-                <div className="analysis-overlay-transport" data-testid="analysis-overlay-transport">
+              <div className="analysis-overlay-header-controls">
+                {selectedPlaybackVersion ? (
+                  <div className="analysis-overlay-transport" data-testid="analysis-overlay-transport">
+                    <button
+                      type="button"
+                      className="analysis-overlay-transport-button analysis-overlay-skip-button"
+                      data-testid="analysis-overlay-skip-back-10"
+                      onClick={() => handleSkipSeconds(-10)}
+                      title="Skip back 10 seconds"
+                      aria-label="Skip back 10 seconds"
+                    >
+                      −10s
+                    </button>
+                    <button
+                      type="button"
+                      className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                      data-testid="analysis-overlay-skip-back-5"
+                      onClick={() => handleSkipSeconds(-5)}
+                      title="Skip back 5 seconds"
+                      aria-label="Skip back 5 seconds"
+                    >
+                      −5s
+                    </button>
+                    <button
+                      type="button"
+                      className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                      data-testid="analysis-overlay-skip-back-1"
+                      onClick={() => handleSkipSeconds(-1)}
+                      title="Skip back 1 second"
+                      aria-label="Skip back 1 second"
+                    >
+                      −1s
+                    </button>
+                    <button
+                      type="button"
+                      className="analysis-overlay-transport-button"
+                      data-testid="analysis-overlay-prev"
+                      onClick={() => handlePreviousTrack()}
+                      title="Previous track"
+                      aria-label="Previous track"
+                    >
+                      ◀◀
+                    </button>
+                    <button
+                      type="button"
+                      className="analysis-overlay-transport-button analysis-overlay-play-toggle"
+                      data-testid="analysis-overlay-play-toggle"
+                      data-playing={isPlaying ? 'true' : 'false'}
+                      aria-label={isPlaying ? 'Pause' : 'Play'}
+                      title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                      onClick={() => {
+                        void handleTogglePlayback();
+                      }}
+                    >
+                      <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="analysis-overlay-transport-button"
+                      data-testid="analysis-overlay-next"
+                      onClick={() => handleNextTrack()}
+                      title="Next track"
+                      aria-label="Next track"
+                    >
+                      ▶▶
+                    </button>
+                    <button
+                      type="button"
+                      className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                      data-testid="analysis-overlay-skip-forward-1"
+                      onClick={() => handleSkipSeconds(1)}
+                      title="Skip forward 1 second"
+                      aria-label="Skip forward 1 second"
+                    >
+                      +1s
+                    </button>
+                    <button
+                      type="button"
+                      className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                      data-testid="analysis-overlay-skip-forward-5"
+                      onClick={() => handleSkipSeconds(5)}
+                      title="Skip forward 5 seconds"
+                      aria-label="Skip forward 5 seconds"
+                    >
+                      +5s
+                    </button>
+                    <button
+                      type="button"
+                      className="analysis-overlay-transport-button analysis-overlay-skip-button"
+                      data-testid="analysis-overlay-skip-forward-10"
+                      onClick={() => handleSkipSeconds(10)}
+                      title="Skip forward 10 seconds"
+                      aria-label="Skip forward 10 seconds"
+                    >
+                      +10s
+                    </button>
+                    <span className="analysis-overlay-transport-time muted" data-testid="analysis-overlay-time">
+                      {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
+                    </span>
+                    <input
+                      type="range"
+                      className="analysis-overlay-transport-scrubber"
+                      min={0}
+                      max={durationSeconds > 0 ? durationSeconds : 0}
+                      step={0.1}
+                      value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
+                      disabled={durationSeconds <= 0}
+                      onChange={(event) => handleSeek(Number(event.target.value))}
+                      data-testid="analysis-overlay-scrubber"
+                      title="Scrub through the track"
+                    />
+                  </div>
+                ) : null}
+                <div className="analysis-overlay-header-actions">
                   <button
                     type="button"
-                    className="analysis-overlay-transport-button analysis-overlay-skip-button"
-                    data-testid="analysis-overlay-skip-back-10"
-                    onClick={() => handleSkipSeconds(-10)}
-                    title="Skip back 10 seconds"
-                    aria-label="Skip back 10 seconds"
+                    className="ghost"
+                    onClick={handleOpenChecklistFromMastering}
+                    disabled={!selectedPlaybackSongId}
+                    data-testid="analysis-open-checklist-button"
+                    title="Open this track's checklist."
                   >
-                    −10s
+                    Checklist
                   </button>
                   <button
                     type="button"
-                    className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
-                    data-testid="analysis-overlay-skip-back-5"
-                    onClick={() => handleSkipSeconds(-5)}
-                    title="Skip back 5 seconds"
-                    aria-label="Skip back 5 seconds"
+                    className="ghost"
+                    onClick={handleResetFullscreenMasteringSession}
+                    data-testid="analysis-overlay-reset-session"
+                    title="Reset temporary full-screen mastering session state."
                   >
-                    −5s
+                    Reset session
                   </button>
                   <button
                     type="button"
-                    className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
-                    data-testid="analysis-overlay-skip-back-1"
-                    onClick={() => handleSkipSeconds(-1)}
-                    title="Skip back 1 second"
-                    aria-label="Skip back 1 second"
+                    className="ghost"
+                    onClick={() => setAnalysisExpanded(false)}
+                    data-testid="analysis-close-button"
+                    title="Close the full-screen mastering view."
                   >
-                    −1s
+                    Close
                   </button>
-                  <button
-                    type="button"
-                    className="analysis-overlay-transport-button"
-                    data-testid="analysis-overlay-prev"
-                    onClick={() => handlePreviousTrack()}
-                    title="Previous track"
-                    aria-label="Previous track"
-                  >
-                    ◀◀
-                  </button>
-                  <button
-                    type="button"
-                    className="analysis-overlay-transport-button analysis-overlay-play-toggle"
-                    data-testid="analysis-overlay-play-toggle"
-                    data-playing={isPlaying ? 'true' : 'false'}
-                    aria-label={isPlaying ? 'Pause' : 'Play'}
-                    title={isPlaying ? 'Pause playback' : 'Resume playback'}
-                    onClick={() => {
-                      void handleTogglePlayback();
-                    }}
-                  >
-                    <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="analysis-overlay-transport-button"
-                    data-testid="analysis-overlay-next"
-                    onClick={() => handleNextTrack()}
-                    title="Next track"
-                    aria-label="Next track"
-                  >
-                    ▶▶
-                  </button>
-                  <button
-                    type="button"
-                    className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
-                    data-testid="analysis-overlay-skip-forward-1"
-                    onClick={() => handleSkipSeconds(1)}
-                    title="Skip forward 1 second"
-                    aria-label="Skip forward 1 second"
-                  >
-                    +1s
-                  </button>
-                  <button
-                    type="button"
-                    className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
-                    data-testid="analysis-overlay-skip-forward-5"
-                    onClick={() => handleSkipSeconds(5)}
-                    title="Skip forward 5 seconds"
-                    aria-label="Skip forward 5 seconds"
-                  >
-                    +5s
-                  </button>
-                  <button
-                    type="button"
-                    className="analysis-overlay-transport-button analysis-overlay-skip-button"
-                    data-testid="analysis-overlay-skip-forward-10"
-                    onClick={() => handleSkipSeconds(10)}
-                    title="Skip forward 10 seconds"
-                    aria-label="Skip forward 10 seconds"
-                  >
-                    +10s
-                  </button>
-                  <span className="analysis-overlay-transport-time muted" data-testid="analysis-overlay-time">
-                    {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
-                  </span>
-                  <input
-                    type="range"
-                    className="analysis-overlay-transport-scrubber"
-                    min={0}
-                    max={durationSeconds > 0 ? durationSeconds : 0}
-                    step={0.1}
-                    value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
-                    disabled={durationSeconds <= 0}
-                    onChange={(event) => handleSeek(Number(event.target.value))}
-                    data-testid="analysis-overlay-scrubber"
-                    title="Scrub through the track"
-                  />
                 </div>
-              ) : null}
-              <button
-                type="button"
-                className="ghost"
-                onClick={handleOpenChecklistFromMastering}
-                disabled={!selectedPlaybackSongId}
-                data-testid="analysis-open-checklist-button"
-                title="Open this track's checklist."
-              >
-                Checklist
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={handleResetFullscreenMasteringSession}
-                data-testid="analysis-overlay-reset-session"
-                title="Reset temporary full-screen mastering session state."
-              >
-                Reset session
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => setAnalysisExpanded(false)}
-                data-testid="analysis-close-button"
-                title="Close the full-screen mastering view."
-              >
-                Close
-              </button>
+              </div>
             </div>
 
             {selectedPlaybackVersion ? (
@@ -8293,7 +8256,7 @@ export function App(): JSX.Element {
                       <div className="analysis-panel-header-row">
                         <div className="analysis-section-header">
                           <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{usingReferenceSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high).\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
-                          <p className="analysis-section-subtitle">Real-time frequency content — click bands to solo frequency ranges</p>
+                          <p className="analysis-section-subtitle">Real-time frequency content — click a band to solo; Shift+click to exclude.</p>
                         </div>
                         {renderMasteringPanelDragHandle('fullscreen', 'visualizations')}
                       </div>

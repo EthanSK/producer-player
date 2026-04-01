@@ -26,7 +26,6 @@ interface AgentSettingsProps {
   onModelChange: (model: AgentModelId) => void;
   onThinkingChange: (thinking: AgentThinkingEffort) => void;
   onSystemPromptChange: (prompt: string) => void;
-  onResetSystemPrompt: () => void;
   onNewChat: () => void;
   onOpenHistory: () => void;
   hasHistory: boolean;
@@ -45,7 +44,6 @@ export function AgentSettings({
   onModelChange,
   onThinkingChange,
   onSystemPromptChange,
-  onResetSystemPrompt,
   onNewChat,
   onOpenHistory,
   hasHistory,
@@ -242,22 +240,6 @@ export function AgentSettings({
           spellCheck={false}
           data-testid="agent-system-prompt-input"
         />
-        <div className="agent-settings-system-prompt-actions">
-          <button
-            type="button"
-            className="agent-settings-system-prompt-reset"
-            onClick={onResetSystemPrompt}
-            disabled={controlsDisabled}
-            data-testid="agent-system-prompt-reset"
-            title="Reset assistant settings"
-          >
-            Reset settings
-          </button>
-        </div>
-        <p className="agent-settings-reset-help">
-          Resets assistant settings only (provider, model, thinking, prompt). Song order,
-          checklist items, ratings, and files are not changed.
-        </p>
       </div>
 
       <div className="agent-settings-section">

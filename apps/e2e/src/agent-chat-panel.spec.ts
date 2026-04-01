@@ -409,7 +409,7 @@ test.describe('Agent Chat Panel', () => {
       await expect(thinkingSelect).toHaveValue('high');
       await expect(systemPromptInput).toBeVisible();
       await expect(systemPromptInput).toHaveValue(/full-access mastering agent/i);
-      await expect(page.getByTestId('agent-system-prompt-reset')).toBeVisible();
+      await expect(page.getByTestId('agent-system-prompt-reset')).toHaveCount(0);
       await expect(page.getByTestId('agent-deepgram-key-help')).toContainText(
         'microphone button appears beside the message box'
       );
@@ -434,23 +434,17 @@ test.describe('Agent Chat Panel', () => {
     }
   });
 
-  test('sidebar settings button opens assistant settings', async () => {
-    const dirs = await createE2ETestDirectories('agent-panel-branding-settings-button');
+  test('sidebar does not render assistant settings button', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-branding-settings-button-removed');
     const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
       extraEnv: fakeCli.env,
     });
 
     try {
-      await expect(page.getByTestId('producer-player-settings-button')).toBeVisible();
-      const panel = page.getByTestId('agent-chat-panel');
-      await expect(panel).toBeAttached();
+      await expect(page.getByTestId('producer-player-settings-button')).toHaveCount(0);
+      await expect(page.getByTestId('producer-player-branding')).toBeVisible();
       await expect(page.getByTestId('agent-settings')).toHaveCount(0);
-
-      await page.getByTestId('producer-player-settings-button').click();
-
-      await expect(panel).toHaveClass(/agent-chat-panel--open/);
-      await expect(page.getByTestId('agent-settings')).toBeVisible();
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
@@ -482,87 +476,17 @@ test.describe('Agent Chat Panel', () => {
     }
   });
 
-  test('reset settings restores assistant defaults without touching shared user data', async () => {
-    const dirs = await createE2ETestDirectories('agent-panel-reset-settings');
+  test('settings menu does not render reset settings button', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-reset-settings-button-removed');
     const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
       extraEnv: fakeCli.env,
     });
 
-    const seededSharedState = {
-      ratings: {
-        'song-reset-test': 4,
-      },
-      checklists: {
-        'song-reset-test': [
-          {
-            id: 'check-reset-test',
-            text: 'Keep transient detail',
-            completed: false,
-            timestampSeconds: 12.5,
-            versionNumber: 2,
-          },
-        ],
-      },
-      projectFilePaths: {
-        'song-reset-test': '/tmp/reset-test.logicx',
-      },
-    };
-
     try {
       await page.getByTestId('agent-panel-toggle').click();
       await page.getByTestId('agent-settings-toggle').click();
-
-      await page.evaluate(async (state) => {
-        const bridge = (window as unknown as { producerPlayer: { setSharedUserState: (payload: unknown) => Promise<unknown> } }).producerPlayer;
-        await bridge.setSharedUserState(state);
-      }, seededSharedState);
-
-      const sharedStateBeforeReset = (await page.evaluate(async () => {
-        const bridge = (window as unknown as { producerPlayer: { getSharedUserState: () => Promise<unknown> } }).producerPlayer;
-        return bridge.getSharedUserState();
-      })) as {
-        ratings: Record<string, number>;
-        checklists: Record<string, unknown>;
-        projectFilePaths: Record<string, string>;
-      };
-
-      expect(sharedStateBeforeReset.ratings).toEqual(seededSharedState.ratings);
-      expect(sharedStateBeforeReset.checklists).toEqual(seededSharedState.checklists);
-      expect(sharedStateBeforeReset.projectFilePaths).toEqual(
-        seededSharedState.projectFilePaths
-      );
-
-      const modelSelect = page.getByTestId('agent-model-select');
-      const thinkingSelect = page.getByTestId('agent-thinking-select');
-      const systemPromptInput = page.getByTestId('agent-system-prompt-input');
-
-      await page.getByTestId('agent-provider-codex').click();
-      await modelSelect.selectOption('gpt-5.3-codex');
-      await thinkingSelect.selectOption('low');
-      await systemPromptInput.fill('Temporary reset test prompt');
-
-      await page.getByTestId('agent-system-prompt-reset').click();
-
-      await expect(page.getByTestId('agent-provider-claude')).toHaveClass(/--active/);
-      await expect(modelSelect).toHaveValue('claude-sonnet-4-6');
-      await expect(thinkingSelect).toHaveValue('high');
-      await expect(systemPromptInput).toHaveValue(/full-access mastering agent/i);
-
-      const sharedStateAfterReset = (await page.evaluate(async () => {
-        const bridge = (window as unknown as { producerPlayer: { getSharedUserState: () => Promise<unknown> } }).producerPlayer;
-        return bridge.getSharedUserState();
-      })) as {
-        ratings: Record<string, number>;
-        checklists: Record<string, unknown>;
-        projectFilePaths: Record<string, string>;
-      };
-
-      expect(sharedStateAfterReset.ratings).toEqual(seededSharedState.ratings);
-      expect(sharedStateAfterReset.checklists).toEqual(seededSharedState.checklists);
-      expect(sharedStateAfterReset.projectFilePaths).toEqual(
-        seededSharedState.projectFilePaths
-      );
+      await expect(page.getByTestId('agent-system-prompt-reset')).toHaveCount(0);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
@@ -592,6 +516,46 @@ test.describe('Agent Chat Panel', () => {
       await expect(page.getByTestId('agent-help-tutorial-sources')).toContainText(
         'Published docs / guide site'
       );
+
+      const helpToggleBounds = await page.getByTestId('agent-help-toggle').boundingBox();
+      expect(helpToggleBounds).not.toBeNull();
+      expect(helpToggleBounds!.height).toBeLessThanOrEqual(40);
+      expect(helpToggleBounds!.width).toBeLessThanOrEqual(40);
+
+      const headerButtonSizes = await page
+        .locator('.agent-panel-header-right .agent-header-button')
+        .evaluateAll((buttons) =>
+          buttons.map((button) => {
+            const rect = button.getBoundingClientRect();
+            return {
+              width: rect.width,
+              height: rect.height,
+            };
+          })
+        );
+
+      expect(headerButtonSizes).toHaveLength(4);
+      for (const size of headerButtonSizes) {
+        expect(size.height).toBeLessThanOrEqual(40);
+        expect(size.width).toBeLessThanOrEqual(40);
+      }
+
+      const timelineScrollState = await page.getByTestId('agent-timeline').evaluate((element) => {
+        const before = element.scrollTop;
+        element.scrollTop = 9999;
+
+        return {
+          before,
+          after: element.scrollTop,
+          scrollHeight: element.scrollHeight,
+          clientHeight: element.clientHeight,
+          overflowY: window.getComputedStyle(element).overflowY,
+        };
+      });
+
+      expect(timelineScrollState.overflowY).toBe('auto');
+      expect(timelineScrollState.scrollHeight).toBeGreaterThan(timelineScrollState.clientHeight);
+      expect(timelineScrollState.after).toBeGreaterThanOrEqual(timelineScrollState.before);
 
       await page.getByTestId('agent-help-close').dispatchEvent('click');
       await expect(helpDialog).toHaveCount(0);
@@ -1059,6 +1023,65 @@ test.describe('Agent Chat Panel', () => {
         const secondPrompt = String(codexLogs[1]?.stdin ?? '');
         expect(secondPrompt).toContain('<conversation-history>');
         expect(secondPrompt).toContain('User:\nPersist this chat');
+      } finally {
+        await electronApp.close();
+      }
+    } finally {
+      if (firstRun) {
+        await firstRun.electronApp.close();
+      }
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('chat history auto-saves current conversation and survives restart', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-history-autosave-restart');
+    const fakeCli = await createFakeCliEnvironment(dirs.userDataDirectory);
+
+    let firstRun: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+
+    try {
+      firstRun = await launchProducerPlayer(dirs.userDataDirectory, {
+        extraEnv: fakeCli.env,
+      });
+
+      await firstRun.page.getByTestId('agent-panel-toggle').click();
+
+      const firstInput = firstRun.page.getByTestId('agent-composer-input');
+      await firstInput.fill('History autosave check');
+      await firstRun.page.getByTestId('agent-send-button').click();
+      await expect(firstRun.page.getByTestId('agent-message-agent').last()).toContainText(
+        'CLAUDE(claude-sonnet-4-6): History autosave check'
+      );
+
+      await firstRun.page.getByTestId('agent-history-toggle').click();
+      await expect(firstRun.page.getByTestId('agent-history-state')).toBeVisible();
+      await expect(firstRun.page.getByTestId('agent-history-item')).toHaveCount(1);
+      await expect(firstRun.page.getByTestId('agent-history-item').first()).toContainText(
+        'History autosave check'
+      );
+
+      await firstRun.electronApp.close();
+      firstRun = null;
+
+      const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory, {
+        extraEnv: fakeCli.env,
+      });
+
+      try {
+        await page.getByTestId('agent-panel-toggle').click();
+        await page.getByTestId('agent-history-toggle').click();
+
+        await expect(page.getByTestId('agent-history-state')).toBeVisible();
+        await expect(page.getByTestId('agent-history-item')).toHaveCount(1);
+        await expect(page.getByTestId('agent-history-item').first()).toContainText(
+          'History autosave check'
+        );
+
+        await page.getByTestId('agent-history-open').first().click();
+        await expect(page.getByTestId('agent-message-user').first()).toContainText(
+          'History autosave check'
+        );
       } finally {
         await electronApp.close();
       }

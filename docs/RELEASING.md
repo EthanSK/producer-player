@@ -7,9 +7,14 @@ This repo ships downloadable desktop artifacts via:
 
 ## Version source of truth
 
-`package.json` is the single source of truth for the app version.
+`package.json` remains the source of truth for the **semantic app version** (for example `2.0.0`).
 
-The release workflow reads `package.json` directly and does **not** auto-bump semver from previous tags.
+Builds now embed an automatic build identifier so each push can produce a newer in-app version string without hand-editing `package.json`:
+
+- `build.<n>` where `<n>` comes from `PRODUCER_PLAYER_BUILD_NUMBER` (in CI this is `github.run_number`)
+- short commit SHA suffix when available
+
+In-app display format: `<semver>+build.<n>.<sha>` (for example `2.0.0+build.412.9d2ab7f4c1a2`).
 
 ## What the workflow publishes
 
@@ -32,38 +37,33 @@ Release behavior by trigger:
 
 ## Recommended release flow
 
-1. Bump `package.json` version.
-   - Patch by default:
+1. Keep `package.json` semver at the current milestone unless you intentionally want a new semantic release.
+   - Bump when appropriate (optional on routine pushes):
 
 ```bash
 npm run version:bump:patch
-```
-
-   - Minor for bigger user-facing feature work:
-
-```bash
+# or
 npm run version:bump:minor
 ```
 
-2. Run the version guards locally:
+2. Run version consistency checks locally:
 
 ```bash
 npm run version:check
-npm run version:bump:check
 ```
 
 3. Commit and push to `main`.
 4. Let the workflow publish:
-   - First build for that version → `v<package-version>`
-   - Additional builds for the same version → `v<package-version>-build.<run_number>`
+   - First build for that semver → `v<package-version>`
+   - Additional builds for the same semver → `v<package-version>-build.<run_number>`
 
-CI also enforces that release-relevant app/site/package changes cannot land without a `package.json` version bump.
+Routine pushes no longer require a manual semver bump just to move the in-app version forward.
 
 Optional explicit tag path:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 ## Manual artifact run (no release publish)

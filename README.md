@@ -161,7 +161,9 @@ See [docs/RELEASING.md](docs/RELEASING.md), [docs/MAC_APP_STORE.md](docs/MAC_APP
 
 ## Downloads
 
-Release versioning now uses a single source of truth: `package.json`.
+Release versioning now uses a single source of truth for semantic versioning: `package.json`.
+
+Pushes to `main`/`master` also embed automatic build metadata into the app version display (`<semver>+build.<run_number>.<sha>`), so each push advances the visible in-app version without requiring a manual semver edit.
 
 Pushes to `main`/`master` publish macOS, Linux, and Windows ZIP builds plus SHA-256 checksums under:
 

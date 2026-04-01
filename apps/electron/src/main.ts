@@ -22,6 +22,7 @@ import type {
   SongChecklistItem,
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
+  ProducerPlayerAppVersion,
   ProducerPlayerEnvironment,
   ProjectFileSelection,
   ReferenceTrackSelection,
@@ -38,6 +39,9 @@ import {
 } from '@producer-player/contracts';
 import { FileLibraryService } from '@producer-player/domain';
 import * as agentService from './agent-service';
+
+declare const __PRODUCER_PLAYER_BUILD_NUMBER__: string;
+declare const __PRODUCER_PLAYER_COMMIT_SHA__: string;
 
 const DEFAULT_RENDERER_DEV_URL =
   process.env.RENDERER_DEV_URL ?? 'http://127.0.0.1:4207';
@@ -178,6 +182,96 @@ interface ParsedSemver {
   prerelease: Array<number | string>;
 }
 
+interface ParsedReleaseVersion {
+  semanticVersion: string;
+  buildNumber: number | null;
+}
+
+function normalizeBuildNumber(value: string | undefined): number | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return Math.trunc(parsed);
+}
+
+function normalizeCommitShortSha(value: string | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!/^[0-9a-f]{7,40}$/i.test(normalized)) {
+    return null;
+  }
+
+  return normalized.slice(0, 12).toLowerCase();
+}
+
+function parseReleaseVersion(value: string): ParsedReleaseVersion {
+  const normalized = value.trim().replace(/^v/i, '');
+  const buildMatch = normalized.match(/^(.*)-build\.(\d+)$/i);
+
+  if (!buildMatch) {
+    return {
+      semanticVersion: normalized,
+      buildNumber: null,
+    };
+  }
+
+  return {
+    semanticVersion: (buildMatch[1] ?? normalized).trim(),
+    buildNumber: normalizeBuildNumber(buildMatch[2]),
+  };
+}
+
+function resolveAppVersionInfo(): ProducerPlayerAppVersion {
+  const semanticVersion = app.getVersion().trim() || '0.0.0';
+
+  const buildNumber = normalizeBuildNumber(
+    (__PRODUCER_PLAYER_BUILD_NUMBER__ ||
+      process.env.PRODUCER_PLAYER_BUILD_NUMBER ||
+      process.env.GITHUB_RUN_NUMBER) ?? ''
+  );
+
+  const commitShortSha = normalizeCommitShortSha(
+    (__PRODUCER_PLAYER_COMMIT_SHA__ ||
+      process.env.PRODUCER_PLAYER_COMMIT_SHA ||
+      process.env.GITHUB_SHA) ?? ''
+  );
+
+  const displaySegments: string[] = [];
+  if (buildNumber !== null) {
+    displaySegments.push(`build.${buildNumber}`);
+  }
+  if (commitShortSha) {
+    displaySegments.push(commitShortSha);
+  }
+
+  const displayVersion =
+    displaySegments.length > 0
+      ? `${semanticVersion}+${displaySegments.join('.')}`
+      : semanticVersion;
+
+  return {
+    semanticVersion,
+    buildNumber,
+    commitShortSha,
+    displayVersion,
+  };
+}
+
+const APP_VERSION_INFO = resolveAppVersionInfo();
 const UPDATE_CHECK_CACHE_MS = 60_000;
 
 let updateCheckInFlight: Promise<UpdateCheckResult> | null = null;
@@ -498,15 +592,18 @@ async function checkForUpdates(options: { force?: boolean } = {}): Promise<Updat
     return updateCheckInFlight;
   }
 
-  const currentVersion = app.getVersion();
+  const currentVersion = APP_VERSION_INFO.displayVersion;
+  const currentSemanticVersion = APP_VERSION_INFO.semanticVersion;
+  const currentBuildNumber = APP_VERSION_INFO.buildNumber;
 
   const runCheck = async (): Promise<UpdateCheckResult> => {
     try {
       const release = await fetchLatestGithubRelease();
       const latestVersion = release.tagName.replace(/^v/i, '').trim();
+      const latestParsedVersion = parseReleaseVersion(release.tagName);
 
-      const currentComparable = toComparableVersion(currentVersion);
-      const latestComparable = toComparableVersion(latestVersion);
+      const currentComparable = toComparableVersion(currentSemanticVersion);
+      const latestComparable = toComparableVersion(latestParsedVersion.semanticVersion);
 
       if (!currentComparable || !latestComparable) {
         throw new Error(
@@ -515,8 +612,23 @@ async function checkForUpdates(options: { force?: boolean } = {}): Promise<Updat
       }
 
       const versionDelta = compareSemver(latestComparable, currentComparable);
-      const status: UpdateCheckResult['status'] =
-        versionDelta > 0 ? 'update-available' : 'up-to-date';
+      let status: UpdateCheckResult['status'];
+
+      if (versionDelta > 0) {
+        status = 'update-available';
+      } else if (versionDelta < 0) {
+        status = 'up-to-date';
+      } else {
+        const latestBuildNumber = latestParsedVersion.buildNumber;
+        const buildDelta =
+          latestBuildNumber === null
+            ? 0
+            : currentBuildNumber === null
+              ? latestBuildNumber
+              : latestBuildNumber - currentBuildNumber;
+        status = buildDelta > 0 ? 'update-available' : 'up-to-date';
+      }
+
       const downloadUrl = resolveReleaseDownloadUrl(release);
 
       const result: UpdateCheckResult = {
@@ -2437,6 +2549,7 @@ function buildEnvironmentInfo(): ProducerPlayerEnvironment {
     canRequestSecurityScopedBookmarks: IS_MAC_APP_STORE_SANDBOX,
     isTestMode: IS_TEST_MODE,
     platform: process.platform,
+    appVersion: APP_VERSION_INFO,
   };
 }
 

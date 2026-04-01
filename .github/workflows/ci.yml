@@ -41,12 +41,6 @@ jobs:
           VERSION_BUMP_BASE: origin/${{ github.base_ref }}
         run: npm run version:bump:check
 
-      - name: Enforce version bump on main/master pushes
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-        env:
-          VERSION_BUMP_BASE: ${{ github.event.before }}
-        run: npm run version:bump:check
-
       - name: Typecheck workspaces
         run: |
           npm run build -w packages/contracts

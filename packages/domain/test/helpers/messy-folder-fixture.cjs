@@ -33,7 +33,7 @@ async function listRelativeFiles(rootDirectory) {
         continue;
       }
 
-      output.push(path.relative(rootDirectory, absolutePath));
+      output.push(path.relative(rootDirectory, absolutePath).replace(/\\/g, '/'));
     }
   }
 

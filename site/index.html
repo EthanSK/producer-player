@@ -28,14 +28,14 @@
     <meta property="og:url" content="https://ethansk.github.io/producer-player/" />
     <meta property="og:title" content="Producer Player — Desktop app for music producers" />
     <meta property="og:description" content="Producer Player is a desktop app for music producers with version tracking, mastering workspace, and album ordering." />
-    <meta property="og:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-hero.png" />
+    <meta property="og:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-overview.jpg" />
     <meta property="og:image:alt" content="Producer Player app interface screenshot" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Producer Player — Desktop app for music producers" />
     <meta name="twitter:description" content="Producer Player is a desktop app for music producers with version tracking, mastering workspace, and album ordering." />
-    <meta name="twitter:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-hero.png" />
+    <meta name="twitter:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-overview.jpg" />
     <meta name="twitter:image:alt" content="Producer Player app interface screenshot" />
 
     <script type="application/ld+json">
@@ -300,6 +300,64 @@
       .screenshot img {
         width: 100%;
         display: block;
+      }
+
+      /* ── Screenshots Gallery ── */
+      .screenshots-gallery {
+        padding: 80px 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .gallery-header {
+        text-align: center;
+        margin-bottom: 40px;
+      }
+
+      .gallery-header .features-kicker {
+        justify-content: center;
+      }
+
+      .gallery-title {
+        font-size: 30px;
+        font-weight: 700;
+        line-height: 1.15;
+        text-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+      }
+
+      .gallery-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+
+      .gallery-item {
+        margin: 0;
+      }
+
+      .gallery-item--wide {
+        grid-column: 1 / -1;
+      }
+
+      .gallery-item .screenshot {
+        margin-bottom: 0;
+      }
+
+      .gallery-item figcaption {
+        margin-top: 10px;
+        font-size: 13px;
+        color: var(--text-muted);
+        line-height: 1.5;
+        padding: 0 4px;
+      }
+
+      @media (max-width: 768px) {
+        .gallery-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .gallery-title {
+          font-size: 26px;
+        }
       }
 
       /* ── Video ── */
@@ -858,10 +916,98 @@
         <div class="wrap wrap--wide">
           <div class="screenshot">
             <img
-              src="./assets/screenshots/app-hero.png"
-              alt="Producer Player app interface"
+              src="./assets/screenshots/app-overview.jpg"
+              alt="Producer Player main app overview — song list, album art, version history, mastering metrics"
               loading="eager"
             />
+          </div>
+        </div>
+      </section>
+
+      <section class="screenshots-gallery" id="screenshots">
+        <div class="wrap wrap--wide">
+          <div class="gallery-header">
+            <div class="features-kicker">Screenshots</div>
+            <h2 class="gallery-title">See it in action</h2>
+          </div>
+
+          <div class="gallery-grid">
+            <figure class="gallery-item gallery-item--wide">
+              <div class="screenshot">
+                <img
+                  src="./assets/screenshots/mastering-spectrum-band-solo.jpg"
+                  alt="Fullscreen mastering — Spectrum Analyzer with band soloing, Level Meter, Reference Track panel"
+                  loading="lazy"
+                />
+              </div>
+              <figcaption>Spectrum Analyzer with band soloing — isolate frequency ranges to hear exactly what's happening</figcaption>
+            </figure>
+
+            <figure class="gallery-item gallery-item--wide">
+              <div class="screenshot">
+                <img
+                  src="./assets/screenshots/midside-spectrogram.jpg"
+                  alt="Mid/Side Spectrum, Loudness Distribution histogram, and Spectrogram heatmap"
+                  loading="lazy"
+                />
+              </div>
+              <figcaption>Mid/Side Spectrum, Loudness Distribution, and Spectrogram — deep analysis tools</figcaption>
+            </figure>
+
+            <figure class="gallery-item">
+              <div class="screenshot">
+                <img
+                  src="./assets/screenshots/reference-track-ab.jpg"
+                  alt="Reference Track panel with A/B comparison, Level Match, Loudness History, and Waveform"
+                  loading="lazy"
+                />
+              </div>
+              <figcaption>Reference track A/B comparison with level matching and loudness history</figcaption>
+            </figure>
+
+            <figure class="gallery-item">
+              <div class="screenshot">
+                <img
+                  src="./assets/screenshots/platform-normalization-ai.jpg"
+                  alt="Platform normalization targets for Spotify, Apple Music, YouTube, Tidal, Amazon Music with Produciboi AI agent"
+                  loading="lazy"
+                />
+              </div>
+              <figcaption>Platform normalization preview with Produciboi AI mastering agent</figcaption>
+            </figure>
+
+            <figure class="gallery-item">
+              <div class="screenshot">
+                <img
+                  src="./assets/screenshots/crest-factor-ai.jpg"
+                  alt="Dynamic Range / Crest Factor graph, Mid/Side Spectrum, Loudness Distribution with AI vocal analysis"
+                  loading="lazy"
+                />
+              </div>
+              <figcaption>Crest Factor, Mid/Side Spectrum, and AI-powered vocal frequency analysis</figcaption>
+            </figure>
+
+            <figure class="gallery-item">
+              <div class="screenshot">
+                <img
+                  src="./assets/screenshots/checklist-mini-player.jpg"
+                  alt="Checklist dialog with mini-player transport, version history, timestamped production notes"
+                  loading="lazy"
+                />
+              </div>
+              <figcaption>Production checklist with mini-player — pin notes to versions and timestamps</figcaption>
+            </figure>
+
+            <figure class="gallery-item">
+              <div class="screenshot">
+                <img
+                  src="./assets/screenshots/checklist-ai-agent.jpg"
+                  alt="Checklist with Produciboi AI agent providing vocal analysis and mastering recommendations"
+                  loading="lazy"
+                />
+              </div>
+              <figcaption>Checklist integrated with Produciboi AI agent for smart mastering recommendations</figcaption>
+            </figure>
           </div>
         </div>
       </section>

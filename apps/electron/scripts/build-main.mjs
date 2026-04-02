@@ -83,8 +83,42 @@ function resolveCommitSha() {
   }
 }
 
+function normalizeSemanticVersion(rawValue) {
+  if (typeof rawValue !== 'string') {
+    return null;
+  }
+
+  const normalized = rawValue.trim().replace(/^v/i, '');
+  if (!/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+async function resolveAppSemanticVersion() {
+  const explicitSemanticVersion = normalizeSemanticVersion(process.env.PRODUCER_PLAYER_APP_VERSION);
+  if (explicitSemanticVersion) {
+    return explicitSemanticVersion;
+  }
+
+  try {
+    const repositoryPackageJsonPath = resolve(repositoryDirectory, 'package.json');
+    const repositoryPackageJson = JSON.parse(await readFile(repositoryPackageJsonPath, 'utf8'));
+    const repositoryVersion = normalizeSemanticVersion(repositoryPackageJson?.version);
+    if (repositoryVersion) {
+      return repositoryVersion;
+    }
+  } catch {
+    // Ignore and use runtime fallback in the app.
+  }
+
+  return '';
+}
+
 const resolvedBuildNumber = resolveBuildNumber();
 const resolvedCommitSha = resolveCommitSha();
+const resolvedAppSemanticVersion = await resolveAppSemanticVersion();
 
 await build({
   entryPoints: [resolve(appDirectory, 'src/main.ts'), resolve(appDirectory, 'src/preload.ts')],
@@ -99,14 +133,16 @@ await build({
     '.js': '.cjs',
   },
   define: {
+    __PRODUCER_PLAYER_APP_VERSION__: JSON.stringify(resolvedAppSemanticVersion),
     __PRODUCER_PLAYER_BUILD_NUMBER__: JSON.stringify(resolvedBuildNumber),
     __PRODUCER_PLAYER_COMMIT_SHA__: JSON.stringify(resolvedCommitSha),
   },
   logLevel: 'info',
 });
 
-if (resolvedBuildNumber || resolvedCommitSha) {
+if (resolvedBuildNumber || resolvedCommitSha || resolvedAppSemanticVersion) {
   console.info('[producer-player/electron] Embedded app build metadata', {
+    semanticVersion: resolvedAppSemanticVersion || null,
     buildNumber: resolvedBuildNumber || null,
     commitSha: resolvedCommitSha || null,
   });

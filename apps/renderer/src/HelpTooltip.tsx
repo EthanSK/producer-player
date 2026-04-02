@@ -94,29 +94,11 @@ const helpTextStyle: CSSProperties = {
   paddingRight: 28, // keep clear of close button
 };
 
-const linkSectionStyle: CSSProperties = {
-  marginTop: 8,
-  paddingTop: 10,
-  borderTop: '1px solid rgba(156, 175, 196, 0.15)',
-  fontSize: 12,
-  lineHeight: 1.6,
-};
-
 const linkLabelStyle: CSSProperties = {
   color: '#7a8fa3',
   fontWeight: 600,
   marginBottom: 4,
   display: 'block',
-};
-
-const linkStyle: CSSProperties = {
-  color: '#6ea8fe',
-  textDecoration: 'none',
-  display: 'block',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  padding: '1px 0',
 };
 
 const videoSectionStyle: CSSProperties = {
@@ -180,7 +162,6 @@ function HelpModal({
 
   const tutorialLinks = links;
 
-  // Separate YouTube links (for thumbnails) from non-YouTube links.
   const youtubeLinks: (HelpTooltipLink & { videoId: string })[] = [];
   for (const link of tutorialLinks) {
     const id = extractYouTubeId(link.url);
@@ -189,8 +170,7 @@ function HelpModal({
     }
   }
 
-  // Keep thumbnail grid compact, but still expose all ranked links below.
-  const videoThumbs = youtubeLinks.slice(0, 3);
+  const videoThumbs = youtubeLinks.slice(0, 9);
 
   return createPortal(
     <div
@@ -217,37 +197,9 @@ function HelpModal({
 
         <div style={helpTextStyle}>{text}</div>
 
-        {tutorialLinks.length > 0 && (
-          <div style={linkSectionStyle}>
-            <span style={linkLabelStyle}>AI-ranked tutorials:</span>
-            {tutorialLinks.map((link, i) => (
-              <a
-                key={i}
-                href={link.url}
-                style={linkStyle}
-                onClick={(e) => {
-                  e.preventDefault();
-                  openExternalUrl(link.url);
-                }}
-                onMouseOver={(e) => {
-                  (e.target as HTMLElement).style.textDecoration = 'underline';
-                }}
-                onMouseOut={(e) => {
-                  (e.target as HTMLElement).style.textDecoration = 'none';
-                }}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={link.label}
-              >
-                {link.label}
-              </a>
-            ))}
-          </div>
-        )}
-
         {videoThumbs.length > 0 && (
           <div style={videoSectionStyle}>
-            <span style={linkLabelStyle}>Video tutorials:</span>
+            <span style={linkLabelStyle}>Video Tutorials (ranked by AI)</span>
             <div style={videoGridStyle}>
               {videoThumbs.map((v) => (
                 <div

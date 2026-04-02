@@ -1585,6 +1585,7 @@ export function App(): JSX.Element {
   const checklistInputFocusedRef = useRef(false);
   const checklistOverlayRef = useRef<HTMLDivElement | null>(null);
   const checklistModalCardRef = useRef<HTMLDivElement | null>(null);
+  const checklistItemScrollRegionRef = useRef<HTMLDivElement | null>(null);
   const checklistUnderlyingAnalysisPaneRef = useRef<HTMLElement | null>(null);
   const checklistUnderlyingSidePaneScrollRef = useRef<HTMLDivElement | null>(null);
   const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -5445,7 +5446,20 @@ export function App(): JSX.Element {
     checklistHighlightTimeoutsRef.current.set(itemId, timeout);
   }
 
-  function handleAddChecklistItem(): void {
+  function scrollChecklistToBottomAfterEnterAdd(): void {
+    const scrollRegion = checklistItemScrollRegionRef.current;
+    if (!scrollRegion) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollRegion.scrollTop = scrollRegion.scrollHeight;
+      });
+    });
+  }
+
+  function handleAddChecklistItem(options: { source: 'enter' | 'button' } = { source: 'button' }): void {
     const songId = checklistModalSongId;
     const itemText = checklistDraftText.trim();
 
@@ -5476,6 +5490,10 @@ export function App(): JSX.Element {
     ]);
 
     resetChecklistComposer(captureCurrentPlaybackTimestamp());
+
+    if (options.source === 'enter') {
+      scrollChecklistToBottomAfterEnterAdd();
+    }
   }
 
   function handleToggleChecklistItem(songId: string, itemId: string, completed: boolean): void {
@@ -6141,7 +6159,7 @@ export function App(): JSX.Element {
                 data-testid="producer-player-branding-version"
                 title={`Current app version ${environment.appVersion.displayVersion}`}
               >
-                {environment.appVersion.displayVersion}
+                {environment.appVersion.semanticVersion || environment.appVersion.displayVersion}
               </span>
             </div>
             {SHOW_3000AD_BRANDING && (
@@ -7333,6 +7351,24 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="skip-button skip-button-small"
+                    data-testid="player-skip-back-1"
+                    onClick={() => handleSkipSeconds(-1)}
+                    title="Skip back 1 second."
+                  >
+                    −1s
+                  </button>
+                  <button
+                    type="button"
+                    className="skip-button skip-button-small"
+                    data-testid="player-skip-forward-1"
+                    onClick={() => handleSkipSeconds(1)}
+                    title="Skip forward 1 second."
+                  >
+                    +1s
+                  </button>
+                  <button
+                    type="button"
+                    className="skip-button skip-button-small"
                     data-testid="player-skip-forward-5"
                     onClick={() => handleSkipSeconds(5)}
                     title="Skip forward 5 seconds."
@@ -7350,15 +7386,6 @@ export function App(): JSX.Element {
                   </button>
                 </div>
                 <div className="transport-main-row">
-                  <button
-                    type="button"
-                    className="skip-button skip-button-small"
-                    data-testid="player-skip-back-1"
-                    onClick={() => handleSkipSeconds(-1)}
-                    title="Skip back 1 second."
-                  >
-                    −1s
-                  </button>
                   <button
                     type="button"
                     data-testid="player-prev"
@@ -7387,15 +7414,6 @@ export function App(): JSX.Element {
                     title="Jump to next track in the current queue."
                   >
                     ▶▶
-                  </button>
-                  <button
-                    type="button"
-                    className="skip-button skip-button-small"
-                    data-testid="player-skip-forward-1"
-                    onClick={() => handleSkipSeconds(1)}
-                    title="Skip forward 1 second."
-                  >
-                    +1s
                   </button>
                 </div>
               </div>
@@ -7639,6 +7657,7 @@ export function App(): JSX.Element {
             </div>
 
             <div
+              ref={checklistItemScrollRegionRef}
               className="checklist-item-scroll-region"
               data-testid="song-checklist-scroll-region"
             >
@@ -7780,7 +7799,7 @@ export function App(): JSX.Element {
                     !event.altKey
                   ) {
                     event.preventDefault();
-                    handleAddChecklistItem();
+                    handleAddChecklistItem({ source: 'enter' });
                   }
                 }}
                 placeholder="Add a checklist item"
@@ -7815,7 +7834,7 @@ export function App(): JSX.Element {
               ) : null}
               <button
                 type="button"
-                onClick={handleAddChecklistItem}
+                onClick={() => handleAddChecklistItem({ source: 'button' })}
                 disabled={checklistDraftIsEmpty}
                 data-testid="song-checklist-add"
                 title="Add this checklist item."

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, protocol, safeStorage, shell } from 'electron';
 import type { OpenDialogOptions } from 'electron';
-import { createReadStream, existsSync, promises as fs } from 'node:fs';
+import { createReadStream, existsSync, promises as fs, readFileSync } from 'node:fs';
 import { basename, dirname, extname, join, parse, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import type {
@@ -40,6 +40,7 @@ import {
 import { FileLibraryService } from '@producer-player/domain';
 import * as agentService from './agent-service';
 
+declare const __PRODUCER_PLAYER_APP_VERSION__: string;
 declare const __PRODUCER_PLAYER_BUILD_NUMBER__: string;
 declare const __PRODUCER_PLAYER_COMMIT_SHA__: string;
 
@@ -187,6 +188,32 @@ interface ParsedReleaseVersion {
   buildNumber: number | null;
 }
 
+function normalizeSemanticVersion(value: string | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/^v/i, '');
+  if (!/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function readPackageManifestSemanticVersion(): string | null {
+  try {
+    const packageManifestPath = resolve(__dirname, '../../../package.json');
+    const parsed = JSON.parse(readFileSync(packageManifestPath, 'utf8')) as {
+      version?: unknown;
+    };
+
+    return typeof parsed.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeBuildNumber(value: string | undefined): number | null {
   if (typeof value !== 'string') {
     return null;
@@ -236,7 +263,11 @@ function parseReleaseVersion(value: string): ParsedReleaseVersion {
 }
 
 function resolveAppVersionInfo(): ProducerPlayerAppVersion {
-  const semanticVersion = app.getVersion().trim() || '0.0.0';
+  const semanticVersion =
+    normalizeSemanticVersion(__PRODUCER_PLAYER_APP_VERSION__) ??
+    normalizeSemanticVersion(readPackageManifestSemanticVersion() ?? undefined) ??
+    normalizeSemanticVersion(app.getVersion()) ??
+    '0.0.0';
 
   const buildNumber = normalizeBuildNumber(
     (__PRODUCER_PLAYER_BUILD_NUMBER__ ||

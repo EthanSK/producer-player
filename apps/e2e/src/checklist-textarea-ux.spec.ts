@@ -153,7 +153,7 @@ test.describe('Checklist textarea UX', () => {
     }
   });
 
-  test('checklist transport tab flow uses natural order without forced input/loop jumps', async () => {
+  test('checklist Shift+Tab toggles focus between transport buttons and the composer input', async () => {
     const directories = await createE2ETestDirectories('producer-player-checklist-tab-flow');
 
     await writeFixtureFiles(directories.fixtureDirectory, [
@@ -165,12 +165,15 @@ test.describe('Checklist textarea UX', () => {
     try {
       await linkSingleSongAndOpenChecklist(page, directories.fixtureDirectory);
 
+      const composer = page.getByTestId('song-checklist-input');
       const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
-      const skipForwardTwo = page.getByTestId('song-checklist-skip-forward-2');
       const skipForwardFive = page.getByTestId('song-checklist-skip-forward-5');
       const skipForwardTen = page.getByTestId('song-checklist-skip-forward-10');
       const miniPlayerPrev = page.getByTestId('song-checklist-mini-player-prev');
       const miniPlayerNext = page.getByTestId('song-checklist-mini-player-next');
+      const shiftTabHint = page.getByTestId('song-checklist-shift-tab-hint');
+
+      await expect(shiftTabHint).toHaveText('Shift+Tab toggles input ↔ transport focus');
 
       await skipForwardTen.focus();
       await skipForwardTen.press('Tab');
@@ -178,11 +181,15 @@ test.describe('Checklist textarea UX', () => {
 
       await skipBackTen.focus();
       await skipBackTen.press('Shift+Tab');
-      await expect(miniPlayerPrev).toBeFocused();
+      await expect(composer).toBeFocused();
 
       await skipForwardFive.focus();
       await skipForwardFive.press('Shift+Tab');
-      await expect(skipForwardTwo).toBeFocused();
+      await expect(composer).toBeFocused();
+
+      await miniPlayerPrev.focus();
+      await miniPlayerPrev.press('Shift+Tab');
+      await expect(composer).toBeFocused();
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

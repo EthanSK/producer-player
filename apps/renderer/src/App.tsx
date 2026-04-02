@@ -7129,16 +7129,16 @@ export function App(): JSX.Element {
                       : 'Click to select. Clear search to reorder.'
                   }
                 >
-                  <div className="main-list-row-primary">
+                  <div className="main-list-row-top">
                     <strong className="main-list-row-title" data-testid="main-list-row-title">
                       {songRowTitle}
                     </strong>
-                    <p className="muted">{secondaryRowText}</p>
-                  </div>
-                  <div className="main-list-row-meta-group">
                     <span className="main-list-row-metadata" data-testid="main-list-row-metadata">
                       {songRowMetadataLabel}
                     </span>
+                  </div>
+                  <div className="main-list-row-bottom">
+                    <p className="muted main-list-row-secondary">{secondaryRowText}</p>
                     <div className="main-list-row-meta-footer">
                       {songProjectFilePath ? (
                         <div className="song-project-controls">
@@ -7649,7 +7649,7 @@ export function App(): JSX.Element {
           <div ref={checklistModalCardRef} className="checklist-modal-card">
             <div className="checklist-modal-header">
               <div>
-                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, and revisions you need to make for this track.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song.\n\nWhy you'd want to: Keep a structured record of what needs fixing in each song so nothing slips through the cracks between sessions.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes."} /></h2>
+                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, and revisions you need to make for this track.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song.\n\nWhy you'd want to: Keep a structured record of what needs fixing in each song so nothing slips through the cracks between sessions.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
                 <p className="muted">
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
@@ -7866,6 +7866,19 @@ export function App(): JSX.Element {
                     className="checklist-mini-player-button"
                     data-testid="song-checklist-mini-player-prev"
                     onClick={() => handlePreviousTrack({ syncChecklistModal: true })}
+                    onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
+                    onKeyDown={(event) => {
+                      if (event.key === ' ') {
+                        event.preventDefault();
+                        void handleTogglePlayback();
+                        return;
+                      }
+
+                      if (isUnmodifiedShiftTab(event)) {
+                        event.preventDefault();
+                        checklistComposerTextareaRef.current?.focus();
+                      }
+                    }}
                     title="Previous track"
                     aria-label="Previous track"
                   >
@@ -7884,6 +7897,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip back 10 seconds"
@@ -7902,6 +7921,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip back 5 seconds"
@@ -7919,6 +7944,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip back 2 seconds"
@@ -7941,6 +7972,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                     >
@@ -7956,6 +7993,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip forward 2 seconds"
@@ -7973,6 +8016,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip forward 5 seconds"
@@ -7990,6 +8039,12 @@ export function App(): JSX.Element {
                         if (event.key === ' ') {
                           event.preventDefault();
                           void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
                         }
                       }}
                       title="Skip forward 10 seconds"
@@ -8004,6 +8059,19 @@ export function App(): JSX.Element {
                     className="checklist-mini-player-button"
                     data-testid="song-checklist-mini-player-next"
                     onClick={() => handleNextTrack({ syncChecklistModal: true })}
+                    onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
+                    onKeyDown={(event) => {
+                      if (event.key === ' ') {
+                        event.preventDefault();
+                        void handleTogglePlayback();
+                        return;
+                      }
+
+                      if (isUnmodifiedShiftTab(event)) {
+                        event.preventDefault();
+                        checklistComposerTextareaRef.current?.focus();
+                      }
+                    }}
                     title="Next track"
                     aria-label="Next track"
                   >
@@ -8052,6 +8120,9 @@ export function App(): JSX.Element {
               >
                 Mastering <span aria-hidden="true">⤢</span>
               </button>
+              <span className="checklist-transport-hint" data-testid="song-checklist-shift-tab-hint">
+                Shift+Tab toggles input ↔ transport focus
+              </span>
               <button
                 type="button"
                 className="ghost"

@@ -1550,10 +1550,10 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 .main-list-row {
   width: 100%;
   text-align: left;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 6px;
+  align-content: center;
   padding: 8px 10px;
   min-height: 72px;
   border: 1px solid var(--border);
@@ -1581,30 +1581,46 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   outline-offset: 1px;
 }
 
-.main-list-row-primary {
+.main-list-row-top {
   min-width: 0;
-  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .main-list-row-title {
   display: block;
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.main-list-row-meta-group {
-  display: grid;
-  gap: 6px;
-  justify-items: end;
-  text-align: right;
-  flex-shrink: 0;
+.main-list-row-bottom {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.main-list-row-secondary {
+  margin: 0;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .main-list-row-meta-footer {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .main-list-row-metadata {
@@ -2209,6 +2225,17 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.checklist-transport-hint {
+  flex: 1 1 220px;
+  min-width: 160px;
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.82;
+  line-height: 1.2;
 }
 
 .checklist-mini-player {

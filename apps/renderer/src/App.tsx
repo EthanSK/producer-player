@@ -2772,6 +2772,29 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  // Forward uncaught renderer errors and rejections to main-process log file.
+  useEffect(() => {
+    function handleError(event: ErrorEvent): void {
+      void window.producerPlayer.rendererLog('error', `Uncaught error: ${event.message}`, {
+        filename: event.filename ?? undefined,
+        lineno: event.lineno,
+        colno: event.colno,
+      });
+    }
+
+    function handleRejection(event: PromiseRejectionEvent): void {
+      const reason = event.reason instanceof Error ? event.reason.message : String(event.reason);
+      void window.producerPlayer.rendererLog('error', `Unhandled rejection: ${reason}`);
+    }
+
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -6535,6 +6558,19 @@ export function App(): JSX.Element {
               {iCloudSyncError}
             </p>
           )}
+
+          <button
+            type="button"
+            className="ghost"
+            style={{ fontSize: '0.85em', marginTop: '0.4em', padding: '2px 6px' }}
+            data-testid="show-logs-button"
+            title="Open the folder containing app log files for troubleshooting."
+            onClick={() => {
+              void window.producerPlayer.openLogFolder();
+            }}
+          >
+            Show Logs
+          </button>
 
           {loading && <p className="muted">Loading snapshot…</p>}
           {error && <p className="error">{error}</p>}

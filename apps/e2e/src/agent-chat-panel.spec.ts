@@ -577,7 +577,20 @@ test.describe('Agent Chat Panel', () => {
 
       const micButton = page.getByTestId('agent-mic-button');
       await expect(micButton).toBeVisible();
-      await expect(micButton).toBeDisabled();
+
+      const voiceSupportedInComposerTest = await page.evaluate(() => {
+        return (
+          typeof navigator.mediaDevices?.getUserMedia === 'function' &&
+          typeof MediaRecorder !== 'undefined'
+        );
+      });
+
+      if (voiceSupportedInComposerTest) {
+        // Mic button is always clickable now (shows toast if no key configured)
+        await expect(micButton).toBeEnabled();
+      } else {
+        await expect(micButton).toBeDisabled();
+      }
 
       await input.fill('Hello agent');
       await expect(input).toHaveValue('Hello agent');
@@ -604,7 +617,19 @@ test.describe('Agent Chat Panel', () => {
 
       const micButton = page.getByTestId('agent-mic-button');
       await expect(micButton).toBeVisible();
-      await expect(micButton).toBeDisabled();
+
+      // Mic button is clickable even without a key (shows toast on click)
+      const voiceSupportedBeforeKey = await page.evaluate(() => {
+        return (
+          typeof navigator.mediaDevices?.getUserMedia === 'function' &&
+          typeof MediaRecorder !== 'undefined'
+        );
+      });
+      if (voiceSupportedBeforeKey) {
+        await expect(micButton).toBeEnabled();
+      } else {
+        await expect(micButton).toBeDisabled();
+      }
 
       await page.getByTestId('agent-settings-toggle').click();
       await page.getByTestId('agent-deepgram-key-input').fill('dg_test_key');
@@ -644,7 +669,6 @@ test.describe('Agent Chat Panel', () => {
 
       const micButton = page.getByTestId('agent-mic-button');
       await expect(micButton).toBeVisible();
-      await expect(micButton).toBeDisabled();
 
       const voiceSupported = await page.evaluate(() => {
         return (
@@ -652,6 +676,13 @@ test.describe('Agent Chat Panel', () => {
           typeof MediaRecorder !== 'undefined'
         );
       });
+
+      // Mic button is clickable even without a key (shows toast on click)
+      if (voiceSupported) {
+        await expect(micButton).toBeEnabled();
+      } else {
+        await expect(micButton).toBeDisabled();
+      }
 
       await page.getByTestId('agent-settings-toggle').click();
       await page.getByTestId('agent-stt-provider-assemblyai').click();
@@ -671,9 +702,12 @@ test.describe('Agent Chat Panel', () => {
       await page.getByTestId('agent-stt-provider-deepgram').click();
       await page.getByTestId('agent-settings-toggle').click();
 
-      await expect(micButton).toBeDisabled();
+      // Mic button stays enabled even after switching to a provider without a key
       if (voiceSupported) {
+        await expect(micButton).toBeEnabled();
         await expect(micButton).toHaveAttribute('title', /Deepgram/i);
+      } else {
+        await expect(micButton).toBeDisabled();
       }
 
       await page.getByTestId('agent-settings-toggle').click();

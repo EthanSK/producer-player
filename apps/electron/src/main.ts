@@ -5,6 +5,7 @@ import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, promises as fs, readFileSync } from 'node:fs';
 import { basename, dirname, extname, join, parse, resolve } from 'node:path';
 import { Readable } from 'node:stream';
+import log from 'electron-log/main';
 import type {
   AgentContext,
   AgentProviderId,
@@ -153,6 +154,27 @@ if (customUserDataDirectory) {
 }
 
 app.setName('Producer Player');
+
+// ---------------------------------------------------------------------------
+// Logging – electron-log writes to ~/Library/Logs/Producer Player/ on macOS,
+// %USERPROFILE%\AppData\Roaming\Producer Player\logs\ on Windows, and
+// ~/.config/Producer Player/logs/ on Linux.
+// ---------------------------------------------------------------------------
+log.transports.file.maxSize = 5 * 1024 * 1024; // 5 MB per file
+log.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}]{scope} {text}';
+log.transports.console.format = '[{h}:{i}:{s}.{ms}] [{level}]{scope} {text}';
+log.errorHandler.startCatching({
+  showDialog: false,
+  onError({ error, errorName }) {
+    log.error(`[${errorName}]`, error);
+  },
+});
+
+/** Resolve the directory that contains the log file(s). */
+function getLogDirectoryPath(): string {
+  const logFilePath = log.transports.file.getFile().path;
+  return dirname(logFilePath);
+}
 
 let mainWindow: BrowserWindow | null = null;
 let libraryService: FileLibraryService | null = null;
@@ -779,7 +801,7 @@ async function maybePromptForAvailableUpdate(): Promise<void> {
       await openUpdateDownloadUrl(result.downloadUrl ?? result.releaseUrl);
     }
   } catch (error: unknown) {
-    console.warn('[producer-player:update] automatic update check failed', {
+    log.warn('[producer-player:update] automatic update check failed', {
       error: error instanceof Error ? error.message : String(error),
     });
   } finally {
@@ -837,10 +859,10 @@ function registerGlobalMediaShortcuts(): void {
       });
 
       if (!registered) {
-        console.warn(`[producer-player:transport] accelerator not available: ${accelerator}`);
+        log.warn(`[producer-player:transport] accelerator not available: ${accelerator}`);
       }
     } catch (error: unknown) {
-      console.warn(`[producer-player:transport] failed to register ${accelerator}`, {
+      log.warn(`[producer-player:transport] failed to register ${accelerator}`, {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -1419,7 +1441,7 @@ function beginFolderSecurityScope(folderPath: string): void {
       linkedFolderSecurityAccessStops.set(resolvedPath, stopAccess as () => void);
     }
   } catch (error: unknown) {
-    console.warn('[producer-player:sandbox] Failed to start security-scoped access', {
+    log.warn('[producer-player:sandbox] Failed to start security-scoped access', {
       folderPath: resolvedPath,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -2198,7 +2220,7 @@ async function resolvePlaybackTranscodeCodec(sourcePath: string): Promise<Playba
       bitDepth,
     });
   } catch (error: unknown) {
-    console.warn('[producer-player:playback] could not probe AIFF format; defaulting to pcm_s24le', {
+    log.warn('[producer-player:playback] could not probe AIFF format; defaulting to pcm_s24le', {
       sourcePath,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -2424,7 +2446,7 @@ async function resolvePlaybackSource(filePath: string): Promise<PlaybackSourceIn
       originalFilePath: resolvedPath,
     };
   } catch (error) {
-    console.warn(
+    log.warn(
       `[producer-player:playback] failed to prepare AIFF source, falling back to direct file: ${resolvedPath}`,
       error
     );
@@ -2965,6 +2987,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
     let snapshot = service.getSnapshot();
     for (const [index, selectedPath] of result.filePaths.entries()) {
       const resolvedPath = resolve(selectedPath);
+      log.info('Linking folder via dialog', { path: resolvedPath });
       const bookmark = result.bookmarks?.[index];
 
       if (IS_MAC_APP_STORE_SANDBOX && (!bookmark || bookmark.length === 0)) {
@@ -2979,6 +3002,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
       try {
         snapshot = await service.linkFolder(resolvedPath);
       } catch (error) {
+        log.error('Failed to link folder', { path: resolvedPath, error: error instanceof Error ? error.message : String(error) });
         releaseFolderSecurityScope(resolvedPath);
         forgetFolderBookmark(resolvedPath);
         throw error;
@@ -3010,6 +3034,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.UNLINK_FOLDER, async (_event, folderId: string) => {
     const folder = service.getSnapshot().linkedFolders.find((entry) => entry.id === folderId);
+    log.info('Unlinking folder', { folderId, path: folder?.path ?? '(unknown)' });
     const snapshot = await service.unlinkFolder(folderId);
 
     if (folder) {
@@ -3020,7 +3045,10 @@ function registerIpcHandlers(service: FileLibraryService): void {
     return snapshot;
   });
 
-  ipcMain.handle(IPC_CHANNELS.RESCAN_LIBRARY, async () => service.rescanLibrary());
+  ipcMain.handle(IPC_CHANNELS.RESCAN_LIBRARY, async () => {
+    log.info('Rescanning library');
+    return service.rescanLibrary();
+  });
 
   ipcMain.handle(IPC_CHANNELS.ORGANIZE_OLD_VERSIONS, async () => {
     return service.organizeOldVersions();
@@ -3455,9 +3483,48 @@ function registerIpcHandlers(service: FileLibraryService): void {
       // ignore if doesn't exist
     }
   });
+
+  // ---- Logging IPC handlers ------------------------------------------------
+
+  ipcMain.handle(IPC_CHANNELS.OPEN_LOG_FOLDER, async () => {
+    const logDir = getLogDirectoryPath();
+    await shell.openPath(logDir);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_LOG_PATH, async () => {
+    return log.transports.file.getFile().path;
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.RENDERER_LOG,
+    async (
+      _event,
+      level: 'error' | 'warn' | 'info',
+      message: string,
+      meta?: Record<string, unknown>
+    ) => {
+      const safeLevel = (['error', 'warn', 'info'] as const).includes(level) ? level : 'info';
+      if (meta) {
+        log[safeLevel](`[renderer] ${message}`, meta);
+      } else {
+        log[safeLevel](`[renderer] ${message}`);
+      }
+    }
+  );
 }
 
 app.whenReady().then(async () => {
+  log.info('App ready', {
+    version: APP_VERSION_INFO.displayVersion,
+    platform: process.platform,
+    arch: process.arch,
+    electronVersion: process.versions.electron,
+    nodeVersion: process.versions.node,
+    sandboxed: IS_MAC_APP_STORE_SANDBOX,
+    testMode: IS_TEST_MODE,
+    logPath: log.transports.file.getFile().path,
+  });
+
   await registerPlaybackProtocol();
 
   const service = await ensureLibraryService();
@@ -3465,6 +3532,8 @@ app.whenReady().then(async () => {
   await createMainWindow();
   registerGlobalMediaShortcuts();
   scheduleAutomaticUpdateChecks();
+
+  log.info('App startup complete');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -3474,6 +3543,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  log.info('App quitting');
   globalShortcut.unregisterAll();
   clearAutomaticUpdateChecks();
   releaseAllFolderSecurityScopes();

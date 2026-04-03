@@ -229,6 +229,18 @@ const bridge: ProducerPlayerBridge = {
       ipcRenderer.removeListener(IPC_CHANNELS.AGENT_EVENT, wrappedListener);
     };
   },
+
+  async openLogFolder() {
+    await ipcRenderer.invoke(IPC_CHANNELS.OPEN_LOG_FOLDER);
+  },
+
+  async getLogPath() {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_LOG_PATH);
+  },
+
+  async rendererLog(level: 'error' | 'warn' | 'info', message: string, meta?: Record<string, unknown>) {
+    await ipcRenderer.invoke(IPC_CHANNELS.RENDERER_LOG, level, message, meta);
+  },
 };
 
 contextBridge.exposeInMainWorld('producerPlayer', bridge);

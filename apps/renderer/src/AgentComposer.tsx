@@ -18,14 +18,27 @@ interface AgentComposerProps {
   disabled?: boolean;
 }
 
+type MicState = 'idle' | 'recording' | 'processing' | 'error';
+
+interface ToastMessage {
+  id: number;
+  text: string;
+}
+
 const MAX_ROWS = 6;
 const MIN_ROWS = 1;
+const TOAST_AUTO_DISMISS_MS = 5000;
+const WAVEFORM_BAR_COUNT = 24;
+const WAVEFORM_UPDATE_INTERVAL_MS = 50;
 const DEEPGRAM_TRANSCRIBE_URL =
   'https://api.deepgram.com/v1/listen?model=nova-3&language=en&smart_format=true';
 const ASSEMBLYAI_UPLOAD_URL = 'https://api.assemblyai.com/v2/upload';
 const ASSEMBLYAI_TRANSCRIPT_URL = 'https://api.assemblyai.com/v2/transcript';
 const ASSEMBLYAI_POLL_INTERVAL_MS = 800;
 const ASSEMBLYAI_MAX_POLL_ATTEMPTS = 45;
+const MIC_ERROR_FLASH_MS = 600;
+
+let nextToastId = 1;
 
 function normalizeStoredKey(key: string | null): string | null {
   const trimmed = key?.trim();
@@ -196,6 +209,123 @@ async function transcribeAudioBlob(
   return transcribeWithAssemblyAi(audioBlob, key);
 }
 
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function errorToMessage(error: unknown): string {
+  if (error instanceof DOMException && error.name === 'NotAllowedError') {
+    return 'Microphone access denied. Check System Preferences \u2192 Privacy \u2192 Microphone';
+  }
+  if (error instanceof DOMException && error.name === 'NotFoundError') {
+    return 'No microphone found. Please connect a microphone and try again.';
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return 'An unknown error occurred.';
+}
+
+/* ── Toast component ────────────────────────────────────────── */
+
+function AgentToast({
+  message,
+  onDismiss,
+}: {
+  message: ToastMessage;
+  onDismiss: (id: number) => void;
+}): JSX.Element {
+  useEffect(() => {
+    const timer = setTimeout(() => onDismiss(message.id), TOAST_AUTO_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [message.id, onDismiss]);
+
+  return (
+    <div className="agent-toast" data-testid="agent-toast">
+      <span className="agent-toast-text">{message.text}</span>
+      <button
+        type="button"
+        className="agent-toast-close"
+        onClick={() => onDismiss(message.id)}
+        aria-label="Dismiss"
+      >
+        &times;
+      </button>
+    </div>
+  );
+}
+
+/* ── Waveform visualizer ────────────────────────────────────── */
+
+function RecordingWaveform({
+  analyser,
+  duration,
+}: {
+  analyser: AnalyserNode | null;
+  duration: number;
+}): JSX.Element {
+  const [barHeights, setBarHeights] = useState<number[]>(
+    () => Array.from({ length: WAVEFORM_BAR_COUNT }, () => 2)
+  );
+  const animFrameRef = useRef(0);
+
+  useEffect(() => {
+    if (!analyser) return;
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    let lastUpdate = 0;
+
+    const tick = (time: number) => {
+      if (time - lastUpdate >= WAVEFORM_UPDATE_INTERVAL_MS) {
+        lastUpdate = time;
+        analyser.getByteFrequencyData(dataArray);
+
+        const step = Math.max(1, Math.floor(bufferLength / WAVEFORM_BAR_COUNT));
+        const heights: number[] = [];
+        for (let i = 0; i < WAVEFORM_BAR_COUNT; i++) {
+          const idx = Math.min(i * step, bufferLength - 1);
+          // Map 0-255 to 2-20 (pixel height)
+          heights.push(2 + (dataArray[idx] / 255) * 18);
+        }
+        setBarHeights(heights);
+      }
+      animFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    animFrameRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+      }
+    };
+  }, [analyser]);
+
+  return (
+    <div className="agent-recording-overlay" data-testid="agent-recording-overlay">
+      <div className="agent-recording-indicator" />
+      <div className="agent-waveform" data-testid="agent-waveform">
+        {barHeights.map((h, i) => (
+          <div
+            key={i}
+            className="agent-waveform-bar"
+            style={{ height: `${h}px` }}
+          />
+        ))}
+      </div>
+      <span className="agent-recording-timer" data-testid="agent-recording-timer">
+        {formatDuration(duration)}
+      </span>
+    </div>
+  );
+}
+
+/* ── Main composer ──────────────────────────────────────────── */
+
 export function AgentComposer({
   onSend,
   onInterrupt,
@@ -203,14 +333,42 @@ export function AgentComposer({
   disabled = false,
 }: AgentComposerProps): JSX.Element {
   const [text, setText] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
+  const [micState, setMicState] = useState<MicState>('idle');
+  const [recordingDuration, setRecordingDuration] = useState(0);
   const [sttProvider, setSttProvider] = useState<AgentSttProviderId>(() =>
     readStoredAgentSttProvider()
   );
   const [hasSelectedProviderKey, setHasSelectedProviderKey] = useState(false);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const errorFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isRecording = micState === 'recording';
+  const isProcessing = micState === 'processing';
+
+  const showToast = useCallback((text: string) => {
+    const id = nextToastId;
+    nextToastId += 1;
+    setToasts((prev) => [...prev, { id, text }]);
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const flashError = useCallback(() => {
+    setMicState('error');
+    if (errorFlashTimerRef.current) clearTimeout(errorFlashTimerRef.current);
+    errorFlashTimerRef.current = setTimeout(() => {
+      setMicState('idle');
+      errorFlashTimerRef.current = null;
+    }, MIC_ERROR_FLASH_MS);
+  }, []);
 
   const refreshVoiceSettings = useCallback(async () => {
     try {
@@ -243,6 +401,17 @@ export function AgentComposer({
     };
   }, [refreshVoiceSettings]);
 
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+      if (errorFlashTimerRef.current) clearTimeout(errorFlashTimerRef.current);
+      if (audioContextRef.current) {
+        void audioContextRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
   // Auto-resize textarea
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -271,8 +440,41 @@ export function AgentComposer({
     [handleSend]
   );
 
+  const stopDurationTimer = useCallback(() => {
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
+  }, []);
+
+  const startDurationTimer = useCallback(() => {
+    setRecordingDuration(0);
+    stopDurationTimer();
+    durationIntervalRef.current = setInterval(() => {
+      setRecordingDuration((prev) => prev + 1);
+    }, 1000);
+  }, [stopDurationTimer]);
+
+  const cleanupAudioContext = useCallback(() => {
+    analyserRef.current = null;
+    if (audioContextRef.current) {
+      void audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+  }, []);
+
   const handleMicToggle = useCallback(async () => {
-    if (!hasSelectedProviderKey || disabled || isStreaming) {
+    if (disabled || isStreaming || isProcessing) {
+      return;
+    }
+
+    // If no API key, show a toast instead of silently doing nothing
+    if (!hasSelectedProviderKey) {
+      const providerName = getProviderDisplayName(sttProvider);
+      showToast(
+        `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
+      );
+      flashError();
       return;
     }
 
@@ -280,12 +482,23 @@ export function AgentComposer({
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.stop();
       }
-      setIsRecording(false);
+      stopDurationTimer();
       return;
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Set up Web Audio API analyser for waveform
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.7;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
       const preferredMimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : MediaRecorder.isTypeSupported('audio/webm')
@@ -309,6 +522,8 @@ export function AgentComposer({
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
         mediaRecorderRef.current = null;
+        cleanupAudioContext();
+        setMicState('processing');
 
         const audioBlob = new Blob(audioChunksRef.current, {
           type: mediaRecorder.mimeType || 'audio/webm',
@@ -318,6 +533,10 @@ export function AgentComposer({
         const key = await readKeyForProvider(activeProvider);
         if (!key) {
           await refreshVoiceSettings();
+          showToast(
+            `${getProviderDisplayName(activeProvider)} API key is missing. Add it in Producey Boy settings.`
+          );
+          flashError();
           return;
         }
 
@@ -330,25 +549,40 @@ export function AgentComposer({
             );
             textareaRef.current?.focus();
           }
+          setMicState('idle');
         } catch (error) {
           console.error(
             `Voice transcription failed (${getProviderDisplayName(activeProvider)}):`,
             error
           );
+          showToast(
+            `Transcription failed: ${errorToMessage(error)}`
+          );
+          flashError();
         }
       };
 
       mediaRecorder.start();
-      setIsRecording(true);
+      setMicState('recording');
+      startDurationTimer();
     } catch (error) {
       console.error('Failed to start recording:', error);
+      cleanupAudioContext();
+      showToast(errorToMessage(error));
+      flashError();
     }
   }, [
+    cleanupAudioContext,
     disabled,
+    flashError,
     hasSelectedProviderKey,
+    isProcessing,
     isRecording,
     isStreaming,
     refreshVoiceSettings,
+    showToast,
+    startDurationTimer,
+    stopDurationTimer,
     sttProvider,
   ]);
 
@@ -358,18 +592,45 @@ export function AgentComposer({
     typeof navigator.mediaDevices?.getUserMedia === 'function' &&
     typeof MediaRecorder !== 'undefined';
   const showMic = !isStreaming;
-  const micEnabled = hasSelectedProviderKey && voiceSupported && !disabled;
+  const micClickable = voiceSupported && !disabled && !isProcessing;
   const providerDisplayName = getProviderDisplayName(sttProvider);
   const micTitle = !hasSelectedProviderKey
     ? `Add ${providerDisplayName} API key in Settings to enable voice input`
     : !voiceSupported
       ? 'Voice input is not supported in this environment'
-      : isRecording
-        ? `Stop recording (${providerDisplayName})`
-        : `Record voice message (${providerDisplayName})`;
+      : isProcessing
+        ? `Transcribing with ${providerDisplayName}...`
+        : isRecording
+          ? `Stop recording (${providerDisplayName})`
+          : `Record voice message (${providerDisplayName})`;
+
+  const micButtonClass = [
+    'agent-mic-button',
+    isRecording ? 'agent-mic-button--recording' : '',
+    isProcessing ? 'agent-mic-button--processing' : '',
+    micState === 'error' ? 'agent-mic-button--error' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div className="agent-composer" data-testid="agent-composer">
+      {/* Recording waveform overlay */}
+      {isRecording ? (
+        <RecordingWaveform
+          analyser={analyserRef.current}
+          duration={recordingDuration}
+        />
+      ) : null}
+
+      {/* Processing indicator */}
+      {isProcessing ? (
+        <div className="agent-processing-overlay" data-testid="agent-processing-overlay">
+          <div className="agent-processing-spinner" />
+          <span className="agent-processing-label">Transcribing...</span>
+        </div>
+      ) : null}
+
       <div className="agent-composer-input-row">
         <textarea
           ref={textareaRef}
@@ -382,7 +643,7 @@ export function AgentComposer({
               ? 'Producey Boy is unavailable'
               : 'Ask Producey Boy about your master...'
           }
-          disabled={disabled}
+          disabled={disabled || isRecording || isProcessing}
           rows={MIN_ROWS}
           data-testid="agent-composer-input"
         />
@@ -390,27 +651,31 @@ export function AgentComposer({
           {showMic ? (
             <button
               type="button"
-              className={`agent-mic-button ${isRecording ? 'agent-mic-button--recording' : ''}`}
+              className={micButtonClass}
               onClick={() => void handleMicToggle()}
               data-testid="agent-mic-button"
               title={micTitle}
-              disabled={!micEnabled}
+              disabled={!micClickable}
             >
-              <svg
-                viewBox="0 0 24 24"
-                width="18"
-                height="18"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
-              </svg>
+              {isProcessing ? (
+                <div className="agent-mic-spinner" />
+              ) : (
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+              )}
             </button>
           ) : null}
 
@@ -452,6 +717,15 @@ export function AgentComposer({
           </button>
         </div>
       </div>
+
+      {/* Toast notifications */}
+      {toasts.length > 0 ? (
+        <div className="agent-toast-container" data-testid="agent-toast-container">
+          {toasts.map((msg) => (
+            <AgentToast key={msg.id} message={msg} onDismiss={dismissToast} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

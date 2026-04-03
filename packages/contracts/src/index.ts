@@ -198,6 +198,9 @@ export const IPC_CHANNELS = {
   AGENT_STORE_ASSEMBLYAI_KEY: 'producer-player:agent-store-assemblyai-key',
   AGENT_GET_ASSEMBLYAI_KEY: 'producer-player:agent-get-assemblyai-key',
   AGENT_CLEAR_ASSEMBLYAI_KEY: 'producer-player:agent-clear-assemblyai-key',
+  OPEN_LOG_FOLDER: 'producer-player:open-log-folder',
+  GET_LOG_PATH: 'producer-player:get-log-path',
+  RENDERER_LOG: 'producer-player:renderer-log',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
@@ -576,6 +579,9 @@ export interface ProducerPlayerBridge {
   agentGetAssemblyAiKey(): Promise<string | null>;
   agentClearAssemblyAiKey(): Promise<void>;
   onAgentEvent(listener: AgentEventListener): () => void;
+  openLogFolder(): Promise<void>;
+  getLogPath(): Promise<string>;
+  rendererLog(level: 'error' | 'warn' | 'info', message: string, meta?: Record<string, unknown>): Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

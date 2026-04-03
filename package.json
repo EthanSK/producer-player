@@ -1,6 +1,6 @@
 {
   "name": "producer-player",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "private": true,
   "description": "Producer Player desktop app for producers managing album tracks, exports, and ordering.",
   "author": "EthanSK",

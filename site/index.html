@@ -303,12 +303,13 @@
       .screenshot::after {
         content: '';
         position: absolute;
-        top: 10px;
-        right: 10px;
-        width: 28px;
-        height: 28px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 72px;
+        height: 72px;
         background: rgba(0, 0, 0, 0.55);
-        border-radius: 6px;
+        border-radius: 50%;
         opacity: 0;
         transition: opacity 0.2s ease;
         pointer-events: none;
@@ -316,7 +317,7 @@
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 2h4v4M6 14H2v-4M14 2l-5 5M2 14l5-5'/%3E%3C/svg%3E");
         background-repeat: no-repeat;
         background-position: center;
-        background-size: 16px 16px;
+        background-size: 36px 36px;
       }
 
       .screenshot:hover::after {

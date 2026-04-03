@@ -28,14 +28,14 @@
     <meta property="og:url" content="https://ethansk.github.io/producer-player/" />
     <meta property="og:title" content="Producer Player — Desktop app for music producers" />
     <meta property="og:description" content="Producer Player is a desktop app for music producers with version tracking, mastering workspace, and album ordering." />
-    <meta property="og:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-overview.jpg" />
+    <meta property="og:image" content="https://ethansk.github.io/producer-player/assets/screenshots/main-view.png" />
     <meta property="og:image:alt" content="Producer Player app interface screenshot" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Producer Player — Desktop app for music producers" />
     <meta name="twitter:description" content="Producer Player is a desktop app for music producers with version tracking, mastering workspace, and album ordering." />
-    <meta name="twitter:image" content="https://ethansk.github.io/producer-player/assets/screenshots/app-overview.jpg" />
+    <meta name="twitter:image" content="https://ethansk.github.io/producer-player/assets/screenshots/main-view.png" />
     <meta name="twitter:image:alt" content="Producer Player app interface screenshot" />
 
     <script type="application/ld+json">
@@ -932,8 +932,8 @@
         <div class="wrap wrap--wide">
           <div class="screenshot">
             <img
-              src="./assets/screenshots/app-overview.jpg"
-              alt="Producer Player main app overview — song list, album art, version history, mastering metrics"
+              src="./assets/screenshots/main-view.png"
+              alt="Producer Player main app overview — scan folders, auto-group versions, drag to reorder, album art, version history, mastering metrics"
               loading="eager"
             />
           </div>
@@ -965,101 +965,93 @@
           </div>
 
           <div class="gallery-grid">
+            <!-- 1. Main view — full width -->
             <figure class="gallery-item gallery-item--wide">
               <div class="screenshot">
                 <img
-                  src="./assets/screenshots/mastering-spectrum-band-solo.jpg"
-                  alt="Fullscreen mastering — Spectrum Analyzer with band soloing, Level Meter, Reference Track panel"
+                  src="./assets/screenshots/main-view.png"
+                  alt="Track management — scan folders, auto-group versions, drag to reorder, album art, version history, mastering metrics"
                   loading="lazy"
                 />
               </div>
               <figcaption>
-                <h3>Spectrum Analyzer with Band Soloing</h3>
-                <p>Isolate frequency ranges to hear exactly what's happening. Watch integrated, short-term, and momentary loudness unfold in real time. Spot problem sections at a glance and nail your target LUFS with confidence.</p>
+                <h3>Track Management</h3>
+                <p>Scan folders, auto-group versions, drag to reorder. Album art, version history, and mastering metrics at a glance.</p>
               </figcaption>
             </figure>
 
+            <!-- 2. Spectrum mastering — full width -->
             <figure class="gallery-item gallery-item--wide">
               <div class="screenshot">
                 <img
-                  src="./assets/screenshots/midside-spectrogram.jpg"
-                  alt="Mid/Side Spectrum, Loudness Distribution histogram, and Spectrogram heatmap"
+                  src="./assets/screenshots/spectrum-mastering.png"
+                  alt="Full-screen spectrum analyzer with frequency band soloing, level meter, and reference track A/B comparison"
                   loading="lazy"
                 />
               </div>
               <figcaption>
-                <h3>Mid/Side Spectrum, Loudness Distribution &amp; Spectrogram</h3>
-                <p>Solo mid or side channels with a click. Hear exactly what your centre vocal is doing versus the stereo width. Track peak-to-RMS ratio, count digital overs, and detect DC offset before they become problems on release day.</p>
+                <h3>Mastering Workspace</h3>
+                <p>Full-screen spectrum analyzer with frequency band soloing, level meter, and reference track A/B comparison.</p>
               </figcaption>
             </figure>
 
+            <!-- 3. Checklist — 2-col grid -->
             <figure class="gallery-item">
               <div class="screenshot">
                 <img
-                  src="./assets/screenshots/reference-track-ab.jpg"
-                  alt="Reference Track panel with A/B comparison, Level Match, Loudness History, and Waveform"
+                  src="./assets/screenshots/checklist.png"
+                  alt="Production checklist with per-song notes, timestamps, version tracking, and built-in transport controls"
                   loading="lazy"
                 />
               </div>
               <figcaption>
-                <h3>Reference Track A/B Comparison</h3>
-                <p>A/B your master against reference tracks at matched loudness. Remove the "louder is better" bias and hear real tonal differences. Build a personal library of reference tracks that persist across sessions — no re-importing every time.</p>
+                <h3>Production Checklist</h3>
+                <p>Per-song notes with timestamps and version tracking. Built-in transport controls for quick review.</p>
               </figcaption>
             </figure>
 
+            <!-- 4. Platform normalization — 2-col grid -->
             <figure class="gallery-item">
               <div class="screenshot">
                 <img
-                  src="./assets/screenshots/platform-normalization-ai.jpg"
-                  alt="Platform normalization targets for Spotify, Apple Music, YouTube, Tidal, Amazon Music with Produciboi AI agent"
+                  src="./assets/screenshots/platform-normalization.png"
+                  alt="Tonal balance, loudness and peak metrics, streaming platform targets, AI mastering assistant with detailed analysis"
                   loading="lazy"
                 />
               </div>
               <figcaption>
-                <h3>Hear What Your Fans Will Hear</h3>
-                <p>Spotify normalizes to -14 LUFS. Apple Music doesn't. YouTube does its own thing. Preview exactly how each platform will play your track before you release, with Produciboi AI mastering agent suggestions.</p>
+                <h3>Platform Normalization</h3>
+                <p>Tonal balance, loudness &amp; peak metrics, streaming platform targets. AI mastering assistant with detailed analysis.</p>
               </figcaption>
             </figure>
 
+            <!-- 5. Mid/Side analysis — 2-col grid -->
             <figure class="gallery-item">
               <div class="screenshot">
                 <img
-                  src="./assets/screenshots/crest-factor-ai.jpg"
-                  alt="Dynamic Range / Crest Factor graph, Mid/Side Spectrum, Loudness Distribution with AI vocal analysis"
+                  src="./assets/screenshots/midside-analysis.png"
+                  alt="Dynamic range, crest factor, mid/side spectrum, loudness distribution, AI-powered frequency and stereo field analysis"
                   loading="lazy"
                 />
               </div>
               <figcaption>
-                <h3>Crest Factor, Clip Count &amp; AI Vocal Analysis</h3>
-                <p>One-glance diagnostics: crest factor, clip count, DC offset, K-metering (K-12, K-14, K-20), stereo correlation, and vectorscope. AI-powered vocal frequency analysis built right in.</p>
+                <h3>Advanced Analysis</h3>
+                <p>Dynamic range, crest factor, mid/side spectrum, and loudness distribution. AI-powered frequency and stereo field analysis.</p>
               </figcaption>
             </figure>
 
+            <!-- 6. Waveform / reference — 2-col grid -->
             <figure class="gallery-item">
               <div class="screenshot">
                 <img
-                  src="./assets/screenshots/checklist-mini-player.jpg"
-                  alt="Checklist dialog with mini-player transport, version history, timestamped production notes"
+                  src="./assets/screenshots/waveform-loudness.png"
+                  alt="A/B compare against reference tracks with loudness history and waveform visualization"
                   loading="lazy"
                 />
               </div>
               <figcaption>
-                <h3>"Fix This at 2:34" — Production Checklist</h3>
-                <p>Pin notes to exact moments in a track. Click a note, jump right to the spot. Every bounce lives here, organized by song, latest always on top. No more folder archaeology.</p>
-              </figcaption>
-            </figure>
-
-            <figure class="gallery-item gallery-item--wide">
-              <div class="screenshot">
-                <img
-                  src="./assets/screenshots/checklist-ai-agent.jpg"
-                  alt="Checklist with Produciboi AI agent providing vocal analysis and mastering recommendations"
-                  loading="lazy"
-                />
-              </div>
-              <figcaption>
-                <h3>Produciboi AI Mastering Agent</h3>
-                <p>Smart mastering recommendations integrated right into your checklist. Drag tracks to nail your tracklist flow — every reorder saves instantly. Built for noobs and production experts alike: every tool includes plain-English guidance and links to tutorials so you can learn fast.</p>
+                <h3>Reference Matching</h3>
+                <p>A/B compare against reference tracks with loudness history and waveform visualization.</p>
               </figcaption>
             </figure>
           </div>

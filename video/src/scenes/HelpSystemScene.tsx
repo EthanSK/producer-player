@@ -44,8 +44,8 @@ export const HelpSystemScene: React.FC = () => {
 
       <FadeIn delay={0} duration={18} direction="up">
         <FeatureLabel
-          title="Built-in Learning"
-          subtitle="Help docs, video tutorials, and keyboard shortcuts right inside the app"
+          title="Built-in Tutorials"
+          subtitle="Professional mastering education and keyboard shortcuts right inside the app"
         />
       </FadeIn>
 
@@ -96,7 +96,7 @@ export const HelpSystemScene: React.FC = () => {
             opacity: backdropOpacity,
           }} />
 
-          {/* Help modal */}
+          {/* Tutorial content modal */}
           <div
             style={{
               position: "absolute",
@@ -108,14 +108,14 @@ export const HelpSystemScene: React.FC = () => {
               borderRadius: 16,
               border: `1px solid ${COLORS.border}`,
               padding: 32,
-              width: 700,
+              width: 740,
               boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
             }}
           >
             {/* Modal header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <div style={{ fontFamily: FONTS.body, fontSize: 22, fontWeight: 700, color: COLORS.text }}>
-                Help & Tutorials
+                Mastering Tutorials
               </div>
               <div style={{
                 fontFamily: FONTS.mono,
@@ -129,61 +129,65 @@ export const HelpSystemScene: React.FC = () => {
               </div>
             </div>
 
-            {/* Video thumbnail */}
-            <FadeIn delay={30} duration={15} direction="up" distance={15}>
+            {/* Tutorial content - real mastering education */}
+            <FadeIn delay={25} duration={15} direction="up" distance={15}>
               <div style={{
-                background: "linear-gradient(135deg, #0a1628, #162040)",
+                background: "linear-gradient(135deg, rgba(10,22,40,0.9), rgba(22,32,64,0.9))",
                 borderRadius: 10,
-                height: 180,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                position: "relative",
-                marginBottom: 20,
-                overflow: "hidden",
+                padding: 24,
+                marginBottom: 16,
+                border: `1px solid ${COLORS.border}`,
               }}>
-                {/* Play button */}
                 <div style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: "50%",
-                  background: "rgba(255,255,255,0.15)",
-                  backdropFilter: "blur(4px)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  border: "2px solid rgba(255,255,255,0.3)",
+                  fontFamily: FONTS.body,
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: COLORS.accent,
+                  marginBottom: 14,
+                  letterSpacing: "0.02em",
                 }}>
-                  <svg width={20} height={20} viewBox="0 0 24 24" fill="white">
-                    <polygon points="8,5 19,12 8,19" />
-                  </svg>
+                  Understanding EQ
                 </div>
 
-                {/* YouTube-style duration badge */}
                 <div style={{
-                  position: "absolute",
-                  bottom: 8,
-                  right: 12,
-                  fontFamily: FONTS.mono,
-                  fontSize: 11,
-                  color: "#fff",
-                  background: "rgba(0,0,0,0.7)",
-                  borderRadius: 3,
-                  padding: "2px 6px",
-                }}>
-                  4:32
-                </div>
-
-                {/* Title overlay */}
-                <div style={{
-                  position: "absolute",
-                  bottom: 8,
-                  left: 12,
                   fontFamily: FONTS.body,
                   fontSize: 13,
-                  color: "rgba(255,255,255,0.8)",
+                  color: "rgba(255,255,255,0.85)",
+                  lineHeight: "1.7",
+                  marginBottom: 12,
                 }}>
-                  Getting Started with Producer Player
+                  Cut narrow, boost wide. Start with subtractive EQ to remove problem frequencies before boosting. Use a high-pass filter around 30-40 Hz to clean low-end rumble.
+                </div>
+
+                <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+                  <div style={{
+                    flex: 1,
+                    background: "rgba(255,255,255,0.04)",
+                    borderRadius: 6,
+                    padding: "10px 14px",
+                    border: `1px solid rgba(255,255,255,0.06)`,
+                  }}>
+                    <div style={{ fontFamily: FONTS.mono, fontSize: 11, color: COLORS.yellow, marginBottom: 4, fontWeight: 700 }}>
+                      COMPRESSION
+                    </div>
+                    <div style={{ fontFamily: FONTS.body, fontSize: 12, color: "rgba(255,255,255,0.7)", lineHeight: "1.6" }}>
+                      2-4 dB gain reduction for gentle glue. Attack 10-30ms, release 50-100ms. Use your ears, not your eyes.
+                    </div>
+                  </div>
+                  <div style={{
+                    flex: 1,
+                    background: "rgba(255,255,255,0.04)",
+                    borderRadius: 6,
+                    padding: "10px 14px",
+                    border: `1px solid rgba(255,255,255,0.06)`,
+                  }}>
+                    <div style={{ fontFamily: FONTS.mono, fontSize: 11, color: COLORS.green, marginBottom: 4, fontWeight: 700 }}>
+                      LIMITING
+                    </div>
+                    <div style={{ fontFamily: FONTS.body, fontSize: 12, color: "rgba(255,255,255,0.7)", lineHeight: "1.6" }}>
+                      Target -14 LUFS for streaming. Aim for 1-2 dB of limiting max. Preserve transients and dynamic range.
+                    </div>
+                  </div>
                 </div>
               </div>
             </FadeIn>
@@ -193,8 +197,8 @@ export const HelpSystemScene: React.FC = () => {
               <div style={{ display: "flex", gap: 12 }}>
                 {[
                   { label: "Keyboard Shortcuts", icon: "K" },
-                  { label: "Mastering Guide", icon: "M" },
-                  { label: "Release Notes", icon: "R" },
+                  { label: "Stereo Imaging", icon: "S" },
+                  { label: "Loudness Standards", icon: "L" },
                 ].map((item) => (
                   <div
                     key={item.label}

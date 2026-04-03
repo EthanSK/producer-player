@@ -62,7 +62,7 @@ export const AIAgentScene: React.FC = () => {
 
       <FadeIn delay={0} duration={18} direction="up">
         <FeatureLabel
-          title="Produciboi — AI Mastering Assistant"
+          title="Producey Boy — AI Mastering Assistant"
           subtitle="Ask your AI agent about your mix. Get instant, data-driven mastering recommendations."
         />
       </FadeIn>
@@ -99,7 +99,7 @@ export const AIAgentScene: React.FC = () => {
             </div>
             <div>
               <div style={{ fontFamily: FONTS.body, fontSize: 16, fontWeight: 600, color: COLORS.text }}>
-                Produciboi
+                Producey Boy
               </div>
               <div style={{ fontFamily: FONTS.body, fontSize: 11, color: COLORS.green }}>
                 Online
@@ -176,7 +176,7 @@ export const AIAgentScene: React.FC = () => {
               </svg>
             </div>
             <div style={{ flex: 1, fontFamily: FONTS.body, fontSize: 14, color: COLORS.textMuted }}>
-              Ask Produciboi about your mix...
+              Ask Producey Boy about your mix...
             </div>
             <div style={{
               fontFamily: FONTS.body,

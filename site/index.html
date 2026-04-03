@@ -343,7 +343,7 @@
       }
 
       .gallery-item figcaption {
-        margin-top: 12px;
+        margin-top: 4px;
         padding: 16px 18px;
         border-radius: var(--radius);
         border: none;
@@ -848,6 +848,57 @@
           justify-content: center;
         }
       }
+
+      /* ── Lightbox ── */
+      .lightbox {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.9);
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.25s ease, visibility 0.25s ease;
+        cursor: zoom-out;
+      }
+
+      .lightbox--open {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .lightbox img {
+        max-width: 95vw;
+        max-height: 95vh;
+        object-fit: contain;
+        border-radius: 6px;
+        cursor: default;
+      }
+
+      .lightbox-close {
+        position: absolute;
+        top: 16px;
+        right: 20px;
+        background: none;
+        border: none;
+        color: #fff;
+        font-size: 32px;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0.7;
+        transition: opacity 0.15s;
+        padding: 4px 10px;
+      }
+
+      .lightbox-close:hover {
+        opacity: 1;
+      }
+
+      .screenshot img {
+        cursor: zoom-in;
+      }
     </style>
   </head>
 
@@ -1085,6 +1136,50 @@
         </div>
       </footer>
     </div>
+
+    <!-- ── Screenshot Lightbox ── -->
+    <div class="lightbox" id="lightbox">
+      <button class="lightbox-close" aria-label="Close">&times;</button>
+      <img src="" alt="" />
+    </div>
+    <script>
+    (function () {
+      var lb = document.getElementById('lightbox');
+      var lbImg = lb.querySelector('img');
+      var lbClose = lb.querySelector('.lightbox-close');
+
+      function open(src, alt) {
+        lbImg.src = src;
+        lbImg.alt = alt || '';
+        lb.classList.add('lightbox--open');
+        document.body.style.overflow = 'hidden';
+      }
+
+      function close() {
+        lb.classList.remove('lightbox--open');
+        document.body.style.overflow = '';
+      }
+
+      /* Click any screenshot image to open */
+      document.querySelectorAll('.screenshot img').forEach(function (img) {
+        img.addEventListener('click', function () {
+          open(img.src, img.alt);
+        });
+      });
+
+      /* Close on backdrop click (but not on image click) */
+      lb.addEventListener('click', function (e) {
+        if (e.target === lb) close();
+      });
+
+      lbClose.addEventListener('click', close);
+
+      /* Close on Escape */
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') close();
+      });
+    })();
+    </script>
 
     <!-- ── Kaleidoscope Animation (balanced: perf + beauty) ── -->
     <script>

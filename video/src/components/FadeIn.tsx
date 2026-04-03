@@ -1,5 +1,5 @@
 import React from "react";
-import { useCurrentFrame, interpolate } from "remotion";
+import { useCurrentFrame, interpolate, Easing } from "remotion";
 
 interface FadeInProps {
   children: React.ReactNode;
@@ -11,7 +11,7 @@ interface FadeInProps {
 export const FadeIn: React.FC<FadeInProps> = ({
   children,
   delay = 0,
-  duration = 15,
+  duration = 25,
   style,
 }) => {
   const frame = useCurrentFrame();
@@ -21,6 +21,7 @@ export const FadeIn: React.FC<FadeInProps> = ({
   const opacity = interpolate(delayedFrame, [0, duration], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: Easing.inOut(Easing.ease),
   });
 
   return (

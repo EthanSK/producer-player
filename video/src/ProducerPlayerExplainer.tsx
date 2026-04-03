@@ -77,7 +77,7 @@ export const ProducerPlayerExplainer: React.FC = () => {
 
   return (
     <AbsoluteFill style={{ background: COLORS.bg }}>
-      <Audio src={staticFile("audio/thedrums-v6.wav")} volume={0.5} />
+      <Audio src={staticFile("audio/thedrums-v6.mp3")} volume={0.5} />
       {SCENES.map((scene, i) => {
         const from = offset;
         offset += scene.duration;

@@ -4,6 +4,18 @@ import { fileURLToPath } from 'node:url';
 
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
+/**
+ * Convert an x.y.0 semver to two-part display format x.y.
+ * If the patch is non-zero, the full semver is returned as-is.
+ */
+function toDisplayVersion(semver) {
+  const match = semver.match(/^(\d+)\.(\d+)\.0$/);
+  if (match) {
+    return `${match[1]}.${match[2]}`;
+  }
+  return semver;
+}
+
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDirectory, '..');
 
@@ -30,9 +42,11 @@ async function main() {
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
   const version = normalizeVersion(packageJson.version);
 
+  const display = toDisplayVersion(version);
+
   const payload = {
     version,
-    displayVersion: `v${version}`,
+    displayVersion: `v${display}`,
     source: 'package.json',
   };
 

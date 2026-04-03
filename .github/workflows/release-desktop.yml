@@ -54,20 +54,27 @@ jobs:
             exit 1
           fi
 
+          # Two-part display version (strip trailing .0 patch)
+          display_version="$app_version"
+          if [[ "$app_version" =~ ^([0-9]+\.[0-9]+)\.0$ ]]; then
+            display_version="${BASH_REMATCH[1]}"
+          fi
+
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             release_tag="${GITHUB_REF_NAME}"
             tag_version="${release_tag#v}"
             tag_base="${tag_version%%-*}"
             tag_base="${tag_base%%+*}"
 
-            if [[ "$tag_version" != "$app_version" && "$tag_base" != "$app_version" ]]; then
-              echo "::error::Tag '${release_tag}' does not match package.json version '${app_version}'."
-              echo "::error::Use v${app_version} (or v${app_version}-build.<n>) for this commit."
+            # Accept tags matching either full semver (v2.14.0) or display version (v2.14)
+            if [[ "$tag_version" != "$app_version" && "$tag_base" != "$app_version" && "$tag_version" != "$display_version" && "$tag_base" != "$display_version" ]]; then
+              echo "::error::Tag '${release_tag}' does not match package.json version '${display_version}'."
+              echo "::error::Use v${display_version} (or v${display_version}-build.<n>) for this commit."
               exit 1
             fi
 
-            if [[ "$tag_version" == "$app_version" ]]; then
-              release_name="Producer Player v${app_version}"
+            if [[ "$tag_version" == "$app_version" || "$tag_version" == "$display_version" ]]; then
+              release_name="Producer Player v${display_version}"
             else
               release_name="Producer Player ${release_tag}"
             fi
@@ -80,14 +87,14 @@ jobs:
           fi
 
           build_num="${GITHUB_RUN_NUMBER}"
-          canonical_tag="v${app_version}"
+          canonical_tag="v${display_version}"
 
           if git ls-remote --tags --refs origin "${canonical_tag}" | grep -q .; then
-            release_tag="v${app_version}-build.${build_num}"
-            release_name="Producer Player v${app_version} (build ${build_num})"
+            release_tag="v${display_version}-build.${build_num}"
+            release_name="Producer Player v${display_version} (build ${build_num})"
           else
             release_tag="${canonical_tag}"
-            release_name="Producer Player v${app_version}"
+            release_name="Producer Player v${display_version}"
           fi
 
           echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"

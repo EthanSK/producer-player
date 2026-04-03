@@ -54,7 +54,7 @@ async function main() {
   }
 
   const hardcodedSiteVersionPattern =
-    /<span class="logo-version"[^>]*>\s*v\d+\.\d+\.\d+(?:-[^<\s]+)?\s*<\/span>/i;
+    /<span class="logo-version"[^>]*>\s*v\d+\.\d+(?:\.\d+)?(?:-[^<\s]+)?\s*<\/span>/i;
   if (hardcodedSiteVersionPattern.test(siteIndex)) {
     throw new Error('site/index.html still contains a hardcoded semantic version label.');
   }

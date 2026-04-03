@@ -42,6 +42,18 @@ function shouldIgnoreFile(filePath) {
   return IGNORE_PREFIXES.some((prefix) => filePath.startsWith(prefix));
 }
 
+/**
+ * Convert an x.y.0 semver to two-part display format x.y.
+ * If the patch is non-zero, the full semver is returned as-is.
+ */
+function toDisplayVersion(semver) {
+  const match = semver.match(/^(\d+)\.(\d+)\.0$/);
+  if (match) {
+    return `${match[1]}.${match[2]}`;
+  }
+  return semver;
+}
+
 function parseSemver(version, label) {
   const match = String(version).trim().match(SEMVER_PATTERN);
 
@@ -51,6 +63,7 @@ function parseSemver(version, label) {
 
   return {
     raw: String(version).trim(),
+    display: toDisplayVersion(String(version).trim()),
     major: Number(match[1]),
     minor: Number(match[2]),
     patch: Number(match[3]),
@@ -151,8 +164,8 @@ async function main() {
         `Base version: ${baseVersion}\nCurrent version: ${currentVersion}\n\n` +
         `Changed files requiring a bump:\n${formattedFiles}\n\n` +
         `Run one of:\n` +
-        `  npm run version:bump:patch\n` +
-        `  npm run version:bump:minor\n` +
+        `  npm run version:bump:patch   (bump the minor part, e.g. 2.14 -> 2.15)\n` +
+        `  npm run version:bump:minor   (bump the major part, e.g. 2.14 -> 3.0)\n` +
         `Then commit the versioned change.`
     );
   }
@@ -162,22 +175,22 @@ async function main() {
   const coreComparison = compareSemverCore(currentSemver, baseSemver);
 
   if (coreComparison <= 0) {
-    const minimumPatchVersion = `${baseSemver.major}.${baseSemver.minor}.${baseSemver.patch + 1}`;
+    const minimumNextVersion = `${baseSemver.major}.${baseSemver.minor + 1}.0`;
 
     throw new Error(
-      `Release-relevant files changed, but package.json did not advance by at least a patch bump.\n\n` +
-        `Base version: ${baseVersion}\nCurrent version: ${currentVersion}\n` +
-        `Minimum required version: ${minimumPatchVersion} (or any higher minor/major semver)\n\n` +
+      `Release-relevant files changed, but package.json did not advance by at least a version bump.\n\n` +
+        `Base version: ${baseSemver.display}\nCurrent version: ${currentSemver.display}\n` +
+        `Minimum required version: ${toDisplayVersion(minimumNextVersion)} (or any higher major version)\n\n` +
         `Changed files requiring a bump:\n${formattedFiles}\n\n` +
         `Run one of:\n` +
-        `  npm run version:bump:patch\n` +
-        `  npm run version:bump:minor\n` +
+        `  npm run version:bump:patch   (bump the minor part, e.g. 2.14 -> 2.15)\n` +
+        `  npm run version:bump:minor   (bump the major part, e.g. 2.14 -> 3.0)\n` +
         `Then commit the versioned change.`
     );
   }
 
   console.log(
-    `[version:bump:check] OK — package.json version increased from ${baseVersion} to ${currentVersion}.`
+    `[version:bump:check] OK — package.json version increased from ${baseSemver.display} to ${currentSemver.display}.`
   );
 }
 

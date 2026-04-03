@@ -8121,7 +8121,7 @@ export function App(): JSX.Element {
                 Mastering <span aria-hidden="true">⤢</span>
               </button>
               <span className="checklist-transport-hint" data-testid="song-checklist-shift-tab-hint">
-                Shift+Tab toggles input ↔ transport focus
+                Shift+Tab toggles input ↔ time jumping controls
               </span>
               <button
                 type="button"

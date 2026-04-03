@@ -173,7 +173,7 @@ test.describe('Checklist textarea UX', () => {
       const miniPlayerNext = page.getByTestId('song-checklist-mini-player-next');
       const shiftTabHint = page.getByTestId('song-checklist-shift-tab-hint');
 
-      await expect(shiftTabHint).toHaveText('Shift+Tab toggles input ↔ transport focus');
+      await expect(shiftTabHint).toHaveText('Shift+Tab toggles input ↔ time jumping controls');
 
       await skipForwardTen.focus();
       await skipForwardTen.press('Tab');

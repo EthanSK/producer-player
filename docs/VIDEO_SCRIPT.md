@@ -73,7 +73,7 @@ Resolution: 1920x1080 (16:9)
 **Visual:** Return to the main view. Show the GitHub releases page briefly.
 
 **Narration:**
-> Producer Player is open source under the MIT license.
+> Producer Player is source-available under the PolyForm Noncommercial license.
 > Download it now from GitHub Releases — macOS, Linux, and Windows snapshots available.
 
 **Text overlay:** `github.com/EthanSK/producer-player`

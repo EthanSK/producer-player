@@ -4,11 +4,11 @@
 
 [![CI](https://github.com/EthanSK/producer-player/actions/workflows/ci.yml/badge.svg)](https://github.com/EthanSK/producer-player/actions/workflows/ci.yml)
 [![Release](https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-purple.svg)](LICENSE)
 
 # Producer Player
 
-**A free, open-source mastering analysis suite and production companion for music producers and mastering engineers.**
+**A free, source-available mastering analysis suite and production companion for music producers and mastering engineers.**
 
 Stop paying for expensive metering plugins. Producer Player gives you broadcast-grade loudness metering, stereo imaging analysis, platform normalization preview, reference A/B comparison, and version tracking -- all in one app.
 
@@ -183,4 +183,6 @@ Pushes to `main`/`master` publish macOS, Linux, and Windows ZIP builds plus SHA-
 
 ## License
 
-MIT -- see [LICENSE](LICENSE).
+PolyForm Noncommercial 1.0.0 -- see [LICENSE](LICENSE).
+
+Commercial use (including selling this software) is not permitted under this license without a separate commercial agreement.

@@ -1,26 +1,16 @@
 import React from "react";
-import { spring, interpolate, useCurrentFrame, useVideoConfig, Img, staticFile } from "remotion";
+import { interpolate, useCurrentFrame, Img, staticFile } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
 
 export const OutroScene: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
 
-  // Logo springs in with a big bounce
-  const logoSpring = spring({
-    fps,
-    frame: Math.max(0, frame - 5),
-    config: { damping: 8, stiffness: 80, mass: 0.5 },
-  });
-
-  const logoScale = interpolate(logoSpring, [0, 1], [0.1, 1]);
-  const logoOpacity = interpolate(frame, [5, 12], [0, 1], {
+  const logoOpacity = interpolate(frame, [5, 18], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const logoRotate = interpolate(logoSpring, [0, 1], [20, 0]);
 
   return (
     <div
@@ -43,9 +33,7 @@ export const OutroScene: React.FC = () => {
       <div
         style={{
           opacity: logoOpacity,
-          transform: `scale(${logoScale}) rotate(${logoRotate}deg)`,
           marginBottom: 24,
-          willChange: "transform",
         }}
       >
         <Img
@@ -58,7 +46,7 @@ export const OutroScene: React.FC = () => {
         />
       </div>
 
-      <FadeIn delay={10} duration={18} direction="up" distance={50} rotate={-2} scaleFrom={0.7}>
+      <FadeIn delay={10} duration={15}>
         <h1
           style={{
             fontFamily: FONTS.body,
@@ -74,7 +62,7 @@ export const OutroScene: React.FC = () => {
         </h1>
       </FadeIn>
 
-      <FadeIn delay={20} duration={18} direction="right" distance={60} rotate={2}>
+      <FadeIn delay={20} duration={15}>
         <p
           style={{
             fontFamily: FONTS.body,
@@ -88,7 +76,7 @@ export const OutroScene: React.FC = () => {
         </p>
       </FadeIn>
 
-      <FadeIn delay={30} duration={18} direction="left" distance={60} rotate={-2}>
+      <FadeIn delay={30} duration={15}>
         <div
           style={{
             marginTop: 36,
@@ -105,7 +93,7 @@ export const OutroScene: React.FC = () => {
         </div>
       </FadeIn>
 
-      <FadeIn delay={40} duration={18} direction="up" distance={30}>
+      <FadeIn delay={40} duration={15}>
         <div
           style={{
             display: "flex",
@@ -115,7 +103,7 @@ export const OutroScene: React.FC = () => {
         >
           {["Version Tracking", "Mastering Workspace", "Album Ordering", "Song Checklists"].map(
             (feature, i) => (
-              <FadeIn key={feature} delay={42 + i * 3} duration={14} direction="up" distance={20} scaleFrom={0.8}>
+              <FadeIn key={feature} delay={42 + i * 3} duration={15}>
                 <span
                   style={{
                     fontFamily: FONTS.body,

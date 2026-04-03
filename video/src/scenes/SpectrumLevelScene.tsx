@@ -16,7 +16,6 @@ export const SpectrumLevelScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -24,12 +23,14 @@ export const SpectrumLevelScene: React.FC = () => {
     >
       <GlowOrb color={COLORS.accent} size={500} x={300} y={100} pulseSpeed={0.015} drift={40} />
 
-      <FadeIn delay={0} duration={18} direction="down" distance={70} rotate={2} scaleFrom={0.7}>
-        <FeatureLabel
-          title="Real-time Spectrum & Level"
-          subtitle="Clickable frequency bands for instant soloing. Full stereo level metering."
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Real-time Spectrum & Level"
+            subtitle="Clickable frequency bands for instant soloing. Full stereo level metering."
+          />
+        </FadeIn>
+      </div>
 
       <div
         style={{
@@ -39,7 +40,7 @@ export const SpectrumLevelScene: React.FC = () => {
           alignItems: "flex-end",
         }}
       >
-        <FadeIn delay={10} duration={18} direction="left" distance={80} rotate={-3} scaleFrom={0.6}>
+        <FadeIn delay={10} duration={15}>
           <div
             style={{
               background: COLORS.bgCard,
@@ -89,7 +90,7 @@ export const SpectrumLevelScene: React.FC = () => {
           </div>
         </FadeIn>
 
-        <FadeIn delay={20} duration={18} direction="right" distance={80} rotate={3} scaleFrom={0.6}>
+        <FadeIn delay={20} duration={15}>
           <div
             style={{
               background: COLORS.bgCard,

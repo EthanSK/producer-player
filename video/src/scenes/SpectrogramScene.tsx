@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { interpolate, useCurrentFrame } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
@@ -7,7 +7,6 @@ import { FeatureLabel } from "../components/FeatureLabel";
 
 export const SpectrogramScene: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
 
   const width = 900;
   const height = 400;
@@ -22,11 +21,10 @@ export const SpectrogramScene: React.FC = () => {
     extrapolateRight: "clamp",
   });
 
-  // Spectrogram container springs in with scale
-  const containerSpring = spring({
-    fps,
-    frame: Math.max(0, frame - 8),
-    config: { damping: 12, stiffness: 100, mass: 0.6 },
+  // Container opacity
+  const containerOpacity = interpolate(frame, [8, 18], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
   });
 
   return (
@@ -38,7 +36,6 @@ export const SpectrogramScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -47,17 +44,23 @@ export const SpectrogramScene: React.FC = () => {
       <GlowOrb color="#7c3aed" size={500} x={200} y={100} pulseSpeed={0.02} drift={35} />
       <GlowOrb color={COLORS.red} size={400} x={1300} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="right" distance={80} rotate={3} scaleFrom={0.7}>
-        <FeatureLabel
-          title="Spectrogram — Time x Frequency"
-          subtitle="Visualize frequency energy over time with a scrolling heatmap display"
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Spectrogram — Time x Frequency"
+            subtitle="Visualize frequency energy over time with a scrolling heatmap display"
+          />
+        </FadeIn>
+      </div>
 
-      <FadeIn delay={8} duration={18} direction="down" distance={60} rotate={-2} scaleFrom={0.6}>
+      <div
+        style={{
+          marginTop: 40,
+          opacity: containerOpacity,
+        }}
+      >
         <div
           style={{
-            marginTop: 40,
             background: COLORS.bgCard,
             borderRadius: 12,
             padding: 24,
@@ -116,7 +119,7 @@ export const SpectrogramScene: React.FC = () => {
             <span style={{ fontFamily: FONTS.mono, fontSize: 10, color: COLORS.textMuted }}>30s</span>
           </div>
         </div>
-      </FadeIn>
+      </div>
     </div>
   );
 };

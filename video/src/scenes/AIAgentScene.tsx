@@ -17,14 +17,9 @@ export const AIAgentScene: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // User message springs in from the right
-  const userSpring = spring({
-    fps,
-    frame: Math.max(0, frame - 8),
-    config: { damping: 12, stiffness: 120, mass: 0.5 },
-  });
-  const userTranslateX = interpolate(userSpring, [0, 1], [200, 0]);
-  const userOpacity = interpolate(userSpring, [0, 0.3], [0, 1], {
+  // User message fades in
+  const userOpacity = interpolate(frame, [8, 20], [0, 1], {
+    extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
@@ -40,14 +35,9 @@ export const AIAgentScene: React.FC = () => {
   );
   const displayedText = fullText.substring(0, visibleChars);
 
-  // Assistant bubble springs in from the left
-  const assistantSpring = spring({
-    fps,
-    frame: Math.max(0, frame - 20),
-    config: { damping: 12, stiffness: 100, mass: 0.5 },
-  });
-  const assistantTranslateX = interpolate(assistantSpring, [0, 1], [-200, 0]);
-  const assistantOpacity = interpolate(assistantSpring, [0, 0.3], [0, 1], {
+  // Assistant bubble fades in
+  const assistantOpacity = interpolate(frame, [20, 30], [0, 1], {
+    extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
@@ -63,7 +53,6 @@ export const AIAgentScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -72,14 +61,18 @@ export const AIAgentScene: React.FC = () => {
       <GlowOrb color="#7c3aed" size={600} x={300} y={100} pulseSpeed={0.02} drift={40} />
       <GlowOrb color={COLORS.green} size={400} x={1200} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="down" distance={70} rotate={2} scaleFrom={0.75}>
-        <FeatureLabel
-          title="Producey Boy — AI Mastering Assistant"
-          subtitle="Ask your AI agent about your mix. Get instant, data-driven mastering recommendations."
-        />
-      </FadeIn>
+      {/* Title — fixed position, no animation on position */}
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Producey Boy — AI Mastering Assistant"
+            subtitle="Ask your AI agent about your mix. Get instant, data-driven mastering recommendations."
+          />
+        </FadeIn>
+      </div>
 
-      <FadeIn delay={5} duration={18} direction="up" distance={50} rotate={-1}>
+      {/* Chat content animates below the fixed title */}
+      <FadeIn delay={5} duration={15}>
         <div
           style={{
             marginTop: 36,
@@ -119,10 +112,9 @@ export const AIAgentScene: React.FC = () => {
             </div>
           </div>
 
-          {/* User message — springs from right */}
+          {/* User message */}
           <div style={{
             opacity: userOpacity,
-            transform: `translateX(${userTranslateX}px)`,
             marginBottom: 16,
             display: "flex",
             justifyContent: "flex-end",
@@ -139,10 +131,9 @@ export const AIAgentScene: React.FC = () => {
             </div>
           </div>
 
-          {/* Assistant response — springs from left */}
+          {/* Assistant response */}
           <div style={{
             opacity: assistantOpacity,
-            transform: `translateX(${assistantTranslateX}px)`,
             display: "flex",
             justifyContent: "flex-start",
           }}>

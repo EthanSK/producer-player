@@ -22,18 +22,11 @@ export const HelpSystemScene: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // Modal pop-up with spring
-  const modalSpring = spring({
-    fps,
-    frame: Math.max(0, frame - 15),
-    config: { damping: 11, stiffness: 100, mass: 0.6 },
-  });
-
-  const modalScale = interpolate(modalSpring, [0, 1], [0.5, 1]);
-  const modalOpacity = interpolate(modalSpring, [0, 0.3], [0, 1], {
+  // Modal pop-up opacity
+  const modalOpacity = interpolate(frame, [15, 25], [0, 1], {
+    extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const modalRotate = interpolate(modalSpring, [0, 1], [-4, 0]);
 
   // Backdrop
   const backdropOpacity = interpolate(frame, [12, 20], [0, 0.5], {
@@ -50,7 +43,6 @@ export const HelpSystemScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -59,15 +51,17 @@ export const HelpSystemScene: React.FC = () => {
       <GlowOrb color={COLORS.yellow} size={500} x={200} y={100} pulseSpeed={0.02} />
       <GlowOrb color={COLORS.accent} size={400} x={1300} y={500} pulseSpeed={0.025} />
 
-      <FadeIn delay={0} duration={18} direction="up" rotate={-2}>
-        <FeatureLabel
-          title="Built-in Tutorials"
-          subtitle="AI-ranked YouTube tutorials for every panel, right inside the app"
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Built-in Tutorials"
+            subtitle="AI-ranked YouTube tutorials for every panel, right inside the app"
+          />
+        </FadeIn>
+      </div>
 
       {/* Background app mockup (dimmed) */}
-      <FadeIn delay={5} duration={15} direction="none" scaleFrom={0.95}>
+      <FadeIn delay={5} duration={15}>
         <div
           style={{
             marginTop: 36,
@@ -112,13 +106,13 @@ export const HelpSystemScene: React.FC = () => {
             opacity: backdropOpacity,
           }} />
 
-          {/* Tutorial content modal — mimics actual HelpTooltip.tsx design */}
+          {/* Tutorial content modal */}
           <div
             style={{
               position: "absolute",
               top: "50%",
               left: "50%",
-              transform: `translate(-50%, -50%) scale(${modalScale}) rotate(${modalRotate}deg)`,
+              transform: "translate(-50%, -50%)",
               opacity: modalOpacity,
               background: "#111922",
               borderRadius: 12,
@@ -128,7 +122,7 @@ export const HelpSystemScene: React.FC = () => {
               boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
             }}
           >
-            {/* Modal header — matches real app */}
+            {/* Modal header */}
             <div style={{
               display: "flex",
               justifyContent: "space-between",
@@ -174,7 +168,26 @@ export const HelpSystemScene: React.FC = () => {
               </div>
             </div>
 
-            {/* Video tutorials section — matches real design with grid */}
+            {/* LUFS explainer paragraph */}
+            <div style={{
+              borderTop: "1px solid rgba(156,175,196,0.15)",
+              paddingTop: 12,
+              marginBottom: 12,
+            }}>
+              <p style={{
+                fontFamily: FONTS.body,
+                fontSize: 12,
+                lineHeight: 1.6,
+                color: "#9cafc4",
+                margin: 0,
+              }}>
+                LUFS (Loudness Units Full Scale) measures perceived loudness.
+                Spotify targets -14 LUFS, Apple Music -16 LUFS, and YouTube -14 LUFS.
+                Understanding these standards is essential for competitive masters.
+              </p>
+            </div>
+
+            {/* Video tutorials section */}
             <div style={{
               paddingTop: 12,
               borderTop: "1px solid rgba(156,175,196,0.15)",
@@ -190,7 +203,7 @@ export const HelpSystemScene: React.FC = () => {
                 Video Tutorials (ranked by AI)
               </span>
 
-              {/* 3x3 grid of video cards — matches real videoGridStyle */}
+              {/* 3x3 grid of video cards */}
               <div style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(3, 1fr)",
@@ -198,13 +211,9 @@ export const HelpSystemScene: React.FC = () => {
                 marginTop: 8,
               }}>
                 {tutorials.map((tutorial, i) => {
-                  const cardSpring = spring({
-                    fps,
-                    frame: Math.max(0, frame - 25 - i * 3),
-                    config: { damping: 13, stiffness: 120, mass: 0.5 },
-                  });
-                  const cardScale = interpolate(cardSpring, [0, 1], [0.5, 1]);
-                  const cardOpacity = interpolate(cardSpring, [0, 0.3], [0, 1], {
+                  const cardDelay = 25 + i * 3;
+                  const cardOpacity = interpolate(frame, [cardDelay, cardDelay + 10], [0, 1], {
+                    extrapolateLeft: "clamp",
                     extrapolateRight: "clamp",
                   });
 
@@ -213,7 +222,6 @@ export const HelpSystemScene: React.FC = () => {
                       key={tutorial.title}
                       style={{
                         opacity: cardOpacity,
-                        transform: `scale(${cardScale})`,
                         borderRadius: 6,
                         overflow: "hidden",
                         border: "1px solid rgba(156,175,196,0.15)",

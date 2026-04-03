@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { interpolate, useCurrentFrame } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
@@ -16,7 +16,6 @@ const platforms = [
 
 export const PlatformNormScene: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
 
   return (
     <div
@@ -27,7 +26,6 @@ export const PlatformNormScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -36,15 +34,17 @@ export const PlatformNormScene: React.FC = () => {
       <GlowOrb color={COLORS.green} size={500} x={200} y={200} pulseSpeed={0.02} drift={35} />
       <GlowOrb color={COLORS.accent} size={400} x={1300} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="down" distance={70} rotate={-2} scaleFrom={0.7}>
-        <FeatureLabel
-          title="Platform Normalization Preview"
-          subtitle="Hear exactly how Spotify, Apple Music, YouTube, and others will play your track"
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Platform Normalization Preview"
+            subtitle="Hear exactly how Spotify, Apple Music, YouTube, and others will play your track"
+          />
+        </FadeIn>
+      </div>
 
       <div style={{ marginTop: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
-        {/* Platform grid — each card springs in staggered */}
+        {/* Platform grid */}
         <div
           style={{
             display: "grid",
@@ -53,59 +53,49 @@ export const PlatformNormScene: React.FC = () => {
             width: 900,
           }}
         >
-          {platforms.map((platform, i) => {
-            // Each card direction alternates
-            const directions: Array<"left" | "right" | "up" | "down"> = ["left", "right", "up", "left", "right", "down"];
-            const rotations = [-4, 3, -2, 3, -3, 2];
-
-            return (
-              <FadeIn
-                key={platform.name}
-                delay={12 + i * 5}
-                duration={18}
-                direction={directions[i]}
-                distance={80}
-                rotate={rotations[i]}
-                scaleFrom={0.5}
+          {platforms.map((platform, i) => (
+            <FadeIn
+              key={platform.name}
+              delay={12 + i * 5}
+              duration={15}
+            >
+              <div
+                style={{
+                  background: COLORS.bgCard,
+                  borderRadius: 10,
+                  padding: "20px 24px",
+                  border: `1px solid ${COLORS.border}`,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
               >
-                <div
-                  style={{
-                    background: COLORS.bgCard,
-                    borderRadius: 10,
-                    padding: "20px 24px",
-                    border: `1px solid ${COLORS.border}`,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div
-                      style={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: "50%",
-                        background: platform.color,
-                      }}
-                    />
-                    <span style={{ fontFamily: FONTS.body, fontSize: 16, fontWeight: 600, color: COLORS.text }}>
-                      {platform.name}
-                    </span>
-                  </div>
-                  <div style={{ fontFamily: FONTS.mono, fontSize: 14, color: COLORS.accent }}>
-                    {platform.target} LUFS target
-                  </div>
-                  <div style={{ fontFamily: FONTS.mono, fontSize: 12, color: COLORS.textMuted }}>
-                    {platform.ceiling} dBTP ceiling
-                  </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: "50%",
+                      background: platform.color,
+                    }}
+                  />
+                  <span style={{ fontFamily: FONTS.body, fontSize: 16, fontWeight: 600, color: COLORS.text }}>
+                    {platform.name}
+                  </span>
                 </div>
-              </FadeIn>
-            );
-          })}
+                <div style={{ fontFamily: FONTS.mono, fontSize: 14, color: COLORS.accent }}>
+                  {platform.target} LUFS target
+                </div>
+                <div style={{ fontFamily: FONTS.mono, fontSize: 12, color: COLORS.textMuted }}>
+                  {platform.ceiling} dBTP ceiling
+                </div>
+              </div>
+            </FadeIn>
+          ))}
         </div>
 
         {/* Preview toggle */}
-        <FadeIn delay={45} duration={18} direction="up" distance={40} rotate={1}>
+        <FadeIn delay={45} duration={15}>
           <div
             style={{
               background: COLORS.bgCard,

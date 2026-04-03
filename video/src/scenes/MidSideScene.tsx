@@ -40,19 +40,17 @@ export const MidSideScene: React.FC = () => {
     (v) => v * 0.55 + Math.sin(frame * 0.05) * 0.05
   );
 
-  // SVG curves spring into view
-  const curveSpring = spring({
-    fps,
-    frame: Math.max(0, frame - 10),
-    config: { damping: 14, stiffness: 100, mass: 0.5 },
+  // Curves fade in
+  const curveOpacity = interpolate(frame, [10, 22], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
   });
 
   function toPath(data: number[]): string {
     return data
       .map((val, i) => {
         const x = padding.left + (i / (data.length - 1)) * plotW;
-        // Spring affects the vertical scale
-        const y = padding.top + (1 - val * curveSpring) * plotH;
+        const y = padding.top + (1 - val) * plotH;
         return `${i === 0 ? "M" : "L"}${x},${y}`;
       })
       .join(" ");
@@ -77,7 +75,6 @@ export const MidSideScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -86,14 +83,16 @@ export const MidSideScene: React.FC = () => {
       <GlowOrb color={COLORS.accent} size={500} x={200} y={100} pulseSpeed={0.02} drift={35} />
       <GlowOrb color="#ff8c42" size={400} x={1300} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="left" distance={80} rotate={-3} scaleFrom={0.7}>
-        <FeatureLabel
-          title="Mid/Side Analysis"
-          subtitle="Compare the center (Mid) and stereo (Side) spectrums in real time"
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Mid/Side Analysis"
+            subtitle="Compare the center (Mid) and stereo (Side) spectrums in real time"
+          />
+        </FadeIn>
+      </div>
 
-      <FadeIn delay={8} duration={18} direction="up" distance={60} rotate={2}>
+      <FadeIn delay={8} duration={15}>
         <div
           style={{
             marginTop: 40,
@@ -119,7 +118,7 @@ export const MidSideScene: React.FC = () => {
             </div>
           </div>
 
-          <svg width={width} height={height} style={{ display: "block" }}>
+          <svg width={width} height={height} style={{ display: "block", opacity: curveOpacity }}>
             <rect x={padding.left} y={padding.top} width={plotW} height={plotH}
               fill="rgba(255,255,255,0.02)" rx={4} />
 

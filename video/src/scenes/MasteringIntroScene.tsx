@@ -29,7 +29,7 @@ export const MasteringIntroScene: React.FC = () => {
       <GlowOrb color={COLORS.accent} size={700} x={500} y={200} pulseSpeed={0.02} />
       <GlowOrb color={COLORS.green} size={500} x={1100} y={400} pulseSpeed={0.025} />
 
-      <FadeIn delay={5} duration={20} direction="up" distance={30}>
+      <FadeIn delay={5} duration={15}>
         <h1
           style={{
             fontFamily: FONTS.body,
@@ -56,7 +56,7 @@ export const MasteringIntroScene: React.FC = () => {
         }}
       />
 
-      <FadeIn delay={25} duration={18} direction="up" distance={20}>
+      <FadeIn delay={25} duration={15}>
         <p
           style={{
             fontFamily: FONTS.body,
@@ -74,7 +74,7 @@ export const MasteringIntroScene: React.FC = () => {
         </p>
       </FadeIn>
 
-      <FadeIn delay={40} duration={18} direction="none">
+      <FadeIn delay={40} duration={15}>
         <div
           style={{
             display: "flex",
@@ -94,7 +94,7 @@ export const MasteringIntroScene: React.FC = () => {
             "M/S Monitoring",
             "K-Metering",
           ].map((label, i) => (
-            <FadeIn key={label} delay={45 + i * 4} duration={12} direction="up" distance={15}>
+            <FadeIn key={label} delay={45 + i * 4} duration={15}>
               <div
                 style={{
                   fontFamily: FONTS.body,

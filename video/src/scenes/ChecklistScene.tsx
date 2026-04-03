@@ -15,7 +15,6 @@ export const ChecklistScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 60,
@@ -24,15 +23,19 @@ export const ChecklistScene: React.FC = () => {
       <GlowOrb color={COLORS.yellow} size={500} x={200} y={200} pulseSpeed={0.02} drift={35} />
       <GlowOrb color={COLORS.accent} size={400} x={1300} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="right" distance={80} rotate={2} scaleFrom={0.75}>
-        <FeatureLabel
-          title="Song Checklists & Notes"
-          subtitle="Track mix notes per song. Mark items done. Import from any app via LLM migration."
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Song Checklists & Notes"
+            subtitle="Track mix notes per song. Mark items done. Import from any app via LLM migration."
+          />
+        </FadeIn>
+      </div>
 
       <div style={{ marginTop: 40 }}>
-        <AppScreenshot src="images/app-hero-checklist.png" width={1200} delay={10} />
+        <FadeIn delay={10} duration={15}>
+          <AppScreenshot src="images/app-hero-checklist.png" width={1200} delay={10} />
+        </FadeIn>
       </div>
     </div>
   );

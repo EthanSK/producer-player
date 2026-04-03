@@ -29,11 +29,10 @@ export const BandSoloScene: React.FC = () => {
     extrapolateRight: "clamp",
   }));
 
-  // Spectrum bars grow from bottom with spring
-  const spectrumSpring = spring({
-    fps,
-    frame: Math.max(0, frame - 10),
-    config: { damping: 12, stiffness: 100, mass: 0.5 },
+  // Spectrum bars appear via opacity fade
+  const spectrumOpacity = interpolate(frame, [10, 20], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
   });
 
   return (
@@ -45,7 +44,6 @@ export const BandSoloScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -54,14 +52,16 @@ export const BandSoloScene: React.FC = () => {
       <GlowOrb color={COLORS.accent} size={500} x={300} y={100} pulseSpeed={0.02} drift={35} />
       <GlowOrb color={COLORS.green} size={400} x={1200} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="right" distance={80} rotate={3} scaleFrom={0.7}>
-        <FeatureLabel
-          title="Frequency Band Soloing"
-          subtitle="Click any frequency band to instantly solo it. Hear exactly what's happening in each range."
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Frequency Band Soloing"
+            subtitle="Click any frequency band to instantly solo it. Hear exactly what's happening in each range."
+          />
+        </FadeIn>
+      </div>
 
-      <FadeIn delay={8} duration={18} direction="up" distance={50} rotate={-1}>
+      <FadeIn delay={8} duration={15}>
         <div
           style={{
             marginTop: 40,
@@ -71,17 +71,12 @@ export const BandSoloScene: React.FC = () => {
             border: `1px solid ${COLORS.border}`,
           }}
         >
-          {/* Band selector pills — each springs in staggered */}
+          {/* Band selector pills */}
           <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
             {bands.map((band, i) => {
               const isActive = i === soloIndex;
-              const pillSpring = spring({
-                fps,
-                frame: Math.max(0, frame - 12 - i * 2),
-                config: { damping: 11, stiffness: 130, mass: 0.4 },
-              });
-              const pillScale = interpolate(pillSpring, [0, 1], [0.3, 1]);
-              const pillOpacity = interpolate(pillSpring, [0, 0.3], [0, 1], {
+              const pillOpacity = interpolate(frame, [12 + i * 2, 18 + i * 2], [0, 1], {
+                extrapolateLeft: "clamp",
                 extrapolateRight: "clamp",
               });
 
@@ -97,9 +92,8 @@ export const BandSoloScene: React.FC = () => {
                     borderRadius: 6,
                     padding: "6px 16px",
                     border: isActive ? `1px solid ${COLORS.accent}` : "1px solid transparent",
-                    transform: `scale(${pillScale}) ${isActive ? "scale(1.08)" : ""}`,
+                    transform: isActive ? "scale(1.08)" : "scale(1)",
                     opacity: pillOpacity,
-                    willChange: "transform",
                   }}
                 >
                   {band.name}
@@ -111,8 +105,8 @@ export const BandSoloScene: React.FC = () => {
             })}
           </div>
 
-          {/* Spectrum with band highlighting — bars grow from bottom */}
-          <svg width={width} height={height} style={{ display: "block" }}>
+          {/* Spectrum with band highlighting */}
+          <svg width={width} height={height} style={{ display: "block", opacity: spectrumOpacity }}>
             <rect width={width} height={height} fill="rgba(255,255,255,0.02)" rx={4} />
 
             {Array.from({ length: numBars }).map((_, i) => {
@@ -122,8 +116,7 @@ export const BandSoloScene: React.FC = () => {
                 Math.sin(frame * 0.08 + i * 0.4) * 0.15 +
                 Math.sin(frame * 0.12 + i * 0.7) * 0.1;
               const barAmp = Math.max(0.03, Math.min(1, freqShape + animation));
-              // Bars grow from bottom using spring
-              const barH = barAmp * (height - 16) * spectrumSpring;
+              const barH = barAmp * (height - 16);
               const y = height - barH - 8;
 
               const activeBand = bands[soloIndex];

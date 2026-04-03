@@ -4,7 +4,6 @@ import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
 import { FeatureLabel } from "../components/FeatureLabel";
-import { StatCard } from "../components/StatCard";
 
 export const ReferenceMatchScene: React.FC = () => {
   const frame = useCurrentFrame();
@@ -18,13 +17,6 @@ export const ReferenceMatchScene: React.FC = () => {
   );
   const isMixActive = toggleProgress < 0.5;
 
-  // Toggle button spring for visual pop
-  const toggleSpring = spring({
-    fps,
-    frame: Math.max(0, frame - 15),
-    config: { damping: 14, stiffness: 130, mass: 0.4 },
-  });
-
   return (
     <div
       style={{
@@ -34,7 +26,6 @@ export const ReferenceMatchScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -43,16 +34,18 @@ export const ReferenceMatchScene: React.FC = () => {
       <GlowOrb color={COLORS.accent} size={600} x={300} y={200} pulseSpeed={0.02} drift={40} />
       <GlowOrb color={COLORS.yellow} size={400} x={1200} y={400} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="right" distance={80} rotate={3} scaleFrom={0.7}>
-        <FeatureLabel
-          title="Reference Level Matching"
-          subtitle="A/B your mix against any reference track with automatic loudness-matched playback"
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Reference Track A/B"
+            subtitle="Instantly compare your mix against any reference track"
+          />
+        </FadeIn>
+      </div>
 
       <div style={{ marginTop: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 32 }}>
-        {/* A/B Toggle */}
-        <FadeIn delay={10} duration={18} direction="left" distance={60} rotate={-2}>
+        {/* A/B Toggle — the focal point */}
+        <FadeIn delay={10} duration={15}>
           <div
             style={{
               background: COLORS.bgCard,
@@ -66,32 +59,35 @@ export const ReferenceMatchScene: React.FC = () => {
               Quick A/B Comparison
             </div>
 
+            {/* Prominent A/B toggle */}
             <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
               <div
                 style={{
                   fontFamily: FONTS.body,
-                  fontSize: 16,
-                  fontWeight: 600,
+                  fontSize: 18,
+                  fontWeight: 700,
                   color: isMixActive ? "#fff" : COLORS.textMuted,
                   background: isMixActive ? COLORS.accent : "rgba(255,255,255,0.06)",
-                  borderRadius: 8,
-                  padding: "10px 32px",
+                  borderRadius: 10,
+                  padding: "14px 48px",
+                  border: isMixActive ? `2px solid ${COLORS.accent}` : "2px solid transparent",
                 }}
               >
-                Mix
+                A — Your Mix
               </div>
               <div
                 style={{
                   fontFamily: FONTS.body,
-                  fontSize: 16,
-                  fontWeight: 600,
+                  fontSize: 18,
+                  fontWeight: 700,
                   color: !isMixActive ? "#fff" : COLORS.textMuted,
                   background: !isMixActive ? COLORS.green : "rgba(255,255,255,0.06)",
-                  borderRadius: 8,
-                  padding: "10px 32px",
+                  borderRadius: 10,
+                  padding: "14px 48px",
+                  border: !isMixActive ? `2px solid ${COLORS.green}` : "2px solid transparent",
                 }}
               >
-                Reference
+                B — Reference
               </div>
             </div>
 
@@ -134,16 +130,6 @@ export const ReferenceMatchScene: React.FC = () => {
                 External file
               </div>
             </div>
-          </div>
-        </FadeIn>
-
-        {/* Comparison stats */}
-        <FadeIn delay={25} duration={18} direction="up" distance={50} rotate={1}>
-          <div style={{ display: "flex", gap: 16 }}>
-            <StatCard label="Mix LUFS" value="-14.2" delay={30} accentColor={COLORS.accent} />
-            <StatCard label="Ref LUFS" value="-11.9" delay={34} accentColor={COLORS.green} />
-            <StatCard label="Delta" value="+2.3 dB" subtitle="Auto-compensated" delay={38} accentColor={COLORS.yellow} />
-            <StatCard label="True Peak Delta" value="-0.4 dB" delay={42} />
           </div>
         </FadeIn>
       </div>

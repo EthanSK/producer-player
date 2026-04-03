@@ -95,7 +95,6 @@ export const DraggablePanelsScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -104,14 +103,16 @@ export const DraggablePanelsScene: React.FC = () => {
       <GlowOrb color={COLORS.accent} size={500} x={200} y={150} pulseSpeed={0.02} drift={35} />
       <GlowOrb color="#7c3aed" size={400} x={1300} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="left" distance={80} rotate={-3} scaleFrom={0.7}>
-        <FeatureLabel
-          title="Customizable Workspace"
-          subtitle="Drag and rearrange mastering panels to build your ideal layout"
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Customizable Workspace"
+            subtitle="Drag and rearrange mastering panels to build your ideal layout"
+          />
+        </FadeIn>
+      </div>
 
-      <FadeIn delay={8} duration={18} direction="up" distance={60} rotate={1}>
+      <FadeIn delay={8} duration={15}>
         <div
           style={{
             marginTop: 48,
@@ -127,14 +128,8 @@ export const DraggablePanelsScene: React.FC = () => {
             const shadow = dragShadow(i);
             const swapping = isSwapping(i);
 
-            // Each panel springs in from a random direction
-            const panelSpring = spring({
-              fps,
-              frame: Math.max(0, frame - 10 - i * 3),
-              config: { damping: 12, stiffness: 120, mass: 0.5 },
-            });
-            const panelScale = interpolate(panelSpring, [0, 1], [0.3, 1]);
-            const panelOpacity = interpolate(panelSpring, [0, 0.3], [0, 1], {
+            const panelOpacity = interpolate(frame, [10 + i * 3, 20 + i * 3], [0, 1], {
+              extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
             });
 
@@ -151,7 +146,7 @@ export const DraggablePanelsScene: React.FC = () => {
                   borderRadius: 10,
                   border: `1px solid ${swapping ? panel.color : COLORS.border}`,
                   padding: 20,
-                  transform: `scale(${panelScale * scale}) rotate(${rotation}deg)`,
+                  transform: `scale(${scale}) rotate(${rotation}deg)`,
                   opacity: panelOpacity,
                   boxShadow: shadow,
                   zIndex: swapping ? 10 : 1,

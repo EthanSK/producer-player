@@ -15,7 +15,6 @@ export const AdvancedAnalysisScene: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
         position: "relative",
         overflow: "hidden",
         padding: 80,
@@ -24,16 +23,18 @@ export const AdvancedAnalysisScene: React.FC = () => {
       <GlowOrb color="#7c3aed" size={500} x={300} y={200} pulseSpeed={0.02} drift={40} />
       <GlowOrb color={COLORS.accent} size={400} x={1200} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="down" distance={70} rotate={2} scaleFrom={0.7}>
-        <FeatureLabel
-          title="Deep Analysis Tools"
-          subtitle="K-Metering, Crest Factor, Clip Detection, DC Offset, and more"
-        />
-      </FadeIn>
+      <div style={{ marginTop: 80 }}>
+        <FadeIn delay={0} duration={15}>
+          <FeatureLabel
+            title="Deep Analysis Tools"
+            subtitle="K-Metering, Crest Factor, Clip Detection, DC Offset, and more"
+          />
+        </FadeIn>
+      </div>
 
       {/* K-Metering section */}
       <div style={{ marginTop: 48, display: "flex", gap: 40, alignItems: "flex-start" }}>
-        <FadeIn delay={10} duration={18} direction="left" distance={100} rotate={-4} scaleFrom={0.5}>
+        <FadeIn delay={10} duration={15}>
           <div
             style={{
               background: COLORS.bgCard,
@@ -77,7 +78,7 @@ export const AdvancedAnalysisScene: React.FC = () => {
           </div>
         </FadeIn>
 
-        <FadeIn delay={20} duration={18} direction="right" distance={100} rotate={4} scaleFrom={0.5}>
+        <FadeIn delay={20} duration={15}>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ display: "flex", gap: 16 }}>
               <StatCard label="Crest Factor" value="11.4 dB" subtitle="Peak-to-RMS ratio" delay={25} accentColor={COLORS.accent} />

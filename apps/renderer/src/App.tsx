@@ -314,6 +314,13 @@ interface MasteringCacheStatusState {
   error: string | null;
 }
 
+interface InspectorVersionSampleRateState {
+  cacheKey: string;
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  sampleRateHz: number | null;
+  error: string | null;
+}
+
 function toAgentStaticAnalysis(measured: AudioFileAnalysis): AgentStaticAnalysis {
   return {
     integratedLufs: measured.integratedLufs,
@@ -1509,6 +1516,12 @@ export function App(): JSX.Element {
   const [masteringCacheStatusByVersionId, setMasteringCacheStatusByVersionId] = useState<
     Record<string, MasteringCacheStatusState>
   >({});
+  const [inspectorVersionSampleRateByVersionId, setInspectorVersionSampleRateByVersionId] =
+    useState<Record<string, InspectorVersionSampleRateState>>({});
+  const inspectorVersionSampleRateByVersionIdRef = useRef<
+    Record<string, InspectorVersionSampleRateState>
+  >({});
+  const inspectorVersionSampleRatePendingVersionIdsRef = useRef<Set<string>>(new Set());
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
   const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(() =>
     window.localStorage.getItem(MORE_METRICS_EXPANDED_KEY) === 'true'
@@ -1788,6 +1801,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     masteringCacheByVersionIdRef.current = masteringCacheByVersionId;
   }, [masteringCacheByVersionId]);
+
+  useEffect(() => {
+    inspectorVersionSampleRateByVersionIdRef.current = inspectorVersionSampleRateByVersionId;
+  }, [inspectorVersionSampleRateByVersionId]);
 
   useEffect(() => {
     durationSecondsRef.current = durationSeconds;
@@ -2907,7 +2924,184 @@ export function App(): JSX.Element {
     (song) => song.id === selectedSongId
   );
 
-  const inspectorVersions = selectedSong ? sortVersions(selectedSong.versions) : [];
+  const inspectorVersions = useMemo(
+    () => (selectedSong ? sortVersions(selectedSong.versions) : []),
+    [selectedSong]
+  );
+
+  useEffect(() => {
+    if (inspectorVersions.length === 0) {
+      return;
+    }
+
+    setInspectorVersionSampleRateByVersionId((previous) => {
+      let changed = false;
+      const next = { ...previous };
+
+      for (const version of inspectorVersions) {
+        const cacheKey = buildMasteringCacheKey(version);
+        const cachedEntry = masteringCacheByVersionId[version.id];
+        const cachedSampleRateHz = isMasteringCacheEntryFresh(cachedEntry, version)
+          ? cachedEntry.staticAnalysis.sampleRateHz
+          : null;
+        const existing = next[version.id];
+
+        if (cachedSampleRateHz !== null && Number.isFinite(cachedSampleRateHz)) {
+          if (
+            !existing ||
+            existing.cacheKey !== cacheKey ||
+            existing.status !== 'ready' ||
+            existing.sampleRateHz !== cachedSampleRateHz ||
+            existing.error !== null
+          ) {
+            next[version.id] = {
+              cacheKey,
+              status: 'ready',
+              sampleRateHz: cachedSampleRateHz,
+              error: null,
+            };
+            changed = true;
+          }
+          continue;
+        }
+
+        if (!existing || existing.cacheKey !== cacheKey) {
+          next[version.id] = {
+            cacheKey,
+            status: 'idle',
+            sampleRateHz: null,
+            error: null,
+          };
+          changed = true;
+        }
+      }
+
+      return changed ? next : previous;
+    });
+  }, [inspectorVersions, masteringCacheByVersionId]);
+
+  useEffect(() => {
+    if (inspectorVersions.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      for (const version of inspectorVersions) {
+        if (cancelled) {
+          return;
+        }
+
+        const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
+        if (isMasteringCacheEntryFresh(cachedEntry, version)) {
+          continue;
+        }
+
+        const cacheKey = buildMasteringCacheKey(version);
+        const statusState = inspectorVersionSampleRateByVersionIdRef.current[version.id];
+
+        if (
+          statusState &&
+          statusState.cacheKey === cacheKey &&
+          (statusState.status === 'ready' || statusState.status === 'loading')
+        ) {
+          continue;
+        }
+
+        if (inspectorVersionSampleRatePendingVersionIdsRef.current.has(version.id)) {
+          continue;
+        }
+
+        inspectorVersionSampleRatePendingVersionIdsRef.current.add(version.id);
+
+        setInspectorVersionSampleRateByVersionId((previous) => {
+          const existing = previous[version.id];
+
+          if (!existing || existing.cacheKey !== cacheKey) {
+            return {
+              ...previous,
+              [version.id]: {
+                cacheKey,
+                status: 'loading',
+                sampleRateHz: null,
+                error: null,
+              },
+            };
+          }
+
+          if (existing.status === 'loading') {
+            return previous;
+          }
+
+          return {
+            ...previous,
+            [version.id]: {
+              ...existing,
+              status: 'loading',
+              error: null,
+            },
+          };
+        });
+
+        try {
+          const measured = await window.producerPlayer.analyzeAudioFile(version.filePath);
+
+          if (cancelled) {
+            return;
+          }
+
+          setInspectorVersionSampleRateByVersionId((previous) => {
+            const existing = previous[version.id];
+            if (!existing || existing.cacheKey !== cacheKey) {
+              return previous;
+            }
+
+            return {
+              ...previous,
+              [version.id]: {
+                ...existing,
+                status: 'ready',
+                sampleRateHz:
+                  measured.sampleRateHz !== null && Number.isFinite(measured.sampleRateHz)
+                    ? measured.sampleRateHz
+                    : null,
+                error: null,
+              },
+            };
+          });
+        } catch (error: unknown) {
+          if (cancelled) {
+            return;
+          }
+
+          setInspectorVersionSampleRateByVersionId((previous) => {
+            const existing = previous[version.id];
+            if (!existing || existing.cacheKey !== cacheKey) {
+              return previous;
+            }
+
+            return {
+              ...previous,
+              [version.id]: {
+                ...existing,
+                status: 'error',
+                sampleRateHz: null,
+                error:
+                  error instanceof Error ? error.message : 'Could not load sample rate yet.',
+              },
+            };
+          });
+        } finally {
+          inspectorVersionSampleRatePendingVersionIdsRef.current.delete(version.id);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inspectorVersions]);
 
   const albumActiveVersions = useMemo(
     () =>
@@ -5919,6 +6113,34 @@ export function App(): JSX.Element {
       empty: '—',
     }
   );
+  const inspectorVersionSampleRateTextByVersionId = useMemo(() => {
+    const byVersionId: Record<string, string> = {};
+
+    for (const version of inspectorVersions) {
+      const cachedEntry = masteringCacheByVersionId[version.id];
+      const cachedSampleRateHz = isMasteringCacheEntryFresh(cachedEntry, version)
+        ? cachedEntry.staticAnalysis.sampleRateHz
+        : null;
+
+      if (cachedSampleRateHz !== null && Number.isFinite(cachedSampleRateHz)) {
+        byVersionId[version.id] = formatSampleRateHz(cachedSampleRateHz);
+        continue;
+      }
+
+      const statusState = inspectorVersionSampleRateByVersionId[version.id];
+      byVersionId[version.id] = buildAnalysisValue(
+        statusState?.status ?? 'idle',
+        formatSampleRateHz(statusState?.sampleRateHz),
+        {
+          loading: 'Loading…',
+          error: 'Unavailable',
+          empty: '—',
+        }
+      );
+    }
+
+    return byVersionId;
+  }, [inspectorVersionSampleRateByVersionId, inspectorVersions, masteringCacheByVersionId]);
   const checklistDraftIsEmpty = checklistDraftText.trim().length === 0;
   const updateStatusText =
     updateCheckStatus === 'checking'
@@ -7535,6 +7757,9 @@ export function App(): JSX.Element {
                     <strong>{version.fileName}</strong>
                     <p className="muted">{formatDate(version.modifiedAt)}</p>
                     <p className="muted">{formatFileSize(version.sizeBytes)}</p>
+                    <p className="muted" data-testid="inspector-version-sample-rate">
+                      Sample rate: {inspectorVersionSampleRateTextByVersionId[version.id] ?? '—'}
+                    </p>
                   </div>
                   <div className="version-actions">
                     <button

@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, useCurrentFrame } from "remotion";
+import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
@@ -7,6 +7,7 @@ import { FeatureLabel } from "../components/FeatureLabel";
 
 export const SpectrogramScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
   const width = 900;
   const height = 400;
@@ -19,6 +20,13 @@ export const SpectrogramScene: React.FC = () => {
   const sweepCol = interpolate(frame, [10, 85], [0, cols], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+  });
+
+  // Spectrogram container springs in with scale
+  const containerSpring = spring({
+    fps,
+    frame: Math.max(0, frame - 8),
+    config: { damping: 12, stiffness: 100, mass: 0.6 },
   });
 
   return (
@@ -36,17 +44,17 @@ export const SpectrogramScene: React.FC = () => {
         padding: 80,
       }}
     >
-      <GlowOrb color="#7c3aed" size={500} x={200} y={100} pulseSpeed={0.02} />
-      <GlowOrb color={COLORS.red} size={400} x={1300} y={500} pulseSpeed={0.025} />
+      <GlowOrb color="#7c3aed" size={500} x={200} y={100} pulseSpeed={0.02} drift={35} />
+      <GlowOrb color={COLORS.red} size={400} x={1300} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="right" distance={80} rotate={3} scaleFrom={0.7}>
         <FeatureLabel
-          title="Spectrogram — Time × Frequency"
+          title="Spectrogram — Time x Frequency"
           subtitle="Visualize frequency energy over time with a scrolling heatmap display"
         />
       </FadeIn>
 
-      <FadeIn delay={8} duration={18} direction="up" distance={25}>
+      <FadeIn delay={8} duration={18} direction="down" distance={60} rotate={-2} scaleFrom={0.6}>
         <div
           style={{
             marginTop: 40,
@@ -63,9 +71,7 @@ export const SpectrogramScene: React.FC = () => {
             <rect width={width} height={height} fill="rgba(0,0,20,0.8)" rx={4} />
             {Array.from({ length: Math.min(Math.ceil(sweepCol), cols) }).map((_, col) =>
               Array.from({ length: rows }).map((_, row) => {
-                // frequency = row (0=low, rows-1=high)
                 const freqNorm = row / rows;
-                // Simulate energy: bass heavy, with harmonic bumps
                 const bassWeight = Math.exp(-freqNorm * 3) * 0.8;
                 const midBump = Math.exp(-Math.pow((freqNorm - 0.3) * 5, 2)) * 0.4;
                 const highDecay = Math.exp(-freqNorm * 6) * 0.2;
@@ -74,7 +80,6 @@ export const SpectrogramScene: React.FC = () => {
                   Math.sin(col * 0.08 + row * 0.3) * 0.2;
                 const energy = Math.max(0, Math.min(1, bassWeight + midBump + highDecay + timeVariation));
 
-                // Heatmap: dark blue -> blue -> cyan -> yellow -> red
                 const r = Math.floor(interpolate(energy, [0, 0.3, 0.6, 0.8, 1], [10, 20, 50, 220, 255], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }));
                 const g = Math.floor(interpolate(energy, [0, 0.3, 0.6, 0.8, 1], [10, 40, 180, 200, 60], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }));
                 const b = Math.floor(interpolate(energy, [0, 0.3, 0.6, 0.8, 1], [40, 140, 200, 80, 20], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }));

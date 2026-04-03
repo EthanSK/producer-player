@@ -1,21 +1,26 @@
 import React from "react";
-import { interpolate, useCurrentFrame, Img, staticFile } from "remotion";
+import { spring, interpolate, useCurrentFrame, useVideoConfig, Img, staticFile } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
 
 export const OutroScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
-  const logoScale = interpolate(frame, [5, 25], [0.8, 1], {
+  // Logo springs in with a big bounce
+  const logoSpring = spring({
+    fps,
+    frame: Math.max(0, frame - 5),
+    config: { damping: 8, stiffness: 80, mass: 0.5 },
+  });
+
+  const logoScale = interpolate(logoSpring, [0, 1], [0.1, 1]);
+  const logoOpacity = interpolate(frame, [5, 12], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-
-  const logoOpacity = interpolate(frame, [5, 20], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const logoRotate = interpolate(logoSpring, [0, 1], [20, 0]);
 
   return (
     <div
@@ -31,15 +36,16 @@ export const OutroScene: React.FC = () => {
         overflow: "hidden",
       }}
     >
-      <GlowOrb color={COLORS.accent} size={700} x={400} y={200} pulseSpeed={0.015} />
-      <GlowOrb color={COLORS.green} size={500} x={1100} y={500} pulseSpeed={0.02} />
-      <GlowOrb color="#7c3aed" size={400} x={800} y={100} pulseSpeed={0.025} />
+      <GlowOrb color={COLORS.accent} size={700} x={400} y={200} pulseSpeed={0.015} drift={50} />
+      <GlowOrb color={COLORS.green} size={500} x={1100} y={500} pulseSpeed={0.02} drift={40} />
+      <GlowOrb color="#7c3aed" size={400} x={800} y={100} pulseSpeed={0.025} drift={30} />
 
       <div
         style={{
           opacity: logoOpacity,
-          transform: `scale(${logoScale})`,
+          transform: `scale(${logoScale}) rotate(${logoRotate}deg)`,
           marginBottom: 24,
+          willChange: "transform",
         }}
       >
         <Img
@@ -52,7 +58,7 @@ export const OutroScene: React.FC = () => {
         />
       </div>
 
-      <FadeIn delay={10} duration={18} direction="up" distance={20}>
+      <FadeIn delay={10} duration={18} direction="up" distance={50} rotate={-2} scaleFrom={0.7}>
         <h1
           style={{
             fontFamily: FONTS.body,
@@ -68,7 +74,7 @@ export const OutroScene: React.FC = () => {
         </h1>
       </FadeIn>
 
-      <FadeIn delay={20} duration={18} direction="up" distance={15}>
+      <FadeIn delay={20} duration={18} direction="right" distance={60} rotate={2}>
         <p
           style={{
             fontFamily: FONTS.body,
@@ -82,7 +88,7 @@ export const OutroScene: React.FC = () => {
         </p>
       </FadeIn>
 
-      <FadeIn delay={30} duration={18} direction="up" distance={15}>
+      <FadeIn delay={30} duration={18} direction="left" distance={60} rotate={-2}>
         <div
           style={{
             marginTop: 36,
@@ -99,7 +105,7 @@ export const OutroScene: React.FC = () => {
         </div>
       </FadeIn>
 
-      <FadeIn delay={40} duration={18} direction="none">
+      <FadeIn delay={40} duration={18} direction="up" distance={30}>
         <div
           style={{
             display: "flex",
@@ -108,17 +114,18 @@ export const OutroScene: React.FC = () => {
           }}
         >
           {["Version Tracking", "Mastering Workspace", "Album Ordering", "Song Checklists"].map(
-            (feature) => (
-              <span
-                key={feature}
-                style={{
-                  fontFamily: FONTS.body,
-                  fontSize: 14,
-                  color: COLORS.textMuted,
-                }}
-              >
-                {feature}
-              </span>
+            (feature, i) => (
+              <FadeIn key={feature} delay={42 + i * 3} duration={14} direction="up" distance={20} scaleFrom={0.8}>
+                <span
+                  style={{
+                    fontFamily: FONTS.body,
+                    fontSize: 14,
+                    color: COLORS.textMuted,
+                  }}
+                >
+                  {feature}
+                </span>
+              </FadeIn>
             )
           )}
         </div>

@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, useCurrentFrame } from "remotion";
+import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
@@ -16,7 +16,6 @@ function generateSpectrumCurve(
   const data: number[] = [];
   for (let i = 0; i < numPoints; i++) {
     const freqNorm = i / numPoints;
-    // Natural roll-off shape
     const base = Math.exp(-freqNorm * 2.5) * 0.8 + 0.05;
     const animation =
       Math.sin(frame * 0.07 + i * 0.3 + seed) * 0.12 +
@@ -28,6 +27,7 @@ function generateSpectrumCurve(
 
 export const MidSideScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
   const width = 900;
   const height = 340;
@@ -40,16 +40,19 @@ export const MidSideScene: React.FC = () => {
     (v) => v * 0.55 + Math.sin(frame * 0.05) * 0.05
   );
 
-  const fadeInOpacity = interpolate(frame, [8, 22], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
+  // SVG curves spring into view
+  const curveSpring = spring({
+    fps,
+    frame: Math.max(0, frame - 10),
+    config: { damping: 14, stiffness: 100, mass: 0.5 },
   });
 
   function toPath(data: number[]): string {
     return data
       .map((val, i) => {
         const x = padding.left + (i / (data.length - 1)) * plotW;
-        const y = padding.top + (1 - val) * plotH;
+        // Spring affects the vertical scale
+        const y = padding.top + (1 - val * curveSpring) * plotH;
         return `${i === 0 ? "M" : "L"}${x},${y}`;
       })
       .join(" ");
@@ -63,7 +66,6 @@ export const MidSideScene: React.FC = () => {
     return `${path} L${lastX},${bottom} L${firstX},${bottom} Z`;
   }
 
-  // Grid lines for dB scale
   const gridDb = [-10, -20, -30, -40, -50];
 
   return (
@@ -81,17 +83,17 @@ export const MidSideScene: React.FC = () => {
         padding: 80,
       }}
     >
-      <GlowOrb color={COLORS.accent} size={500} x={200} y={100} pulseSpeed={0.02} />
-      <GlowOrb color="#ff8c42" size={400} x={1300} y={500} pulseSpeed={0.025} />
+      <GlowOrb color={COLORS.accent} size={500} x={200} y={100} pulseSpeed={0.02} drift={35} />
+      <GlowOrb color="#ff8c42" size={400} x={1300} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="left" distance={80} rotate={-3} scaleFrom={0.7}>
         <FeatureLabel
           title="Mid/Side Analysis"
           subtitle="Compare the center (Mid) and stereo (Side) spectrums in real time"
         />
       </FadeIn>
 
-      <FadeIn delay={8} duration={18} direction="up" distance={25}>
+      <FadeIn delay={8} duration={18} direction="up" distance={60} rotate={2}>
         <div
           style={{
             marginTop: 40,
@@ -117,7 +119,7 @@ export const MidSideScene: React.FC = () => {
             </div>
           </div>
 
-          <svg width={width} height={height} style={{ display: "block", opacity: fadeInOpacity }}>
+          <svg width={width} height={height} style={{ display: "block" }}>
             <rect x={padding.left} y={padding.top} width={plotW} height={plotH}
               fill="rgba(255,255,255,0.02)" rx={4} />
 

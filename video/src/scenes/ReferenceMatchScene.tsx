@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, useCurrentFrame } from "remotion";
+import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
@@ -8,6 +8,7 @@ import { StatCard } from "../components/StatCard";
 
 export const ReferenceMatchScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
   // Animated toggle between Mix and Reference
   const toggleProgress = interpolate(
@@ -16,6 +17,13 @@ export const ReferenceMatchScene: React.FC = () => {
     [0, 1]
   );
   const isMixActive = toggleProgress < 0.5;
+
+  // Toggle button spring for visual pop
+  const toggleSpring = spring({
+    fps,
+    frame: Math.max(0, frame - 15),
+    config: { damping: 14, stiffness: 130, mass: 0.4 },
+  });
 
   return (
     <div
@@ -32,10 +40,10 @@ export const ReferenceMatchScene: React.FC = () => {
         padding: 80,
       }}
     >
-      <GlowOrb color={COLORS.accent} size={600} x={300} y={200} pulseSpeed={0.02} />
-      <GlowOrb color={COLORS.yellow} size={400} x={1200} y={400} pulseSpeed={0.025} />
+      <GlowOrb color={COLORS.accent} size={600} x={300} y={200} pulseSpeed={0.02} drift={40} />
+      <GlowOrb color={COLORS.yellow} size={400} x={1200} y={400} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="right" distance={80} rotate={3} scaleFrom={0.7}>
         <FeatureLabel
           title="Reference Level Matching"
           subtitle="A/B your mix against any reference track with automatic loudness-matched playback"
@@ -44,7 +52,7 @@ export const ReferenceMatchScene: React.FC = () => {
 
       <div style={{ marginTop: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 32 }}>
         {/* A/B Toggle */}
-        <FadeIn delay={10} duration={18} direction="up" distance={20}>
+        <FadeIn delay={10} duration={18} direction="left" distance={60} rotate={-2}>
           <div
             style={{
               background: COLORS.bgCard,
@@ -68,7 +76,6 @@ export const ReferenceMatchScene: React.FC = () => {
                   background: isMixActive ? COLORS.accent : "rgba(255,255,255,0.06)",
                   borderRadius: 8,
                   padding: "10px 32px",
-                  transition: "all 0.3s",
                 }}
               >
                 Mix
@@ -82,7 +89,6 @@ export const ReferenceMatchScene: React.FC = () => {
                   background: !isMixActive ? COLORS.green : "rgba(255,255,255,0.06)",
                   borderRadius: 8,
                   padding: "10px 32px",
-                  transition: "all 0.3s",
                 }}
               >
                 Reference
@@ -91,27 +97,19 @@ export const ReferenceMatchScene: React.FC = () => {
 
             {/* Level Match toggle */}
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-              <div
-                style={{
-                  fontFamily: FONTS.body,
-                  fontSize: 14,
-                  color: COLORS.textMuted,
-                }}
-              >
+              <div style={{ fontFamily: FONTS.body, fontSize: 14, color: COLORS.textMuted }}>
                 Level Match
               </div>
-              <div
-                style={{
-                  fontFamily: FONTS.body,
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: COLORS.green,
-                  background: "rgba(95, 210, 143, 0.12)",
-                  border: "1px solid rgba(95, 210, 143, 0.3)",
-                  borderRadius: 6,
-                  padding: "6px 16px",
-                }}
-              >
+              <div style={{
+                fontFamily: FONTS.body,
+                fontSize: 14,
+                fontWeight: 600,
+                color: COLORS.green,
+                background: "rgba(95, 210, 143, 0.12)",
+                border: "1px solid rgba(95, 210, 143, 0.3)",
+                borderRadius: 6,
+                padding: "6px 16px",
+              }}>
                 Level Match On
               </div>
               <span style={{ fontFamily: FONTS.mono, fontSize: 13, color: COLORS.textMuted }}>
@@ -120,14 +118,12 @@ export const ReferenceMatchScene: React.FC = () => {
             </div>
 
             {/* Reference track info */}
-            <div
-              style={{
-                background: "rgba(255,255,255,0.03)",
-                borderRadius: 8,
-                padding: 20,
-                border: `1px solid ${COLORS.border}`,
-              }}
-            >
+            <div style={{
+              background: "rgba(255,255,255,0.03)",
+              borderRadius: 8,
+              padding: 20,
+              border: `1px solid ${COLORS.border}`,
+            }}>
               <div style={{ fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted, marginBottom: 8 }}>
                 Active reference track
               </div>
@@ -142,7 +138,7 @@ export const ReferenceMatchScene: React.FC = () => {
         </FadeIn>
 
         {/* Comparison stats */}
-        <FadeIn delay={25} duration={18} direction="up" distance={20}>
+        <FadeIn delay={25} duration={18} direction="up" distance={50} rotate={1}>
           <div style={{ display: "flex", gap: 16 }}>
             <StatCard label="Mix LUFS" value="-14.2" delay={30} accentColor={COLORS.accent} />
             <StatCard label="Ref LUFS" value="-11.9" delay={34} accentColor={COLORS.green} />

@@ -22,9 +22,9 @@ export const SpectrumLevelScene: React.FC = () => {
         padding: 80,
       }}
     >
-      <GlowOrb color={COLORS.accent} size={500} x={300} y={100} pulseSpeed={0.015} />
+      <GlowOrb color={COLORS.accent} size={500} x={300} y={100} pulseSpeed={0.015} drift={40} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="down" distance={70} rotate={2} scaleFrom={0.7}>
         <FeatureLabel
           title="Real-time Spectrum & Level"
           subtitle="Clickable frequency bands for instant soloing. Full stereo level metering."
@@ -39,7 +39,7 @@ export const SpectrumLevelScene: React.FC = () => {
           alignItems: "flex-end",
         }}
       >
-        <FadeIn delay={10} duration={18} direction="left" distance={30}>
+        <FadeIn delay={10} duration={18} direction="left" distance={80} rotate={-3} scaleFrom={0.6}>
           <div
             style={{
               background: COLORS.bgCard,
@@ -89,7 +89,7 @@ export const SpectrumLevelScene: React.FC = () => {
           </div>
         </FadeIn>
 
-        <FadeIn delay={20} duration={18} direction="right" distance={30}>
+        <FadeIn delay={20} duration={18} direction="right" distance={80} rotate={3} scaleFrom={0.6}>
           <div
             style={{
               background: COLORS.bgCard,

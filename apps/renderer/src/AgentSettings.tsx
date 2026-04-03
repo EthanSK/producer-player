@@ -179,6 +179,7 @@ export function AgentSettings({
               onClick={() => onProviderChange(providerId)}
               disabled={controlsDisabled}
               data-testid={`agent-provider-${providerId}`}
+              title={`Use ${AGENT_PROVIDER_LABELS[providerId]} as the AI provider`}
             >
               {AGENT_PROVIDER_LABELS[providerId]}
             </button>
@@ -253,6 +254,7 @@ export function AgentSettings({
               onClick={() => handleSttProviderChange(providerId)}
               disabled={controlsDisabled}
               data-testid={`agent-stt-provider-${providerId}`}
+              title={`Use ${AGENT_STT_PROVIDER_LABELS[providerId]} for speech-to-text`}
             >
               {AGENT_STT_PROVIDER_LABELS[providerId]}
             </button>
@@ -273,6 +275,7 @@ export function AgentSettings({
               className="agent-settings-key-clear"
               onClick={() => void handleClearDeepgramKey()}
               data-testid="agent-settings-key-clear"
+              title="Clear the saved Deepgram API key"
             >
               Clear
             </button>
@@ -293,6 +296,7 @@ export function AgentSettings({
               onClick={() => void handleSaveDeepgramKey()}
               disabled={!deepgramKey.trim()}
               data-testid="agent-settings-key-save"
+              title="Save the Deepgram API key"
             >
               Save
             </button>
@@ -321,6 +325,7 @@ export function AgentSettings({
               className="agent-settings-key-clear"
               onClick={() => void handleClearAssemblyAiKey()}
               data-testid="agent-assemblyai-key-clear"
+              title="Clear the saved AssemblyAI API key"
             >
               Clear
             </button>
@@ -341,6 +346,7 @@ export function AgentSettings({
               onClick={() => void handleSaveAssemblyAiKey()}
               disabled={!assemblyAiKey.trim()}
               data-testid="agent-assemblyai-key-save"
+              title="Save the AssemblyAI API key"
             >
               Save
             </button>
@@ -365,6 +371,7 @@ export function AgentSettings({
           className="agent-settings-clear-button"
           onClick={handleNewChatClick}
           data-testid="agent-clear-chat"
+          title="Clear the current conversation and start fresh"
         >
           Start new chat
         </button>

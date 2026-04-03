@@ -1287,6 +1287,7 @@ export function AgentChatPanel({
                 type="button"
                 className="agent-approval-allow"
                 onClick={() => handleApproval('allow')}
+                title="Allow this tool action"
               >
                 Allow
               </button>
@@ -1294,6 +1295,7 @@ export function AgentChatPanel({
                 type="button"
                 className="agent-approval-deny"
                 onClick={() => handleApproval('deny')}
+                title="Deny this tool action"
               >
                 Deny
               </button>
@@ -1368,6 +1370,7 @@ export function AgentChatPanel({
                           type="button"
                           className="agent-help-source-link"
                           onClick={() => handleOpenTutorialSource(source.url)}
+                          title={`Open ${source.label}`}
                         >
                           {source.label}
                         </button>
@@ -1463,6 +1466,7 @@ export function AgentChatPanel({
                       setHistoryOpen(false);
                     }}
                     data-testid="agent-empty-state-help"
+                    title="Open setup help for configuring the assistant"
                   >
                     Open setup help
                   </button>
@@ -1474,6 +1478,7 @@ export function AgentChatPanel({
                         className="agent-starter-chip"
                         onClick={() => void handleSendMessage(prompt)}
                         data-testid="agent-starter-chip"
+                        title={`Send: ${prompt}`}
                       >
                         {prompt}
                       </button>

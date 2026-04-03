@@ -23,10 +23,10 @@ export const LoudnessWaveformScene: React.FC = () => {
         padding: 60,
       }}
     >
-      <GlowOrb color={COLORS.accent} size={600} x={200} y={100} pulseSpeed={0.015} />
-      <GlowOrb color={COLORS.green} size={400} x={1300} y={600} pulseSpeed={0.02} />
+      <GlowOrb color={COLORS.accent} size={600} x={200} y={100} pulseSpeed={0.015} drift={40} />
+      <GlowOrb color={COLORS.green} size={400} x={1300} y={600} pulseSpeed={0.02} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="left" distance={80} rotate={-2} scaleFrom={0.7}>
         <FeatureLabel
           title="Loudness History & Waveform"
           subtitle="Track LUFS over time with an animated playback cursor. See the full waveform at a glance."
@@ -34,7 +34,7 @@ export const LoudnessWaveformScene: React.FC = () => {
       </FadeIn>
 
       <div style={{ marginTop: 36 }}>
-        <FadeIn delay={10} duration={18} direction="up" distance={25}>
+        <FadeIn delay={10} duration={18} direction="right" distance={60} rotate={1}>
           <div
             style={{
               background: COLORS.bgCard,
@@ -51,7 +51,7 @@ export const LoudnessWaveformScene: React.FC = () => {
           </div>
         </FadeIn>
 
-        <FadeIn delay={25} duration={18} direction="up" distance={25}>
+        <FadeIn delay={25} duration={18} direction="left" distance={60} rotate={-1}>
           <div
             style={{
               background: COLORS.bgCard,

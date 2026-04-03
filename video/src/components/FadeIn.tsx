@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, useCurrentFrame } from "remotion";
+import { spring, useCurrentFrame, useVideoConfig, interpolate } from "remotion";
 
 interface FadeInProps {
   children: React.ReactNode;
@@ -8,6 +8,9 @@ interface FadeInProps {
   direction?: "up" | "down" | "left" | "right" | "none";
   distance?: number;
   style?: React.CSSProperties;
+  rotate?: number;
+  scaleFrom?: number;
+  blur?: number;
 }
 
 export const FadeIn: React.FC<FadeInProps> = ({
@@ -15,29 +18,69 @@ export const FadeIn: React.FC<FadeInProps> = ({
   delay = 0,
   duration = 20,
   direction = "up",
-  distance = 40,
+  distance = 60,
   style,
+  rotate = 0,
+  scaleFrom = 0.85,
+  blur = 4,
 }) => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
-  const opacity = interpolate(frame, [delay, delay + duration], [0, 1], {
+  const delayedFrame = Math.max(0, frame - delay);
+
+  // Bouncy spring animation
+  const springVal = spring({
+    fps,
+    frame: delayedFrame,
+    config: {
+      damping: 12,
+      stiffness: 120,
+      mass: 0.6,
+    },
+  });
+
+  // Opacity ramps quickly
+  const opacity = interpolate(delayedFrame, [0, Math.min(duration * 0.4, 8)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
-  const translateMap = {
-    up: `translateY(${interpolate(frame, [delay, delay + duration], [distance, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })}px)`,
-    down: `translateY(${interpolate(frame, [delay, delay + duration], [-distance, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })}px)`,
-    left: `translateX(${interpolate(frame, [delay, delay + duration], [distance, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })}px)`,
-    right: `translateX(${interpolate(frame, [delay, delay + duration], [-distance, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })}px)`,
-    none: "none",
+  // Direction-based translation
+  const translateMap: Record<string, string> = {
+    up: `translateY(${(1 - springVal) * distance}px)`,
+    down: `translateY(${-(1 - springVal) * distance}px)`,
+    left: `translateX(${(1 - springVal) * distance}px)`,
+    right: `translateX(${-(1 - springVal) * distance}px)`,
+    none: "",
   };
+
+  // Scale springs in
+  const scale = interpolate(springVal, [0, 1], [scaleFrom, 1]);
+
+  // Rotation springs from rotate to 0
+  const rot = interpolate(springVal, [0, 1], [rotate, 0]);
+
+  // Blur fades away
+  const blurVal = interpolate(springVal, [0, 0.5], [blur, 0], {
+    extrapolateRight: "clamp",
+  });
+
+  const transform = [
+    translateMap[direction] || "",
+    `scale(${scale})`,
+    rot !== 0 ? `rotate(${rot}deg)` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
       style={{
-        opacity,
-        transform: translateMap[direction],
+        opacity: frame < delay ? 0 : opacity,
+        transform,
+        filter: blurVal > 0.1 ? `blur(${blurVal}px)` : "none",
+        willChange: "transform, opacity, filter",
         ...style,
       }}
     >

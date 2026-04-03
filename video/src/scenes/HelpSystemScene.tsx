@@ -1,22 +1,39 @@
 import React from "react";
-import { interpolate, useCurrentFrame } from "remotion";
+import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
 import { FeatureLabel } from "../components/FeatureLabel";
 
+// Real tutorial data from the app's helpTooltipLinks.ts
+const tutorials = [
+  { title: "Understanding LUFS", channel: "Ben Kestok", color: "#5ca7ff" },
+  { title: "True Peak Limiting", channel: "Streaky", color: "#fbbf24" },
+  { title: "Mastering with References", channel: "iZotope", color: "#5fd28f" },
+  { title: "Spectrum Analyzer Tips", channel: "In The Mix", color: "#7c3aed" },
+  { title: "Mid/Side EQ Simplified", channel: "In The Mix", color: "#ff8c42" },
+  { title: "K-System Metering", channel: "MeterPlugs", color: "#f87171" },
+  { title: "Phase Correlation Meter", channel: "AM Music", color: "#5ca7ff" },
+  { title: "DC Offset Explained", channel: "Sweetwater", color: "#5fd28f" },
+  { title: "Stereo Width Tips", channel: "Cableguys", color: "#fbbf24" },
+];
+
 export const HelpSystemScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
-  // Modal pop-up animation
-  const modalScale = interpolate(frame, [15, 30], [0.85, 1], {
-    extrapolateLeft: "clamp",
+  // Modal pop-up with spring
+  const modalSpring = spring({
+    fps,
+    frame: Math.max(0, frame - 15),
+    config: { damping: 11, stiffness: 100, mass: 0.6 },
+  });
+
+  const modalScale = interpolate(modalSpring, [0, 1], [0.5, 1]);
+  const modalOpacity = interpolate(modalSpring, [0, 0.3], [0, 1], {
     extrapolateRight: "clamp",
   });
-  const modalOpacity = interpolate(frame, [15, 25], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const modalRotate = interpolate(modalSpring, [0, 1], [-4, 0]);
 
   // Backdrop
   const backdropOpacity = interpolate(frame, [12, 20], [0, 0.5], {
@@ -42,21 +59,21 @@ export const HelpSystemScene: React.FC = () => {
       <GlowOrb color={COLORS.yellow} size={500} x={200} y={100} pulseSpeed={0.02} />
       <GlowOrb color={COLORS.accent} size={400} x={1300} y={500} pulseSpeed={0.025} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="up" rotate={-2}>
         <FeatureLabel
           title="Built-in Tutorials"
-          subtitle="Professional mastering education and keyboard shortcuts right inside the app"
+          subtitle="AI-ranked YouTube tutorials for every panel, right inside the app"
         />
       </FadeIn>
 
       {/* Background app mockup (dimmed) */}
-      <FadeIn delay={5} duration={15} direction="none">
+      <FadeIn delay={5} duration={15} direction="none" scaleFrom={0.95}>
         <div
           style={{
             marginTop: 36,
             position: "relative",
             width: 900,
-            height: 480,
+            height: 520,
           }}
         >
           {/* Dimmed background */}
@@ -67,7 +84,7 @@ export const HelpSystemScene: React.FC = () => {
             borderRadius: 12,
             border: `1px solid ${COLORS.border}`,
             padding: 20,
-            opacity: 0.4,
+            opacity: 0.3,
           }}>
             {/* Fake toolbar */}
             <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -75,7 +92,6 @@ export const HelpSystemScene: React.FC = () => {
               <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#ffbd2e" }} />
               <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#27c93f" }} />
             </div>
-            {/* Fake content lines */}
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} style={{
                 width: `${60 + Math.sin(i) * 20}%`,
@@ -96,145 +112,176 @@ export const HelpSystemScene: React.FC = () => {
             opacity: backdropOpacity,
           }} />
 
-          {/* Tutorial content modal */}
+          {/* Tutorial content modal — mimics actual HelpTooltip.tsx design */}
           <div
             style={{
               position: "absolute",
               top: "50%",
               left: "50%",
-              transform: `translate(-50%, -50%) scale(${modalScale})`,
+              transform: `translate(-50%, -50%) scale(${modalScale}) rotate(${modalRotate}deg)`,
               opacity: modalOpacity,
-              background: COLORS.bgCard,
-              borderRadius: 16,
-              border: `1px solid ${COLORS.border}`,
-              padding: 32,
-              width: 740,
-              boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+              background: "#111922",
+              borderRadius: 12,
+              border: "1px solid #2b3a49",
+              padding: "20px 24px",
+              width: 760,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
             }}
           >
-            {/* Modal header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <div style={{ fontFamily: FONTS.body, fontSize: 22, fontWeight: 700, color: COLORS.text }}>
-                Mastering Tutorials
+            {/* Modal header — matches real app */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              marginBottom: 12,
+            }}>
+              <div style={{
+                fontFamily: FONTS.body,
+                fontSize: 13,
+                lineHeight: "1.55",
+                color: "#c6d5e8",
+                whiteSpace: "pre-wrap",
+                paddingRight: 28,
+              }}>
+                Click the{" "}
+                <span style={{
+                  display: "inline-flex",
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  border: "1px solid rgba(156,175,196,0.25)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 10,
+                  color: "#9cafc4",
+                  verticalAlign: "middle",
+                }}>?</span>
+                {" "}icon on any panel for context-specific help and curated video tutorials.
               </div>
               <div style={{
-                fontFamily: FONTS.mono,
-                fontSize: 12,
-                color: COLORS.textMuted,
-                background: "rgba(255,255,255,0.06)",
-                borderRadius: 4,
-                padding: "4px 10px",
+                width: 26,
+                height: 26,
+                borderRadius: "50%",
+                border: "1px solid rgba(156,175,196,0.25)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 15,
+                color: "#9cafc4",
+                flexShrink: 0,
               }}>
-                ?
+                x
               </div>
             </div>
 
-            {/* Tutorial content - real mastering education */}
-            <FadeIn delay={25} duration={15} direction="up" distance={15}>
-              <div style={{
-                background: "linear-gradient(135deg, rgba(10,22,40,0.9), rgba(22,32,64,0.9))",
-                borderRadius: 10,
-                padding: 24,
-                marginBottom: 16,
-                border: `1px solid ${COLORS.border}`,
+            {/* Video tutorials section — matches real design with grid */}
+            <div style={{
+              paddingTop: 12,
+              borderTop: "1px solid rgba(156,175,196,0.15)",
+            }}>
+              <span style={{
+                fontFamily: FONTS.body,
+                fontSize: 12,
+                fontWeight: 600,
+                color: "#7a8fa3",
+                marginBottom: 8,
+                display: "block",
               }}>
-                <div style={{
-                  fontFamily: FONTS.body,
-                  fontSize: 16,
-                  fontWeight: 700,
-                  color: COLORS.accent,
-                  marginBottom: 14,
-                  letterSpacing: "0.02em",
-                }}>
-                  Understanding EQ
-                </div>
+                Video Tutorials (ranked by AI)
+              </span>
 
-                <div style={{
-                  fontFamily: FONTS.body,
-                  fontSize: 13,
-                  color: "rgba(255,255,255,0.85)",
-                  lineHeight: "1.7",
-                  marginBottom: 12,
-                }}>
-                  Cut narrow, boost wide. Start with subtractive EQ to remove problem frequencies before boosting. Use a high-pass filter around 30-40 Hz to clean low-end rumble.
-                </div>
+              {/* 3x3 grid of video cards — matches real videoGridStyle */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: 10,
+                marginTop: 8,
+              }}>
+                {tutorials.map((tutorial, i) => {
+                  const cardSpring = spring({
+                    fps,
+                    frame: Math.max(0, frame - 25 - i * 3),
+                    config: { damping: 13, stiffness: 120, mass: 0.5 },
+                  });
+                  const cardScale = interpolate(cardSpring, [0, 1], [0.5, 1]);
+                  const cardOpacity = interpolate(cardSpring, [0, 0.3], [0, 1], {
+                    extrapolateRight: "clamp",
+                  });
 
-                <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
-                  <div style={{
-                    flex: 1,
-                    background: "rgba(255,255,255,0.04)",
-                    borderRadius: 6,
-                    padding: "10px 14px",
-                    border: `1px solid rgba(255,255,255,0.06)`,
-                  }}>
-                    <div style={{ fontFamily: FONTS.mono, fontSize: 11, color: COLORS.yellow, marginBottom: 4, fontWeight: 700 }}>
-                      COMPRESSION
+                  return (
+                    <div
+                      key={tutorial.title}
+                      style={{
+                        opacity: cardOpacity,
+                        transform: `scale(${cardScale})`,
+                        borderRadius: 6,
+                        overflow: "hidden",
+                        border: "1px solid rgba(156,175,196,0.15)",
+                        background: "#0d1520",
+                      }}
+                    >
+                      {/* Fake YouTube thumbnail */}
+                      <div style={{
+                        width: "100%",
+                        aspectRatio: "16 / 9",
+                        background: `linear-gradient(135deg, ${tutorial.color}30, ${tutorial.color}10)`,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        position: "relative",
+                      }}>
+                        {/* Play button */}
+                        <div style={{
+                          width: 32,
+                          height: 22,
+                          background: "rgba(255,0,0,0.85)",
+                          borderRadius: 4,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}>
+                          <div style={{
+                            width: 0,
+                            height: 0,
+                            borderLeft: "8px solid white",
+                            borderTop: "5px solid transparent",
+                            borderBottom: "5px solid transparent",
+                            marginLeft: 2,
+                          }} />
+                        </div>
+                        {/* AI rank badge */}
+                        <div style={{
+                          position: "absolute",
+                          top: 4,
+                          left: 4,
+                          fontFamily: FONTS.mono,
+                          fontSize: 8,
+                          color: "#fff",
+                          background: "rgba(0,0,0,0.7)",
+                          borderRadius: 3,
+                          padding: "1px 4px",
+                        }}>
+                          #{i + 1}
+                        </div>
+                      </div>
+                      {/* Caption */}
+                      <div style={{
+                        fontSize: 9,
+                        lineHeight: "1.35",
+                        padding: "4px 6px",
+                        color: "#9cafc4",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        fontFamily: FONTS.body,
+                      }}>
+                        {tutorial.title} - {tutorial.channel}
+                      </div>
                     </div>
-                    <div style={{ fontFamily: FONTS.body, fontSize: 12, color: "rgba(255,255,255,0.7)", lineHeight: "1.6" }}>
-                      2-4 dB gain reduction for gentle glue. Attack 10-30ms, release 50-100ms. Use your ears, not your eyes.
-                    </div>
-                  </div>
-                  <div style={{
-                    flex: 1,
-                    background: "rgba(255,255,255,0.04)",
-                    borderRadius: 6,
-                    padding: "10px 14px",
-                    border: `1px solid rgba(255,255,255,0.06)`,
-                  }}>
-                    <div style={{ fontFamily: FONTS.mono, fontSize: 11, color: COLORS.green, marginBottom: 4, fontWeight: 700 }}>
-                      LIMITING
-                    </div>
-                    <div style={{ fontFamily: FONTS.body, fontSize: 12, color: "rgba(255,255,255,0.7)", lineHeight: "1.6" }}>
-                      Target -14 LUFS for streaming. Aim for 1-2 dB of limiting max. Preserve transients and dynamic range.
-                    </div>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
-            </FadeIn>
-
-            {/* Quick links */}
-            <FadeIn delay={40} duration={15} direction="up" distance={10}>
-              <div style={{ display: "flex", gap: 12 }}>
-                {[
-                  { label: "Keyboard Shortcuts", icon: "K" },
-                  { label: "Stereo Imaging", icon: "S" },
-                  { label: "Loudness Standards", icon: "L" },
-                ].map((item) => (
-                  <div
-                    key={item.label}
-                    style={{
-                      flex: 1,
-                      background: "rgba(255,255,255,0.03)",
-                      borderRadius: 8,
-                      padding: "12px 16px",
-                      border: `1px solid ${COLORS.border}`,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <div style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: 4,
-                      background: `${COLORS.accent}15`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontFamily: FONTS.mono,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: COLORS.accent,
-                    }}>
-                      {item.icon}
-                    </div>
-                    <span style={{ fontFamily: FONTS.body, fontSize: 13, color: COLORS.text }}>
-                      {item.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </FadeIn>
+            </div>
           </div>
         </div>
       </FadeIn>

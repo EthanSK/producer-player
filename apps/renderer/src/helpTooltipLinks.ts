@@ -64,7 +64,7 @@ const MASTERING_TUTORIAL_FALLBACKS: readonly HelpTooltipLink[] = [
 ];
 
 function stripAiRankPrefix(label: string): string {
-  return label.replace(/^AI-ranked\s*#?\d+[:.)-]?\s*/i, '').trim();
+  return label.replace(/^(AI-ranked\s*)?#?\d+[:.)-]?\s*/i, '').trim();
 }
 
 function withAiRankedTutorials(sourceLinks: readonly HelpTooltipLink[]): HelpTooltipLink[] {
@@ -90,7 +90,7 @@ function withAiRankedTutorials(sourceLinks: readonly HelpTooltipLink[]): HelpToo
   }
 
   return ranked.map((link, index) => ({
-    label: `AI-ranked #${index + 1}: ${link.label}`,
+    label: `#${index + 1}: ${link.label}`,
     url: link.url,
   }));
 }

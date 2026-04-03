@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, useCurrentFrame } from "remotion";
+import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
@@ -16,6 +16,7 @@ const bands = [
 
 export const BandSoloScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
   const width = 900;
   const height = 320;
@@ -23,11 +24,17 @@ export const BandSoloScene: React.FC = () => {
   const barW = width / numBars;
 
   // Cycle through bands being soloed
-  const cycleTime = 80; // frames per full cycle
   const soloIndex = Math.floor(interpolate(frame, [15, 85], [0, 5.99], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   }));
+
+  // Spectrum bars grow from bottom with spring
+  const spectrumSpring = spring({
+    fps,
+    frame: Math.max(0, frame - 10),
+    config: { damping: 12, stiffness: 100, mass: 0.5 },
+  });
 
   return (
     <div
@@ -44,17 +51,17 @@ export const BandSoloScene: React.FC = () => {
         padding: 80,
       }}
     >
-      <GlowOrb color={COLORS.accent} size={500} x={300} y={100} pulseSpeed={0.02} />
-      <GlowOrb color={COLORS.green} size={400} x={1200} y={500} pulseSpeed={0.025} />
+      <GlowOrb color={COLORS.accent} size={500} x={300} y={100} pulseSpeed={0.02} drift={35} />
+      <GlowOrb color={COLORS.green} size={400} x={1200} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="right" distance={80} rotate={3} scaleFrom={0.7}>
         <FeatureLabel
           title="Frequency Band Soloing"
           subtitle="Click any frequency band to instantly solo it. Hear exactly what's happening in each range."
         />
       </FadeIn>
 
-      <FadeIn delay={8} duration={18} direction="up" distance={25}>
+      <FadeIn delay={8} duration={18} direction="up" distance={50} rotate={-1}>
         <div
           style={{
             marginTop: 40,
@@ -64,10 +71,20 @@ export const BandSoloScene: React.FC = () => {
             border: `1px solid ${COLORS.border}`,
           }}
         >
-          {/* Band selector pills */}
+          {/* Band selector pills — each springs in staggered */}
           <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
             {bands.map((band, i) => {
               const isActive = i === soloIndex;
+              const pillSpring = spring({
+                fps,
+                frame: Math.max(0, frame - 12 - i * 2),
+                config: { damping: 11, stiffness: 130, mass: 0.4 },
+              });
+              const pillScale = interpolate(pillSpring, [0, 1], [0.3, 1]);
+              const pillOpacity = interpolate(pillSpring, [0, 0.3], [0, 1], {
+                extrapolateRight: "clamp",
+              });
+
               return (
                 <div
                   key={band.name}
@@ -80,6 +97,9 @@ export const BandSoloScene: React.FC = () => {
                     borderRadius: 6,
                     padding: "6px 16px",
                     border: isActive ? `1px solid ${COLORS.accent}` : "1px solid transparent",
+                    transform: `scale(${pillScale}) ${isActive ? "scale(1.08)" : ""}`,
+                    opacity: pillOpacity,
+                    willChange: "transform",
                   }}
                 >
                   {band.name}
@@ -91,7 +111,7 @@ export const BandSoloScene: React.FC = () => {
             })}
           </div>
 
-          {/* Spectrum with band highlighting */}
+          {/* Spectrum with band highlighting — bars grow from bottom */}
           <svg width={width} height={height} style={{ display: "block" }}>
             <rect width={width} height={height} fill="rgba(255,255,255,0.02)" rx={4} />
 
@@ -102,10 +122,10 @@ export const BandSoloScene: React.FC = () => {
                 Math.sin(frame * 0.08 + i * 0.4) * 0.15 +
                 Math.sin(frame * 0.12 + i * 0.7) * 0.1;
               const barAmp = Math.max(0.03, Math.min(1, freqShape + animation));
-              const barH = barAmp * (height - 16);
+              // Bars grow from bottom using spring
+              const barH = barAmp * (height - 16) * spectrumSpring;
               const y = height - barH - 8;
 
-              // Check if this bar is in the soloed band
               const activeBand = bands[soloIndex];
               const isInBand = freqNorm >= activeBand.start && freqNorm < activeBand.end;
               const hue = 200 + freqNorm * 60;

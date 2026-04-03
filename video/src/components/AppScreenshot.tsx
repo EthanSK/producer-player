@@ -1,5 +1,5 @@
 import React from "react";
-import { Img, staticFile, interpolate, useCurrentFrame } from "remotion";
+import { Img, staticFile, spring, useCurrentFrame, useVideoConfig, interpolate } from "remotion";
 
 interface AppScreenshotProps {
   src?: string;
@@ -15,24 +15,37 @@ export const AppScreenshot: React.FC<AppScreenshotProps> = ({
   shadow = true,
 }) => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
-  const opacity = interpolate(frame, [delay, delay + 20], [0, 1], {
+  const delayedFrame = Math.max(0, frame - delay);
+
+  const springVal = spring({
+    fps,
+    frame: delayedFrame,
+    config: {
+      damping: 12,
+      stiffness: 80,
+      mass: 0.7,
+    },
+  });
+
+  const opacity = interpolate(delayedFrame, [0, 10], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
-  const scale = interpolate(frame, [delay, delay + 25], [0.95, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const scale = interpolate(springVal, [0, 1], [0.4, 1]);
+  const rotate = interpolate(springVal, [0, 1], [-2, 0]);
+  const translateY = interpolate(springVal, [0, 1], [80, 0]);
 
   return (
     <div
       style={{
-        opacity,
-        transform: `scale(${scale})`,
+        opacity: frame < delay ? 0 : opacity,
+        transform: `scale(${scale}) rotate(${rotate}deg) translateY(${translateY}px)`,
         display: "flex",
         justifyContent: "center",
+        willChange: "transform, opacity",
       }}
     >
       <Img

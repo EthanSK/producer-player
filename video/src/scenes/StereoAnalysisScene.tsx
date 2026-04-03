@@ -22,10 +22,10 @@ export const StereoAnalysisScene: React.FC = () => {
         padding: 80,
       }}
     >
-      <GlowOrb color={COLORS.green} size={600} x={400} y={200} pulseSpeed={0.02} />
-      <GlowOrb color="#7c3aed" size={400} x={1200} y={400} pulseSpeed={0.025} />
+      <GlowOrb color={COLORS.green} size={600} x={400} y={200} pulseSpeed={0.02} drift={40} />
+      <GlowOrb color="#7c3aed" size={400} x={1200} y={400} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="up" distance={70} rotate={-3} scaleFrom={0.7}>
         <FeatureLabel
           title="Stereo Field Analysis"
           subtitle="Visualize your stereo image. Catch phase issues before they become problems."
@@ -40,8 +40,8 @@ export const StereoAnalysisScene: React.FC = () => {
           alignItems: "center",
         }}
       >
-        {/* Vectorscope */}
-        <FadeIn delay={10} duration={18} direction="left" distance={40}>
+        {/* Vectorscope — flies in from left with rotation */}
+        <FadeIn delay={10} duration={18} direction="left" distance={100} rotate={-5} scaleFrom={0.5}>
           <div
             style={{
               background: COLORS.bgCard,
@@ -64,8 +64,8 @@ export const StereoAnalysisScene: React.FC = () => {
           </div>
         </FadeIn>
 
-        {/* Correlation + M/S info */}
-        <FadeIn delay={20} duration={18} direction="right" distance={40}>
+        {/* Correlation + M/S info — flies in from right with opposite rotation */}
+        <FadeIn delay={20} duration={18} direction="right" distance={100} rotate={5} scaleFrom={0.5}>
           <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             <div
               style={{

@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, useCurrentFrame } from "remotion";
+import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
@@ -22,6 +22,7 @@ const panels: PanelDef[] = [
 
 export const DraggablePanelsScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
   // Grid layout positions (2 rows x 3 cols)
   const gridCols = 3;
@@ -30,16 +31,12 @@ export const DraggablePanelsScene: React.FC = () => {
   const gap = 16;
   const gridW = gridCols * panelW + (gridCols - 1) * gap;
 
-  // Animate two panels swapping positions (indices 1 and 4)
-  const swapStart = 30;
-  const swapEnd = 55;
-  const swapProgress = interpolate(frame, [swapStart, swapEnd], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
+  // Spring-based swap animation
+  const swapSpring = spring({
+    fps,
+    frame: Math.max(0, frame - 30),
+    config: { damping: 10, stiffness: 80, mass: 0.7 },
   });
-
-  // Ease function
-  const eased = 0.5 - 0.5 * Math.cos(swapProgress * Math.PI);
 
   function getGridPos(index: number): { x: number; y: number } {
     const col = index % gridCols;
@@ -55,33 +52,38 @@ export const DraggablePanelsScene: React.FC = () => {
       const from = getGridPos(1);
       const to = getGridPos(4);
       return {
-        x: from.x + (to.x - from.x) * eased,
-        y: from.y + (to.y - from.y) * eased,
+        x: from.x + (to.x - from.x) * swapSpring,
+        y: from.y + (to.y - from.y) * swapSpring,
       };
     }
     if (index === 4) {
       const from = getGridPos(4);
       const to = getGridPos(1);
       return {
-        x: from.x + (to.x - from.x) * eased,
-        y: from.y + (to.y - from.y) * eased,
+        x: from.x + (to.x - from.x) * swapSpring,
+        y: from.y + (to.y - from.y) * swapSpring,
       };
     }
     return getGridPos(index);
   }
 
-  // Dragging visual: scale up the panels being swapped
-  const dragScale = index => {
-    if (index !== 1 && index !== 4) return 1;
-    if (swapProgress <= 0 || swapProgress >= 1) return 1;
-    return 1 + Math.sin(swapProgress * Math.PI) * 0.06;
+  const isSwapping = (index: number) =>
+    (index === 1 || index === 4) && swapSpring > 0 && swapSpring < 1;
+
+  const dragScale = (index: number) => {
+    if (!isSwapping(index)) return 1;
+    return 1 + Math.sin(swapSpring * Math.PI) * 0.08;
+  };
+
+  const dragRotation = (index: number) => {
+    if (!isSwapping(index)) return 0;
+    return Math.sin(swapSpring * Math.PI) * (index === 1 ? 4 : -4);
   };
 
   const dragShadow = (index: number) => {
-    if (index !== 1 && index !== 4) return "none";
-    if (swapProgress <= 0 || swapProgress >= 1) return "none";
-    const intensity = Math.sin(swapProgress * Math.PI);
-    return `0 ${8 * intensity}px ${24 * intensity}px rgba(0,0,0,0.5)`;
+    if (!isSwapping(index)) return "none";
+    const intensity = Math.sin(swapSpring * Math.PI);
+    return `0 ${12 * intensity}px ${32 * intensity}px rgba(0,0,0,0.6)`;
   };
 
   return (
@@ -99,17 +101,17 @@ export const DraggablePanelsScene: React.FC = () => {
         padding: 80,
       }}
     >
-      <GlowOrb color={COLORS.accent} size={500} x={200} y={150} pulseSpeed={0.02} />
-      <GlowOrb color="#7c3aed" size={400} x={1300} y={500} pulseSpeed={0.025} />
+      <GlowOrb color={COLORS.accent} size={500} x={200} y={150} pulseSpeed={0.02} drift={35} />
+      <GlowOrb color="#7c3aed" size={400} x={1300} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="left" distance={80} rotate={-3} scaleFrom={0.7}>
         <FeatureLabel
           title="Customizable Workspace"
           subtitle="Drag and rearrange mastering panels to build your ideal layout"
         />
       </FadeIn>
 
-      <FadeIn delay={8} duration={18} direction="up" distance={25}>
+      <FadeIn delay={8} duration={18} direction="up" distance={60} rotate={1}>
         <div
           style={{
             marginTop: 48,
@@ -121,8 +123,20 @@ export const DraggablePanelsScene: React.FC = () => {
           {panels.map((panel, i) => {
             const pos = getPanelPos(i);
             const scale = dragScale(i);
+            const rotation = dragRotation(i);
             const shadow = dragShadow(i);
-            const isSwapping = (i === 1 || i === 4) && swapProgress > 0 && swapProgress < 1;
+            const swapping = isSwapping(i);
+
+            // Each panel springs in from a random direction
+            const panelSpring = spring({
+              fps,
+              frame: Math.max(0, frame - 10 - i * 3),
+              config: { damping: 12, stiffness: 120, mass: 0.5 },
+            });
+            const panelScale = interpolate(panelSpring, [0, 1], [0.3, 1]);
+            const panelOpacity = interpolate(panelSpring, [0, 0.3], [0, 1], {
+              extrapolateRight: "clamp",
+            });
 
             return (
               <div
@@ -135,14 +149,16 @@ export const DraggablePanelsScene: React.FC = () => {
                   height: panelH,
                   background: COLORS.bgCard,
                   borderRadius: 10,
-                  border: `1px solid ${isSwapping ? panel.color : COLORS.border}`,
+                  border: `1px solid ${swapping ? panel.color : COLORS.border}`,
                   padding: 20,
-                  transform: `scale(${scale})`,
+                  transform: `scale(${panelScale * scale}) rotate(${rotation}deg)`,
+                  opacity: panelOpacity,
                   boxShadow: shadow,
-                  zIndex: isSwapping ? 10 : 1,
+                  zIndex: swapping ? 10 : 1,
                   display: "flex",
                   flexDirection: "column",
                   justifyContent: "space-between",
+                  willChange: "transform, opacity",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

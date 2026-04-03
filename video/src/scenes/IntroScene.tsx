@@ -1,31 +1,43 @@
 import React from "react";
-import { interpolate, useCurrentFrame, Img, staticFile } from "remotion";
+import { spring, interpolate, useCurrentFrame, useVideoConfig, Img, staticFile } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
 
 export const IntroScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
-  const titleOpacity = interpolate(frame, [10, 30], [0, 1], {
+  // Logo springs in with a big bounce
+  const logoSpring = spring({
+    fps,
+    frame,
+    config: {
+      damping: 8,
+      stiffness: 80,
+      mass: 0.5,
+    },
+  });
+
+  const logoScale = interpolate(logoSpring, [0, 1], [0.1, 1]);
+  const logoOpacity = interpolate(frame, [0, 8], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
+  const logoRotate = interpolate(logoSpring, [0, 1], [-15, 0]);
 
-  const titleY = interpolate(frame, [10, 30], [30, 0], {
+  // Title springs in from below
+  const titleSpring = spring({
+    fps,
+    frame: Math.max(0, frame - 10),
+    config: { damping: 10, stiffness: 100, mass: 0.6 },
+  });
+  const titleY = interpolate(titleSpring, [0, 1], [60, 0]);
+  const titleOpacity = interpolate(frame, [10, 18], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-
-  const logoScale = interpolate(frame, [0, 20], [0.5, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-
-  const logoOpacity = interpolate(frame, [0, 15], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const titleScale = interpolate(titleSpring, [0, 1], [0.7, 1]);
 
   return (
     <div
@@ -41,16 +53,17 @@ export const IntroScene: React.FC = () => {
         overflow: "hidden",
       }}
     >
-      <GlowOrb color={COLORS.accent} size={600} x={200} y={100} pulseSpeed={0.02} />
-      <GlowOrb color="#7c3aed" size={500} x={1200} y={500} pulseSpeed={0.025} />
-      <GlowOrb color={COLORS.green} size={400} x={800} y={-100} pulseSpeed={0.03} />
+      <GlowOrb color={COLORS.accent} size={600} x={200} y={100} pulseSpeed={0.02} drift={40} />
+      <GlowOrb color="#7c3aed" size={500} x={1200} y={500} pulseSpeed={0.025} drift={35} />
+      <GlowOrb color={COLORS.green} size={400} x={800} y={-100} pulseSpeed={0.03} drift={25} />
 
-      {/* Logo */}
+      {/* Logo — bouncy entrance */}
       <div
         style={{
           opacity: logoOpacity,
-          transform: `scale(${logoScale})`,
+          transform: `scale(${logoScale}) rotate(${logoRotate}deg)`,
           marginBottom: 32,
+          willChange: "transform",
         }}
       >
         <Img
@@ -63,12 +76,13 @@ export const IntroScene: React.FC = () => {
         />
       </div>
 
-      {/* Title */}
+      {/* Title — slides up with scale bounce */}
       <div
         style={{
           opacity: titleOpacity,
-          transform: `translateY(${titleY}px)`,
+          transform: `translateY(${titleY}px) scale(${titleScale})`,
           textAlign: "center",
+          willChange: "transform",
         }}
       >
         <h1
@@ -86,8 +100,8 @@ export const IntroScene: React.FC = () => {
         </h1>
       </div>
 
-      {/* Subtitle */}
-      <FadeIn delay={25} duration={18} direction="up" distance={20}>
+      {/* Subtitle — flies in from the right with rotation */}
+      <FadeIn delay={25} duration={18} direction="right" distance={80} rotate={3} scaleFrom={0.8}>
         <p
           style={{
             fontFamily: FONTS.body,
@@ -101,8 +115,8 @@ export const IntroScene: React.FC = () => {
         </p>
       </FadeIn>
 
-      {/* Tagline */}
-      <FadeIn delay={40} duration={18} direction="up" distance={15}>
+      {/* Tagline — flies in from the left */}
+      <FadeIn delay={40} duration={18} direction="left" distance={60} rotate={-2} scaleFrom={0.85}>
         <p
           style={{
             fontFamily: FONTS.body,

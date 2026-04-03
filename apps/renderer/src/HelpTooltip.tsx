@@ -185,6 +185,7 @@ function HelpModal({
           style={closeButtonStyle}
           onClick={onClose}
           aria-label="Close"
+          title="Close"
           onMouseOver={(e) => {
             (e.currentTarget as HTMLElement).style.color = '#ecf2f9';
           }}
@@ -199,7 +200,7 @@ function HelpModal({
 
         {videoThumbs.length > 0 && (
           <div style={videoSectionStyle}>
-            <span style={linkLabelStyle}>Video Tutorials (ranked by AI)</span>
+            <span style={linkLabelStyle}>Video Tutorials (order ranked by AI)</span>
             <div style={videoGridStyle}>
               {videoThumbs.map((v) => (
                 <div
@@ -245,6 +246,7 @@ export function HelpTooltip({ text, links }: HelpTooltipProps): JSX.Element {
         type="button"
         className="help-tooltip-trigger"
         aria-label="Help"
+        title="Help"
         onClick={(e) => {
           e.stopPropagation();
           setOpen(true);

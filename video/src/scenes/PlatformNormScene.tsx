@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, useCurrentFrame } from "remotion";
+import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { COLORS, FONTS } from "../theme";
 import { GlowOrb } from "../components/GlowOrb";
 import { FadeIn } from "../components/FadeIn";
@@ -16,6 +16,7 @@ const platforms = [
 
 export const PlatformNormScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
 
   return (
     <div
@@ -32,10 +33,10 @@ export const PlatformNormScene: React.FC = () => {
         padding: 80,
       }}
     >
-      <GlowOrb color={COLORS.green} size={500} x={200} y={200} pulseSpeed={0.02} />
-      <GlowOrb color={COLORS.accent} size={400} x={1300} y={500} pulseSpeed={0.025} />
+      <GlowOrb color={COLORS.green} size={500} x={200} y={200} pulseSpeed={0.02} drift={35} />
+      <GlowOrb color={COLORS.accent} size={400} x={1300} y={500} pulseSpeed={0.025} drift={30} />
 
-      <FadeIn delay={0} duration={18} direction="up">
+      <FadeIn delay={0} duration={18} direction="down" distance={70} rotate={-2} scaleFrom={0.7}>
         <FeatureLabel
           title="Platform Normalization Preview"
           subtitle="Hear exactly how Spotify, Apple Music, YouTube, and others will play your track"
@@ -43,29 +44,32 @@ export const PlatformNormScene: React.FC = () => {
       </FadeIn>
 
       <div style={{ marginTop: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
-        {/* Platform grid */}
-        <FadeIn delay={10} duration={18} direction="up" distance={25}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 16,
-              width: 900,
-            }}
-          >
-            {platforms.map((platform, i) => {
-              const cardOpacity = interpolate(
-                frame,
-                [15 + i * 4, 25 + i * 4],
-                [0, 1],
-                { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-              );
+        {/* Platform grid — each card springs in staggered */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 16,
+            width: 900,
+          }}
+        >
+          {platforms.map((platform, i) => {
+            // Each card direction alternates
+            const directions: Array<"left" | "right" | "up" | "down"> = ["left", "right", "up", "left", "right", "down"];
+            const rotations = [-4, 3, -2, 3, -3, 2];
 
-              return (
+            return (
+              <FadeIn
+                key={platform.name}
+                delay={12 + i * 5}
+                duration={18}
+                direction={directions[i]}
+                distance={80}
+                rotate={rotations[i]}
+                scaleFrom={0.5}
+              >
                 <div
-                  key={platform.name}
                   style={{
-                    opacity: cardOpacity,
                     background: COLORS.bgCard,
                     borderRadius: 10,
                     padding: "20px 24px",
@@ -95,13 +99,13 @@ export const PlatformNormScene: React.FC = () => {
                     {platform.ceiling} dBTP ceiling
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </FadeIn>
+              </FadeIn>
+            );
+          })}
+        </div>
 
         {/* Preview toggle */}
-        <FadeIn delay={40} duration={18} direction="up" distance={15}>
+        <FadeIn delay={45} duration={18} direction="up" distance={40} rotate={1}>
           <div
             style={{
               background: COLORS.bgCard,

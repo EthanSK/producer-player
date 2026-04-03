@@ -7879,6 +7879,9 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
+              <button type="button" className="checklist-header-done-button" onClick={handleCloseSongChecklist} title="Close checklist." data-testid="song-checklist-done-header">
+                Done
+              </button>
             </div>
 
             <div
@@ -8357,9 +8360,6 @@ export function App(): JSX.Element {
                 title="Remove all completed checklist items."
               >
                 Clear Completed
-              </button>
-              <button type="button" onClick={handleCloseSongChecklist} title="Close checklist.">
-                Done
               </button>
             </div>
           </div>
@@ -9701,6 +9701,7 @@ export function App(): JSX.Element {
                     type="button"
                     onClick={handleConfirmMigrationImport}
                     data-testid="migration-confirm-import"
+                    title="Confirm and import the matched checklist items."
                   >
                     Import {migrationPreview.filter((s) => s.matchedSongId).length} Song(s)
                   </button>
@@ -9711,6 +9712,7 @@ export function App(): JSX.Element {
                       setMigrationPreview(null);
                       setMigrationParseError(null);
                     }}
+                    title="Cancel the import and go back to editing."
                   >
                     Cancel
                   </button>

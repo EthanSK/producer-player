@@ -2017,6 +2017,14 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   font-size: 20px;
 }
 
+.checklist-header-done-button {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .checklist-item-scroll-region {
   flex: 1;
   min-height: 140px;

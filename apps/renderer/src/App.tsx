@@ -2722,6 +2722,10 @@ export function App(): JSX.Element {
       playbackAnalyserNodeRef.current = null;
       setAnalyserNode(null);
 
+      if (midSideProcessorRef.current) {
+        try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
+        midSideProcessorRef.current = null;
+      }
       for (const f of bandSoloFiltersRef.current) {
         try { f.disconnect(); } catch { /* ignore */ }
       }
@@ -3263,6 +3267,7 @@ export function App(): JSX.Element {
   const usingReferenceSuffix = referenceModeSuffix;
   const activePreviewAnalysis = isRefMode ? referenceTrack?.previewAnalysis ?? null : analysis;
   const activePreviewAnalysisStatus = isRefMode ? referenceStatus : analysisStatus;
+  const activeMeasuredAnalysis = isRefMode ? referenceTrack?.measuredAnalysis ?? null : measuredAnalysis;
   const desiredPlaybackSource =
     playbackPreviewMode === 'reference'
       ? referenceTrack?.playbackSource ?? null
@@ -3706,61 +3711,85 @@ export function App(): JSX.Element {
     applyPlaybackGain(volume, appliedNormalizationGainDb);
   }, [appliedNormalizationGainDb, applyPlaybackGain, volume]);
 
-  // Mid/Side monitoring processor
+  // Consolidated output chain: gain → [mid/side processor] → [band solo filters | destination]
+  // This single effect coordinates mid/side monitoring AND band soloing so they
+  // never conflict, and re-runs when the playback source changes (mix ↔ reference)
+  // to ensure the ScriptProcessorNode stays connected.
   useEffect(() => {
     const audioContext = playbackAudioContextRef.current;
     const gainNode = playbackGainNodeRef.current;
     if (!audioContext || !gainNode) return;
 
-    // Clean up previous processor
+    // --- Tear down previous chain ---
     if (midSideProcessorRef.current) {
       try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
       midSideProcessorRef.current = null;
     }
+    for (const f of bandSoloFiltersRef.current) {
+      try { f.disconnect(); } catch { /* ignore */ }
+    }
+    bandSoloFiltersRef.current = [];
+    try { gainNode.disconnect(); } catch { /* ignore */ }
 
-    if (midSideMode === 'stereo') {
-      // Reconnect gain directly to destination
-      try { gainNode.disconnect(); } catch { /* ignore */ }
-      gainNode.connect(audioContext.destination);
-      return;
+    // --- Determine the node that feeds into the final stage (solo filters or destination) ---
+    let outputNode: AudioNode = gainNode;
+
+    if (midSideMode !== 'stereo') {
+      const bufferSize = 4096;
+      const processor = audioContext.createScriptProcessor(bufferSize, 2, 2);
+      processor.onaudioprocess = (event) => {
+        const inputL = event.inputBuffer.getChannelData(0);
+        const inputR = event.inputBuffer.getChannelData(1);
+        const outputL = event.outputBuffer.getChannelData(0);
+        const outputR = event.outputBuffer.getChannelData(1);
+
+        for (let i = 0; i < bufferSize; i++) {
+          if (midSideMode === 'mid') {
+            const mid = (inputL[i] + inputR[i]) / 2;
+            outputL[i] = mid;
+            outputR[i] = mid;
+          } else {
+            const side = (inputL[i] - inputR[i]) / 2;
+            outputL[i] = side;
+            outputR[i] = side;
+          }
+        }
+      };
+
+      gainNode.connect(processor);
+      midSideProcessorRef.current = processor;
+      outputNode = processor;
     }
 
-    // Create ScriptProcessorNode for mid or side
-    const bufferSize = 4096;
-    const processor = audioContext.createScriptProcessor(bufferSize, 2, 2);
-    processor.onaudioprocess = (event) => {
-      const inputL = event.inputBuffer.getChannelData(0);
-      const inputR = event.inputBuffer.getChannelData(1);
-      const outputL = event.outputBuffer.getChannelData(0);
-      const outputR = event.outputBuffer.getChannelData(1);
-
-      for (let i = 0; i < bufferSize; i++) {
-        if (midSideMode === 'mid') {
-          const mid = (inputL[i] + inputR[i]) / 2;
-          outputL[i] = mid;
-          outputR[i] = mid;
-        } else {
-          // side
-          const side = (inputL[i] - inputR[i]) / 2;
-          outputL[i] = side;
-          outputR[i] = side;
-        }
+    // --- Connect band solo filters (or direct to destination) ---
+    if (soloedBands.size > 0) {
+      for (const bandIndex of soloedBands) {
+        const band = FREQUENCY_BANDS[bandIndex];
+        if (!band) continue;
+        const filter = createBandSoloFilter(audioContext, band);
+        outputNode.connect(filter);
+        filter.connect(audioContext.destination);
+        bandSoloFiltersRef.current.push(filter);
       }
-    };
-
-    try { gainNode.disconnect(); } catch { /* ignore */ }
-    gainNode.connect(processor);
-    processor.connect(audioContext.destination);
-    midSideProcessorRef.current = processor;
+    } else {
+      outputNode.connect(audioContext.destination);
+    }
 
     return () => {
-      try { processor.disconnect(); } catch { /* ignore */ }
+      if (midSideProcessorRef.current) {
+        try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
+        midSideProcessorRef.current = null;
+      }
+      for (const f of bandSoloFiltersRef.current) {
+        try { f.disconnect(); } catch { /* ignore */ }
+      }
+      bandSoloFiltersRef.current = [];
       try {
         gainNode.disconnect();
         gainNode.connect(audioContext.destination);
       } catch { /* ignore */ }
     };
-  }, [midSideMode]);
+  }, [midSideMode, soloedBands, desiredPlaybackKey]);
 
   async function resumePlaybackContextIfNeeded(): Promise<void> {
     const playbackAudioContext = playbackAudioContextRef.current;
@@ -4970,39 +4999,6 @@ export function App(): JSX.Element {
     applyPlaybackGain(clampedVolume, appliedNormalizationGainDb);
   }
 
-  function rebuildBandSoloFilters(nextBands: Set<number>): void {
-    const audioContext = playbackAudioContextRef.current;
-    const gainNode = playbackGainNodeRef.current;
-    if (!audioContext || !gainNode) return;
-
-    // Tear down existing filter chain
-    for (const f of bandSoloFiltersRef.current) {
-      try { gainNode.disconnect(f); } catch { /* ignore */ }
-      try { f.disconnect(); } catch { /* ignore */ }
-    }
-    bandSoloFiltersRef.current = [];
-
-    if (nextBands.size === 0) {
-      // No solo — connect gain directly to destination
-      try { gainNode.connect(audioContext.destination); } catch { /* already connected */ }
-      return;
-    }
-
-    // Disconnect direct path
-    try { gainNode.disconnect(audioContext.destination); } catch { /* may not be connected */ }
-
-    // Create a merger node so multiple band filters can feed into destination
-    // Each bandpass filter runs in parallel: gain → filter → destination
-    for (const bandIndex of nextBands) {
-      const band = FREQUENCY_BANDS[bandIndex];
-      if (!band) continue;
-      const filter = createBandSoloFilter(audioContext, band);
-      gainNode.connect(filter);
-      filter.connect(audioContext.destination);
-      bandSoloFiltersRef.current.push(filter);
-    }
-  }
-
   function handleBandToggle(bandIndex: number, shiftKey: boolean = false): void {
     setSoloedBands((prev) => {
       let next: Set<number>;
@@ -5022,15 +5018,14 @@ export function App(): JSX.Element {
           next.add(bandIndex);
         }
       }
-      rebuildBandSoloFilters(next);
+      // The consolidated output chain effect rebuilds the Web Audio graph
+      // when soloedBands state changes — no manual rebuild needed.
       return next;
     });
   }
 
   function handleClearSoloedBands(): void {
-    const empty = new Set<number>();
-    rebuildBandSoloFilters(empty);
-    setSoloedBands(empty);
+    setSoloedBands(new Set<number>());
   }
 
   async function loadReferenceTrack(
@@ -5987,64 +5982,67 @@ export function App(): JSX.Element {
   ]);
 
   const measuredIntegratedText = buildAnalysisValue(
-    analysisStatus,
-    formatMeasuredStat(measuredAnalysis?.integratedLufs, 'LUFS'),
+    activePreviewAnalysisStatus,
+    formatMeasuredStat(activeMeasuredAnalysis?.integratedLufs, 'LUFS'),
     {
       loading: 'Loading…',
       error: 'Error',
     }
   );
   const measuredLraText = buildAnalysisValue(
-    analysisStatus,
-    formatMeasuredStat(measuredAnalysis?.loudnessRangeLufs, 'LU'),
+    activePreviewAnalysisStatus,
+    formatMeasuredStat(activeMeasuredAnalysis?.loudnessRangeLufs, 'LU'),
     {
       loading: 'Loading…',
       error: 'Error',
     }
   );
   const measuredTruePeakText = buildAnalysisValue(
-    analysisStatus,
-    formatMeasuredStat(measuredAnalysis?.truePeakDbfs, 'dBTP'),
+    activePreviewAnalysisStatus,
+    formatMeasuredStat(activeMeasuredAnalysis?.truePeakDbfs, 'dBTP'),
     {
       loading: 'Loading…',
       error: 'Error',
     }
   );
   const measuredMaxShortTermText = buildAnalysisValue(
-    analysisStatus,
-    formatMeasuredStat(measuredAnalysis?.maxShortTermLufs, 'LUFS'),
+    activePreviewAnalysisStatus,
+    formatMeasuredStat(activeMeasuredAnalysis?.maxShortTermLufs, 'LUFS'),
     {
       loading: 'Loading…',
       error: 'Error',
     }
   );
   const measuredMaxMomentaryText = buildAnalysisValue(
-    analysisStatus,
-    formatMeasuredStat(measuredAnalysis?.maxMomentaryLufs, 'LUFS'),
+    activePreviewAnalysisStatus,
+    formatMeasuredStat(activeMeasuredAnalysis?.maxMomentaryLufs, 'LUFS'),
     {
       loading: 'Loading…',
       error: 'Error',
     }
   );
   const measuredSamplePeakText = buildAnalysisValue(
-    analysisStatus,
-    formatMeasuredStat(measuredAnalysis?.samplePeakDbfs, 'dBFS'),
+    activePreviewAnalysisStatus,
+    formatMeasuredStat(activeMeasuredAnalysis?.samplePeakDbfs, 'dBFS'),
     {
       loading: 'Loading…',
       error: 'Error',
     }
   );
   const measuredMeanVolumeText = buildAnalysisValue(
-    analysisStatus,
-    formatMeasuredStat(measuredAnalysis?.meanVolumeDbfs, 'dBFS'),
+    activePreviewAnalysisStatus,
+    formatMeasuredStat(activeMeasuredAnalysis?.meanVolumeDbfs, 'dBFS'),
     {
       loading: 'Loading…',
       error: 'Error',
     }
   );
+  const activeShortTermLufsEstimate = activePreviewAnalysis
+    ? estimateShortTermLufs(activePreviewAnalysis, currentTimeSeconds)
+    : null;
   const shortTermEstimateText = buildAnalysisValue(
-    analysisStatus,
-    formatMeasuredStat(shortTermLufsEstimate, 'LUFS est.'),
+    activePreviewAnalysisStatus,
+    formatMeasuredStat(activeShortTermLufsEstimate, 'LUFS est.'),
     {
       loading: 'Loading…',
       error: 'Error',
@@ -8899,7 +8897,7 @@ export function App(): JSX.Element {
                     {renderMasteringPanelDragHandle('fullscreen', 'loudness-history')}
                   </div>
                   <LoudnessHistoryGraph
-                    analysis={analysis}
+                    analysis={activePreviewAnalysis}
                     currentTimeSeconds={currentTimeSeconds}
                     isPlaying={isPlaying}
                     width={Math.max(400, spectrumFullWidth)}
@@ -8923,8 +8921,8 @@ export function App(): JSX.Element {
                     {renderMasteringPanelDragHandle('fullscreen', 'waveform')}
                   </div>
                   <WaveformDisplay
-                    waveformPeaks={analysis?.waveformPeaks ?? null}
-                    analysis={analysis}
+                    waveformPeaks={activePreviewAnalysis?.waveformPeaks ?? null}
+                    analysis={activePreviewAnalysis}
                     currentTimeSeconds={currentTimeSeconds}
                     durationSeconds={durationSeconds}
                     isPlaying={isPlaying}
@@ -9075,9 +9073,9 @@ export function App(): JSX.Element {
                     <div className="analysis-stat-card" title="Number of samples at or above 0 dBFS (digital clipping).">
                       <span className="analysis-stat-label">Clip Count{showingReferenceSuffix} <HelpTooltip text={"What this measures: The number of individual samples in the file whose absolute value reaches or exceeds 1.0 (0 dBFS) — the digital ceiling. Each clipped sample represents a moment where the signal was too loud to be represented digitally and was hard-clipped, causing distortion.\n\nGood values: Zero. Any non-zero clip count means digital distortion is present in the file. Even a single clipped sample is technically distortion, though a handful may not be audible. Hundreds or thousands of clips will be clearly audible as harsh, crunchy distortion.\n\nIf it's wrong: Reduce gain before your limiter, or lower the limiter output ceiling. If clips are coming from the mix bus, pull down your fader or gain-stage your plugins. Note: some producers intentionally use hard clipping as a creative effect (e.g., clip-to-zero mastering in hip-hop), but the clips should be intentional and controlled, not accidental."} links={CLIP_COUNT_LINKS} /></span>
                       <strong>
-                        {analysisStatus === 'ready' && analysis
-                          ? analysis.clipCount > 0
-                            ? `${analysis.clipCount} sample${analysis.clipCount === 1 ? '' : 's'}`
+                        {activePreviewAnalysisStatus === 'ready' && activePreviewAnalysis
+                          ? activePreviewAnalysis.clipCount > 0
+                            ? `${activePreviewAnalysis.clipCount} sample${activePreviewAnalysis.clipCount === 1 ? '' : 's'}`
                             : 'None'
                           : 'Loading…'}
                       </strong>
@@ -9085,9 +9083,9 @@ export function App(): JSX.Element {
                     <div className="analysis-stat-card" title="DC Offset — mean sample value. Non-zero DC offset wastes headroom.">
                       <span className="analysis-stat-label">DC Offset{showingReferenceSuffix} <HelpTooltip text={"What this measures: The mean (average) of all sample values in the file. A perfectly centered waveform has a DC offset of 0. A non-zero value means the entire waveform is shifted above or below the center line. The threshold for a warning here is 0.1% (mean sample value > 0.001).\n\nGood values: As close to 0% as possible. Anything under 0.1% is considered clean. Above 0.1% triggers a warning because it wastes headroom — if your waveform is shifted up by 0.5%, you lose 0.5% of your available peak range.\n\nIf it's wrong: DC offset is usually caused by faulty hardware (cheap audio interfaces, phantom power leakage), certain analog-modeled plugins, or recording with a bad cable. Fix it by applying a high-pass filter at a very low frequency (10-20 Hz) or use your DAW's DC offset removal tool (most have one in the audio editor). Always fix DC offset before mastering."} links={DC_OFFSET_LINKS} /></span>
                       <strong>
-                        {analysisStatus === 'ready' && analysis
-                          ? Math.abs(analysis.dcOffset) > 0.001
-                            ? `${(analysis.dcOffset * 100).toFixed(3)}% ⚠`
+                        {activePreviewAnalysisStatus === 'ready' && activePreviewAnalysis
+                          ? Math.abs(activePreviewAnalysis.dcOffset) > 0.001
+                            ? `${(activePreviewAnalysis.dcOffset * 100).toFixed(3)}% ⚠`
                             : 'Clean'
                           : 'Loading…'}
                       </strong>
@@ -9580,7 +9578,7 @@ export function App(): JSX.Element {
                     {renderMasteringPanelDragHandle('fullscreen', 'loudness-histogram')}
                   </div>
                   <LoudnessHistogram
-                    frameLoudnessDbfs={analysis?.frameLoudnessDbfs ?? []}
+                    frameLoudnessDbfs={activePreviewAnalysis?.frameLoudnessDbfs ?? []}
                     width={spectrumFullWidth}
                     height={200}
                   />

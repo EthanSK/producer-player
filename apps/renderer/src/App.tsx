@@ -1584,6 +1584,7 @@ export function App(): JSX.Element {
   const [albumArt, setAlbumArt] = useState<string | null>(() => {
     return window.localStorage.getItem(ALBUM_ART_STORAGE_KEY);
   });
+  const [albumArtFullscreen, setAlbumArtFullscreen] = useState(false);
   const albumArtInputRef = useRef<HTMLInputElement | null>(null);
   const albumTitleInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -7150,7 +7151,31 @@ export function App(): JSX.Element {
               data-testid="album-art-trigger"
             >
               {albumArt ? (
-                <img src={albumArt} alt="Album art" className="album-art-img" />
+                <>
+                  <img src={albumArt} alt="Album art" className="album-art-img" />
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="album-art-expand"
+                    title="View fullscreen"
+                    data-testid="album-art-expand"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAlbumArtFullscreen(true);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setAlbumArtFullscreen(true);
+                      }
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                      <path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </span>
+                </>
               ) : (
                 <span className="album-art-placeholder" aria-hidden="true">🎵</span>
               )}
@@ -9785,6 +9810,36 @@ export function App(): JSX.Element {
           getAnalysisContext={getAnalysisContext}
           promptRequest={agentChatPromptRequest}
         />
+      ) : null}
+
+      {/* Album art fullscreen lightbox */}
+      {albumArtFullscreen && albumArt ? (
+        <div
+          className="album-art-lightbox"
+          onClick={() => setAlbumArtFullscreen(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setAlbumArtFullscreen(false);
+          }}
+          role="dialog"
+          aria-label="Album art preview"
+          tabIndex={-1}
+          ref={(el) => el?.focus()}
+        >
+          <button
+            type="button"
+            className="album-art-lightbox-close"
+            onClick={() => setAlbumArtFullscreen(false)}
+            aria-label="Close"
+          >
+            &times;
+          </button>
+          <img
+            src={albumArt}
+            alt="Album art"
+            className="album-art-lightbox-img"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
       ) : null}
     </div>
   );

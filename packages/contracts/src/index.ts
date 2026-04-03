@@ -103,6 +103,10 @@ export interface ProducerPlayerAppVersion {
   semanticVersion: string;
   buildNumber: number | null;
   commitShortSha: string | null;
+  /**
+   * Clean user-facing version string (e.g., "2.17").
+   * Must NEVER include build metadata like "+build.NNN" — users see this in the sidebar.
+   */
   displayVersion: string;
 }
 

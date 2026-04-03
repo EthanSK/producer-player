@@ -312,20 +312,11 @@ function resolveAppVersionInfo(): ProducerPlayerAppVersion {
       process.env.GITHUB_SHA) ?? ''
   );
 
-  const twoPartVersion = toDisplayVersion(semanticVersion);
-
-  const displaySegments: string[] = [];
-  if (buildNumber !== null) {
-    displaySegments.push(`build.${buildNumber}`);
-  }
-  if (commitShortSha) {
-    displaySegments.push(commitShortSha);
-  }
-
-  const displayVersion =
-    displaySegments.length > 0
-      ? `${twoPartVersion}+${displaySegments.join('.')}`
-      : twoPartVersion;
+  // IMPORTANT: displayVersion must be a clean two-part version (e.g., "2.17")
+  // with NO build metadata suffix (+build.NNN). Users see this in the sidebar.
+  // The build number is only for internal tracking and release artifacts.
+  // Build metadata is available separately via buildNumber and commitShortSha.
+  const displayVersion = toDisplayVersion(semanticVersion);
 
   return {
     semanticVersion,
@@ -3527,6 +3518,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
 app.whenReady().then(async () => {
   log.info('App ready', {
     version: APP_VERSION_INFO.displayVersion,
+    buildNumber: APP_VERSION_INFO.buildNumber,
+    commitSha: APP_VERSION_INFO.commitShortSha,
     platform: process.platform,
     arch: process.arch,
     electronVersion: process.versions.electron,

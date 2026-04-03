@@ -6419,6 +6419,8 @@ export function App(): JSX.Element {
           <div className="sidebar-branding-copy">
             <div className="sidebar-branding-title-row">
               <strong>Producer Player</strong>
+              {/* displayVersion is a clean two-part version (e.g., "2.17") with no build suffix.
+                  Do NOT replace this with semanticVersion or append build metadata here. */}
               <span
                 className="sidebar-branding-version"
                 data-testid="producer-player-branding-version"

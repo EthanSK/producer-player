@@ -4268,28 +4268,48 @@ export function App(): JSX.Element {
 
   function processAlbumArtDataUrl(dataUrl: string): void {
     const MAX_ALBUM_ART_DIM = 256;
-    const img = new Image();
-    img.onload = () => {
-      let finalDataUrl = dataUrl;
-      if (img.width > MAX_ALBUM_ART_DIM || img.height > MAX_ALBUM_ART_DIM) {
-        const canvas = document.createElement('canvas');
-        const scale = Math.min(MAX_ALBUM_ART_DIM / img.width, MAX_ALBUM_ART_DIM / img.height);
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          finalDataUrl = canvas.toDataURL('image/png');
+
+    // Convert the data-URL to a Blob so we can use createImageBitmap,
+    // which properly handles embedded ICC color profiles (Adobe RGB,
+    // ProPhoto RGB, Display P3, etc.) and converts them to sRGB.
+    // Without this, canvas drawing strips the ICC profile and interprets
+    // raw pixel values as sRGB, producing washed-out / faded colors.
+    const byteString = atob(dataUrl.split(',')[1]);
+    const mimeType = dataUrl.split(',')[0].split(':')[1].split(';')[0];
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) {
+      ia[i] = byteString.charCodeAt(i);
+    }
+    const blob = new Blob([ab], { type: mimeType });
+
+    createImageBitmap(blob, { colorSpaceConversion: 'default' }).then(
+      (bitmap) => {
+        let w = bitmap.width;
+        let h = bitmap.height;
+        if (w > MAX_ALBUM_ART_DIM || h > MAX_ALBUM_ART_DIM) {
+          const scale = Math.min(MAX_ALBUM_ART_DIM / w, MAX_ALBUM_ART_DIM / h);
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
         }
-      }
-      setAlbumArt(finalDataUrl);
-      try {
-        window.localStorage.setItem(ALBUM_ART_STORAGE_KEY, finalDataUrl);
-      } catch {
-        // localStorage may be full for very large images — ignore silently
-      }
-    };
-    img.src = dataUrl;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
+        if (ctx) {
+          ctx.drawImage(bitmap, 0, 0, w, h);
+        }
+        bitmap.close();
+        const finalDataUrl = canvas.toDataURL('image/png');
+        setAlbumArt(finalDataUrl);
+        try {
+          window.localStorage.setItem(ALBUM_ART_STORAGE_KEY, finalDataUrl);
+        } catch {
+          // localStorage may be full for very large images — ignore silently
+        }
+      },
+    );
   }
 
   function handleAlbumArtChange(e: React.ChangeEvent<HTMLInputElement>): void {
@@ -6404,7 +6424,7 @@ export function App(): JSX.Element {
                 data-testid="producer-player-branding-version"
                 title={`Current app version ${environment.appVersion.displayVersion}`}
               >
-                {environment.appVersion.semanticVersion || environment.appVersion.displayVersion}
+                {environment.appVersion.displayVersion}
               </span>
             </div>
             {SHOW_3000AD_BRANDING && (

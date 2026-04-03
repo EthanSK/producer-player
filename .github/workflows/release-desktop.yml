@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       app_version: ${{ steps.meta.outputs.app_version }}
+      display_version: ${{ steps.meta.outputs.display_version }}
       release_tag: ${{ steps.meta.outputs.release_tag }}
       release_name: ${{ steps.meta.outputs.release_name }}
       is_tag_release: ${{ steps.meta.outputs.is_tag_release }}
@@ -80,6 +81,7 @@ jobs:
             fi
 
             echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"
+            echo "display_version=${display_version}" >> "$GITHUB_OUTPUT"
             echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
             echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
             echo "is_tag_release=true" >> "$GITHUB_OUTPUT"
@@ -98,6 +100,7 @@ jobs:
           fi
 
           echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"
+          echo "display_version=${display_version}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
           echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
           echo "is_tag_release=false" >> "$GITHUB_OUTPUT"
@@ -270,7 +273,7 @@ jobs:
           make_latest: true
           generate_release_notes: false
           body: |
-            ## Producer Player v${{ needs.compute-version.outputs.app_version }}
+            ## Producer Player v${{ needs.compute-version.outputs.display_version }}
 
             **Stable direct latest-download links** (auto-follow new releases):
 

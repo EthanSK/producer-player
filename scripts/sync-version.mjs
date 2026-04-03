@@ -67,7 +67,7 @@ async function main() {
   }
 
   await writeFile(siteVersionPath, nextContent, 'utf8');
-  console.log(`[version:sync] Updated site/version.json → v${version}.`);
+  console.log(`[version:sync] Updated site/version.json → v${display} (semver ${version}).`);
 }
 
 main().catch((error) => {

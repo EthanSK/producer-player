@@ -284,6 +284,15 @@ function parseReleaseVersion(value: string): ParsedReleaseVersion {
   };
 }
 
+/**
+ * Strip trailing `.0` patch from a semver string for user-facing display.
+ * e.g. "2.16.0" → "2.16", but "2.16.1" stays as-is.
+ */
+function toDisplayVersion(semver: string): string {
+  const match = semver.match(/^(\d+\.\d+)\.0$/);
+  return match ? match[1] : semver;
+}
+
 function resolveAppVersionInfo(): ProducerPlayerAppVersion {
   const semanticVersion =
     normalizeSemanticVersion(__PRODUCER_PLAYER_APP_VERSION__) ??
@@ -303,6 +312,8 @@ function resolveAppVersionInfo(): ProducerPlayerAppVersion {
       process.env.GITHUB_SHA) ?? ''
   );
 
+  const twoPartVersion = toDisplayVersion(semanticVersion);
+
   const displaySegments: string[] = [];
   if (buildNumber !== null) {
     displaySegments.push(`build.${buildNumber}`);
@@ -313,8 +324,8 @@ function resolveAppVersionInfo(): ProducerPlayerAppVersion {
 
   const displayVersion =
     displaySegments.length > 0
-      ? `${semanticVersion}+${displaySegments.join('.')}`
-      : semanticVersion;
+      ? `${twoPartVersion}+${displaySegments.join('.')}`
+      : twoPartVersion;
 
   return {
     semanticVersion,

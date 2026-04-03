@@ -944,11 +944,15 @@
                   return response.json();
                 })
                 .then(function (payload) {
-                  if (!payload || typeof payload.version !== 'string' || payload.version.length === 0) {
+                  var display = (payload && payload.displayVersion) || '';
+                  if (!display && payload && typeof payload.version === 'string' && payload.version.length > 0) {
+                    display = 'v' + payload.version.replace(/^v/i, '');
+                  }
+                  if (!display) {
                     return;
                   }
 
-                  versionLabel.textContent = 'v' + payload.version.replace(/^v/i, '');
+                  versionLabel.textContent = display.charAt(0) === 'v' ? display : 'v' + display;
                 })
                 .catch(function () {
                   // Keep placeholder if metadata is unavailable.

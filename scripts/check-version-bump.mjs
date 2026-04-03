@@ -8,6 +8,8 @@ const execFile = promisify(execFileCallback);
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDirectory, '..');
 
+const SEMVER_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
 const IGNORE_PREFIXES = [
   '.github/',
   'docs/',
@@ -24,6 +26,8 @@ const IGNORE_EXACT = new Set([
   'scripts/check-version-consistency.mjs',
   'scripts/check-version-bump.mjs',
   'scripts/sync-version.mjs',
+  'scripts/install-git-hooks.mjs',
+  'scripts/run-pre-push-version-check.mjs',
 ]);
 
 function isAllZeroHash(value) {
@@ -36,6 +40,41 @@ function shouldIgnoreFile(filePath) {
   }
 
   return IGNORE_PREFIXES.some((prefix) => filePath.startsWith(prefix));
+}
+
+function parseSemver(version, label) {
+  const match = String(version).trim().match(SEMVER_PATTERN);
+
+  if (!match) {
+    throw new Error(`${label} "${version}" is not valid semantic versioning.`);
+  }
+
+  return {
+    raw: String(version).trim(),
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+function compareSemverCore(left, right) {
+  if (left.major !== right.major) {
+    return left.major > right.major ? 1 : -1;
+  }
+
+  if (left.minor !== right.minor) {
+    return left.minor > right.minor ? 1 : -1;
+  }
+
+  if (left.patch !== right.patch) {
+    return left.patch > right.patch ? 1 : -1;
+  }
+
+  return 0;
+}
+
+function formatReleaseRelevantFiles(files) {
+  return files.map((filePath) => `  - ${filePath}`).join('\n');
 }
 
 async function git(args) {
@@ -104,22 +143,41 @@ async function main() {
   const currentVersion = String(currentPackageJson.version || '').trim();
   const baseVersion = await readPackageVersionFromRef(baseCommit);
 
-  if (currentVersion !== baseVersion) {
-    console.log(
-      `[version:bump:check] OK — package.json version changed from ${baseVersion} to ${currentVersion}.`
+  const formattedFiles = formatReleaseRelevantFiles(releaseRelevantFiles);
+
+  if (currentVersion === baseVersion) {
+    throw new Error(
+      `Release-relevant files changed without a package.json version bump.\n\n` +
+        `Base version: ${baseVersion}\nCurrent version: ${currentVersion}\n\n` +
+        `Changed files requiring a bump:\n${formattedFiles}\n\n` +
+        `Run one of:\n` +
+        `  npm run version:bump:patch\n` +
+        `  npm run version:bump:minor\n` +
+        `Then commit the versioned change.`
     );
-    return;
   }
 
-  const formattedFiles = releaseRelevantFiles.map((filePath) => `  - ${filePath}`).join('\n');
-  throw new Error(
-    `Release-relevant files changed without a package.json version bump.\n\n` +
-      `Base version: ${baseVersion}\nCurrent version: ${currentVersion}\n\n` +
-      `Changed files requiring a bump:\n${formattedFiles}\n\n` +
-      `Run one of:\n` +
-      `  npm run version:bump:patch\n` +
-      `  npm run version:bump:minor\n` +
-      `Then commit the versioned change.`
+  const baseSemver = parseSemver(baseVersion, 'Base package.json version');
+  const currentSemver = parseSemver(currentVersion, 'Current package.json version');
+  const coreComparison = compareSemverCore(currentSemver, baseSemver);
+
+  if (coreComparison <= 0) {
+    const minimumPatchVersion = `${baseSemver.major}.${baseSemver.minor}.${baseSemver.patch + 1}`;
+
+    throw new Error(
+      `Release-relevant files changed, but package.json did not advance by at least a patch bump.\n\n` +
+        `Base version: ${baseVersion}\nCurrent version: ${currentVersion}\n` +
+        `Minimum required version: ${minimumPatchVersion} (or any higher minor/major semver)\n\n` +
+        `Changed files requiring a bump:\n${formattedFiles}\n\n` +
+        `Run one of:\n` +
+        `  npm run version:bump:patch\n` +
+        `  npm run version:bump:minor\n` +
+        `Then commit the versioned change.`
+    );
+  }
+
+  console.log(
+    `[version:bump:check] OK — package.json version increased from ${baseVersion} to ${currentVersion}.`
   );
 }
 

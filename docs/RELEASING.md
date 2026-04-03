@@ -37,8 +37,9 @@ Release behavior by trigger:
 
 ## Recommended release flow
 
-1. Keep `package.json` semver at the current milestone unless you intentionally want a new semantic release.
-   - Bump when appropriate (optional on routine pushes):
+1. For release-relevant changes, bump `package.json` before push.
+   - Minimum required bump is **patch** (`x.y.z -> x.y.(z+1)`)
+   - Use **minor** for larger user-facing feature scope
 
 ```bash
 npm run version:bump:patch
@@ -46,18 +47,22 @@ npm run version:bump:patch
 npm run version:bump:minor
 ```
 
-2. Run version consistency checks locally:
+2. Run checks locally:
 
 ```bash
+npm run version:bump:check
 npm run version:check
 ```
 
 3. Commit and push to `main`.
+   - Local `pre-push` hook enforces `version:bump:check`
+   - CI enforces the same check on PRs/pushes
+
 4. Let the workflow publish:
    - First build for that semver → `v<package-version>`
    - Additional builds for the same semver → `v<package-version>-build.<run_number>`
 
-Routine pushes no longer require a manual semver bump just to move the in-app version forward.
+Only non-shipping changes (for example docs/workflow-only paths ignored by `version:bump:check`) can skip a semver bump.
 
 Optional explicit tag path:
 

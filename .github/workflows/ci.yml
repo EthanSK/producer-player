@@ -26,6 +26,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Enforce version bump policy (pull requests)
+        if: github.event_name == 'pull_request'
+        env:
+          VERSION_BUMP_BASE: ${{ github.event.pull_request.base.sha }}
+        run: npm run version:bump:check
+
+      - name: Enforce version bump policy (pushes)
+        if: github.event_name == 'push'
+        env:
+          VERSION_BUMP_BASE: ${{ github.event.before }}
+        run: npm run version:bump:check
+
       - name: Verify unified version source
         run: |
           npm run version:sync

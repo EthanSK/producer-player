@@ -141,6 +141,29 @@ npm run e2e:core         # build + core E2E specs
 npm run e2e:full         # build + full E2E suite (previous e2e:ci behavior)
 ```
 
+## Version Bump Policy (Pre-push + CI)
+
+Release-relevant changes must include a semantic version bump in `package.json`, with a **minimum of patch** (`x.y.z -> x.y.(z+1)`) when a bump is required.
+
+- Local enforcement: Git `pre-push` hook runs `npm run version:bump:check`
+- CI enforcement: `.github/workflows/ci.yml` runs the same check on PRs and pushes
+- No auto-bumping or auto-commit behavior is used (checks only), so there is no self-triggering loop risk
+
+After cloning, run `npm install` once to set up hooks automatically (`prepare` -> `npm run hooks:install`).
+If needed, reinstall manually:
+
+```bash
+npm run hooks:install
+```
+
+To satisfy the check on release-relevant changes:
+
+```bash
+npm run version:bump:patch   # default path
+# or
+npm run version:bump:minor
+```
+
 ## Desktop Packaging
 
 ```bash

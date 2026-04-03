@@ -290,17 +290,43 @@
 
       /* ── Screenshot ── */
       .screenshot {
+        position: relative;
         margin: 0 auto 24px;
         border-radius: 12px;
         overflow: hidden;
         background: transparent;
         border: none;
         box-shadow: none;
+        cursor: zoom-in;
+      }
+
+      .screenshot::after {
+        content: '';
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 28px;
+        height: 28px;
+        background: rgba(0, 0, 0, 0.55);
+        border-radius: 6px;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        pointer-events: none;
+        /* expand/fullscreen icon via inline SVG data URI */
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 2h4v4M6 14H2v-4M14 2l-5 5M2 14l5-5'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: center;
+        background-size: 16px 16px;
+      }
+
+      .screenshot:hover::after {
+        opacity: 1;
       }
 
       .screenshot img {
         width: 100%;
         display: block;
+        cursor: zoom-in;
       }
 
       /* ── Screenshots Gallery ── */
@@ -896,9 +922,6 @@
         opacity: 1;
       }
 
-      .screenshot img {
-        cursor: zoom-in;
-      }
     </style>
   </head>
 
@@ -1164,10 +1187,11 @@
         document.body.style.overflow = '';
       }
 
-      /* Click any screenshot image to open */
-      document.querySelectorAll('.screenshot img').forEach(function (img) {
-        img.addEventListener('click', function () {
-          open(img.src, img.alt);
+      /* Click any screenshot container or its image to open */
+      document.querySelectorAll('.screenshot').forEach(function (container) {
+        container.addEventListener('click', function () {
+          var img = container.querySelector('img');
+          if (img) open(img.src, img.alt);
         });
       });
 

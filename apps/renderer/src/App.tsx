@@ -1717,7 +1717,9 @@ export function App(): JSX.Element {
   const [eqBandGains, setEqBandGains] = useState<number[]>(
     () => FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB)
   );
-  const [eqEnabled, setEqEnabled] = useState(true);
+  // EQ starts OFF by default — user explicitly enables it when they want to trial adjustments.
+  const [eqEnabled, setEqEnabled] = useState(false);
+  const [showEqTonalBalance, setShowEqTonalBalance] = useState(false);
   const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
   const [spectrumFullWidth, setSpectrumFullWidth] = useState(860);
   const spectrumFullContainerRef = useRef<HTMLDivElement | null>(null);
@@ -6367,6 +6369,71 @@ export function App(): JSX.Element {
     : analysis?.tonalBalance ?? null;
   const tonalBalanceStatus = isRefMode ? referenceStatus : analysisStatus;
   const tonalBalanceReady = tonalBalanceStatus === 'ready' && activeTonalBalance !== null;
+
+  // --- EQ-adjusted tonal balance ---
+  // Maps the 6 EQ bands (Sub, Low, Low-Mid, Mid, High-Mid, High) to the 3 tonal-balance
+  // bands (Low 20-250 Hz, Mid 250-4000 Hz, High 4000-20000 Hz) by converting dB gains
+  // to linear power multipliers and weighting each EQ band's contribution proportionally
+  // based on how much of its frequency range overlaps with each tonal band.
+  const hasActiveEqGains = eqEnabled && eqBandGains.some((g) => g !== 0);
+  const eqAdjustedTonalBalance = useMemo(() => {
+    if (!activeTonalBalance || !hasActiveEqGains) return activeTonalBalance;
+
+    // EQ band → tonal band overlap fractions.
+    // Each entry: [fractionInLow, fractionInMid, fractionInHigh]
+    // Tonal cutoffs: Low < 250 Hz, Mid 250-4000 Hz, High > 4000 Hz
+    const eqToTonalWeights: Array<[number, number, number]> = [
+      [1, 0, 0],                      // Sub  20-120   → all Low
+      [130 / 380, 250 / 380, 0],      // Low  120-500  → 130 Hz in Low, 250 Hz in Mid
+      [0, 1, 0],                      // LM   500-2000 → all Mid
+      [0, 0.5, 0.5],                  // Mid  2000-6000 → half Mid, half High (split at 4000)
+      [0, 0, 1],                      // HM   6000-12000 → all High
+      [0, 0, 1],                      // High 12000-20000 → all High
+    ];
+
+    // Compute average linear power gain for each tonal band,
+    // weighted by how much of each EQ band falls inside it.
+    let lowGainWeighted = 0;
+    let lowWeightSum = 0;
+    let midGainWeighted = 0;
+    let midWeightSum = 0;
+    let highGainWeighted = 0;
+    let highWeightSum = 0;
+
+    for (let i = 0; i < FREQUENCY_BANDS.length; i++) {
+      const linearGain = Math.pow(10, eqBandGains[i] / 10); // dB to power ratio
+      const [wL, wM, wH] = eqToTonalWeights[i];
+      lowGainWeighted += wL * linearGain;
+      lowWeightSum += wL;
+      midGainWeighted += wM * linearGain;
+      midWeightSum += wM;
+      highGainWeighted += wH * linearGain;
+      highWeightSum += wH;
+    }
+
+    const lowGain = lowWeightSum > 0 ? lowGainWeighted / lowWeightSum : 1;
+    const midGain = midWeightSum > 0 ? midGainWeighted / midWeightSum : 1;
+    const highGain = highWeightSum > 0 ? highGainWeighted / highWeightSum : 1;
+
+    // Apply gains to original energy fractions and re-normalize
+    const adjLow = activeTonalBalance.low * lowGain;
+    const adjMid = activeTonalBalance.mid * midGain;
+    const adjHigh = activeTonalBalance.high * highGain;
+    const total = adjLow + adjMid + adjHigh;
+
+    if (total <= 0) return { low: 0, mid: 0, high: 0 };
+    return {
+      low: adjLow / total,
+      mid: adjMid / total,
+      high: adjHigh / total,
+    };
+  }, [activeTonalBalance, hasActiveEqGains, eqBandGains, eqEnabled]);
+
+  // Use EQ-adjusted values when the toggle is on and EQ gains are active
+  const displayTonalBalance = showEqTonalBalance && hasActiveEqGains
+    ? eqAdjustedTonalBalance
+    : activeTonalBalance;
+
   const referenceIntegratedText =
     referenceStatus === 'ready' && referenceTrack
       ? formatMeasuredStat(referenceTrack.measuredAnalysis.integratedLufs, 'LUFS')
@@ -7213,20 +7280,20 @@ export function App(): JSX.Element {
                   <div className="analysis-tonal-balance-wrapper">
                     <div className="analysis-panel-header-row">
                       <p className="analysis-tonal-balance-heading" data-testid="analysis-tonal-balance-heading">
-                        Tonal balance{usingReferenceSuffix}
+                        Tonal balance{showEqTonalBalance && hasActiveEqGains ? ' (EQ\u2019d)' : ''}{usingReferenceSuffix}
                       </p>
                       {renderMasteringPanelDragHandle('compact', 'tonal-balance')}
                     </div>
                     <div
-                      className="analysis-tonal-balance"
+                      className={`analysis-tonal-balance${showEqTonalBalance && hasActiveEqGains ? ' eq-adjusted' : ''}`}
                       data-testid="analysis-tonal-balance"
                       data-source={isRefMode ? "reference-track" : "mix-track"}
                     >
                       {(
                         [
-                          ['Low', activeTonalBalance?.low ?? 0],
-                          ['Mid', activeTonalBalance?.mid ?? 0],
-                          ['High', activeTonalBalance?.high ?? 0],
+                          ['Low', displayTonalBalance?.low ?? 0],
+                          ['Mid', displayTonalBalance?.mid ?? 0],
+                          ['High', displayTonalBalance?.high ?? 0],
                         ] as Array<[string, number]>
                       ).map(([label, value]) => (
                         <div key={label} className="analysis-band-row" data-testid={`analysis-band-${label.toLowerCase()}`}>
@@ -9430,21 +9497,32 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                       <div className="analysis-section-header">
-                      <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{usingReferenceSuffix} <HelpTooltip text="Shows how your audio energy is distributed across three broad frequency bands. Low (20-250 Hz) covers sub and bass. Mid (250-4000 Hz) covers vocals, guitars, synths, and most musical detail. High (4000-20000 Hz) covers presence, air, and brightness. Each band is shown as a percentage of total energy. Use the numbers as a rough guide, not a rulebook: many balanced masters fall somewhere around 30-40% Low, 40-50% Mid, and 15-25% High, but genre and arrangement matter." links={TONAL_BALANCE_LINKS} /></h4>
+                      <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{showEqTonalBalance && hasActiveEqGains ? ' (EQ\u2019d)' : ''}{usingReferenceSuffix} <HelpTooltip text="Shows how your audio energy is distributed across three broad frequency bands. Low (20-250 Hz) covers sub and bass. Mid (250-4000 Hz) covers vocals, guitars, synths, and most musical detail. High (4000-20000 Hz) covers presence, air, and brightness. Each band is shown as a percentage of total energy. Use the numbers as a rough guide, not a rulebook: many balanced masters fall somewhere around 30-40% Low, 40-50% Mid, and 15-25% High, but genre and arrangement matter." links={TONAL_BALANCE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Low/mid/high energy distribution</p>
                       </div>
                       {renderMasteringPanelDragHandle('fullscreen', 'tonal-balance')}
                     </div>
+                    <div className="analysis-tonal-balance-eq-toggle-row">
+                      <button
+                        type="button"
+                        className={`ghost eq-tonal-toggle${showEqTonalBalance ? ' eq-tonal-toggle--active' : ''}`}
+                        onClick={() => setShowEqTonalBalance((prev) => !prev)}
+                        title={showEqTonalBalance ? 'Show original tonal balance' : 'Preview how EQ adjustments would shift the tonal balance'}
+                        data-testid="eq-tonal-balance-toggle"
+                      >
+                        {showEqTonalBalance ? 'Show Original Tonal Balance' : 'Show EQ\u2019d Tonal Balance'}
+                      </button>
+                    </div>
                     <div
-                      className="analysis-tonal-balance detailed"
+                      className={`analysis-tonal-balance detailed${showEqTonalBalance && hasActiveEqGains ? ' eq-adjusted' : ''}`}
                       data-testid="analysis-overlay-tonal-balance"
                       data-source={isRefMode ? "reference-track" : "mix-track"}
                     >
                       {(
                         [
-                          ['Low', activeTonalBalance?.low ?? 0],
-                          ['Mid', activeTonalBalance?.mid ?? 0],
-                          ['High', activeTonalBalance?.high ?? 0],
+                          ['Low', displayTonalBalance?.low ?? 0],
+                          ['Mid', displayTonalBalance?.mid ?? 0],
+                          ['High', displayTonalBalance?.high ?? 0],
                         ] as Array<[string, number]>
                       ).map(([label, value]) => (
                         <div key={label} className="analysis-band-row" data-testid={`analysis-overlay-band-${label.toLowerCase()}`}>

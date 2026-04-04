@@ -12,7 +12,48 @@
 
 Stop paying for expensive metering plugins. Producer Player gives you broadcast-grade loudness metering, stereo imaging analysis, platform normalization preview, reference A/B comparison, and version tracking -- all in one app.
 
-![Producer Player](docs/assets/readme/app-hero.png)
+<p align="center">
+  <img src="site/assets/screenshots/main-view.png" alt="Producer Player main app overview — scan folders, auto-group versions, drag to reorder, album art, version history, mastering metrics" width="100%" />
+</p>
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="site/assets/screenshots/spectrum-mastering.png" alt="Mastering Workflow" width="100%" /><br />
+      <strong>Mastering Workflow</strong><br />
+      <sub>Full-screen spectrum analyzer with frequency band soloing, level meter, and reference track A/B comparison.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="site/assets/screenshots/tutorials.png" alt="Built-in Tutorials" width="100%" /><br />
+      <strong>Built-in Tutorials</strong><br />
+      <sub>Every metric explained in plain language with curated video tutorials. Plus an AI mastering assistant you can chat with for personalised guidance.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="site/assets/screenshots/checklist.png" alt="Production Checklist" width="100%" /><br />
+      <strong>Production Checklist</strong><br />
+      <sub>Per-song notes with timestamps and version management. Built-in transport controls for quick review.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="site/assets/screenshots/platform-normalization.png" alt="Platform Normalization" width="100%" /><br />
+      <strong>Platform Normalization</strong><br />
+      <sub>Tonal balance, loudness &amp; peak metrics, streaming platform targets. AI mastering assistant with detailed analysis.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="site/assets/screenshots/midside-analysis.png" alt="Advanced Analysis" width="100%" /><br />
+      <strong>Advanced Analysis</strong><br />
+      <sub>Dynamic range, crest factor, mid/side spectrum, and loudness distribution. AI-powered frequency and stereo field analysis.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="site/assets/screenshots/waveform-loudness.png" alt="Reference Matching" width="100%" /><br />
+      <strong>Reference Matching</strong><br />
+      <sub>A/B compare against reference tracks with loudness history and waveform visualization.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Mastering Analysis Suite
 

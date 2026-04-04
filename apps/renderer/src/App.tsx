@@ -740,7 +740,7 @@ function formatAppliedChangeMainText(level: number | null | undefined): string {
   }
 
   if (level < 0) {
-    return `Applied reduction ${Math.abs(level).toFixed(1)} dB`;
+    return `Applied reduction -${Math.abs(level).toFixed(1)} dB`;
   }
 
   if (level > 0) {

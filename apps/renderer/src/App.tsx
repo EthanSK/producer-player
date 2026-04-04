@@ -62,7 +62,8 @@ import { CrestFactorGraph } from './CrestFactorGraph';
 import { MidSideSpectrum } from './MidSideSpectrum';
 import { LoudnessHistogram } from './LoudnessHistogram';
 import { Spectrogram } from './Spectrogram';
-import { FREQUENCY_BANDS, createBandSoloFilter } from './audioEngine';
+import { FREQUENCY_BANDS, createBandSoloFilter, createPeakingEqFilter, computeEqGainCurve } from './audioEngine';
+import { EqGainSliders, EQ_GAIN_DEFAULT_DB } from './EqGainSliders';
 import { HelpTooltip } from './HelpTooltip';
 import {
   AgentChatPanel,
@@ -1713,6 +1714,10 @@ export function App(): JSX.Element {
 
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
   const [soloedBands, setSoloedBands] = useState<Set<number>>(new Set());
+  const [eqBandGains, setEqBandGains] = useState<number[]>(
+    () => FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB)
+  );
+  const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
   const [spectrumFullWidth, setSpectrumFullWidth] = useState(860);
   const spectrumFullContainerRef = useRef<HTMLDivElement | null>(null);
   const previewAnalysisCacheRef = useRef<Map<string, TrackAnalysisResult>>(new Map());
@@ -2798,6 +2803,10 @@ export function App(): JSX.Element {
         try { f.disconnect(); } catch { /* ignore */ }
       }
       bandSoloFiltersRef.current = [];
+      for (const f of eqFiltersRef.current) {
+        try { f.disconnect(); } catch { /* ignore */ }
+      }
+      eqFiltersRef.current = [];
 
       playbackGainNodeRef.current?.disconnect();
       playbackGainNodeRef.current = null;
@@ -3779,8 +3788,8 @@ export function App(): JSX.Element {
     applyPlaybackGain(volume, appliedNormalizationGainDb);
   }, [appliedNormalizationGainDb, applyPlaybackGain, volume]);
 
-  // Consolidated output chain: gain → [mid/side processor] → [band solo filters | destination]
-  // This single effect coordinates mid/side monitoring AND band soloing so they
+  // Consolidated output chain: gain → [mid/side processor] → [EQ filters] → [band solo filters | destination]
+  // This single effect coordinates mid/side monitoring, EQ gain, AND band soloing so they
   // never conflict, and re-runs when the playback source changes (mix ↔ reference)
   // to ensure the ScriptProcessorNode stays connected.
   useEffect(() => {
@@ -3797,6 +3806,10 @@ export function App(): JSX.Element {
       try { f.disconnect(); } catch { /* ignore */ }
     }
     bandSoloFiltersRef.current = [];
+    for (const f of eqFiltersRef.current) {
+      try { f.disconnect(); } catch { /* ignore */ }
+    }
+    eqFiltersRef.current = [];
     try { gainNode.disconnect(); } catch { /* ignore */ }
 
     // --- Determine the node that feeds into the final stage (solo filters or destination) ---
@@ -3829,6 +3842,19 @@ export function App(): JSX.Element {
       outputNode = processor;
     }
 
+    // --- Insert EQ peaking filters in series (if any band has non-zero gain) ---
+    const hasEqGain = eqBandGains.some((g) => g !== 0);
+    if (hasEqGain) {
+      for (let i = 0; i < FREQUENCY_BANDS.length; i++) {
+        const g = eqBandGains[i];
+        if (g === 0) continue;
+        const eqFilter = createPeakingEqFilter(audioContext, FREQUENCY_BANDS[i], g);
+        outputNode.connect(eqFilter);
+        outputNode = eqFilter;
+        eqFiltersRef.current.push(eqFilter);
+      }
+    }
+
     // --- Connect band solo filters (or direct to destination) ---
     if (soloedBands.size > 0) {
       for (const bandIndex of soloedBands) {
@@ -3852,12 +3878,16 @@ export function App(): JSX.Element {
         try { f.disconnect(); } catch { /* ignore */ }
       }
       bandSoloFiltersRef.current = [];
+      for (const f of eqFiltersRef.current) {
+        try { f.disconnect(); } catch { /* ignore */ }
+      }
+      eqFiltersRef.current = [];
       try {
         gainNode.disconnect();
         gainNode.connect(audioContext.destination);
       } catch { /* ignore */ }
     };
-  }, [midSideMode, soloedBands, desiredPlaybackKey]);
+  }, [midSideMode, soloedBands, eqBandGains, desiredPlaybackKey]);
 
   async function resumePlaybackContextIfNeeded(): Promise<void> {
     const playbackAudioContext = playbackAudioContextRef.current;
@@ -5096,6 +5126,35 @@ export function App(): JSX.Element {
     setSoloedBands(new Set<number>());
   }
 
+  // --- EQ gain slider handlers ---
+  function handleEqGainChange(bandIndex: number, gainDb: number): void {
+    setEqBandGains((prev) => {
+      const next = [...prev];
+      next[bandIndex] = gainDb;
+      return next;
+    });
+  }
+
+  function handleEqGainReset(bandIndex: number): void {
+    setEqBandGains((prev) => {
+      const next = [...prev];
+      next[bandIndex] = EQ_GAIN_DEFAULT_DB;
+      return next;
+    });
+  }
+
+  function handleEqResetAll(): void {
+    setEqBandGains(FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB));
+  }
+
+  // Compute the EQ gain curve for the spectrum overlay (memoized on band gains)
+  const eqGainCurve = useMemo(() => {
+    const hasAny = eqBandGains.some((g) => g !== 0);
+    if (!hasAny) return undefined;
+    const sampleRate = playbackAudioContextRef.current?.sampleRate ?? 44100;
+    return computeEqGainCurve(eqBandGains, 256, 20, 20000, sampleRate);
+  }, [eqBandGains]);
+
   async function loadReferenceTrack(
     sourceType: ReferenceTrackSource,
     selection: Pick<LoadedReferenceTrack, 'filePath' | 'fileName' | 'subtitle' | 'playbackSource'>,
@@ -5314,6 +5373,7 @@ export function App(): JSX.Element {
     window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, 'false');
     setMidSideMode('stereo');
     handleClearSoloedBands();
+    handleEqResetAll();
     setReferenceTrack(null);
     setReferenceStatus('idle');
     setReferenceError(null);
@@ -8989,6 +9049,14 @@ export function App(): JSX.Element {
                         activeBands={soloedBands}
                         onBandToggle={handleBandToggle}
                         isPlaying={isPlaying}
+                        eqGainCurve={eqGainCurve}
+                      />
+                      <EqGainSliders
+                        gains={eqBandGains}
+                        onGainChange={handleEqGainChange}
+                        onGainReset={handleEqGainReset}
+                        onResetAll={handleEqResetAll}
+                        spectrumWidth={spectrumFullWidth}
                       />
                     </div>
                     <div className="analysis-overlay-viz-meters">

@@ -167,6 +167,92 @@ export function createBandSoloFilter(
 }
 
 /**
+ * Create a peaking EQ filter for a frequency band.
+ * Type "peaking" boosts or cuts around the center frequency.
+ */
+export function createPeakingEqFilter(
+  audioContext: AudioContext,
+  band: FrequencyBand,
+  gainDb: number = 0
+): BiquadFilterNode {
+  const filter = audioContext.createBiquadFilter();
+  filter.type = 'peaking';
+  filter.frequency.value = band.centerHz;
+  // Q chosen to cover the band width smoothly
+  const bandwidth = band.maxHz - band.minHz;
+  filter.Q.value = band.centerHz / bandwidth;
+  filter.gain.value = gainDb;
+  return filter;
+}
+
+/**
+ * Compute the combined EQ gain curve for visualization.
+ * Returns an array of { freq, gainDb } points sampled logarithmically across the spectrum.
+ *
+ * This approximates the response of multiple peaking filters using the standard
+ * biquad magnitude formula, so it can be drawn even when the AudioContext isn't available.
+ */
+export function computeEqGainCurve(
+  gains: readonly number[],
+  numPoints: number = 256,
+  minFreq: number = 20,
+  maxFreq: number = 20000,
+  sampleRate: number = 44100
+): Array<{ freq: number; gainDb: number }> {
+  const points: Array<{ freq: number; gainDb: number }> = [];
+  const logMin = Math.log10(minFreq);
+  const logMax = Math.log10(maxFreq);
+
+  for (let i = 0; i < numPoints; i++) {
+    const t = i / (numPoints - 1);
+    const freq = Math.pow(10, logMin + t * (logMax - logMin));
+    let totalGainDb = 0;
+
+    for (let b = 0; b < FREQUENCY_BANDS.length; b++) {
+      const g = gains[b];
+      if (g === 0) continue;
+
+      const band = FREQUENCY_BANDS[b];
+      const bandwidth = band.maxHz - band.minHz;
+      const Q = band.centerHz / bandwidth;
+      const A = Math.pow(10, g / 40); // amplitude factor for peaking
+      const w0 = (2 * Math.PI * band.centerHz) / sampleRate;
+      const alpha = Math.sin(w0) / (2 * Q);
+
+      // Peaking EQ biquad coefficients (Audio EQ Cookbook)
+      const b0 = 1 + alpha * A;
+      const b1 = -2 * Math.cos(w0);
+      const b2 = 1 - alpha * A;
+      const a0 = 1 + alpha / A;
+      const a1 = -2 * Math.cos(w0);
+      const a2 = 1 - alpha / A;
+
+      // Evaluate magnitude response at freq
+      const w = (2 * Math.PI * freq) / sampleRate;
+      const cosw = Math.cos(w);
+      const cos2w = Math.cos(2 * w);
+      const sinw = Math.sin(w);
+      const sin2w = Math.sin(2 * w);
+
+      const numReal = (b0 / a0) + (b1 / a0) * cosw + (b2 / a0) * cos2w;
+      const numImag = -(b1 / a0) * sinw - (b2 / a0) * sin2w;
+      const denReal = 1 + (a1 / a0) * cosw + (a2 / a0) * cos2w;
+      const denImag = -(a1 / a0) * sinw - (a2 / a0) * sin2w;
+
+      const numMagSq = numReal * numReal + numImag * numImag;
+      const denMagSq = denReal * denReal + denImag * denImag;
+      const magDb = 10 * Math.log10(numMagSq / denMagSq);
+
+      totalGainDb += magDb;
+    }
+
+    points.push({ freq, gainDb: totalGainDb });
+  }
+
+  return points;
+}
+
+/**
  * Interpolate FFT data to get a smooth value at an arbitrary frequency.
  * Uses linear interpolation between bins.
  */

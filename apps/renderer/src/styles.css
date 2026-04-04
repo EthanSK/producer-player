@@ -2759,6 +2759,108 @@ button.checklist-play-toggle[data-playing='true'] {
   padding: 2px 8px;
 }
 
+/* EQ Gain Sliders */
+.eq-gain-sliders {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.eq-gain-sliders-row {
+  position: relative;
+  height: 98px; /* slider height + label */
+}
+
+.eq-band-slider {
+  z-index: 1;
+}
+
+.eq-slider-track {
+  position: relative;
+  width: 8px;
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+.eq-slider-track:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.eq-slider-zero-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+}
+
+.eq-slider-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.eq-slider-thumb {
+  position: absolute;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid;
+  transform: translateX(-50%);
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 100ms ease;
+}
+
+.eq-slider-track:hover .eq-slider-thumb {
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+}
+
+.eq-slider-label {
+  display: block;
+  text-align: center;
+  font-size: 9px;
+  line-height: 1;
+  color: rgba(156, 175, 196, 0.5);
+  margin-top: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.eq-slider-label-active {
+  font-weight: 600;
+  font-size: 9px;
+}
+
+.eq-reset-all-button {
+  font-size: 11px;
+  padding: 2px 8px;
+  color: rgba(255, 180, 60, 0.8);
+  border: 1px solid rgba(255, 180, 60, 0.3);
+  border-radius: 6px;
+  background: rgba(255, 180, 60, 0.08);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.eq-reset-all-button:hover {
+  background: rgba(255, 180, 60, 0.15);
+  color: rgba(255, 180, 60, 1);
+}
+
 /* Section header with subtitle */
 .analysis-section-header {
   display: grid;

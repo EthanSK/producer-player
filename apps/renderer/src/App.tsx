@@ -9208,6 +9208,7 @@ export function App(): JSX.Element {
                         spectrumWidth={spectrumFullWidth}
                         eqEnabled={eqEnabled}
                         onToggleEq={handleToggleEq}
+                        songKey={selectedSongId ?? undefined}
                       />
                     </div>
                     <div className="analysis-overlay-viz-meters">

@@ -11,7 +11,7 @@ export const EQ_GAIN_DEFAULT_DB = 0;
 
 /** Maximum number of saved EQ snapshots. */
 const MAX_EQ_SNAPSHOTS = 10;
-const EQ_SNAPSHOTS_STORAGE_KEY = 'producer-player-eq-snapshots';
+const EQ_SNAPSHOTS_STORAGE_KEY_PREFIX = 'producer-player-eq-snapshots';
 
 export interface EqSnapshot {
   id: string;
@@ -19,9 +19,14 @@ export interface EqSnapshot {
   timestamp: number;
 }
 
-function loadSnapshots(): EqSnapshot[] {
+function storageKeyForSong(songKey: string): string {
+  return `${EQ_SNAPSHOTS_STORAGE_KEY_PREFIX}-${songKey}`;
+}
+
+function loadSnapshots(songKey: string | undefined): EqSnapshot[] {
+  if (!songKey) return [];
   try {
-    const raw = localStorage.getItem(EQ_SNAPSHOTS_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKeyForSong(songKey));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -38,9 +43,10 @@ function loadSnapshots(): EqSnapshot[] {
   }
 }
 
-function saveSnapshots(snapshots: EqSnapshot[]): void {
+function saveSnapshots(songKey: string | undefined, snapshots: EqSnapshot[]): void {
+  if (!songKey) return;
   try {
-    localStorage.setItem(EQ_SNAPSHOTS_STORAGE_KEY, JSON.stringify(snapshots));
+    localStorage.setItem(storageKeyForSong(songKey), JSON.stringify(snapshots));
   } catch {
     /* localStorage may be full or unavailable */
   }
@@ -71,6 +77,8 @@ export interface EqGainSlidersProps {
   eqEnabled?: boolean;
   /** Called when the user toggles the EQ bypass. */
   onToggleEq?: () => void;
+  /** Unique key for the current song — snapshots are stored per-song. */
+  songKey?: string;
 }
 
 /**
@@ -86,14 +94,20 @@ export function EqGainSliders({
   spectrumWidth,
   eqEnabled = true,
   onToggleEq,
+  songKey,
 }: EqGainSlidersProps): JSX.Element {
   const hasAnyGain = gains.some((g) => g !== EQ_GAIN_DEFAULT_DB);
-  const [snapshots, setSnapshots] = useState<EqSnapshot[]>(() => loadSnapshots());
+  const [snapshots, setSnapshots] = useState<EqSnapshot[]>(() => loadSnapshots(songKey));
+
+  // Reload snapshots from localStorage when the song changes
+  useEffect(() => {
+    setSnapshots(loadSnapshots(songKey));
+  }, [songKey]);
 
   // Persist snapshots to localStorage whenever they change
   useEffect(() => {
-    saveSnapshots(snapshots);
-  }, [snapshots]);
+    saveSnapshots(songKey, snapshots);
+  }, [songKey, snapshots]);
 
   function handleSaveSnapshot(): void {
     const snap: EqSnapshot = {

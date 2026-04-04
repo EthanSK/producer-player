@@ -1568,6 +1568,7 @@ export function App(): JSX.Element {
   >({});
   const inspectorVersionSampleRatePendingVersionIdsRef = useRef<Set<string>>(new Set());
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
+  const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(() =>
     window.localStorage.getItem(MORE_METRICS_EXPANDED_KEY) === 'true'
   );
@@ -2040,6 +2041,13 @@ export function App(): JSX.Element {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
+  }, [analysisExpanded]);
+
+  // Close quick switcher when mastering overlay closes
+  useEffect(() => {
+    if (!analysisExpanded) {
+      setQuickSwitcherOpen(false);
+    }
   }, [analysisExpanded]);
 
   // ResizeObserver for full-screen spectrum width
@@ -5699,6 +5707,23 @@ export function App(): JSX.Element {
     handleOpenSongChecklist(selectedPlaybackSongId);
   }
 
+  function handleQuickSwitcherSelect(songId: string): void {
+    const song = albumSongs.find((s) => s.id === songId);
+    if (!song) return;
+
+    rememberCurrentSongPlayhead();
+
+    setPlaybackError(null);
+    setSelectedSongId(songId);
+
+    const nextPlaybackVersionId = getPreferredPlaybackVersionId(song);
+    if (nextPlaybackVersionId) {
+      setSelectedPlaybackVersionId(nextPlaybackVersionId);
+    }
+
+    setQuickSwitcherOpen(false);
+  }
+
   function handleChecklistOverlayWheel(event: WheelEvent<HTMLDivElement>): void {
     const checklistModalCardNode = checklistModalCardRef.current;
     const eventTarget = event.target instanceof Node ? event.target : null;
@@ -8901,6 +8926,15 @@ export function App(): JSX.Element {
                 <div className="analysis-overlay-header-actions">
                   <button
                     type="button"
+                    className={`ghost${quickSwitcherOpen ? ' active' : ''}`}
+                    onClick={() => setQuickSwitcherOpen((v) => !v)}
+                    data-testid="analysis-quick-switcher-button"
+                    title="Quick-switch between songs"
+                  >
+                    Songs
+                  </button>
+                  <button
+                    type="button"
                     className="ghost"
                     onClick={handleOpenChecklistFromMastering}
                     disabled={!selectedPlaybackSongId}
@@ -9908,6 +9942,61 @@ export function App(): JSX.Element {
               <p className="muted">Pick a track to see mastering analysis.</p>
             )}
           </div>
+
+          {quickSwitcherOpen ? (
+            <>
+              <div
+                className="quick-switcher-backdrop"
+                onClick={() => setQuickSwitcherOpen(false)}
+                aria-hidden="true"
+              />
+              <div
+                className="quick-switcher-panel"
+                role="listbox"
+                aria-label="Quick song switcher"
+                data-testid="quick-switcher-panel"
+              >
+                <div className="quick-switcher-header">
+                  <h4>Songs</h4>
+                  <button
+                    type="button"
+                    className="quick-switcher-close"
+                    onClick={() => setQuickSwitcherOpen(false)}
+                    aria-label="Close song switcher"
+                    title="Close"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <div className="quick-switcher-list">
+                  {albumSongs.map((song) => {
+                    const isActive = song.id === selectedPlaybackSongId;
+                    const versionCount = song.versions.length;
+                    return (
+                      <button
+                        key={song.id}
+                        type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        className={`quick-switcher-item${isActive ? ' quick-switcher-item--active' : ''}`}
+                        onClick={() => handleQuickSwitcherSelect(song.id)}
+                        data-testid={`quick-switcher-item-${song.id}`}
+                        title={song.title}
+                      >
+                        <span className="quick-switcher-item-title">{song.title}</span>
+                        <span className="quick-switcher-item-meta">
+                          {versionCount} {versionCount === 1 ? 'version' : 'versions'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {albumSongs.length === 0 ? (
+                    <p className="quick-switcher-empty muted">No songs in this album.</p>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          ) : null}
         </div>
       ) : null}
 

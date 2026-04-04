@@ -298,6 +298,7 @@ const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const ALBUM_CHECKLIST_STORAGE_KEY = 'producer-player.album-checklist.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
 const COMPACT_MASTERING_PANEL_LAYOUT_KEY = 'producer-player.mastering-layout.compact.v1';
+const REFERENCE_LEVEL_MATCH_KEY = 'producer-player.reference-level-match.v1';
 const FULLSCREEN_MASTERING_PANEL_LAYOUT_KEY =
   'producer-player.mastering-layout.fullscreen.v1';
 const MAX_SAVED_REFERENCE_TRACKS = 20;
@@ -1612,7 +1613,10 @@ export function App(): JSX.Element {
   const [midSideMode, setMidSideMode] = useState<'stereo' | 'mid' | 'side'>('stereo');
   const [analyserNodeL, setAnalyserNodeL] = useState<AnalyserNode | null>(null);
   const [analyserNodeR, setAnalyserNodeR] = useState<AnalyserNode | null>(null);
-  const [referenceLevelMatchEnabled, setReferenceLevelMatchEnabled] = useState(false);
+  const [referenceLevelMatchEnabled, setReferenceLevelMatchEnabled] = useState(() => {
+    const stored = window.localStorage.getItem(REFERENCE_LEVEL_MATCH_KEY);
+    return stored !== null ? stored === 'true' : true;
+  });
   const midSideProcessorRef = useRef<ScriptProcessorNode | null>(null);
 
   const [migrationModalOpen, setMigrationModalOpen] = useState(false);
@@ -5307,6 +5311,7 @@ export function App(): JSX.Element {
     setNormalizationPreviewEnabled(false);
     setSelectedNormalizationPlatformId('spotify');
     setReferenceLevelMatchEnabled(false);
+    window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, 'false');
     setMidSideMode('stereo');
     handleClearSoloedBands();
     setReferenceTrack(null);
@@ -8926,15 +8931,6 @@ export function App(): JSX.Element {
                 <div className="analysis-overlay-header-actions">
                   <button
                     type="button"
-                    className={`ghost${quickSwitcherOpen ? ' active' : ''}`}
-                    onClick={() => setQuickSwitcherOpen((v) => !v)}
-                    data-testid="analysis-quick-switcher-button"
-                    title="Quick-switch between songs"
-                  >
-                    Songs
-                  </button>
-                  <button
-                    type="button"
                     className="ghost"
                     onClick={handleOpenChecklistFromMastering}
                     disabled={!selectedPlaybackSongId}
@@ -9113,7 +9109,11 @@ export function App(): JSX.Element {
                       <button
                         type="button"
                         className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
-                        onClick={() => setReferenceLevelMatchEnabled((v) => !v)}
+                        onClick={() => setReferenceLevelMatchEnabled((v) => {
+                          const next = !v;
+                          window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
+                          return next;
+                        })}
                         disabled={!referenceTrack}
                         title="Automatically adjust reference playback gain to match your mix's integrated LUFS"
                         data-testid="analysis-level-match-toggle"
@@ -9945,8 +9945,7 @@ export function App(): JSX.Element {
 
           {referenceTrack ? (
             <div className="floating-ab-panel" data-testid="floating-ab-panel">
-              <span className="floating-ab-label">A/B</span>
-              <div className="floating-ab-buttons" role="group" aria-label="Floating A/B toggle">
+              <div className="floating-ab-buttons" role="group" aria-label="A/B toggle">
                 <button
                   type="button"
                   className={playbackPreviewMode === 'mix' ? 'active' : 'ghost'}
@@ -9971,7 +9970,11 @@ export function App(): JSX.Element {
                 <button
                   type="button"
                   className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
-                  onClick={() => setReferenceLevelMatchEnabled((v) => !v)}
+                  onClick={() => setReferenceLevelMatchEnabled((v) => {
+                    const next = !v;
+                    window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
+                    return next;
+                  })}
                   title="Match playback levels between mix and reference"
                   data-testid="floating-ab-level-match"
                 >
@@ -9986,6 +9989,29 @@ export function App(): JSX.Element {
             </div>
           ) : null}
 
+          <button
+            type="button"
+            className={`quick-switcher-toggle${quickSwitcherOpen ? ' active' : ''}`}
+            onClick={() => setQuickSwitcherOpen((v) => !v)}
+            data-testid="analysis-quick-switcher-button"
+            title={quickSwitcherOpen ? 'Close song switcher' : 'Switch songs'}
+            aria-label={quickSwitcherOpen ? 'Close song switcher' : 'Switch songs'}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 18V5l12-2v13" />
+              <circle cx="6" cy="18" r="3" />
+              <circle cx="18" cy="16" r="3" />
+            </svg>
+          </button>
           {quickSwitcherOpen ? (
             <>
               <div

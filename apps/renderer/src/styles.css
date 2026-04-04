@@ -1261,57 +1261,81 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 
 .floating-ab-panel {
   position: fixed;
-  left: 40px;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 24px;
+  left: 24px;
   z-index: 12;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  background: rgba(17, 25, 34, 0.96);
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(17, 25, 34, 0.85);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-}
-
-.floating-ab-panel .floating-ab-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #9ab6d3;
-  text-align: center;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
 }
 
 .floating-ab-panel .floating-ab-buttons {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  gap: 4px;
 }
 
 .floating-ab-panel .floating-ab-buttons button {
-  min-width: 90px;
-  font-size: 13px;
-  padding: 6px 12px;
+  font-size: 12px;
+  padding: 4px 10px;
 }
 
 .floating-ab-panel .floating-ab-level-match {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
   gap: 4px;
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+  margin-left: 2px;
 }
 
 .floating-ab-panel .floating-ab-level-match button {
   font-size: 11px;
-  padding: 4px 8px;
+  padding: 3px 8px;
+  white-space: nowrap;
 }
 
 .floating-ab-panel .floating-ab-level-match .muted {
-  font-size: 11px;
-  text-align: center;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* ── Quick Song Switcher Floating Toggle ── */
+
+.quick-switcher-toggle {
+  position: fixed;
+  bottom: 16px;
+  right: 68px;
+  z-index: 900;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-1);
+  color: var(--accent);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.quick-switcher-toggle:hover {
+  background: var(--bg-2);
+  transform: scale(1.05);
+}
+
+.quick-switcher-toggle.active {
+  background: var(--accent);
+  color: var(--bg-0, #0e1621);
 }
 
 /* ── Quick Song Switcher Panel ── */
@@ -1319,22 +1343,22 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 .quick-switcher-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 11;
+  z-index: 940;
 }
 
 .quick-switcher-panel {
   position: fixed;
-  top: 24px;
-  right: 24px;
-  width: 280px;
-  max-height: calc(100vh - 48px);
-  z-index: 12;
+  bottom: 68px;
+  right: 68px;
+  width: 300px;
+  max-height: 420px;
+  z-index: 950;
   display: flex;
   flex-direction: column;
-  background: rgba(17, 25, 34, 0.96);
+  background: var(--bg-1);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
   overflow: hidden;
 }
 

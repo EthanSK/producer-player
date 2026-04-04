@@ -7384,13 +7384,12 @@ export function App(): JSX.Element {
             </button>
             <button
               type="button"
-              className="icon-button"
+              className="action-button secondary"
               onClick={handleOpenAlbumChecklist}
               data-testid="album-checklist-button"
-              aria-label="Album Checklist"
               title="Album Checklist — high-level to-do items for the whole album/project."
             >
-              <span aria-hidden="true">☑</span>
+              Checklist
             </button>
             <button
               type="button"

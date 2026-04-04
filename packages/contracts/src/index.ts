@@ -219,6 +219,12 @@ export interface SongChecklistItem {
   versionNumber: number | null;
 }
 
+export interface AlbumChecklistItem {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
 export interface SharedUserState {
   ratings: Record<string, number>;
   checklists: Record<string, SongChecklistItem[]>;

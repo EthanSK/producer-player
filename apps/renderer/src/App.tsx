@@ -9,6 +9,7 @@ import {
   type WheelEvent,
 } from 'react';
 import type {
+  AlbumChecklistItem,
   AudioFileAnalysis,
   ICloudAvailabilityResult,
   ICloudBackupData,
@@ -294,6 +295,7 @@ const COMPACT_REFERENCE_QUICK_PICKS_COUNT = 3;
 const SAVED_REFERENCE_SINGLE_CLICK_DELAY_MS = 300;
 const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
 const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
+const ALBUM_CHECKLIST_STORAGE_KEY = 'producer-player.album-checklist.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
 const COMPACT_MASTERING_PANEL_LAYOUT_KEY = 'producer-player.mastering-layout.compact.v1';
 const FULLSCREEN_MASTERING_PANEL_LAYOUT_KEY =
@@ -944,6 +946,49 @@ function persistSongChecklists(checklists: Record<string, SongChecklistItem[]>):
   window.localStorage.setItem(SONG_CHECKLISTS_STORAGE_KEY, JSON.stringify(checklists));
 }
 
+function readStoredAlbumChecklists(): Record<string, AlbumChecklistItem[]> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(ALBUM_CHECKLIST_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const result: Record<string, AlbumChecklistItem[]> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (Array.isArray(value)) {
+        result[key] = value.filter(
+          (item): item is AlbumChecklistItem =>
+            typeof item === 'object' &&
+            item !== null &&
+            typeof (item as AlbumChecklistItem).id === 'string' &&
+            typeof (item as AlbumChecklistItem).text === 'string' &&
+            typeof (item as AlbumChecklistItem).completed === 'boolean'
+        );
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function persistAlbumChecklists(checklists: Record<string, AlbumChecklistItem[]>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(ALBUM_CHECKLIST_STORAGE_KEY, JSON.stringify(checklists));
+}
+
 function readStoredSongProjectFilePaths(): Record<string, string> {
   if (typeof window === 'undefined') {
     return {};
@@ -1585,6 +1630,13 @@ export function App(): JSX.Element {
     return window.localStorage.getItem(ALBUM_ART_STORAGE_KEY);
   });
   const [albumArtFullscreen, setAlbumArtFullscreen] = useState(false);
+  const [albumChecklistOpen, setAlbumChecklistOpen] = useState(false);
+  const [albumChecklists, setAlbumChecklists] = useState<Record<string, AlbumChecklistItem[]>>(
+    () => readStoredAlbumChecklists()
+  );
+  const [albumChecklistDraftText, setAlbumChecklistDraftText] = useState('');
+  const albumChecklistComposerRef = useRef<HTMLTextAreaElement | null>(null);
+  const albumChecklistScrollRef = useRef<HTMLDivElement | null>(null);
   const albumArtInputRef = useRef<HTMLInputElement | null>(null);
   const albumTitleInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -2064,6 +2116,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     persistSongChecklists(songChecklists);
   }, [songChecklists]);
+
+  useEffect(() => {
+    persistAlbumChecklists(albumChecklists);
+  }, [albumChecklists]);
 
   useEffect(() => {
     persistSongProjectFilePaths(songProjectFilePaths);
@@ -5532,6 +5588,91 @@ export function App(): JSX.Element {
     clearChecklistTimestampHighlights();
   }
 
+  function getAlbumChecklistKey(): string {
+    const folder = snapshot.linkedFolders.find((f) => f.id === selectedFolderId) ?? null;
+    return folder?.path ?? '__global__';
+  }
+
+  function handleOpenAlbumChecklist(): void {
+    setAlbumChecklistOpen(true);
+    setAlbumChecklistDraftText('');
+    requestAnimationFrame(() => {
+      albumChecklistComposerRef.current?.focus();
+    });
+  }
+
+  function handleCloseAlbumChecklist(): void {
+    setAlbumChecklistOpen(false);
+    setAlbumChecklistDraftText('');
+  }
+
+  function handleAddAlbumChecklistItem(): void {
+    const text = albumChecklistDraftText.trim();
+    if (text.length === 0) {
+      return;
+    }
+
+    const key = getAlbumChecklistKey();
+    setAlbumChecklists((prev) => {
+      const existing = prev[key] ?? [];
+      return {
+        ...prev,
+        [key]: [
+          ...existing,
+          {
+            id: createChecklistItemId(),
+            text,
+            completed: false,
+          },
+        ],
+      };
+    });
+    setAlbumChecklistDraftText('');
+    requestAnimationFrame(() => {
+      albumChecklistComposerRef.current?.focus();
+      if (albumChecklistScrollRef.current) {
+        albumChecklistScrollRef.current.scrollTop = albumChecklistScrollRef.current.scrollHeight;
+      }
+    });
+  }
+
+  function handleToggleAlbumChecklistItem(itemId: string, completed: boolean): void {
+    const key = getAlbumChecklistKey();
+    setAlbumChecklists((prev) => {
+      const existing = prev[key] ?? [];
+      return {
+        ...prev,
+        [key]: existing.map((item) =>
+          item.id === itemId ? { ...item, completed } : item
+        ),
+      };
+    });
+  }
+
+  function handleRemoveAlbumChecklistItem(itemId: string): void {
+    const key = getAlbumChecklistKey();
+    setAlbumChecklists((prev) => {
+      const existing = prev[key] ?? [];
+      return {
+        ...prev,
+        [key]: existing.filter((item) => item.id !== itemId),
+      };
+    });
+  }
+
+  function handleAlbumChecklistItemTextChange(itemId: string, text: string): void {
+    const key = getAlbumChecklistKey();
+    setAlbumChecklists((prev) => {
+      const existing = prev[key] ?? [];
+      return {
+        ...prev,
+        [key]: existing.map((item) =>
+          item.id === itemId ? { ...item, text } : item
+        ),
+      };
+    });
+  }
+
   function handleOpenMasteringFromChecklist(): void {
     const modalSongId = checklistModalSongIdRef.current;
     if (modalSongId) {
@@ -5930,6 +6071,13 @@ export function App(): JSX.Element {
     setMigrationImportDone(true);
     setMigrationPreview(null);
   }
+
+  const albumChecklistKey = (() => {
+    const folder = snapshot.linkedFolders.find((f) => f.id === selectedFolderId) ?? null;
+    return folder?.path ?? '__global__';
+  })();
+  const albumChecklistItems = albumChecklists[albumChecklistKey] ?? [];
+  const albumChecklistCompletedCount = albumChecklistItems.filter((item) => item.completed).length;
 
   const checklistModalSong = checklistModalSongId
     ? snapshot.songs.find((song) => song.id === checklistModalSongId) ?? null
@@ -7236,6 +7384,16 @@ export function App(): JSX.Element {
             </button>
             <button
               type="button"
+              className="icon-button"
+              onClick={handleOpenAlbumChecklist}
+              data-testid="album-checklist-button"
+              aria-label="Album Checklist"
+              title="Album Checklist — high-level to-do items for the whole album/project."
+            >
+              <span aria-hidden="true">☑</span>
+            </button>
+            <button
+              type="button"
               className="action-button secondary"
               onClick={() => {
                 void handleOrganize();
@@ -7306,7 +7464,7 @@ export function App(): JSX.Element {
               <span aria-hidden="true">🚶</span>
             </button>
             <div className="actions-help-group">
-              <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and metadata as a JSON file for backup or transfer.\n\n• ⤒ (Import Order) — Imports a previously exported JSON file to restore track ordering.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
+              <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• ☑ (Album Checklist) — Opens a project-wide checklist for high-level tasks that apply to the whole album, not individual songs.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and metadata as a JSON file for backup or transfer.\n\n• ⤒ (Import Order) — Imports a previously exported JSON file to restore track ordering.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
             </div>
           </div>
         </header>
@@ -8441,6 +8599,144 @@ export function App(): JSX.Element {
                 title="Remove all completed checklist items."
               >
                 Clear Completed
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {albumChecklistOpen ? (
+        <div
+          className="checklist-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Album checklist"
+          data-testid="album-checklist-modal"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              handleCloseAlbumChecklist();
+            }
+          }}
+        >
+          <div className="checklist-modal-card album-checklist-modal-card">
+            <div className="checklist-modal-header">
+              <div>
+                <h2>{albumTitle} Checklist <HelpTooltip text={"What this is: An album-wide to-do list for high-level tasks that apply to the whole project — not individual songs.\n\nHow to use it: Type a task in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item.\n\nWhy you'd want to: Track project-level tasks like finalizing album art, checking track gaps, exporting final files, or uploading to a distributor — things that don't belong on any single song's checklist."} /></h2>
+                <p className="muted">
+                  {albumChecklistCompletedCount}/{albumChecklistItems.length} completed
+                </p>
+              </div>
+              <button type="button" className="checklist-header-done-button" onClick={handleCloseAlbumChecklist} title="Close album checklist." data-testid="album-checklist-done-header">
+                Done
+              </button>
+            </div>
+
+            <div
+              ref={albumChecklistScrollRef}
+              className="checklist-item-scroll-region"
+              data-testid="album-checklist-scroll-region"
+            >
+              {albumChecklistItems.length > 0 ? (
+                <ul className="checklist-item-list" data-testid="album-checklist-items">
+                  {albumChecklistItems.map((item) => (
+                    <li
+                      key={item.id}
+                      className="checklist-item-row"
+                    >
+                      <label className="checklist-item-toggle">
+                        <input
+                          type="checkbox"
+                          checked={item.completed}
+                          onChange={(event) => {
+                            handleToggleAlbumChecklistItem(item.id, event.currentTarget.checked);
+                          }}
+                        />
+                      </label>
+                      <textarea
+                        className={`checklist-item-text${item.completed ? ' completed' : ''}`}
+                        value={item.text}
+                        rows={1}
+                        onChange={(event) => {
+                          autosizeChecklistTextarea(event.currentTarget);
+                          handleAlbumChecklistItemTextChange(item.id, event.currentTarget.value);
+                        }}
+                        onInput={(event) => {
+                          autosizeChecklistTextarea(event.currentTarget);
+                        }}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === 'Enter' &&
+                            !event.shiftKey &&
+                            !event.metaKey &&
+                            !event.ctrlKey &&
+                            !event.altKey
+                          ) {
+                            event.preventDefault();
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        ref={(el) => {
+                          if (el) {
+                            autosizeChecklistTextarea(el);
+                          }
+                        }}
+                        data-testid="album-checklist-item-text"
+                      />
+                      <button
+                        type="button"
+                        className="ghost checklist-remove-button"
+                        onClick={() => handleRemoveAlbumChecklistItem(item.id)}
+                        aria-label={`Remove ${item.text}`}
+                        title="Remove checklist item"
+                      >
+                        <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted checklist-empty-state" data-testid="album-checklist-empty">
+                  No album checklist items yet.
+                </p>
+              )}
+            </div>
+
+            <div className="checklist-input-row">
+              <textarea
+                ref={albumChecklistComposerRef}
+                className="checklist-composer-text"
+                value={albumChecklistDraftText}
+                rows={1}
+                onChange={(event) => {
+                  autosizeChecklistTextarea(event.currentTarget);
+                  setAlbumChecklistDraftText(event.currentTarget.value);
+                }}
+                onInput={(event) => {
+                  autosizeChecklistTextarea(event.currentTarget);
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === 'Enter' &&
+                    !event.shiftKey &&
+                    !event.metaKey &&
+                    !event.ctrlKey &&
+                    !event.altKey
+                  ) {
+                    event.preventDefault();
+                    handleAddAlbumChecklistItem();
+                  }
+                }}
+                placeholder="Add an album checklist item"
+                data-testid="album-checklist-input"
+              />
+              <button
+                type="button"
+                onClick={handleAddAlbumChecklistItem}
+                disabled={albumChecklistDraftText.trim().length === 0}
+                data-testid="album-checklist-add-button"
+                title="Add checklist item."
+              >
+                Add
               </button>
             </div>
           </div>

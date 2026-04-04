@@ -1257,6 +1257,63 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   min-width: 0;
 }
 
+/* ── Floating A/B Toggle Panel ── */
+
+.floating-ab-panel {
+  position: fixed;
+  left: 40px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(17, 25, 34, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.floating-ab-panel .floating-ab-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9ab6d3;
+  text-align: center;
+}
+
+.floating-ab-panel .floating-ab-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.floating-ab-panel .floating-ab-buttons button {
+  min-width: 90px;
+  font-size: 13px;
+  padding: 6px 12px;
+}
+
+.floating-ab-panel .floating-ab-level-match {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.floating-ab-panel .floating-ab-level-match button {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.floating-ab-panel .floating-ab-level-match .muted {
+  font-size: 11px;
+  text-align: center;
+}
+
 /* ── Quick Song Switcher Panel ── */
 
 .quick-switcher-backdrop {

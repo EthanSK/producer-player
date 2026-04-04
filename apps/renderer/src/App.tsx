@@ -9943,6 +9943,49 @@ export function App(): JSX.Element {
             )}
           </div>
 
+          {referenceTrack ? (
+            <div className="floating-ab-panel" data-testid="floating-ab-panel">
+              <span className="floating-ab-label">A/B</span>
+              <div className="floating-ab-buttons" role="group" aria-label="Floating A/B toggle">
+                <button
+                  type="button"
+                  className={playbackPreviewMode === 'mix' ? 'active' : 'ghost'}
+                  onClick={() => handleReferencePreviewModeChange('mix')}
+                  data-testid="floating-ab-mix"
+                  title="Listen to your mix."
+                >
+                  Mix
+                </button>
+                <button
+                  type="button"
+                  className={playbackPreviewMode === 'reference' ? 'active' : 'ghost'}
+                  onClick={() => handleReferencePreviewModeChange('reference')}
+                  disabled={referenceStatus === 'loading'}
+                  data-testid="floating-ab-reference"
+                  title="Listen to the reference track."
+                >
+                  Reference
+                </button>
+              </div>
+              <div className="floating-ab-level-match">
+                <button
+                  type="button"
+                  className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
+                  onClick={() => setReferenceLevelMatchEnabled((v) => !v)}
+                  title="Match playback levels between mix and reference"
+                  data-testid="floating-ab-level-match"
+                >
+                  {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
+                </button>
+                {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
+                  <span className="muted">
+                    {referenceLevelMatchGainDb > 0 ? '+' : ''}{referenceLevelMatchGainDb.toFixed(1)} dB
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           {quickSwitcherOpen ? (
             <>
               <div

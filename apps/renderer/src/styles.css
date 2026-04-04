@@ -2861,6 +2861,87 @@ button.checklist-play-toggle[data-playing='true'] {
   color: rgba(255, 180, 60, 1);
 }
 
+/* EQ controls row (Reset + Save buttons side by side) */
+.eq-controls-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* EQ Save snapshot button */
+.eq-save-snapshot-button {
+  font-size: 11px;
+  padding: 2px 8px;
+  color: rgba(100, 200, 255, 0.8);
+  border: 1px solid rgba(100, 200, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(100, 200, 255, 0.08);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.eq-save-snapshot-button:hover {
+  background: rgba(100, 200, 255, 0.15);
+  color: rgba(100, 200, 255, 1);
+}
+
+/* EQ Snapshot pills row */
+.eq-snapshots-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.eq-snapshot-pill {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.eq-snapshot-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.eq-snapshot-pill-button {
+  all: unset;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  color: rgba(156, 175, 196, 0.75);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.eq-snapshot-pill-button:hover {
+  color: rgba(200, 215, 230, 1);
+}
+
+.eq-snapshot-pill-label {
+  letter-spacing: 0.3px;
+}
+
+.eq-snapshot-delete {
+  all: unset;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 11px;
+  line-height: 1;
+  color: rgba(156, 175, 196, 0.35);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.eq-snapshot-delete:hover {
+  color: rgba(255, 100, 100, 0.9);
+  background: rgba(255, 100, 100, 0.1);
+}
+
 /* Section header with subtitle */
 .analysis-section-header {
   display: grid;

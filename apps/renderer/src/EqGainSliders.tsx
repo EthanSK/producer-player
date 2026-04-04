@@ -1,4 +1,4 @@
-import { useCallback, useRef, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FREQUENCY_BANDS, frequencyToX } from './audioEngine';
 
 const MIN_FREQ = 20;
@@ -9,6 +9,51 @@ export const EQ_GAIN_MIN_DB = -12;
 export const EQ_GAIN_MAX_DB = 12;
 export const EQ_GAIN_DEFAULT_DB = 0;
 
+/** Maximum number of saved EQ snapshots. */
+const MAX_EQ_SNAPSHOTS = 10;
+const EQ_SNAPSHOTS_STORAGE_KEY = 'producer-player-eq-snapshots';
+
+export interface EqSnapshot {
+  id: string;
+  gains: number[];
+  timestamp: number;
+}
+
+function loadSnapshots(): EqSnapshot[] {
+  try {
+    const raw = localStorage.getItem(EQ_SNAPSHOTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (s: unknown): s is EqSnapshot =>
+        typeof s === 'object' &&
+        s !== null &&
+        typeof (s as EqSnapshot).id === 'string' &&
+        Array.isArray((s as EqSnapshot).gains) &&
+        typeof (s as EqSnapshot).timestamp === 'number'
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveSnapshots(snapshots: EqSnapshot[]): void {
+  try {
+    localStorage.setItem(EQ_SNAPSHOTS_STORAGE_KEY, JSON.stringify(snapshots));
+  } catch {
+    /* localStorage may be full or unavailable */
+  }
+}
+
+/** Format a gain value as a compact string like "+2" or "-1" or "0". */
+function formatGainCompact(g: number): string {
+  const rounded = Math.round(g * 10) / 10;
+  if (rounded === 0) return '0';
+  const str = rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1);
+  return rounded > 0 ? `+${str}` : str;
+}
+
 export interface EqGainSlidersProps {
   /** Current gain values per band (array of dB, one per FREQUENCY_BANDS entry). */
   gains: readonly number[];
@@ -18,6 +63,8 @@ export interface EqGainSlidersProps {
   onGainReset: (bandIndex: number) => void;
   /** Called to reset all bands. */
   onResetAll: () => void;
+  /** Called to restore a full set of gain values (e.g. from a snapshot). */
+  onRestoreGains: (gains: number[]) => void;
   /** Width of the parent spectrum analyzer (used to position sliders). */
   spectrumWidth: number;
 }
@@ -31,9 +78,40 @@ export function EqGainSliders({
   onGainChange,
   onGainReset,
   onResetAll,
+  onRestoreGains,
   spectrumWidth,
 }: EqGainSlidersProps): JSX.Element {
   const hasAnyGain = gains.some((g) => g !== EQ_GAIN_DEFAULT_DB);
+  const [snapshots, setSnapshots] = useState<EqSnapshot[]>(() => loadSnapshots());
+
+  // Persist snapshots to localStorage whenever they change
+  useEffect(() => {
+    saveSnapshots(snapshots);
+  }, [snapshots]);
+
+  function handleSaveSnapshot(): void {
+    const snap: EqSnapshot = {
+      id: crypto.randomUUID(),
+      gains: [...gains],
+      timestamp: Date.now(),
+    };
+    setSnapshots((prev) => {
+      const next = [...prev, snap];
+      // Circular buffer: drop oldest when exceeding max
+      if (next.length > MAX_EQ_SNAPSHOTS) {
+        return next.slice(next.length - MAX_EQ_SNAPSHOTS);
+      }
+      return next;
+    });
+  }
+
+  function handleRestoreSnapshot(snap: EqSnapshot): void {
+    onRestoreGains(snap.gains);
+  }
+
+  function handleDeleteSnapshot(id: string): void {
+    setSnapshots((prev) => prev.filter((s) => s.id !== id));
+  }
 
   return (
     <div className="eq-gain-sliders" data-testid="eq-gain-sliders">
@@ -59,16 +137,56 @@ export function EqGainSliders({
           );
         })}
       </div>
-      {hasAnyGain && (
-        <button
-          type="button"
-          className="ghost eq-reset-all-button"
-          data-testid="eq-reset-all"
-          onClick={onResetAll}
-          title="Reset all EQ bands to 0 dB."
-        >
-          Reset EQ
-        </button>
+      <div className="eq-controls-row">
+        {hasAnyGain && (
+          <button
+            type="button"
+            className="ghost eq-reset-all-button"
+            data-testid="eq-reset-all"
+            onClick={onResetAll}
+            title="Reset all EQ bands to 0 dB."
+          >
+            Reset EQ
+          </button>
+        )}
+        {hasAnyGain && (
+          <button
+            type="button"
+            className="ghost eq-save-snapshot-button"
+            data-testid="eq-save-snapshot"
+            onClick={handleSaveSnapshot}
+            title="Save current EQ settings as a snapshot."
+          >
+            Save
+          </button>
+        )}
+      </div>
+      {snapshots.length > 0 && (
+        <div className="eq-snapshots-row" data-testid="eq-snapshots-row">
+          {snapshots.map((snap, idx) => (
+            <div key={snap.id} className="eq-snapshot-pill" data-testid={`eq-snapshot-${idx}`}>
+              <button
+                type="button"
+                className="eq-snapshot-pill-button"
+                onClick={() => handleRestoreSnapshot(snap)}
+                title={snap.gains.map(formatGainCompact).join('  ')}
+              >
+                <span className="eq-snapshot-pill-label">
+                  {snap.gains.map(formatGainCompact).join(' ')}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="eq-snapshot-delete"
+                data-testid={`eq-snapshot-delete-${idx}`}
+                onClick={() => handleDeleteSnapshot(snap.id)}
+                title="Delete snapshot"
+              >
+                &times;
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

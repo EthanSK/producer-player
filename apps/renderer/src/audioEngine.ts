@@ -189,8 +189,10 @@ export function createPeakingEqFilter(
  * Compute the combined EQ gain curve for visualization.
  * Returns an array of { freq, gainDb } points sampled logarithmically across the spectrum.
  *
- * This approximates the response of multiple peaking filters using the standard
- * biquad magnitude formula, so it can be drawn even when the AudioContext isn't available.
+ * Computes the true cascaded frequency response by multiplying the complex
+ * transfer functions of all active peaking filters at each frequency point.
+ * This produces the exact combined magnitude response, yielding a smooth curve
+ * when adjacent bands share the same gain.
  */
 export function computeEqGainCurve(
   gains: readonly number[],
@@ -203,50 +205,71 @@ export function computeEqGainCurve(
   const logMin = Math.log10(minFreq);
   const logMax = Math.log10(maxFreq);
 
+  // Pre-compute biquad coefficients for each active band
+  const filters: Array<{
+    b0: number; b1: number; b2: number;
+    a0: number; a1: number; a2: number;
+  }> = [];
+
+  for (let b = 0; b < FREQUENCY_BANDS.length; b++) {
+    const g = gains[b];
+    if (g === 0) continue;
+
+    const band = FREQUENCY_BANDS[b];
+    const bandwidth = band.maxHz - band.minHz;
+    const Q = band.centerHz / bandwidth;
+    const A = Math.pow(10, g / 40); // amplitude factor for peaking
+    const w0 = (2 * Math.PI * band.centerHz) / sampleRate;
+    const alpha = Math.sin(w0) / (2 * Q);
+
+    // Peaking EQ biquad coefficients (Audio EQ Cookbook)
+    filters.push({
+      b0: 1 + alpha * A,
+      b1: -2 * Math.cos(w0),
+      b2: 1 - alpha * A,
+      a0: 1 + alpha / A,
+      a1: -2 * Math.cos(w0),
+      a2: 1 - alpha / A,
+    });
+  }
+
   for (let i = 0; i < numPoints; i++) {
     const t = i / (numPoints - 1);
     const freq = Math.pow(10, logMin + t * (logMax - logMin));
-    let totalGainDb = 0;
+    const w = (2 * Math.PI * freq) / sampleRate;
+    const cosw = Math.cos(w);
+    const cos2w = Math.cos(2 * w);
+    const sinw = Math.sin(w);
+    const sin2w = Math.sin(2 * w);
 
-    for (let b = 0; b < FREQUENCY_BANDS.length; b++) {
-      const g = gains[b];
-      if (g === 0) continue;
+    // Multiply complex transfer functions: H_total = H_1 * H_2 * ... * H_n
+    // Start with unity (1 + 0j)
+    let realAcc = 1;
+    let imagAcc = 0;
 
-      const band = FREQUENCY_BANDS[b];
-      const bandwidth = band.maxHz - band.minHz;
-      const Q = band.centerHz / bandwidth;
-      const A = Math.pow(10, g / 40); // amplitude factor for peaking
-      const w0 = (2 * Math.PI * band.centerHz) / sampleRate;
-      const alpha = Math.sin(w0) / (2 * Q);
+    for (const f of filters) {
+      // Numerator: b0 + b1*z^-1 + b2*z^-2 evaluated at z = e^(jw)
+      const nReal = f.b0 + f.b1 * cosw + f.b2 * cos2w;
+      const nImag = -(f.b1 * sinw + f.b2 * sin2w);
+      // Denominator: a0 + a1*z^-1 + a2*z^-2
+      const dReal = f.a0 + f.a1 * cosw + f.a2 * cos2w;
+      const dImag = -(f.a1 * sinw + f.a2 * sin2w);
 
-      // Peaking EQ biquad coefficients (Audio EQ Cookbook)
-      const b0 = 1 + alpha * A;
-      const b1 = -2 * Math.cos(w0);
-      const b2 = 1 - alpha * A;
-      const a0 = 1 + alpha / A;
-      const a1 = -2 * Math.cos(w0);
-      const a2 = 1 - alpha / A;
+      // H_k = N / D via complex division
+      const dMagSq = dReal * dReal + dImag * dImag;
+      const hReal = (nReal * dReal + nImag * dImag) / dMagSq;
+      const hImag = (nImag * dReal - nReal * dImag) / dMagSq;
 
-      // Evaluate magnitude response at freq
-      const w = (2 * Math.PI * freq) / sampleRate;
-      const cosw = Math.cos(w);
-      const cos2w = Math.cos(2 * w);
-      const sinw = Math.sin(w);
-      const sin2w = Math.sin(2 * w);
-
-      const numReal = (b0 / a0) + (b1 / a0) * cosw + (b2 / a0) * cos2w;
-      const numImag = -(b1 / a0) * sinw - (b2 / a0) * sin2w;
-      const denReal = 1 + (a1 / a0) * cosw + (a2 / a0) * cos2w;
-      const denImag = -(a1 / a0) * sinw - (a2 / a0) * sin2w;
-
-      const numMagSq = numReal * numReal + numImag * numImag;
-      const denMagSq = denReal * denReal + denImag * denImag;
-      const magDb = 10 * Math.log10(numMagSq / denMagSq);
-
-      totalGainDb += magDb;
+      // Multiply into running product: acc = acc * H_k
+      const nextReal = realAcc * hReal - imagAcc * hImag;
+      const nextImag = realAcc * hImag + imagAcc * hReal;
+      realAcc = nextReal;
+      imagAcc = nextImag;
     }
 
-    points.push({ freq, gainDb: totalGainDb });
+    const magSq = realAcc * realAcc + imagAcc * imagAcc;
+    const gainDb = magSq > 0 ? 10 * Math.log10(magSq) : -100;
+    points.push({ freq, gainDb });
   }
 
   return points;

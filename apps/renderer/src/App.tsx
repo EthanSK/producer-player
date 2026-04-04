@@ -5147,6 +5147,10 @@ export function App(): JSX.Element {
     setEqBandGains(FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB));
   }
 
+  function handleEqRestoreGains(restoredGains: number[]): void {
+    setEqBandGains(restoredGains.slice(0, FREQUENCY_BANDS.length));
+  }
+
   // Compute the EQ gain curve for the spectrum overlay (memoized on band gains)
   const eqGainCurve = useMemo(() => {
     const hasAny = eqBandGains.some((g) => g !== 0);
@@ -9056,6 +9060,7 @@ export function App(): JSX.Element {
                         onGainChange={handleEqGainChange}
                         onGainReset={handleEqGainReset}
                         onResetAll={handleEqResetAll}
+                        onRestoreGains={handleEqRestoreGains}
                         spectrumWidth={spectrumFullWidth}
                       />
                     </div>

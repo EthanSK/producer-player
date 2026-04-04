@@ -1717,6 +1717,7 @@ export function App(): JSX.Element {
   const [eqBandGains, setEqBandGains] = useState<number[]>(
     () => FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB)
   );
+  const [eqEnabled, setEqEnabled] = useState(true);
   const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
   const [spectrumFullWidth, setSpectrumFullWidth] = useState(860);
   const spectrumFullContainerRef = useRef<HTMLDivElement | null>(null);
@@ -3842,8 +3843,8 @@ export function App(): JSX.Element {
       outputNode = processor;
     }
 
-    // --- Insert EQ peaking filters in series (if any band has non-zero gain) ---
-    const hasEqGain = eqBandGains.some((g) => g !== 0);
+    // --- Insert EQ peaking filters in series (if any band has non-zero gain and EQ is enabled) ---
+    const hasEqGain = eqEnabled && eqBandGains.some((g) => g !== 0);
     if (hasEqGain) {
       for (let i = 0; i < FREQUENCY_BANDS.length; i++) {
         const g = eqBandGains[i];
@@ -3887,7 +3888,7 @@ export function App(): JSX.Element {
         gainNode.connect(audioContext.destination);
       } catch { /* ignore */ }
     };
-  }, [midSideMode, soloedBands, eqBandGains, desiredPlaybackKey]);
+  }, [midSideMode, soloedBands, eqBandGains, eqEnabled, desiredPlaybackKey]);
 
   async function resumePlaybackContextIfNeeded(): Promise<void> {
     const playbackAudioContext = playbackAudioContextRef.current;
@@ -5151,13 +5152,18 @@ export function App(): JSX.Element {
     setEqBandGains(restoredGains.slice(0, FREQUENCY_BANDS.length));
   }
 
+  function handleToggleEq(): void {
+    setEqEnabled((prev) => !prev);
+  }
+
   // Compute the EQ gain curve for the spectrum overlay (memoized on band gains)
   const eqGainCurve = useMemo(() => {
+    if (!eqEnabled) return undefined;
     const hasAny = eqBandGains.some((g) => g !== 0);
     if (!hasAny) return undefined;
     const sampleRate = playbackAudioContextRef.current?.sampleRate ?? 44100;
     return computeEqGainCurve(eqBandGains, 256, 20, 20000, sampleRate);
-  }, [eqBandGains]);
+  }, [eqBandGains, eqEnabled]);
 
   async function loadReferenceTrack(
     sourceType: ReferenceTrackSource,
@@ -5378,6 +5384,7 @@ export function App(): JSX.Element {
     setMidSideMode('stereo');
     handleClearSoloedBands();
     handleEqResetAll();
+    setEqEnabled(true);
     setReferenceTrack(null);
     setReferenceStatus('idle');
     setReferenceError(null);
@@ -5776,7 +5783,7 @@ export function App(): JSX.Element {
     handleOpenSongChecklist(selectedPlaybackSongId);
   }
 
-  function handleQuickSwitcherSelect(songId: string): void {
+  async function handleQuickSwitcherSelect(songId: string): Promise<void> {
     const song = albumSongs.find((s) => s.id === songId);
     if (!song) return;
 
@@ -5791,6 +5798,39 @@ export function App(): JSX.Element {
     }
 
     setQuickSwitcherOpen(false);
+
+    if (!nextPlaybackVersionId) return;
+
+    // Start playback — resume immediately if the same song/version is already loaded,
+    // otherwise trigger a load-then-play like double-click on the main song list.
+    const audio = audioRef.current;
+    const canResumeCurrentSelection =
+      songId === selectedPlaybackSongId &&
+      nextPlaybackVersionId === selectedPlaybackVersionId &&
+      lastLoadedSongIdRef.current === songId &&
+      playbackSourceReadyRef.current;
+
+    if (audio && canResumeCurrentSelection) {
+      if (audio.paused) {
+        try {
+          await resumePlaybackContextIfNeeded();
+          await audio.play();
+          logPlaybackEvent('quick-switcher-played-current-selection');
+        } catch (cause: unknown) {
+          const message = cause instanceof Error ? cause.message : String(cause);
+          setPlaybackError(
+            `Playback couldn't start: ${message}. ${buildPlaybackFallbackGuidance(
+              playbackSourceRef.current
+            )}`
+          );
+          logPlaybackEvent('quick-switcher-play-failed', { message });
+        }
+      }
+      return;
+    }
+
+    playOnNextLoadRef.current = true;
+    schedulePlaybackLoadTimeout('quick-switcher');
   }
 
   function handleChecklistOverlayWheel(event: WheelEvent<HTMLDivElement>): void {
@@ -9062,6 +9102,8 @@ export function App(): JSX.Element {
                         onResetAll={handleEqResetAll}
                         onRestoreGains={handleEqRestoreGains}
                         spectrumWidth={spectrumFullWidth}
+                        eqEnabled={eqEnabled}
+                        onToggleEq={handleToggleEq}
                       />
                     </div>
                     <div className="analysis-overlay-viz-meters">

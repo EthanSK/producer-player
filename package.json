@@ -1,6 +1,6 @@
 {
   "name": "producer-player",
-  "version": "2.32.0",
+  "version": "2.33.0",
   "private": true,
   "description": "Producer Player desktop app for producers managing album tracks, exports, and ordering.",
   "author": "EthanSK",
@@ -16,11 +16,14 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run build:packages && concurrently -k -n RENDERER,ELECTRON -c cyan,magenta \"npm run dev:renderer\" \"npm run dev:electron\"",
-    "dev:hot": "npm run build:packages && concurrently -k -n RENDERER,ELECTRON -c cyan,magenta \"npm run dev:renderer:hot\" \"npm run dev:electron\"",
-    "dev:renderer": "cross-env PRODUCER_PLAYER_HOT_RELOAD=false npm run dev -w @producer-player/renderer",
-    "dev:renderer:hot": "cross-env PRODUCER_PLAYER_HOT_RELOAD=true npm run dev -w @producer-player/renderer",
+    "dev": "npm run build:packages && concurrently -k -n CONTRACTS,DOMAIN,RENDERER,ELECTRON -c gray,gray,cyan,magenta \"npm run dev:contracts\" \"npm run dev:domain\" \"npm run dev:renderer\" \"npm run dev:electron\"",
+    "dev:cold": "npm run build:packages && concurrently -k -n RENDERER,ELECTRON -c cyan,magenta \"npm run dev:renderer:cold\" \"npm run dev:electron:once\"",
+    "dev:renderer": "cross-env PRODUCER_PLAYER_HOT_RELOAD=true npm run dev -w @producer-player/renderer",
+    "dev:renderer:cold": "cross-env PRODUCER_PLAYER_HOT_RELOAD=false npm run dev -w @producer-player/renderer",
+    "dev:contracts": "npm run dev -w @producer-player/contracts",
+    "dev:domain": "npm run dev -w @producer-player/domain",
     "dev:electron": "npm run dev -w @producer-player/electron",
+    "dev:electron:once": "npm run dev:once -w @producer-player/electron",
     "build:packages": "npm run build -w @producer-player/contracts && npm run build -w @producer-player/domain",
     "build": "npm run build:packages && npm run build -w @producer-player/renderer && npm run build -w @producer-player/electron",
     "build:mac": "node ./scripts/build-mac.mjs zip",

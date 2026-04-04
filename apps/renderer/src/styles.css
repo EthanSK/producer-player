@@ -2868,6 +2868,34 @@ button.checklist-play-toggle[data-playing='true'] {
   align-items: center;
 }
 
+/* EQ on/off toggle button */
+.eq-toggle-button {
+  font-size: 11px;
+  padding: 2px 8px;
+  color: rgba(120, 220, 120, 0.8);
+  border: 1px solid rgba(120, 220, 120, 0.3);
+  border-radius: 6px;
+  background: rgba(120, 220, 120, 0.08);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.eq-toggle-button:hover {
+  background: rgba(120, 220, 120, 0.15);
+  color: rgba(120, 220, 120, 1);
+}
+
+.eq-toggle-button--off {
+  color: rgba(180, 180, 180, 0.6);
+  border-color: rgba(180, 180, 180, 0.25);
+  background: rgba(180, 180, 180, 0.06);
+}
+
+.eq-toggle-button--off:hover {
+  background: rgba(180, 180, 180, 0.12);
+  color: rgba(180, 180, 180, 0.8);
+}
+
 /* EQ Save snapshot button */
 .eq-save-snapshot-button {
   font-size: 11px;

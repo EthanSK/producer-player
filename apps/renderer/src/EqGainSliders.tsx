@@ -67,6 +67,10 @@ export interface EqGainSlidersProps {
   onRestoreGains: (gains: number[]) => void;
   /** Width of the parent spectrum analyzer (used to position sliders). */
   spectrumWidth: number;
+  /** Whether the EQ is currently active (gains applied). Default true. */
+  eqEnabled?: boolean;
+  /** Called when the user toggles the EQ bypass. */
+  onToggleEq?: () => void;
 }
 
 /**
@@ -80,6 +84,8 @@ export function EqGainSliders({
   onResetAll,
   onRestoreGains,
   spectrumWidth,
+  eqEnabled = true,
+  onToggleEq,
 }: EqGainSlidersProps): JSX.Element {
   const hasAnyGain = gains.some((g) => g !== EQ_GAIN_DEFAULT_DB);
   const [snapshots, setSnapshots] = useState<EqSnapshot[]>(() => loadSnapshots());
@@ -138,6 +144,17 @@ export function EqGainSliders({
         })}
       </div>
       <div className="eq-controls-row">
+        {onToggleEq && (
+          <button
+            type="button"
+            className={`ghost eq-toggle-button${eqEnabled ? '' : ' eq-toggle-button--off'}`}
+            data-testid="eq-toggle"
+            onClick={onToggleEq}
+            title={eqEnabled ? 'Bypass EQ (keep slider positions).' : 'Re-enable EQ.'}
+          >
+            {eqEnabled ? 'EQ On' : 'EQ Off'}
+          </button>
+        )}
         {hasAnyGain && (
           <button
             type="button"

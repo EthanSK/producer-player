@@ -2771,7 +2771,7 @@ button.checklist-play-toggle[data-playing='true'] {
 
 .eq-gain-sliders-row {
   position: relative;
-  height: 98px; /* slider height + label */
+  height: 32px; /* horizontal slider height + label */
 }
 
 .eq-band-slider {
@@ -2780,11 +2780,11 @@ button.checklist-play-toggle[data-playing='true'] {
 
 .eq-slider-track {
   position: relative;
-  width: 8px;
-  margin: 0 auto;
+  height: 8px;
+  margin: 0;
   background: rgba(255, 255, 255, 0.06);
   border-radius: 4px;
-  cursor: ns-resize;
+  cursor: ew-resize;
   touch-action: none;
   user-select: none;
   overflow: hidden;
@@ -2796,29 +2796,29 @@ button.checklist-play-toggle[data-playing='true'] {
 
 .eq-slider-zero-line {
   position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
   background: rgba(255, 255, 255, 0.2);
   pointer-events: none;
 }
 
 .eq-slider-fill {
   position: absolute;
-  left: 0;
-  right: 0;
+  top: 0;
+  bottom: 0;
   border-radius: 4px;
   pointer-events: none;
 }
 
 .eq-slider-thumb {
   position: absolute;
-  left: 50%;
+  top: 50%;
   width: 14px;
   height: 14px;
   border-radius: 50%;
   border: 2px solid;
-  transform: translateX(-50%);
+  transform: translateY(-50%);
   pointer-events: none;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   transition: box-shadow 100ms ease;

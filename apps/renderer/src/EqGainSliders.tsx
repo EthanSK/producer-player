@@ -24,7 +24,7 @@ export interface EqGainSlidersProps {
 
 /**
  * Per-band EQ gain sliders overlaid above the spectrum analyzer canvas.
- * Each slider sits at the center of its corresponding frequency region.
+ * Each horizontal slider sits at the center of its corresponding frequency region.
  */
 export function EqGainSliders({
   gains,
@@ -100,17 +100,17 @@ function EqBandSlider({
   const sliderRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
 
-  const sliderHeight = 80;
+  const trackWidth = Math.max(40, regionWidth - 4);
   const thumbSize = 14;
 
-  /** Convert a dB value to a Y fraction (0 = top = +12, 1 = bottom = -12). */
+  /** Convert a dB value to an X fraction (0 = left = -12, 1 = right = +12). */
   const dbToFraction = useCallback((db: number): number => {
-    return (EQ_GAIN_MAX_DB - db) / (EQ_GAIN_MAX_DB - EQ_GAIN_MIN_DB);
+    return (db - EQ_GAIN_MIN_DB) / (EQ_GAIN_MAX_DB - EQ_GAIN_MIN_DB);
   }, []);
 
-  /** Convert a Y fraction to dB, snapping to 0 when close. */
+  /** Convert an X fraction to dB, snapping to 0 when close. */
   const fractionToDb = useCallback((frac: number): number => {
-    const raw = EQ_GAIN_MAX_DB - frac * (EQ_GAIN_MAX_DB - EQ_GAIN_MIN_DB);
+    const raw = EQ_GAIN_MIN_DB + frac * (EQ_GAIN_MAX_DB - EQ_GAIN_MIN_DB);
     const clamped = Math.max(EQ_GAIN_MIN_DB, Math.min(EQ_GAIN_MAX_DB, raw));
     // Snap to 0 within 0.5 dB
     return Math.abs(clamped) < 0.5 ? 0 : Math.round(clamped * 10) / 10;
@@ -125,11 +125,11 @@ function EqBandSlider({
       draggingRef.current = true;
 
       const rect = target.getBoundingClientRect();
-      const y = event.clientY - rect.top;
-      const frac = Math.max(0, Math.min(1, y / sliderHeight));
+      const x = event.clientX - rect.left;
+      const frac = Math.max(0, Math.min(1, x / trackWidth));
       onGainChange(bandIndex, fractionToDb(frac));
     },
-    [bandIndex, fractionToDb, onGainChange]
+    [bandIndex, fractionToDb, onGainChange, trackWidth]
   );
 
   const handlePointerMove = useCallback(
@@ -138,11 +138,11 @@ function EqBandSlider({
       event.preventDefault();
       const target = event.currentTarget;
       const rect = target.getBoundingClientRect();
-      const y = event.clientY - rect.top;
-      const frac = Math.max(0, Math.min(1, y / sliderHeight));
+      const x = event.clientX - rect.left;
+      const frac = Math.max(0, Math.min(1, x / trackWidth));
       onGainChange(bandIndex, fractionToDb(frac));
     },
-    [bandIndex, fractionToDb, onGainChange]
+    [bandIndex, fractionToDb, onGainChange, trackWidth]
   );
 
   const handlePointerUp = useCallback(
@@ -163,23 +163,22 @@ function EqBandSlider({
   );
 
   const fraction = dbToFraction(gainDb);
-  const thumbTop = fraction * sliderHeight - thumbSize / 2;
+  const thumbLeft = fraction * trackWidth - thumbSize / 2;
   const zeroFraction = dbToFraction(0);
-  const zeroY = zeroFraction * sliderHeight;
-  const thumbCenter = fraction * sliderHeight;
+  const zeroX = zeroFraction * trackWidth;
+  const thumbCenter = fraction * trackWidth;
 
   // Fill bar from zero line to current position
-  const fillTop = Math.min(zeroY, thumbCenter);
-  const fillHeight = Math.abs(thumbCenter - zeroY);
+  const fillLeft = Math.min(zeroX, thumbCenter);
+  const fillWidth = Math.abs(thumbCenter - zeroX);
 
   const isNonZero = gainDb !== 0;
   const dbText = gainDb > 0 ? `+${gainDb.toFixed(1)}` : gainDb.toFixed(1);
 
   const sliderContainerStyle: CSSProperties = {
     position: 'absolute',
-    left: centerX - 18,
-    width: 36,
-    height: sliderHeight,
+    left: centerX - trackWidth / 2,
+    width: trackWidth,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
@@ -194,7 +193,7 @@ function EqBandSlider({
       <div
         ref={sliderRef}
         className="eq-slider-track"
-        style={{ height: sliderHeight }}
+        style={{ width: trackWidth }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -204,15 +203,15 @@ function EqBandSlider({
         {/* Zero line */}
         <div
           className="eq-slider-zero-line"
-          style={{ top: zeroY }}
+          style={{ left: zeroX }}
         />
         {/* Fill bar */}
         {isNonZero && (
           <div
             className="eq-slider-fill"
             style={{
-              top: fillTop,
-              height: fillHeight,
+              left: fillLeft,
+              width: fillWidth,
               backgroundColor: color,
               opacity: 0.5,
             }}
@@ -222,7 +221,7 @@ function EqBandSlider({
         <div
           className="eq-slider-thumb"
           style={{
-            top: thumbTop,
+            left: thumbLeft,
             backgroundColor: isNonZero ? color : 'rgba(156, 175, 196, 0.6)',
             borderColor: isNonZero ? color : 'rgba(156, 175, 196, 0.4)',
           }}

@@ -1721,6 +1721,17 @@ export function App(): JSX.Element {
   const [eqEnabled, setEqEnabled] = useState(false);
   const [showEqTonalBalance, setShowEqTonalBalance] = useState(false);
   const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
+
+  // Per-source EQ state: each source (mix / reference) remembers its own EQ enabled + gains
+  // so A/B switching restores the EQ you had dialled in for that source.
+  const mixEqStateRef = useRef<{ enabled: boolean; gains: number[] }>({
+    enabled: false,
+    gains: FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB),
+  });
+  const referenceEqStateRef = useRef<{ enabled: boolean; gains: number[] }>({
+    enabled: false,
+    gains: FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB),
+  });
   const [spectrumFullWidth, setSpectrumFullWidth] = useState(860);
   const spectrumFullContainerRef = useRef<HTMLDivElement | null>(null);
   const previewAnalysisCacheRef = useRef<Map<string, TrackAnalysisResult>>(new Map());
@@ -2369,8 +2380,14 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!referenceTrack && playbackPreviewMode === 'reference') {
+      // Save reference EQ state and restore mix EQ state
+      referenceEqStateRef.current = { enabled: eqEnabled, gains: [...eqBandGains] };
+      const restored = mixEqStateRef.current;
+      setEqEnabled(restored.enabled);
+      setEqBandGains([...restored.gains]);
       setPlaybackPreviewMode('mix');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playbackPreviewMode, referenceTrack]);
 
   useEffect(() => {
@@ -5310,7 +5327,7 @@ export function App(): JSX.Element {
   ): Promise<void> {
     clearPendingSavedReferenceClick();
     await handleLoadSavedReferenceTrack(savedReference);
-    setPlaybackPreviewMode('reference');
+    handleReferencePreviewModeChange('reference');
   }
 
   function handleRemoveSavedReferenceTrack(filePath: string): void {
@@ -5370,6 +5387,22 @@ export function App(): JSX.Element {
       return;
     }
 
+    // Save current EQ state for the source we're leaving, restore the one we're entering
+    if (nextMode !== playbackPreviewMode) {
+      const currentEqState = { enabled: eqEnabled, gains: [...eqBandGains] };
+      if (playbackPreviewMode === 'mix') {
+        mixEqStateRef.current = currentEqState;
+        const restored = referenceEqStateRef.current;
+        setEqEnabled(restored.enabled);
+        setEqBandGains([...restored.gains]);
+      } else {
+        referenceEqStateRef.current = currentEqState;
+        const restored = mixEqStateRef.current;
+        setEqEnabled(restored.enabled);
+        setEqBandGains([...restored.gains]);
+      }
+    }
+
     setPlaybackPreviewMode(nextMode);
   }
 
@@ -5387,6 +5420,10 @@ export function App(): JSX.Element {
     handleClearSoloedBands();
     handleEqResetAll();
     setEqEnabled(true);
+    // Reset per-source EQ state refs
+    const defaultGains = FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB);
+    mixEqStateRef.current = { enabled: false, gains: defaultGains };
+    referenceEqStateRef.current = { enabled: false, gains: [...defaultGains] };
     setReferenceTrack(null);
     setReferenceStatus('idle');
     setReferenceError(null);
@@ -7299,7 +7336,7 @@ export function App(): JSX.Element {
                         <div key={label} className="analysis-band-row" data-testid={`analysis-band-${label.toLowerCase()}`}>
                           <span>{label}</span>
                           <div className="analysis-band-meter" aria-hidden="true">
-                            <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
+                            <span style={{ width: `${Math.round(value * 100)}%` }} />
                           </div>
                           <strong>
                             {tonalBalanceReady
@@ -9528,7 +9565,7 @@ export function App(): JSX.Element {
                         <div key={label} className="analysis-band-row" data-testid={`analysis-overlay-band-${label.toLowerCase()}`}>
                           <span>{label}</span>
                           <div className="analysis-band-meter" aria-hidden="true">
-                            <span style={{ width: `${Math.max(8, Math.round(value * 100))}%` }} />
+                            <span style={{ width: `${Math.round(value * 100)}%` }} />
                           </div>
                           <strong>
                             {tonalBalanceReady

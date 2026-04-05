@@ -339,6 +339,7 @@ export function AgentComposer({
     readStoredAgentSttProvider()
   );
   const [hasSelectedProviderKey, setHasSelectedProviderKey] = useState(false);
+  const voiceSettingsCheckedRef = useRef(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -382,9 +383,8 @@ export function AgentComposer({
   }, []);
 
   useEffect(() => {
-    void refreshVoiceSettings();
-
     const handleVoiceSettingsUpdated = () => {
+      voiceSettingsCheckedRef.current = true;
       void refreshVoiceSettings();
     };
 
@@ -468,8 +468,24 @@ export function AgentComposer({
       return;
     }
 
-    // If no API key, show a toast instead of silently doing nothing
-    if (!hasSelectedProviderKey) {
+    // Lazy-check the API key on first mic interaction to avoid
+    // triggering safeStorage/keychain access on app startup.
+    if (!voiceSettingsCheckedRef.current) {
+      voiceSettingsCheckedRef.current = true;
+      await refreshVoiceSettings();
+      // Re-read current provider after refresh
+      const currentProvider = readStoredAgentSttProvider();
+      const key = await readKeyForProvider(currentProvider);
+      if (!key) {
+        const providerName = getProviderDisplayName(currentProvider);
+        showToast(
+          `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
+        );
+        flashError();
+        return;
+      }
+      // Key exists — fall through to start recording
+    } else if (!hasSelectedProviderKey) {
       const providerName = getProviderDisplayName(sttProvider);
       showToast(
         `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
@@ -594,7 +610,7 @@ export function AgentComposer({
   const showMic = !isStreaming;
   const micClickable = voiceSupported && !disabled && !isProcessing;
   const providerDisplayName = getProviderDisplayName(sttProvider);
-  const micTitle = !hasSelectedProviderKey
+  const micTitle = voiceSettingsCheckedRef.current && !hasSelectedProviderKey
     ? `Add ${providerDisplayName} API key in Settings to enable voice input`
     : !voiceSupported
       ? 'Voice input is not supported in this environment'

@@ -7,6 +7,8 @@ import {
   type AgentRespondApprovalPayload,
   type AgentSendTurnPayload,
   type AgentStartSessionPayload,
+  type AutoUpdateState,
+  type AutoUpdateStateListener,
   type ICloudBackupData,
   type PlaylistOrderExportV1,
   type ProducerPlayerBridge,
@@ -138,6 +140,26 @@ const bridge: ProducerPlayerBridge = {
 
   async openUpdateDownload(url?: string | null) {
     await ipcRenderer.invoke(IPC_CHANNELS.OPEN_UPDATE_DOWNLOAD, url);
+  },
+
+  async autoUpdateCheck() {
+    await ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_CHECK);
+  },
+
+  async autoUpdateInstall() {
+    await ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_INSTALL);
+  },
+
+  onAutoUpdateStateChanged(listener: AutoUpdateStateListener) {
+    const wrappedListener = (_event: unknown, state: unknown) => {
+      listener(state as AutoUpdateState);
+    };
+
+    ipcRenderer.on(IPC_CHANNELS.AUTO_UPDATE_STATE_CHANGED, wrappedListener);
+
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.AUTO_UPDATE_STATE_CHANGED, wrappedListener);
+    };
   },
 
   onSnapshotUpdated(listener: SnapshotListener) {

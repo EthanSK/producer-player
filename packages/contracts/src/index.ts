@@ -189,6 +189,9 @@ export const IPC_CHANNELS = {
   CHECK_ICLOUD_AVAILABLE: 'producer-player:check-icloud-available',
   CHECK_FOR_UPDATES: 'producer-player:check-for-updates',
   OPEN_UPDATE_DOWNLOAD: 'producer-player:open-update-download',
+  AUTO_UPDATE_CHECK: 'producer-player:auto-update-check',
+  AUTO_UPDATE_INSTALL: 'producer-player:auto-update-install',
+  AUTO_UPDATE_STATE_CHANGED: 'producer-player:auto-update-state-changed',
   AGENT_START_SESSION: 'producer-player:agent-start-session',
   AGENT_SEND_TURN: 'producer-player:agent-send-turn',
   AGENT_INTERRUPT: 'producer-player:agent-interrupt',
@@ -275,6 +278,31 @@ export interface UpdateCheckResult {
   notes: string | null;
   message: string;
 }
+
+export type AutoUpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface AutoUpdateProgress {
+  percent: number;
+  bytesPerSecond: number;
+  transferred: number;
+  total: number;
+}
+
+export interface AutoUpdateState {
+  status: AutoUpdateStatus;
+  version: string | null;
+  progress: AutoUpdateProgress | null;
+  error: string | null;
+}
+
+export type AutoUpdateStateListener = (state: AutoUpdateState) => void;
 
 export type AgentProviderId = 'claude' | 'codex';
 export type AgentMode = 'analysis' | 'ui-interaction';
@@ -574,6 +602,9 @@ export interface ProducerPlayerBridge {
   checkICloudAvailable(): Promise<ICloudAvailabilityResult>;
   checkForUpdates(): Promise<UpdateCheckResult>;
   openUpdateDownload(url?: string | null): Promise<void>;
+  autoUpdateCheck(): Promise<void>;
+  autoUpdateInstall(): Promise<void>;
+  onAutoUpdateStateChanged(listener: AutoUpdateStateListener): () => void;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
   onTransportCommand(listener: TransportCommandListener): () => void;
   agentStartSession(payload: AgentStartSessionPayload): Promise<void>;

@@ -11,6 +11,7 @@ import {
 import type {
   AlbumChecklistItem,
   AudioFileAnalysis,
+  AutoUpdateState,
   ICloudAvailabilityResult,
   ICloudBackupData,
   LibrarySnapshot,
@@ -1573,6 +1574,12 @@ export function App(): JSX.Element {
     'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error'
   >('idle');
   const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null);
+  const [autoUpdateState, setAutoUpdateState] = useState<AutoUpdateState>({
+    status: 'idle',
+    version: null,
+    progress: null,
+    error: null,
+  });
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
@@ -4371,6 +4378,12 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    return window.producerPlayer.onAutoUpdateStateChanged((state) => {
+      setAutoUpdateState(state);
+    });
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const active = document.activeElement;
       const textEntryFocused = isTextEntryElement(active);
@@ -5600,6 +5613,18 @@ export function App(): JSX.Element {
     });
   }
 
+  async function handleAutoUpdateCheck(): Promise<void> {
+    await runVoidTask(async () => {
+      await window.producerPlayer.autoUpdateCheck();
+    });
+  }
+
+  async function handleAutoUpdateInstall(): Promise<void> {
+    await runVoidTask(async () => {
+      await window.producerPlayer.autoUpdateInstall();
+    });
+  }
+
   function handleSongRatingChange(songId: string, nextRatingValue: number): void {
     const nextRating = getNormalizedSliderRating(nextRatingValue);
 
@@ -6708,6 +6733,30 @@ export function App(): JSX.Element {
   const canDownloadUpdate =
     updateCheckResult?.status === 'update-available' &&
     Boolean(updateCheckResult.downloadUrl || updateCheckResult.releaseUrl);
+  const autoUpdateDownloadPercent =
+    autoUpdateState.status === 'downloading' && autoUpdateState.progress
+      ? Math.round(autoUpdateState.progress.percent)
+      : null;
+  const autoUpdateStatusText = (() => {
+    switch (autoUpdateState.status) {
+      case 'checking':
+        return 'Checking for updates…';
+      case 'available':
+        return `Update ${autoUpdateState.version ?? ''} available — downloading…`.trim();
+      case 'downloading':
+        return autoUpdateDownloadPercent !== null
+          ? `Downloading update… ${autoUpdateDownloadPercent}%`
+          : 'Downloading update…';
+      case 'downloaded':
+        return `Update ${autoUpdateState.version ?? ''} ready to install.`.trim();
+      case 'not-available':
+        return "You're on the latest version.";
+      case 'error':
+        return autoUpdateState.error ?? 'Auto-update failed.';
+      default:
+        return null;
+    }
+  })();
 
   transportActionRef.current = {
     toggle: () => {
@@ -6918,6 +6967,50 @@ export function App(): JSX.Element {
 
   return (
     <div className="app-shell" data-testid="app-shell">
+      {autoUpdateState.status === 'downloaded' ? (
+        <div
+          className="auto-update-banner"
+          data-testid="auto-update-banner"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '12px',
+            padding: '6px 16px',
+            background: 'var(--color-accent, #6cf)',
+            color: '#000',
+            fontSize: '12px',
+            fontWeight: 500,
+          }}
+        >
+          <span>
+            Update {autoUpdateState.version ?? ''} is ready to install.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              void handleAutoUpdateInstall();
+            }}
+            style={{
+              padding: '2px 10px',
+              borderRadius: '4px',
+              border: '1px solid rgba(0,0,0,0.3)',
+              background: 'rgba(0,0,0,0.15)',
+              color: '#000',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Restart &amp; Update
+          </button>
+        </div>
+      ) : null}
       <aside className="panel panel-left">
         <button
           type="button"
@@ -8450,6 +8543,19 @@ export function App(): JSX.Element {
                   Download Update
                 </button>
               ) : null}
+              {autoUpdateState.status === 'downloaded' ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    void handleAutoUpdateInstall();
+                  }}
+                  data-testid="support-feedback-restart-update"
+                  title="Restart the app to apply the downloaded update."
+                >
+                  Restart &amp; Update
+                </button>
+              ) : null}
             </div>
             {updateStatusText ? (
               <p
@@ -8458,6 +8564,39 @@ export function App(): JSX.Element {
               >
                 {updateStatusText}
               </p>
+            ) : null}
+            {autoUpdateStatusText ? (
+              <p
+                className={autoUpdateState.status === 'error' ? 'error' : 'muted'}
+                data-testid="support-feedback-auto-update-status"
+              >
+                {autoUpdateStatusText}
+              </p>
+            ) : null}
+            {autoUpdateState.status === 'downloading' && autoUpdateDownloadPercent !== null ? (
+              <div
+                className="auto-update-progress"
+                data-testid="support-feedback-auto-update-progress"
+                style={{ marginTop: '4px' }}
+              >
+                <div
+                  style={{
+                    height: '3px',
+                    borderRadius: '1.5px',
+                    background: 'var(--color-border, #333)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${autoUpdateDownloadPercent}%`,
+                      height: '100%',
+                      background: 'var(--color-accent, #6cf)',
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+              </div>
             ) : null}
           </section>
         </div>

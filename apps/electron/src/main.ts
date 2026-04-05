@@ -6,6 +6,7 @@ import { createReadStream, existsSync, promises as fs, readFileSync } from 'node
 import { basename, dirname, extname, join, parse, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import log from 'electron-log/main';
+import { autoUpdater } from 'electron-updater';
 import type {
   AgentContext,
   AgentProviderId,
@@ -13,6 +14,7 @@ import type {
   AgentSendTurnPayload,
   AgentRespondApprovalPayload,
   AudioFileAnalysis,
+  AutoUpdateState,
   MasteringAnalysisCachePayload,
   ICloudAvailabilityResult,
   ICloudBackupData,
@@ -333,8 +335,6 @@ let updateCheckInFlight: Promise<UpdateCheckResult> | null = null;
 let latestCachedUpdateCheck: { result: UpdateCheckResult; checkedAtMs: number } | null = null;
 let autoUpdateCheckStartupTimeout: NodeJS.Timeout | null = null;
 let autoUpdateCheckInterval: NodeJS.Timeout | null = null;
-let autoUpdatePromptInFlight = false;
-let autoUpdatePromptedTag: string | null = null;
 
 function parseSemverToken(token: string): number | string {
   if (/^\d+$/.test(token)) {
@@ -755,60 +755,106 @@ async function openUpdateDownloadUrl(url: string | null | undefined): Promise<vo
   await shell.openExternal(trustedUrl.toString());
 }
 
-async function maybePromptForAvailableUpdate(): Promise<void> {
-  if (!app.isPackaged || IS_TEST_MODE) {
-    return;
+// ---------------------------------------------------------------------------
+// electron-updater auto-update integration
+// ---------------------------------------------------------------------------
+
+let currentAutoUpdateState: AutoUpdateState = {
+  status: 'idle',
+  version: null,
+  progress: null,
+  error: null,
+};
+
+function emitAutoUpdateState(state: AutoUpdateState): void {
+  currentAutoUpdateState = state;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(IPC_CHANNELS.AUTO_UPDATE_STATE_CHANGED, state);
   }
+}
 
-  if (autoUpdatePromptInFlight) {
-    return;
-  }
+function configureAutoUpdater(): void {
+  autoUpdater.logger = log;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowDowngrade = false;
 
-  autoUpdatePromptInFlight = true;
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'EthanSK',
+    repo: 'producer-player',
+  });
 
-  try {
-    const result = await checkForUpdates();
-    if (result.status !== 'update-available') {
-      return;
-    }
-
-    const updateIdentity = result.latestTag ?? result.latestVersion;
-    if (!updateIdentity) {
-      return;
-    }
-
-    if (autoUpdatePromptedTag === updateIdentity) {
-      return;
-    }
-
-    autoUpdatePromptedTag = updateIdentity;
-
-    const messageBoxOptions = {
-      type: 'info' as const,
-      title: 'Update available',
-      message: `Producer Player ${result.latestVersion ?? 'latest'} is available.`,
-      detail: `Current version: ${result.currentVersion}\n\nDownload the update to install it manually.`,
-      buttons: [result.downloadUrl ? 'Download update' : 'View release', 'Later'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-    };
-
-    const response =
-      mainWindow && !mainWindow.isDestroyed()
-        ? await dialog.showMessageBox(mainWindow, messageBoxOptions)
-        : await dialog.showMessageBox(messageBoxOptions);
-
-    if (response.response === 0) {
-      await openUpdateDownloadUrl(result.downloadUrl ?? result.releaseUrl);
-    }
-  } catch (error: unknown) {
-    log.warn('[producer-player:update] automatic update check failed', {
-      error: error instanceof Error ? error.message : String(error),
+  autoUpdater.on('checking-for-update', () => {
+    log.info('[producer-player:auto-update] checking for update');
+    emitAutoUpdateState({
+      status: 'checking',
+      version: null,
+      progress: null,
+      error: null,
     });
-  } finally {
-    autoUpdatePromptInFlight = false;
-  }
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    log.info('[producer-player:auto-update] update available', { version: info.version });
+    emitAutoUpdateState({
+      status: 'available',
+      version: info.version ?? null,
+      progress: null,
+      error: null,
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    log.info('[producer-player:auto-update] no update available', { version: info.version });
+    emitAutoUpdateState({
+      status: 'not-available',
+      version: info.version ?? null,
+      progress: null,
+      error: null,
+    });
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    log.info('[producer-player:auto-update] download progress', {
+      percent: Math.round(progress.percent),
+      transferred: progress.transferred,
+      total: progress.total,
+    });
+    emitAutoUpdateState({
+      status: 'downloading',
+      version: currentAutoUpdateState.version,
+      progress: {
+        percent: progress.percent,
+        bytesPerSecond: progress.bytesPerSecond,
+        transferred: progress.transferred,
+        total: progress.total,
+      },
+      error: null,
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    log.info('[producer-player:auto-update] update downloaded', { version: info.version });
+    emitAutoUpdateState({
+      status: 'downloaded',
+      version: info.version ?? null,
+      progress: null,
+      error: null,
+    });
+  });
+
+  autoUpdater.on('error', (error) => {
+    log.warn('[producer-player:auto-update] error', {
+      message: error.message,
+    });
+    emitAutoUpdateState({
+      status: 'error',
+      version: currentAutoUpdateState.version,
+      progress: null,
+      error: error.message,
+    });
+  });
 }
 
 function clearAutomaticUpdateChecks(): void {
@@ -829,12 +875,21 @@ function scheduleAutomaticUpdateChecks(): void {
   }
 
   clearAutomaticUpdateChecks();
+  configureAutoUpdater();
 
   autoUpdateCheckStartupTimeout = setTimeout(() => {
-    void maybePromptForAvailableUpdate();
+    void autoUpdater.checkForUpdates().catch((error: unknown) => {
+      log.warn('[producer-player:auto-update] scheduled check failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 
     autoUpdateCheckInterval = setInterval(() => {
-      void maybePromptForAvailableUpdate();
+      void autoUpdater.checkForUpdates().catch((error: unknown) => {
+        log.warn('[producer-player:auto-update] periodic check failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }, AUTO_UPDATE_CHECK_INTERVAL_MS);
   }, AUTO_UPDATE_CHECK_DELAY_MS);
 }
@@ -3329,6 +3384,19 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.OPEN_UPDATE_DOWNLOAD, async (_event, url?: string | null) => {
     await openUpdateDownloadUrl(url);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_CHECK, async () => {
+    if (!app.isPackaged || IS_TEST_MODE) {
+      log.info('[producer-player:auto-update] skipping check (not packaged or test mode)');
+      return;
+    }
+    await autoUpdater.checkForUpdates();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_INSTALL, async () => {
+    log.info('[producer-player:auto-update] quit and install requested');
+    autoUpdater.quitAndInstall(false, true);
   });
 
   // --- Agent IPC handlers ---

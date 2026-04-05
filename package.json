@@ -64,6 +64,13 @@
     "appId": "com.ethansk.producerplayer",
     "productName": "Producer Player",
     "electronVersion": "40.6.1",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "EthanSK",
+        "repo": "producer-player"
+      }
+    ],
     "asar": true,
     "asarUnpack": [
       "apps/electron/dist/bin/**"

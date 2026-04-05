@@ -200,6 +200,7 @@ jobs:
             release/Producer-Player-*-${{ matrix.slug }}-*.zip
             release/Producer-Player-*-${{ matrix.slug }}-*.zip.sha256
             release/Producer-Player-*-${{ matrix.slug }}-*.zip.blockmap
+            release/latest*.yml
           if-no-files-found: error
 
   publish-release:

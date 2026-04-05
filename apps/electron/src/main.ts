@@ -3689,6 +3689,14 @@ app.on('before-quit', () => {
   if (libraryService) {
     void libraryService.dispose();
   }
+
+  // Force-exit after 3 seconds if any cleanup hangs (e.g. watcher.close(),
+  // agent CLI subprocess, or synchronous log writes). This prevents the app
+  // from appearing frozen when quitting in dev mode.
+  setTimeout(() => {
+    log.warn('Force-exiting after quit timeout');
+    app.exit(1);
+  }, 3000).unref();
 });
 
 app.on('window-all-closed', () => {

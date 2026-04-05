@@ -582,6 +582,17 @@ export function sendTurn(
     } catch {
       // ignore
     }
+
+    // Escalate to SIGKILL if the previous process doesn't exit promptly.
+    const killTimeout = setTimeout(() => {
+      try {
+        previousProcess.kill('SIGKILL');
+      } catch {
+        // already exited
+      }
+    }, 2000);
+
+    previousProcess.on('exit', () => clearTimeout(killTimeout));
   }
 
   const cliPath = resolveCliPath(getCommandName(session.provider));
@@ -720,6 +731,17 @@ export function interrupt(): void {
       // ignore
     }
 
+    // Escalate to SIGKILL if the agent CLI doesn't exit within 2 seconds.
+    const killTimeout = setTimeout(() => {
+      try {
+        runningProcess.kill('SIGKILL');
+      } catch {
+        // already exited
+      }
+    }, 2000);
+
+    runningProcess.on('exit', () => clearTimeout(killTimeout));
+
     finalizeTurn(currentSession);
   }
 }
@@ -735,11 +757,24 @@ export function destroySession(): void {
   if (currentSession) {
     currentSession.alive = false;
     if (currentSession.process) {
+      const proc = currentSession.process;
       try {
-        currentSession.process.kill('SIGTERM');
+        proc.kill('SIGTERM');
       } catch {
         // ignore
       }
+
+      // Escalate to SIGKILL if the agent CLI doesn't exit within 2 seconds.
+      const killTimeout = setTimeout(() => {
+        try {
+          proc.kill('SIGKILL');
+        } catch {
+          // already exited
+        }
+      }, 2000);
+
+      proc.on('exit', () => clearTimeout(killTimeout));
+
       currentSession.process = null;
     }
     currentSession.activeTurn = null;

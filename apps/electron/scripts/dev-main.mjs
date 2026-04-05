@@ -100,6 +100,23 @@ function killElectron() {
       // already exited
     }
   }
+
+  // Escalate to SIGKILL if the process doesn't exit within 3 seconds.
+  // This prevents the dev script from hanging when Electron ignores SIGTERM
+  // (e.g. a blocking before-quit handler or hung child process).
+  const killTimeout = setTimeout(() => {
+    try {
+      process.kill(-proc.pid, 'SIGKILL');
+    } catch {
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        // already exited
+      }
+    }
+  }, 3000);
+
+  proc.on('exit', () => clearTimeout(killTimeout));
 }
 
 function startElectron() {
@@ -183,6 +200,14 @@ await ctx.watch();
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     killElectron();
+
+    // Force-exit after 5 seconds if esbuild dispose or Electron cleanup hangs.
+    const forceExitTimeout = setTimeout(() => {
+      console.warn('[dev-main] Force-exiting after timeout');
+      process.exit(1);
+    }, 5000);
+    forceExitTimeout.unref();
+
     ctx.dispose().finally(() => process.exit(0));
   });
 }

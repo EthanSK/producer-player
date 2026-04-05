@@ -272,7 +272,7 @@ jobs:
           name: ${{ needs.compute-version.outputs.release_name }}
           prerelease: false
           make_latest: true
-          generate_release_notes: false
+          generate_release_notes: true
           body: |
             ## Producer Player v${{ needs.compute-version.outputs.display_version }}
 
@@ -288,5 +288,7 @@ jobs:
 
             Commit: `${{ github.sha }}`
             Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            ---
           files: |
             release-assets/*

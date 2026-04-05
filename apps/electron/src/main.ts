@@ -218,11 +218,28 @@ function normalizeSemanticVersion(value: string | undefined): string | null {
   }
 
   const normalized = value.trim().replace(/^v/i, '');
-  if (!/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/.test(normalized)) {
+  // Accept both two-part (x.y) and three-part (x.y.z) versions, with optional
+  // pre-release and build-metadata suffixes.
+  const match = normalized.match(
+    /^(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/
+  );
+
+  if (!match) {
     return null;
   }
 
-  return normalized;
+  // Normalize two-part versions to three-part (e.g. "2.38" → "2.38.0").
+  const major = match[1];
+  const minor = match[2];
+  const patch = match[3] ?? '0';
+  let result = `${major}.${minor}.${patch}`;
+  if (match[4]) {
+    result += `-${match[4]}`;
+  }
+  if (match[5]) {
+    result += `+${match[5]}`;
+  }
+  return result;
 }
 
 function readPackageManifestSemanticVersion(): string | null {
@@ -347,7 +364,7 @@ function parseSemverToken(token: string): number | string {
 function parseSemver(value: string): ParsedSemver | null {
   const normalized = value.trim().replace(/^v/i, '');
   const matched = normalized.match(
-    /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
+    /^(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
   );
 
   if (!matched) {
@@ -356,7 +373,7 @@ function parseSemver(value: string): ParsedSemver | null {
 
   const major = Number(matched[1]);
   const minor = Number(matched[2]);
-  const patch = Number(matched[3]);
+  const patch = matched[3] !== undefined ? Number(matched[3]) : 0;
 
   if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) {
     return null;

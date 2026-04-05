@@ -150,6 +150,10 @@ const bridge: ProducerPlayerBridge = {
     await ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_INSTALL);
   },
 
+  async setAutoUpdateEnabled(enabled: boolean) {
+    await ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_SET_ENABLED, enabled);
+  },
+
   onAutoUpdateStateChanged(listener: AutoUpdateStateListener) {
     const wrappedListener = (_event: unknown, state: unknown) => {
       listener(state as AutoUpdateState);

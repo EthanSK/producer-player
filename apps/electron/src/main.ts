@@ -756,10 +756,13 @@ async function checkForUpdates(options: { force?: boolean } = {}): Promise<Updat
 
       const downloadUrl = resolveReleaseDownloadUrl(release);
 
+      // IMPORTANT: Always use toDisplayVersion() when showing versions to users
+      const latestDisplayVersion = toDisplayVersion(latestVersion);
+
       const result: UpdateCheckResult = {
         status,
         currentVersion,
-        latestVersion,
+        latestVersion: latestDisplayVersion,
         latestTag: release.tagName,
         releaseUrl: release.htmlUrl,
         downloadUrl,
@@ -769,7 +772,7 @@ async function checkForUpdates(options: { force?: boolean } = {}): Promise<Updat
         message: buildUpdateResultMessage({
           status,
           currentVersion,
-          latestVersion,
+          latestVersion: latestDisplayVersion,
           downloadUrl,
         }),
       };
@@ -867,9 +870,10 @@ function configureAutoUpdater(): void {
 
   autoUpdater.on('update-available', (info) => {
     log.info('[producer-player:auto-update] update available', { version: info.version });
+    // IMPORTANT: Always use toDisplayVersion() when showing versions to users
     emitAutoUpdateState({
       status: 'available',
-      version: info.version ?? null,
+      version: info.version ? toDisplayVersion(info.version) : null,
       progress: null,
       error: null,
     });
@@ -877,9 +881,10 @@ function configureAutoUpdater(): void {
 
   autoUpdater.on('update-not-available', (info) => {
     log.info('[producer-player:auto-update] no update available', { version: info.version });
+    // IMPORTANT: Always use toDisplayVersion() when showing versions to users
     emitAutoUpdateState({
       status: 'not-available',
-      version: info.version ?? null,
+      version: info.version ? toDisplayVersion(info.version) : null,
       progress: null,
       error: null,
     });
@@ -906,9 +911,10 @@ function configureAutoUpdater(): void {
 
   autoUpdater.on('update-downloaded', (info) => {
     log.info('[producer-player:auto-update] update downloaded', { version: info.version });
+    // IMPORTANT: Always use toDisplayVersion() when showing versions to users
     emitAutoUpdateState({
       status: 'downloaded',
-      version: info.version ?? null,
+      version: info.version ? toDisplayVersion(info.version) : null,
       progress: null,
       error: null,
     });
@@ -3467,6 +3473,15 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_INSTALL, async () => {
     log.info('[producer-player:auto-update] quit and install requested');
     autoUpdater.quitAndInstall(false, true);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_SET_ENABLED, async (_event, enabled: boolean) => {
+    log.info('[producer-player:auto-update] set enabled', { enabled });
+    if (enabled) {
+      scheduleAutomaticUpdateChecks();
+    } else {
+      clearAutomaticUpdateChecks();
+    }
   });
 
   // --- Agent IPC handlers ---

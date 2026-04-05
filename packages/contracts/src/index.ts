@@ -191,6 +191,7 @@ export const IPC_CHANNELS = {
   OPEN_UPDATE_DOWNLOAD: 'producer-player:open-update-download',
   AUTO_UPDATE_CHECK: 'producer-player:auto-update-check',
   AUTO_UPDATE_INSTALL: 'producer-player:auto-update-install',
+  AUTO_UPDATE_SET_ENABLED: 'producer-player:auto-update-set-enabled',
   AUTO_UPDATE_STATE_CHANGED: 'producer-player:auto-update-state-changed',
   AGENT_START_SESSION: 'producer-player:agent-start-session',
   AGENT_SEND_TURN: 'producer-player:agent-send-turn',
@@ -604,6 +605,7 @@ export interface ProducerPlayerBridge {
   openUpdateDownload(url?: string | null): Promise<void>;
   autoUpdateCheck(): Promise<void>;
   autoUpdateInstall(): Promise<void>;
+  setAutoUpdateEnabled(enabled: boolean): Promise<void>;
   onAutoUpdateStateChanged(listener: AutoUpdateStateListener): () => void;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
   onTransportCommand(listener: TransportCommandListener): () => void;

@@ -302,6 +302,7 @@ const ALBUM_CHECKLIST_STORAGE_KEY = 'producer-player.album-checklist.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
 const COMPACT_MASTERING_PANEL_LAYOUT_KEY = 'producer-player.mastering-layout.compact.v1';
 const REFERENCE_LEVEL_MATCH_KEY = 'producer-player.reference-level-match.v1';
+const AUTO_UPDATE_ENABLED_KEY = 'producer-player.auto-update-enabled.v1';
 const FULLSCREEN_MASTERING_PANEL_LAYOUT_KEY =
   'producer-player.mastering-layout.fullscreen.v1';
 const MAX_SAVED_REFERENCE_TRACKS = 20;
@@ -1580,6 +1581,12 @@ export function App(): JSX.Element {
     progress: null,
     error: null,
   });
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(() => {
+    const stored = window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY);
+    return stored !== 'false'; // default true
+  });
+  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
@@ -4383,6 +4390,12 @@ export function App(): JSX.Element {
     });
   }, []);
 
+  // Sync auto-update enabled preference to main process
+  useEffect(() => {
+    window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, autoUpdateEnabled ? 'true' : 'false');
+    void window.producerPlayer.setAutoUpdateEnabled(autoUpdateEnabled);
+  }, [autoUpdateEnabled]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const active = document.activeElement;
@@ -6967,7 +6980,8 @@ export function App(): JSX.Element {
 
   return (
     <div className="app-shell" data-testid="app-shell">
-      {autoUpdateState.status === 'downloaded' ? (
+      {autoUpdateState.status === 'downloaded' &&
+       !(updateBannerDismissed && dismissedUpdateVersion === autoUpdateState.version) ? (
         <div
           className="auto-update-banner"
           data-testid="auto-update-banner"
@@ -6989,6 +7003,8 @@ export function App(): JSX.Element {
           }}
         >
           <span>
+            {/* IMPORTANT: Always use toDisplayVersion() when showing versions to users —
+                the version from main process is already in display format */}
             Update {autoUpdateState.version ?? ''} is ready to install.
           </span>
           <button
@@ -7008,6 +7024,32 @@ export function App(): JSX.Element {
             }}
           >
             Restart &amp; Update
+          </button>
+          <button
+            type="button"
+            data-testid="auto-update-banner-dismiss"
+            onClick={() => {
+              setUpdateBannerDismissed(true);
+              setDismissedUpdateVersion(autoUpdateState.version);
+            }}
+            title="Dismiss"
+            style={{
+              position: 'absolute',
+              right: '8px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'none',
+              border: 'none',
+              color: '#000',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              padding: '2px 6px',
+              lineHeight: 1,
+              opacity: 0.7,
+            }}
+          >
+            ✕
           </button>
         </div>
       ) : null}
@@ -8598,6 +8640,28 @@ export function App(): JSX.Element {
                 </div>
               </div>
             ) : null}
+            <label
+              data-testid="support-feedback-auto-update-toggle"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                marginTop: '8px',
+                fontSize: '11px',
+                color: 'var(--color-text-secondary, #999)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={autoUpdateEnabled}
+                onChange={(event) => {
+                  setAutoUpdateEnabled(event.target.checked);
+                }}
+                data-testid="support-feedback-auto-update-checkbox"
+              />
+              Auto-update
+            </label>
           </section>
         </div>
       </aside>

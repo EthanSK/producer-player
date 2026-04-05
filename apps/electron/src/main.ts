@@ -3577,24 +3577,50 @@ function registerIpcHandlers(service: FileLibraryService): void {
     if (!userStateService) throw new Error('User state service not initialized');
     const state = await userStateService.readUserState();
 
-    const dialogOptions = {
-      title: 'Export Producer Player State',
-      defaultPath: 'producer-player-state.json',
-      filters: [{ name: 'JSON', extensions: ['json'] }],
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Choose Export Location',
+      properties: ['openDirectory', 'createDirectory'],
     };
 
     const result = mainWindow
-      ? await dialog.showSaveDialog(mainWindow, dialogOptions)
-      : await dialog.showSaveDialog(dialogOptions);
+      ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
 
-    if (result.canceled || !result.filePath) {
+    if (result.canceled || result.filePaths.length === 0) {
       return { success: false, error: 'Export cancelled.' };
     }
 
     try {
-      const serialized = `${JSON.stringify(state, null, 2)}\n`;
-      await fs.writeFile(result.filePath, serialized, 'utf8');
-      return { success: true, filePath: result.filePath };
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const exportFolder = join(result.filePaths[0], `producer-player-export-${timestamp}`);
+      await fs.mkdir(exportFolder, { recursive: true });
+
+      // Write user state
+      const stateSerialized = `${JSON.stringify(state, null, 2)}\n`;
+      await fs.writeFile(join(exportFolder, 'user-state.json'), stateSerialized, 'utf8');
+
+      // Dump localStorage from renderer
+      let localStorageData: Record<string, string> = {};
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+          localStorageData = await mainWindow.webContents.executeJavaScript(`
+            (() => {
+              const dump = {};
+              for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key !== null) dump[key] = localStorage.getItem(key) ?? '';
+              }
+              return dump;
+            })()
+          `) as Record<string, string>;
+        } catch (lsError: unknown) {
+          log.warn('[producer-player] Failed to dump localStorage during export:', lsError);
+        }
+      }
+      const lsSerialized = `${JSON.stringify(localStorageData, null, 2)}\n`;
+      await fs.writeFile(join(exportFolder, 'local-storage.json'), lsSerialized, 'utf8');
+
+      return { success: true, folderPath: exportFolder };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return { success: false, error: `Failed to export: ${message}` };
@@ -3604,10 +3630,10 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.IMPORT_USER_STATE, async () => {
     if (!userStateService) throw new Error('User state service not initialized');
 
+    // Allow user to select a folder or any file inside the export folder
     const dialogOptions: OpenDialogOptions = {
-      title: 'Import Producer Player State',
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-      properties: ['openFile'],
+      title: 'Import Producer Player State (select export folder or any file inside it)',
+      properties: ['openFile', 'openDirectory'],
     };
 
     const result = mainWindow
@@ -3619,28 +3645,69 @@ function registerIpcHandlers(service: FileLibraryService): void {
     }
 
     try {
-      const raw = await fs.readFile(result.filePaths[0], 'utf8');
-      const parsed = JSON.parse(raw);
-      const validated = parseUserState(parsed);
-
-      // Validate schema version
-      if (typeof validated.schemaVersion !== 'number' || validated.schemaVersion < 1) {
-        return { success: false, error: 'Invalid state file: missing or invalid schemaVersion.' };
+      // Determine the export directory: if user selected a file, use its parent
+      const selectedPath = result.filePaths[0];
+      let importDir: string;
+      try {
+        const stat = await fs.stat(selectedPath);
+        importDir = stat.isDirectory() ? selectedPath : dirname(selectedPath);
+      } catch {
+        return { success: false, error: `Cannot access selected path: ${selectedPath}` };
       }
 
-      await userStateService.writeUserState(validated);
+      // --- Apply user-state.json ---
+      const userStatePath = join(importDir, 'user-state.json');
+      if (existsSync(userStatePath)) {
+        const raw = await fs.readFile(userStatePath, 'utf8');
+        const parsed = JSON.parse(raw);
+        const validated = parseUserState(parsed);
 
-      // Push updated state to renderer
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(IPC_CHANNELS.USER_STATE_CHANGED, validated);
+        if (typeof validated.schemaVersion !== 'number' || validated.schemaVersion < 1) {
+          return { success: false, error: 'Invalid state file: missing or invalid schemaVersion.' };
+        }
+
+        await userStateService.writeUserState(validated);
+
+        // Push updated state to renderer
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(IPC_CHANNELS.USER_STATE_CHANGED, validated);
+        }
+
+        // Sync backward-compatible files
+        void writePersistedSharedUserState({
+          ratings: validated.songRatings,
+          checklists: validated.songChecklists,
+          projectFilePaths: validated.songProjectFilePaths,
+        });
+      } else {
+        log.warn('[producer-player] user-state.json not found in import folder, skipping');
       }
 
-      // Sync backward-compatible files
-      void writePersistedSharedUserState({
-        ratings: validated.songRatings,
-        checklists: validated.songChecklists,
-        projectFilePaths: validated.songProjectFilePaths,
-      });
+      // --- Apply local-storage.json ---
+      const localStoragePath = join(importDir, 'local-storage.json');
+      if (existsSync(localStoragePath) && mainWindow && !mainWindow.isDestroyed()) {
+        try {
+          const raw = await fs.readFile(localStoragePath, 'utf8');
+          const lsData = JSON.parse(raw) as Record<string, string>;
+          if (typeof lsData === 'object' && lsData !== null && !Array.isArray(lsData)) {
+            const sanitized = JSON.stringify(lsData);
+            await mainWindow.webContents.executeJavaScript(`
+              (() => {
+                try {
+                  const data = ${sanitized};
+                  for (const [key, value] of Object.entries(data)) {
+                    try { localStorage.setItem(key, value); } catch {}
+                  }
+                } catch {}
+              })()
+            `);
+          }
+        } catch (lsError: unknown) {
+          log.warn('[producer-player] Failed to restore localStorage during import:', lsError);
+        }
+      } else if (!existsSync(localStoragePath)) {
+        log.warn('[producer-player] local-storage.json not found in import folder, skipping');
+      }
 
       return { success: true };
     } catch (error: unknown) {

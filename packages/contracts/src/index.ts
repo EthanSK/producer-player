@@ -298,7 +298,7 @@ export interface UserStateImportResult {
 
 export interface UserStateExportResult {
   success: boolean;
-  filePath?: string;
+  folderPath?: string;
   error?: string;
 }
 

@@ -7529,7 +7529,7 @@ export function App(): JSX.Element {
               className="ghost"
               style={{ fontSize: '0.85em', padding: '2px 6px' }}
               data-testid="export-user-state-button"
-              title="Export all settings, checklists, ratings, and preferences to a JSON file."
+              title="Export all settings, checklists, ratings, preferences, and localStorage to a folder."
               onClick={() => {
                 void window.producerPlayer.exportUserState().then((result) => {
                   if (!result.success && result.error && result.error !== 'Export cancelled.') {
@@ -7545,7 +7545,7 @@ export function App(): JSX.Element {
               className="ghost"
               style={{ fontSize: '0.85em', padding: '2px 6px' }}
               data-testid="import-user-state-button"
-              title="Import settings, checklists, ratings, and preferences from a previously exported JSON file."
+              title="Import settings, checklists, ratings, preferences, and localStorage from a previously exported folder."
               onClick={() => {
                 void window.producerPlayer.importUserState().then((result) => {
                   if (!result.success && result.error && result.error !== 'Import cancelled.') {

@@ -2250,8 +2250,289 @@ export function App(): JSX.Element {
 
     window.producerPlayer
       .getUserState()
-      .then((userState) => {
+      .then((loadedState) => {
         if (cancelled) return;
+
+        // -----------------------------------------------------------------
+        // One-time migration: merge localStorage data into unified state
+        // -----------------------------------------------------------------
+        // The v2.45 migration from old JSON files ran before the renderer
+        // was ready, so localStorage data (album art, title, agent prefs,
+        // per-song reference tracks, EQ snapshots, etc.) was NOT included.
+        // On first load, detect this and merge localStorage into the
+        // unified state so nothing is lost.
+        const MIGRATION_FLAG = 'producer-player.unified-state-migrated.v1';
+        const userState = { ...loadedState };
+
+        if (window.localStorage.getItem(MIGRATION_FLAG) !== 'true') {
+          let migrated = false;
+
+          // Album title
+          const lsAlbumTitle = window.localStorage.getItem(ALBUM_TITLE_STORAGE_KEY);
+          if (
+            lsAlbumTitle &&
+            lsAlbumTitle.length > 0 &&
+            lsAlbumTitle !== 'Untitled Album' &&
+            (!userState.albumTitle || userState.albumTitle === 'Untitled Album')
+          ) {
+            userState.albumTitle = lsAlbumTitle;
+            migrated = true;
+          }
+
+          // Album art (data URL)
+          const lsAlbumArt = window.localStorage.getItem(ALBUM_ART_STORAGE_KEY);
+          if (
+            lsAlbumArt &&
+            lsAlbumArt.length > 0 &&
+            (!userState.albumArtDataUrl || userState.albumArtDataUrl.length === 0)
+          ) {
+            userState.albumArtDataUrl = lsAlbumArt;
+            migrated = true;
+          }
+
+          // Album checklists
+          try {
+            const lsAlbumChecklist = window.localStorage.getItem(ALBUM_CHECKLIST_STORAGE_KEY);
+            if (
+              lsAlbumChecklist &&
+              lsAlbumChecklist.length > 0 &&
+              Object.keys(userState.albumChecklists).length === 0
+            ) {
+              const parsed: unknown = JSON.parse(lsAlbumChecklist);
+              if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+                  if (Array.isArray(value) && value.length > 0) {
+                    userState.albumChecklists[key] = value as AlbumChecklistItem[];
+                    migrated = true;
+                  }
+                }
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Saved reference tracks
+          try {
+            const lsSavedRef = window.localStorage.getItem(SAVED_REFERENCE_TRACKS_KEY);
+            if (
+              lsSavedRef &&
+              lsSavedRef.length > 0 &&
+              userState.savedReferenceTracks.length === 0
+            ) {
+              const parsed: unknown = JSON.parse(lsSavedRef);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                userState.savedReferenceTracks = parsed.flatMap((entry: unknown) => {
+                  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return [];
+                  const e = entry as Record<string, unknown>;
+                  if (typeof e.filePath !== 'string' || e.filePath.length === 0) return [];
+                  return [{
+                    filePath: e.filePath,
+                    fileName: typeof e.fileName === 'string' ? e.fileName : '',
+                    dateLastUsed: typeof e.dateLastUsed === 'string' ? e.dateLastUsed : new Date().toISOString(),
+                    integratedLufs: typeof e.integratedLufs === 'number' ? e.integratedLufs : null,
+                  }];
+                });
+                if (userState.savedReferenceTracks.length > 0) migrated = true;
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Per-song reference tracks (dynamic keys)
+          if (Object.keys(userState.perSongReferenceTracks).length === 0) {
+            for (let i = 0; i < window.localStorage.length; i++) {
+              const key = window.localStorage.key(i);
+              if (key && key.startsWith(REFERENCE_TRACK_PER_SONG_KEY_PREFIX)) {
+                const songId = key.slice(REFERENCE_TRACK_PER_SONG_KEY_PREFIX.length);
+                const val = window.localStorage.getItem(key);
+                if (songId.length > 0 && val && val.length > 0) {
+                  userState.perSongReferenceTracks[songId] = val;
+                  migrated = true;
+                }
+              }
+            }
+          }
+
+          // Song ratings (merge, localStorage wins for missing keys)
+          try {
+            const lsRatings = window.localStorage.getItem(SONG_RATINGS_STORAGE_KEY);
+            if (lsRatings && lsRatings.length > 0) {
+              const parsed: unknown = JSON.parse(lsRatings);
+              if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                for (const [id, rating] of Object.entries(parsed as Record<string, unknown>)) {
+                  if (typeof rating === 'number' && !(id in userState.songRatings)) {
+                    userState.songRatings[id] = rating;
+                    migrated = true;
+                  }
+                }
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Song checklists (merge)
+          try {
+            const lsChecklists = window.localStorage.getItem(SONG_CHECKLISTS_STORAGE_KEY);
+            if (lsChecklists && lsChecklists.length > 0) {
+              const parsed: unknown = JSON.parse(lsChecklists);
+              if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                for (const [id, items] of Object.entries(parsed as Record<string, unknown>)) {
+                  if (
+                    Array.isArray(items) &&
+                    items.length > 0 &&
+                    (!(id in userState.songChecklists) || userState.songChecklists[id].length === 0)
+                  ) {
+                    userState.songChecklists[id] = items as SongChecklistItem[];
+                    migrated = true;
+                  }
+                }
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Song project file paths (merge)
+          try {
+            const lsPaths = window.localStorage.getItem(SONG_PROJECT_FILE_PATHS_STORAGE_KEY);
+            if (lsPaths && lsPaths.length > 0) {
+              const parsed: unknown = JSON.parse(lsPaths);
+              if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                for (const [id, path] of Object.entries(parsed as Record<string, unknown>)) {
+                  if (typeof path === 'string' && path.length > 0 && !(id in userState.songProjectFilePaths)) {
+                    userState.songProjectFilePaths[id] = path;
+                    migrated = true;
+                  }
+                }
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Agent provider
+          try {
+            const lsAp = window.localStorage.getItem('producer-player.agent-provider');
+            if (lsAp && lsAp.length > 0 && !userState.agentProvider) {
+              userState.agentProvider = lsAp;
+              migrated = true;
+            }
+          } catch { /* ignore */ }
+
+          // Agent STT provider
+          try {
+            const lsStt = window.localStorage.getItem('producer-player.agent-stt-provider');
+            if (lsStt && lsStt.length > 0 && !userState.agentSttProvider) {
+              userState.agentSttProvider = lsStt;
+              migrated = true;
+            }
+          } catch { /* ignore */ }
+
+          // Agent models (dynamic keys)
+          try {
+            const modelPrefix = 'producer-player.agent-model.';
+            for (let i = 0; i < window.localStorage.length; i++) {
+              const key = window.localStorage.key(i);
+              if (key && key.startsWith(modelPrefix)) {
+                const provider = key.slice(modelPrefix.length);
+                const val = window.localStorage.getItem(key);
+                if (provider.length > 0 && val && val.length > 0 && !userState.agentModels[provider]) {
+                  userState.agentModels[provider] = val;
+                  migrated = true;
+                }
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Agent thinking (dynamic keys)
+          try {
+            const thinkingPrefix = 'producer-player.agent-thinking.';
+            for (let i = 0; i < window.localStorage.length; i++) {
+              const key = window.localStorage.key(i);
+              if (key && key.startsWith(thinkingPrefix)) {
+                const provider = key.slice(thinkingPrefix.length);
+                const val = window.localStorage.getItem(key);
+                if (provider.length > 0 && val && val.length > 0 && !userState.agentThinking[provider]) {
+                  userState.agentThinking[provider] = val;
+                  migrated = true;
+                }
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Agent system prompt
+          try {
+            const lsSp = window.localStorage.getItem('producer-player.agent-system-prompt');
+            if (lsSp && lsSp.length > 0 && !userState.agentSystemPrompt) {
+              userState.agentSystemPrompt = lsSp;
+              migrated = true;
+            }
+          } catch { /* ignore */ }
+
+          // Reference level match (only migrate if unified state has default)
+          try {
+            const lsRefLevel = window.localStorage.getItem(REFERENCE_LEVEL_MATCH_KEY);
+            if (lsRefLevel !== null) {
+              const lsVal = lsRefLevel === 'true';
+              // Default is true; only override if localStorage disagrees
+              if (lsVal !== userState.referenceLevelMatchEnabled) {
+                userState.referenceLevelMatchEnabled = lsVal;
+                migrated = true;
+              }
+            }
+          } catch { /* ignore */ }
+
+          // iCloud backup enabled (only migrate if unified state has default)
+          try {
+            const lsICloud = window.localStorage.getItem(ICLOUD_BACKUP_ENABLED_KEY);
+            if (lsICloud !== null) {
+              const lsVal = lsICloud === 'true';
+              // Default is false; only override if localStorage disagrees
+              if (lsVal !== userState.iCloudBackupEnabled) {
+                userState.iCloudBackupEnabled = lsVal;
+                migrated = true;
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Auto-update enabled (only migrate if unified state has default)
+          try {
+            const lsAutoUpdate = window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY);
+            if (lsAutoUpdate !== null) {
+              const lsVal = lsAutoUpdate !== 'false'; // default true
+              // Default is true; only override if localStorage disagrees
+              if (lsVal !== userState.autoUpdateEnabled) {
+                userState.autoUpdateEnabled = lsVal;
+                migrated = true;
+              }
+            }
+          } catch { /* ignore */ }
+
+          // EQ snapshots (dynamic keys — per-song)
+          try {
+            const eqPrefix = 'producer-player-eq-snapshots-';
+            if (Object.keys(userState.eqSnapshots).length === 0) {
+              for (let i = 0; i < window.localStorage.length; i++) {
+                const key = window.localStorage.key(i);
+                if (key && key.startsWith(eqPrefix)) {
+                  const songKey = key.slice(eqPrefix.length);
+                  const raw = window.localStorage.getItem(key);
+                  if (songKey.length > 0 && raw && raw.length > 0) {
+                    try {
+                      const parsed: unknown = JSON.parse(raw);
+                      if (Array.isArray(parsed) && parsed.length > 0) {
+                        // Store as-is — the renderer reads EQ snapshots directly
+                        // from localStorage, but persisting to unified state
+                        // preserves them across profile changes.
+                        userState.eqSnapshots[songKey] = parsed as ProducerPlayerUserState['eqSnapshots'][string];
+                        migrated = true;
+                      }
+                    } catch { /* ignore */ }
+                  }
+                }
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Mark migration as done and persist enriched state
+          window.localStorage.setItem(MIGRATION_FLAG, 'true');
+          if (migrated) {
+            void window.producerPlayer.setUserState(userState).catch(() => undefined);
+          }
+        }
 
         // Populate React state from the unified state (only for fields
         // that are user data — layout prefs stay in localStorage).

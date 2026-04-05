@@ -27,10 +27,49 @@
 
 ## Data Storage
 
-- Checklists + ratings (shared across dev + packaged app): `producer-player-shared-user-state.json` in appData (`~/Library/Application Support/Producer Player/` on macOS)
-- Legacy migration source: renderer `localStorage` (imported on startup when keys are missing from shared state)
-- App state (linked folders, order, settings): `producer-player-electron-state.json` in appData
-- iCloud backup: `~/Library/Mobile Documents/com~apple~CloudDocs/Producer Player/` (when enabled)
+### Unified state (primary — introduced v2.45)
+
+- **Single source of truth**: `producer-player-user-state.json` in appData (`~/Library/Application Support/Producer Player/` on macOS)
+- Contains ALL user-authored data: ratings, checklists, project file paths, album metadata, reference tracks, agent settings, preferences, linked folders, song order
+- Managed by `apps/electron/src/state-service.ts` (`UserStateService`)
+- Schema defined in `packages/contracts/src/index.ts` as `ProducerPlayerUserState` (schemaVersion: 1)
+- IPC channels: `GET_USER_STATE`, `SET_USER_STATE`, `EXPORT_USER_STATE`, `IMPORT_USER_STATE`, `USER_STATE_CHANGED`
+
+### Legacy files (kept for backward compatibility)
+
+- `producer-player-electron-state.json` — linked folders, order, autoMoveOld (still written alongside unified state)
+- `producer-player-shared-user-state.json` — ratings, checklists, project paths (still written alongside unified state)
+- renderer `localStorage` — still used as a fast local cache; synced to/from unified state on startup
+
+### Migration
+
+On first launch after the update, if `producer-player-user-state.json` doesn't exist but old files do, the app automatically migrates data from the old files into the unified format. Old files are NOT deleted.
+
+### iCloud backup
+
+- Directory: `~/Library/Mobile Documents/com~apple~CloudDocs/Producer Player/`
+- Now backs up the unified state file alongside the legacy per-file backups
+- On restore, if the iCloud unified state is newer, it replaces the local copy
+
+### Import / Export
+
+- "Export State" button in sidebar exports the entire `ProducerPlayerUserState` as JSON via a save dialog
+- "Import State" button reads a JSON file, validates the schema, and applies the full state
+
+### State Storage Rule
+
+User-authored data (anything the user creates, inputs, or configures) MUST be stored
+in the unified state file, NOT only in localStorage. localStorage is per-Chromium-profile
+(LevelDB keyed by executable path) and does NOT transfer between dev and production builds.
+
+Only UI layout preferences (panel order, expanded/collapsed states, onboarding-seen
+flags) should remain localStorage-only.
+
+**OK in localStorage (UI-only, no user data):**
+- `producer-player.more-metrics-expanded.v1` — metrics panel expanded state
+- `producer-player.mastering-layout.compact.v1` / `fullscreen.v1` — panel layout order
+- `producer-player.agent-panel-seen` — onboarding seen flag
+- `producer-player.agent-panel-onboarding-armed` — onboarding armed flag
 
 ## Audio Analysis
 

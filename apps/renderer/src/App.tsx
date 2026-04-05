@@ -18,6 +18,7 @@ import type {
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
+  ProducerPlayerUserState,
   ReferenceTrackSelection,
   SongChecklistItem,
   SongVersion,
@@ -1763,6 +1764,8 @@ export function App(): JSX.Element {
 
   const iCloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sharedUserStateSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unifiedStateSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [unifiedStateReady, setUnifiedStateReady] = useState(false);
   const iCloudBackupEnabledRef = useRef(iCloudBackupEnabled);
 
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
@@ -2238,6 +2241,294 @@ export function App(): JSX.Element {
       }
     };
   }, [sharedUserStateReady, songRatings, songChecklists, songProjectFilePaths]);
+
+  // -----------------------------------------------------------------------
+  // Unified state: load on startup
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    let cancelled = false;
+
+    window.producerPlayer
+      .getUserState()
+      .then((userState) => {
+        if (cancelled) return;
+
+        // Populate React state from the unified state (only for fields
+        // that are user data — layout prefs stay in localStorage).
+        if (userState.songRatings && Object.keys(userState.songRatings).length > 0) {
+          setSongRatings((prev) => {
+            const merged = { ...prev };
+            for (const [id, rating] of Object.entries(userState.songRatings)) {
+              if (!(id in merged)) merged[id] = rating;
+            }
+            return merged;
+          });
+        }
+
+        if (userState.songChecklists && Object.keys(userState.songChecklists).length > 0) {
+          setSongChecklists((prev) => {
+            const merged = { ...prev };
+            for (const [id, items] of Object.entries(userState.songChecklists)) {
+              if (!(id in merged) || merged[id].length === 0) {
+                merged[id] = items;
+              }
+            }
+            return merged;
+          });
+        }
+
+        if (userState.songProjectFilePaths && Object.keys(userState.songProjectFilePaths).length > 0) {
+          setSongProjectFilePaths((prev) => {
+            const merged = { ...prev };
+            for (const [id, path] of Object.entries(userState.songProjectFilePaths)) {
+              if (!(id in merged)) merged[id] = path;
+            }
+            return merged;
+          });
+        }
+
+        if (userState.albumTitle && userState.albumTitle !== 'Untitled Album') {
+          setAlbumTitle(userState.albumTitle);
+        }
+
+        if (userState.albumArtDataUrl && userState.albumArtDataUrl.length > 0) {
+          setAlbumArt((prev) => prev ?? userState.albumArtDataUrl);
+        }
+
+        if (userState.albumChecklists && Object.keys(userState.albumChecklists).length > 0) {
+          setAlbumChecklists((prev) => {
+            const merged = { ...prev };
+            for (const [id, items] of Object.entries(userState.albumChecklists)) {
+              if (!(id in merged) || merged[id].length === 0) {
+                merged[id] = items;
+              }
+            }
+            return merged;
+          });
+        }
+
+        if (userState.savedReferenceTracks && userState.savedReferenceTracks.length > 0) {
+          setSavedReferenceTracks((prev) => {
+            if (prev.length > 0) return prev;
+            return userState.savedReferenceTracks.map((t) => ({
+              filePath: t.filePath,
+              fileName: t.fileName,
+              dateLastUsed: t.dateLastUsed,
+              integratedLufs: t.integratedLufs,
+            }));
+          });
+        }
+
+        if (typeof userState.referenceLevelMatchEnabled === 'boolean') {
+          setReferenceLevelMatchEnabled(userState.referenceLevelMatchEnabled);
+        }
+
+        if (typeof userState.iCloudBackupEnabled === 'boolean') {
+          setICloudBackupEnabled(userState.iCloudBackupEnabled);
+        }
+
+        if (typeof userState.autoUpdateEnabled === 'boolean') {
+          setAutoUpdateEnabled(userState.autoUpdateEnabled);
+        }
+
+        setUnifiedStateReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setUnifiedStateReady(true);
+      });
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // -----------------------------------------------------------------------
+  // Unified state: sync changes back (debounced)
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (!unifiedStateReady) return;
+
+    if (unifiedStateSyncTimerRef.current) {
+      clearTimeout(unifiedStateSyncTimerRef.current);
+    }
+
+    unifiedStateSyncTimerRef.current = setTimeout(() => {
+      const userState: ProducerPlayerUserState = {
+        schemaVersion: 1,
+        updatedAt: new Date().toISOString(),
+        linkedFolders: [], // managed by main process via library service
+        songOrder: [], // managed by main process via library service
+        autoMoveOld: true, // managed by main process via library service
+        songRatings,
+        songChecklists,
+        songProjectFilePaths,
+        albumTitle,
+        albumArtDataUrl: albumArt ?? '',
+        albumChecklists,
+        savedReferenceTracks: savedReferenceTracks.map((t) => ({
+          filePath: t.filePath,
+          fileName: t.fileName,
+          dateLastUsed: t.dateLastUsed,
+          integratedLufs: t.integratedLufs,
+        })),
+        perSongReferenceTracks: (() => {
+          // Collect per-song reference tracks from localStorage
+          const result: Record<string, string> = {};
+          for (let i = 0; i < window.localStorage.length; i++) {
+            const key = window.localStorage.key(i);
+            if (key && key.startsWith(REFERENCE_TRACK_PER_SONG_KEY_PREFIX)) {
+              const songId = key.slice(REFERENCE_TRACK_PER_SONG_KEY_PREFIX.length);
+              const val = window.localStorage.getItem(key);
+              if (songId.length > 0 && val && val.length > 0) {
+                result[songId] = val;
+              }
+            }
+          }
+          return result;
+        })(),
+        eqSnapshots: {},
+        agentProvider: '',
+        agentModels: {},
+        agentThinking: {},
+        agentSystemPrompt: '',
+        agentSttProvider: '',
+        referenceLevelMatchEnabled,
+        iCloudBackupEnabled,
+        autoUpdateEnabled,
+      };
+
+      // Enrich with agent settings from localStorage (these are managed by
+      // AgentChatPanel / AgentSettings and we read them at sync time).
+      try {
+        const ap = window.localStorage.getItem('producer-player.agent-provider');
+        if (ap) userState.agentProvider = ap;
+      } catch { /* ignore */ }
+      try {
+        const prefix = 'producer-player.agent-model.';
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (key && key.startsWith(prefix)) {
+            const provider = key.slice(prefix.length);
+            const val = window.localStorage.getItem(key);
+            if (provider.length > 0 && val) userState.agentModels[provider] = val;
+          }
+        }
+      } catch { /* ignore */ }
+      try {
+        const prefix = 'producer-player.agent-thinking.';
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const key = window.localStorage.key(i);
+          if (key && key.startsWith(prefix)) {
+            const provider = key.slice(prefix.length);
+            const val = window.localStorage.getItem(key);
+            if (provider.length > 0 && val) userState.agentThinking[provider] = val;
+          }
+        }
+      } catch { /* ignore */ }
+      try {
+        const sp = window.localStorage.getItem('producer-player.agent-system-prompt');
+        if (sp) userState.agentSystemPrompt = sp;
+      } catch { /* ignore */ }
+      try {
+        const stt = window.localStorage.getItem('producer-player.agent-stt-provider');
+        if (stt) userState.agentSttProvider = stt;
+      } catch { /* ignore */ }
+
+      void window.producerPlayer
+        .setUserState(userState)
+        .catch(() => undefined);
+    }, 500);
+
+    return () => {
+      if (unifiedStateSyncTimerRef.current) {
+        clearTimeout(unifiedStateSyncTimerRef.current);
+      }
+    };
+  }, [
+    unifiedStateReady,
+    songRatings,
+    songChecklists,
+    songProjectFilePaths,
+    albumTitle,
+    albumArt,
+    albumChecklists,
+    savedReferenceTracks,
+    referenceLevelMatchEnabled,
+    iCloudBackupEnabled,
+    autoUpdateEnabled,
+  ]);
+
+  // -----------------------------------------------------------------------
+  // Unified state: listen for changes pushed from main process (e.g. import)
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    return window.producerPlayer.onUserStateChanged((userState) => {
+      setSongRatings(sanitizeSongRatings(userState.songRatings));
+      setSongChecklists(sanitizeSongChecklists(userState.songChecklists));
+      setSongProjectFilePaths(sanitizeSongProjectFilePaths(userState.songProjectFilePaths));
+
+      if (userState.albumTitle && userState.albumTitle.length > 0) {
+        setAlbumTitle(userState.albumTitle);
+        window.localStorage.setItem(ALBUM_TITLE_STORAGE_KEY, userState.albumTitle);
+      }
+
+      if (typeof userState.albumArtDataUrl === 'string') {
+        setAlbumArt(userState.albumArtDataUrl.length > 0 ? userState.albumArtDataUrl : null);
+        try {
+          if (userState.albumArtDataUrl.length > 0) {
+            window.localStorage.setItem(ALBUM_ART_STORAGE_KEY, userState.albumArtDataUrl);
+          } else {
+            window.localStorage.removeItem(ALBUM_ART_STORAGE_KEY);
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (userState.albumChecklists) {
+        setAlbumChecklists(userState.albumChecklists);
+        persistAlbumChecklists(userState.albumChecklists);
+      }
+
+      if (userState.savedReferenceTracks) {
+        setSavedReferenceTracks(userState.savedReferenceTracks.map((t) => ({
+          filePath: t.filePath,
+          fileName: t.fileName,
+          dateLastUsed: t.dateLastUsed,
+          integratedLufs: t.integratedLufs,
+        })));
+        persistSavedReferenceTracks(userState.savedReferenceTracks.map((t) => ({
+          filePath: t.filePath,
+          fileName: t.fileName,
+          dateLastUsed: t.dateLastUsed,
+          integratedLufs: t.integratedLufs,
+        })));
+      }
+
+      if (typeof userState.referenceLevelMatchEnabled === 'boolean') {
+        setReferenceLevelMatchEnabled(userState.referenceLevelMatchEnabled);
+        window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(userState.referenceLevelMatchEnabled));
+      }
+
+      if (typeof userState.iCloudBackupEnabled === 'boolean') {
+        setICloudBackupEnabled(userState.iCloudBackupEnabled);
+        persistICloudBackupEnabled(userState.iCloudBackupEnabled);
+      }
+
+      if (typeof userState.autoUpdateEnabled === 'boolean') {
+        setAutoUpdateEnabled(userState.autoUpdateEnabled);
+        window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, userState.autoUpdateEnabled ? 'true' : 'false');
+      }
+
+      // Sync per-song reference tracks into localStorage
+      if (userState.perSongReferenceTracks) {
+        for (const [songId, filePath] of Object.entries(userState.perSongReferenceTracks)) {
+          persistReferenceTrackForSong(songId, filePath);
+        }
+      }
+
+      // Keep localStorage in sync for the data that's also stored there
+      persistSongRatings(userState.songRatings);
+      persistSongChecklists(userState.songChecklists);
+      persistSongProjectFilePaths(userState.songProjectFilePaths);
+    });
+  }, []);
 
   // Keep ref in sync
   useEffect(() => {
@@ -7231,6 +7522,41 @@ export function App(): JSX.Element {
               {iCloudSyncError}
             </p>
           )}
+
+          <div style={{ display: 'flex', gap: '6px', marginTop: '0.4em' }}>
+            <button
+              type="button"
+              className="ghost"
+              style={{ fontSize: '0.85em', padding: '2px 6px' }}
+              data-testid="export-user-state-button"
+              title="Export all settings, checklists, ratings, and preferences to a JSON file."
+              onClick={() => {
+                void window.producerPlayer.exportUserState().then((result) => {
+                  if (!result.success && result.error && result.error !== 'Export cancelled.') {
+                    void window.producerPlayer.rendererLog('error', 'Export failed', { error: result.error });
+                  }
+                });
+              }}
+            >
+              Export State
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              style={{ fontSize: '0.85em', padding: '2px 6px' }}
+              data-testid="import-user-state-button"
+              title="Import settings, checklists, ratings, and preferences from a previously exported JSON file."
+              onClick={() => {
+                void window.producerPlayer.importUserState().then((result) => {
+                  if (!result.success && result.error && result.error !== 'Import cancelled.') {
+                    void window.producerPlayer.rendererLog('error', 'Import failed', { error: result.error });
+                  }
+                });
+              }}
+            >
+              Import State
+            </button>
+          </div>
 
           <button
             type="button"

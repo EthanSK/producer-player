@@ -12,6 +12,7 @@ import {
   type ICloudBackupData,
   type PlaylistOrderExportV1,
   type ProducerPlayerBridge,
+  type ProducerPlayerUserState,
   type SnapshotListener,
   type TransportCommand,
   type TransportCommandListener,
@@ -266,6 +267,34 @@ const bridge: ProducerPlayerBridge = {
 
   async rendererLog(level: 'error' | 'warn' | 'info', message: string, meta?: Record<string, unknown>) {
     await ipcRenderer.invoke(IPC_CHANNELS.RENDERER_LOG, level, message, meta);
+  },
+
+  async getUserState() {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_USER_STATE);
+  },
+
+  async setUserState(state: ProducerPlayerUserState) {
+    return ipcRenderer.invoke(IPC_CHANNELS.SET_USER_STATE, state);
+  },
+
+  async exportUserState() {
+    return ipcRenderer.invoke(IPC_CHANNELS.EXPORT_USER_STATE);
+  },
+
+  async importUserState() {
+    return ipcRenderer.invoke(IPC_CHANNELS.IMPORT_USER_STATE);
+  },
+
+  onUserStateChanged(listener: (state: ProducerPlayerUserState) => void) {
+    const wrappedListener = (_event: unknown, state: unknown) => {
+      listener(state as ProducerPlayerUserState);
+    };
+
+    ipcRenderer.on(IPC_CHANNELS.USER_STATE_CHANGED, wrappedListener);
+
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.USER_STATE_CHANGED, wrappedListener);
+    };
   },
 };
 

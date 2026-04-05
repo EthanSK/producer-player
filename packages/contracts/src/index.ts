@@ -209,6 +209,11 @@ export const IPC_CHANNELS = {
   OPEN_LOG_FOLDER: 'producer-player:open-log-folder',
   GET_LOG_PATH: 'producer-player:get-log-path',
   RENDERER_LOG: 'producer-player:renderer-log',
+  GET_USER_STATE: 'producer-player:get-user-state',
+  SET_USER_STATE: 'producer-player:set-user-state',
+  EXPORT_USER_STATE: 'producer-player:export-user-state',
+  IMPORT_USER_STATE: 'producer-player:import-user-state',
+  USER_STATE_CHANGED: 'producer-player:user-state-changed',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
@@ -227,6 +232,74 @@ export interface AlbumChecklistItem {
   id: string;
   text: string;
   completed: boolean;
+}
+
+export interface SavedReferenceTrack {
+  filePath: string;
+  fileName: string;
+  dateLastUsed: string;
+  integratedLufs: number | null;
+}
+
+export interface EqSnapshot {
+  id: string;
+  label: string;
+  createdAt: string;
+  bands: { name: string; gain: number }[];
+}
+
+/**
+ * Unified user state — a single file that holds ALL user-authored data.
+ * Layout/UI preferences (panel order, expanded states) stay in localStorage.
+ */
+export interface ProducerPlayerUserState {
+  schemaVersion: number; // Start at 1
+  updatedAt: string; // ISO timestamp
+
+  // Folder & ordering
+  linkedFolders: { path: string; bookmarkData?: string }[];
+  songOrder: string[];
+  autoMoveOld: boolean;
+
+  // User-authored data
+  songRatings: Record<string, number>;
+  songChecklists: Record<string, SongChecklistItem[]>;
+  songProjectFilePaths: Record<string, string>;
+
+  // Album
+  albumTitle: string;
+  albumArtDataUrl: string; // data URL (kept small via resize)
+  albumChecklists: Record<string, AlbumChecklistItem[]>;
+
+  // Reference tracks
+  savedReferenceTracks: SavedReferenceTrack[];
+  perSongReferenceTracks: Record<string, string>; // songId -> filePath
+
+  // EQ snapshots (per-song)
+  eqSnapshots: Record<string, EqSnapshot[]>;
+
+  // Agent settings
+  agentProvider: string;
+  agentModels: Record<string, string>;
+  agentThinking: Record<string, string>;
+  agentSystemPrompt: string;
+  agentSttProvider: string;
+
+  // Preferences
+  referenceLevelMatchEnabled: boolean;
+  iCloudBackupEnabled: boolean;
+  autoUpdateEnabled: boolean;
+}
+
+export interface UserStateImportResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface UserStateExportResult {
+  success: boolean;
+  filePath?: string;
+  error?: string;
 }
 
 export interface SharedUserState {
@@ -625,6 +698,11 @@ export interface ProducerPlayerBridge {
   openLogFolder(): Promise<void>;
   getLogPath(): Promise<string>;
   rendererLog(level: 'error' | 'warn' | 'info', message: string, meta?: Record<string, unknown>): Promise<void>;
+  getUserState(): Promise<ProducerPlayerUserState>;
+  setUserState(state: ProducerPlayerUserState): Promise<ProducerPlayerUserState>;
+  exportUserState(): Promise<UserStateExportResult>;
+  importUserState(): Promise<UserStateImportResult>;
+  onUserStateChanged(listener: (state: ProducerPlayerUserState) => void): () => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -74,6 +74,7 @@ import type {
   ICloudLoadResult,
   ICloudSyncResult,
   LibrarySnapshot,
+  ProducerPlayerUserState,
   SharedUserState,
   SongChecklistItem,
   PlaylistOrderExportV1,
@@ -95,6 +96,7 @@ import {
 } from '@producer-player/contracts';
 import { FileLibraryService } from '@producer-player/domain';
 import * as agentService from './agent-service';
+import { UserStateService, parseUserState, createDefaultUserState, UNIFIED_STATE_FILE_NAME } from './state-service';
 
 declare const __PRODUCER_PLAYER_APP_VERSION__: string;
 declare const __PRODUCER_PLAYER_BUILD_NUMBER__: string;
@@ -233,6 +235,7 @@ function getLogDirectoryPath(): string {
 
 let mainWindow: BrowserWindow | null = null;
 let libraryService: FileLibraryService | null = null;
+let userStateService: UserStateService | null = null;
 let shouldAttemptSidecarOrderRestore = false;
 let playbackProtocolRegistered = false;
 const playbackTranscodeJobs = new Map<string, Promise<string>>();
@@ -1784,6 +1787,23 @@ async function writePersistedState(snapshot: LibrarySnapshot): Promise<void> {
 
   await writeJsonAtomic(getStateFilePath(), payload);
   await writeFolderOrderSidecars(snapshot);
+
+  // Also update the unified state with library-managed fields
+  if (userStateService) {
+    const bookmarks = buildPersistedBookmarksForSnapshot(snapshot);
+    void userStateService.patchUserState({
+      linkedFolders: snapshot.linkedFolders.map((folder) => ({
+        path: resolve(folder.path),
+        bookmarkData: bookmarks[resolve(folder.path)] || undefined,
+      })),
+      songOrder: snapshot.songs.map((song) => song.id),
+      autoMoveOld: snapshot.matcherSettings.autoMoveOld,
+    }).catch((error: unknown) => {
+      log.warn('[producer-player] Failed to sync unified state after snapshot change', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
 }
 
 function getPlaybackCacheDirectoryPath(): string {
@@ -2988,7 +3008,7 @@ async function syncDataToICloud(data: ICloudBackupData): Promise<ICloudSyncResul
   try {
     await fs.mkdir(backupDirectory, { recursive: true });
 
-    await Promise.all([
+    const writePromises = [
       writeJsonAtomic(
         join(backupDirectory, ICLOUD_CHECKLISTS_FILE),
         data.checklists
@@ -3005,7 +3025,24 @@ async function syncDataToICloud(data: ICloudBackupData): Promise<ICloudSyncResul
         join(backupDirectory, ICLOUD_STATE_FILE),
         data.state
       ),
-    ]);
+    ];
+
+    // Also back up the unified state file if available
+    if (userStateService) {
+      try {
+        const unifiedState = await userStateService.readUserState();
+        writePromises.push(
+          writeJsonAtomic(
+            join(backupDirectory, UNIFIED_STATE_FILE_NAME),
+            unifiedState
+          )
+        );
+      } catch {
+        // Non-fatal: the legacy files are still being written
+      }
+    }
+
+    await Promise.all(writePromises);
 
     return { success: true };
   } catch (error: unknown) {
@@ -3076,6 +3113,31 @@ async function loadDataFromICloud(): Promise<ICloudLoadResult> {
         updatedAt: new Date(0).toISOString(),
       }),
     ]);
+
+    // Also attempt to restore the unified state file from iCloud if available
+    if (userStateService) {
+      const iCloudUnifiedPath = join(backupDirectory, UNIFIED_STATE_FILE_NAME);
+      try {
+        const iCloudUnifiedRaw = await fs.readFile(iCloudUnifiedPath, 'utf8');
+        const iCloudUnifiedParsed = parseUserState(JSON.parse(iCloudUnifiedRaw));
+        const localState = await userStateService.readUserState();
+
+        // Only restore if iCloud version is newer
+        const iCloudTime = new Date(iCloudUnifiedParsed.updatedAt).getTime();
+        const localTime = new Date(localState.updatedAt).getTime();
+        if (iCloudTime > localTime) {
+          await userStateService.writeUserState(iCloudUnifiedParsed);
+          log.info('[producer-player:icloud] Restored newer unified state from iCloud');
+
+          // Notify renderer of updated state
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(IPC_CHANNELS.USER_STATE_CHANGED, iCloudUnifiedParsed);
+          }
+        }
+      } catch {
+        // Unified state not in iCloud yet — that's fine
+      }
+    }
 
     return {
       available: true,
@@ -3484,6 +3546,109 @@ function registerIpcHandlers(service: FileLibraryService): void {
     }
   });
 
+  // --- Unified User State IPC handlers ---
+
+  ipcMain.handle(IPC_CHANNELS.GET_USER_STATE, async () => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    return userStateService.readUserState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SET_USER_STATE, async (_event, state: ProducerPlayerUserState) => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    const updated = await userStateService.writeUserState(state);
+
+    // Also sync the linked folders and song order into the library service
+    // so old-format persistence continues to work during the transition.
+    if (libraryService) {
+      void writePersistedState(libraryService.getSnapshot());
+    }
+
+    // Also sync the shared user state file for backward compatibility
+    void writePersistedSharedUserState({
+      ratings: updated.songRatings,
+      checklists: updated.songChecklists,
+      projectFilePaths: updated.songProjectFilePaths,
+    });
+
+    return updated;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EXPORT_USER_STATE, async () => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    const state = await userStateService.readUserState();
+
+    const dialogOptions = {
+      title: 'Export Producer Player State',
+      defaultPath: 'producer-player-state.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    };
+
+    const result = mainWindow
+      ? await dialog.showSaveDialog(mainWindow, dialogOptions)
+      : await dialog.showSaveDialog(dialogOptions);
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, error: 'Export cancelled.' };
+    }
+
+    try {
+      const serialized = `${JSON.stringify(state, null, 2)}\n`;
+      await fs.writeFile(result.filePath, serialized, 'utf8');
+      return { success: true, filePath: result.filePath };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: `Failed to export: ${message}` };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.IMPORT_USER_STATE, async () => {
+    if (!userStateService) throw new Error('User state service not initialized');
+
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Import Producer Player State',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile'],
+    };
+
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: 'Import cancelled.' };
+    }
+
+    try {
+      const raw = await fs.readFile(result.filePaths[0], 'utf8');
+      const parsed = JSON.parse(raw);
+      const validated = parseUserState(parsed);
+
+      // Validate schema version
+      if (typeof validated.schemaVersion !== 'number' || validated.schemaVersion < 1) {
+        return { success: false, error: 'Invalid state file: missing or invalid schemaVersion.' };
+      }
+
+      await userStateService.writeUserState(validated);
+
+      // Push updated state to renderer
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_CHANNELS.USER_STATE_CHANGED, validated);
+      }
+
+      // Sync backward-compatible files
+      void writePersistedSharedUserState({
+        ratings: validated.songRatings,
+        checklists: validated.songChecklists,
+        projectFilePaths: validated.songProjectFilePaths,
+      });
+
+      return { success: true };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: `Failed to import: ${message}` };
+    }
+  });
+
   // --- Agent IPC handlers ---
 
   if (!ENABLE_AGENT_FEATURES) {
@@ -3678,6 +3843,27 @@ app.whenReady().then(async () => {
   });
 
   await registerPlaybackProtocol();
+
+  // Initialize the unified user state service
+  userStateService = new UserStateService(getStateDirectoryPath());
+
+  // Migrate from old split format if the unified state file doesn't exist yet
+  if (!userStateService.fileExists()) {
+    const oldElectronStatePath = getStateFilePath();
+    const oldSharedStatePath = getSharedUserStateFilePath();
+    const hasOldFiles = existsSync(oldElectronStatePath) || existsSync(oldSharedStatePath);
+
+    if (hasOldFiles) {
+      log.info('[producer-player] Unified state file not found — migrating from old format');
+      // Migrate with empty renderer localStorage data (renderer will push its data
+      // on first sync after startup).
+      await userStateService.migrateFromOldFormat(
+        oldElectronStatePath,
+        oldSharedStatePath,
+        {},
+      );
+    }
+  }
 
   const service = await ensureLibraryService();
   registerIpcHandlers(service);

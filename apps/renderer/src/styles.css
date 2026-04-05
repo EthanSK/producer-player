@@ -3008,6 +3008,81 @@ button.checklist-play-toggle[data-playing='true'] {
   background: rgba(255, 100, 100, 0.1);
 }
 
+/* EQ overlay curve toggle buttons row */
+.eq-overlay-toggles-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.eq-overlay-toggle {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+/* Reference Difference toggle (green/lime theme) */
+.eq-overlay-toggle--ref-diff {
+  color: rgba(120, 230, 80, 0.7);
+  border: 1px solid rgba(120, 230, 80, 0.25);
+  background: rgba(120, 230, 80, 0.06);
+}
+
+.eq-overlay-toggle--ref-diff:hover {
+  background: rgba(120, 230, 80, 0.12);
+  color: rgba(120, 230, 80, 0.9);
+  border-color: rgba(120, 230, 80, 0.4);
+}
+
+.eq-overlay-toggle--ref-diff.eq-overlay-toggle--active {
+  color: rgba(120, 230, 80, 1);
+  border-color: rgba(120, 230, 80, 0.55);
+  background: rgba(120, 230, 80, 0.12);
+}
+
+/* AI EQ toggle (cyan theme) */
+.eq-overlay-toggle--ai-eq {
+  color: rgba(80, 220, 255, 0.7);
+  border: 1px solid rgba(80, 220, 255, 0.25);
+  background: rgba(80, 220, 255, 0.06);
+}
+
+.eq-overlay-toggle--ai-eq:hover {
+  background: rgba(80, 220, 255, 0.12);
+  color: rgba(80, 220, 255, 0.9);
+  border-color: rgba(80, 220, 255, 0.4);
+}
+
+.eq-overlay-toggle--ai-eq.eq-overlay-toggle--active {
+  color: rgba(80, 220, 255, 1);
+  border-color: rgba(80, 220, 255, 0.55);
+  background: rgba(80, 220, 255, 0.12);
+}
+
+.eq-overlay-toggle--ai-eq.eq-overlay-toggle--loading {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* AI EQ refresh button */
+.eq-overlay-toggle--ai-refresh {
+  color: rgba(80, 220, 255, 0.5);
+  border: 1px solid rgba(80, 220, 255, 0.15);
+  background: rgba(80, 220, 255, 0.04);
+  font-size: 13px;
+  padding: 1px 6px;
+}
+
+.eq-overlay-toggle--ai-refresh:hover {
+  color: rgba(80, 220, 255, 0.85);
+  border-color: rgba(80, 220, 255, 0.35);
+  background: rgba(80, 220, 255, 0.1);
+}
+
 /* Section header with subtitle */
 .analysis-section-header {
   display: grid;

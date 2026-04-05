@@ -18,6 +18,10 @@ interface SpectrumAnalyzerProps {
   onBandToggle?: (bandIndex: number, shiftKey: boolean) => void;
   /** Optional EQ gain curve points to overlay on the spectrum. */
   eqGainCurve?: ReadonlyArray<{ freq: number; gainDb: number }>;
+  /** Optional AI-recommended EQ curve overlay (cyan). */
+  aiEqCurve?: ReadonlyArray<{ freq: number; gainDb: number }>;
+  /** Optional reference-difference EQ curve overlay (green/lime). */
+  refDiffCurve?: ReadonlyArray<{ freq: number; gainDb: number }>;
 }
 
 const MIN_FREQ = 20;
@@ -49,6 +53,8 @@ export function SpectrumAnalyzer({
   activeBands,
   onBandToggle,
   eqGainCurve,
+  aiEqCurve,
+  refDiffCurve,
 }: SpectrumAnalyzerProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -418,6 +424,98 @@ export function SpectrumAnalyzer({
         }
       }
 
+      // Shared helper to draw an EQ-style overlay curve at a given color.
+      const drawOverlayCurve = (
+        curve: ReadonlyArray<{ freq: number; gainDb: number }>,
+        strokeColor: string,
+        fillColor: string,
+        zeroLineColor: string,
+        dashPattern: number[] = [],
+      ) => {
+        const hasNonZero = curve.some((p) => Math.abs(p.gainDb) > 0.01);
+        if (!hasNonZero) return;
+
+        const eqDbRange = 24;
+        const midY = height / 2;
+        const eqScale = height * 0.35;
+        const toY = (eqDb: number): number => midY - (eqDb / (eqDbRange / 2)) * eqScale;
+
+        // Filled area between curve and zero line
+        ctx.beginPath();
+        const firstX = frequencyToX(curve[0].freq, width, MIN_FREQ, MAX_FREQ);
+        ctx.moveTo(firstX, midY);
+        for (let i = 0; i < curve.length; i++) {
+          const px = frequencyToX(curve[i].freq, width, MIN_FREQ, MAX_FREQ);
+          const py = toY(curve[i].gainDb);
+          if (i === 0) {
+            ctx.lineTo(px, py);
+          } else {
+            const prevX = frequencyToX(curve[i - 1].freq, width, MIN_FREQ, MAX_FREQ);
+            const cpx = (prevX + px) / 2;
+            ctx.bezierCurveTo(cpx, toY(curve[i - 1].gainDb), cpx, py, px, py);
+          }
+        }
+        const lastX = frequencyToX(curve[curve.length - 1].freq, width, MIN_FREQ, MAX_FREQ);
+        ctx.lineTo(lastX, midY);
+        ctx.closePath();
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+
+        // Stroke
+        ctx.beginPath();
+        for (let i = 0; i < curve.length; i++) {
+          const px = frequencyToX(curve[i].freq, width, MIN_FREQ, MAX_FREQ);
+          const py = toY(curve[i].gainDb);
+          if (i === 0) {
+            ctx.moveTo(px, py);
+          } else {
+            const prevX = frequencyToX(curve[i - 1].freq, width, MIN_FREQ, MAX_FREQ);
+            const cpx = (prevX + px) / 2;
+            ctx.bezierCurveTo(cpx, toY(curve[i - 1].gainDb), cpx, py, px, py);
+          }
+        }
+        if (dashPattern.length > 0) {
+          ctx.setLineDash(dashPattern);
+        }
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        if (dashPattern.length > 0) {
+          ctx.setLineDash([]);
+        }
+
+        // Zero line
+        ctx.beginPath();
+        ctx.moveTo(0, midY);
+        ctx.lineTo(width, midY);
+        ctx.strokeStyle = zeroLineColor;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      };
+
+      // Reference Difference EQ curve overlay (fullscreen only, green/lime)
+      if (isFullScreen && refDiffCurve && refDiffCurve.length > 1) {
+        drawOverlayCurve(
+          refDiffCurve,
+          'rgba(120, 230, 80, 0.7)',
+          'rgba(120, 230, 80, 0.08)',
+          'rgba(120, 230, 80, 0.2)',
+        );
+      }
+
+      // AI-recommended EQ curve overlay (fullscreen only, cyan)
+      if (isFullScreen && aiEqCurve && aiEqCurve.length > 1) {
+        drawOverlayCurve(
+          aiEqCurve,
+          'rgba(80, 220, 255, 0.7)',
+          'rgba(80, 220, 255, 0.08)',
+          'rgba(80, 220, 255, 0.2)',
+          [6, 3],
+        );
+      }
+
       // Crosshair overlay (fullscreen only)
       if (isFullScreen) {
         const mPos = mousePosRef.current;
@@ -531,6 +629,8 @@ export function SpectrumAnalyzer({
     dbToY,
     mousePosRef,
     eqGainCurve,
+    aiEqCurve,
+    refDiffCurve,
   ]);
 
   const handleClick = useCallback(

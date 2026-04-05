@@ -69,6 +69,7 @@ import {
   AgentChatPanel,
   type AgentChatPromptRequest,
 } from './AgentChatPanel';
+import { buildAiEqRecommendationPrompt } from './agentPrompts';
 import type {
   AgentContext,
   AgentPlatformNormalization,
@@ -367,6 +368,44 @@ function parseVersionModifiedAtMs(version: SongVersion): number {
     return 0;
   }
   return parsed;
+}
+
+/**
+ * Parse the AI agent's response text to extract EQ band gains.
+ * Looks for a JSON block with the `eq_recommendation.bands` structure.
+ * Returns an array of 6 gain values (one per FREQUENCY_BANDS entry) or null on failure.
+ */
+function parseAiEqResponse(text: string): number[] | null {
+  // Try to find a JSON code block first
+  const codeBlockMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  const jsonText = codeBlockMatch?.[1] ?? null;
+
+  // Also try a bare JSON object starting with {"eq_recommendation"
+  const bareMatch = jsonText ?? text.match(/\{"eq_recommendation"[\s\S]*?\}\s*\}/)?.[0] ?? null;
+
+  if (!bareMatch) return null;
+
+  try {
+    const parsed = JSON.parse(bareMatch);
+    const bands = parsed?.eq_recommendation?.bands;
+    if (!Array.isArray(bands) || bands.length < 6) return null;
+
+    const bandNames = ['Sub', 'Low', 'Low-Mid', 'Mid', 'High-Mid', 'High'];
+    const gains: number[] = [];
+
+    for (const expectedName of bandNames) {
+      const entry = bands.find(
+        (b: { name?: string; gain?: number }) =>
+          typeof b?.name === 'string' && b.name.toLowerCase() === expectedName.toLowerCase()
+      );
+      const gain = typeof entry?.gain === 'number' ? entry.gain : 0;
+      gains.push(Math.max(-12, Math.min(12, gain)));
+    }
+
+    return gains;
+  } catch {
+    return null;
+  }
 }
 
 function buildMasteringCacheKey(version: SongVersion): string {
@@ -1720,6 +1759,10 @@ export function App(): JSX.Element {
   // EQ starts OFF by default — user explicitly enables it when they want to trial adjustments.
   const [eqEnabled, setEqEnabled] = useState(false);
   const [showEqTonalBalance, setShowEqTonalBalance] = useState(false);
+  const [showRefDiffCurve, setShowRefDiffCurve] = useState(false);
+  const [showAiEqCurve, setShowAiEqCurve] = useState(false);
+  const [aiRecommendedEq, setAiRecommendedEq] = useState<number[] | null>(null);
+  const [aiEqLoading, setAiEqLoading] = useState(false);
   const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
 
   // Per-source EQ state: each source (mix / reference) remembers its own EQ enabled + gains
@@ -3729,6 +3772,50 @@ export function App(): JSX.Element {
     [buildMasteringPanelAskAiPrompt, selectedPlaybackVersion]
   );
 
+  // Request AI-recommended EQ curve via the agent chat session.
+  // Sends a structured prompt and watches for the JSON response via agent events.
+  const handleRequestAiEq = useCallback(() => {
+    if (!selectedPlaybackVersion || aiEqLoading) return;
+
+    setAiEqLoading(true);
+
+    const prompt = buildAiEqRecommendationPrompt({
+      tonalBalance: analysis?.tonalBalance,
+      crestFactorDb: analysis?.crestFactorDb,
+      rmsDbfs: analysis?.rmsDbfs,
+      integratedLufs: measuredAnalysis?.integratedLufs,
+      truePeakDbfs: measuredAnalysis?.truePeakDbfs,
+      loudnessRangeLufs: measuredAnalysis?.loudnessRangeLufs,
+      referenceFileName: referenceTrack?.fileName,
+      referenceTonalBalance: referenceTrack?.previewAnalysis?.tonalBalance,
+    });
+
+    // Accumulate text deltas from the agent response and parse on completion
+    let accumulated = '';
+
+    const unsubscribe = window.producerPlayer.onAgentEvent((event) => {
+      if (event.type === 'text-delta') {
+        accumulated += event.content;
+      } else if (event.type === 'turn-complete') {
+        unsubscribe();
+        const parsed = parseAiEqResponse(accumulated);
+        if (parsed) {
+          setAiRecommendedEq(parsed);
+          setShowAiEqCurve(true);
+        }
+        setAiEqLoading(false);
+      } else if (event.type === 'error') {
+        unsubscribe();
+        setAiEqLoading(false);
+      }
+    });
+
+    setAgentChatPromptRequest({
+      id: `ai-eq-recommend-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      prompt,
+    });
+  }, [selectedPlaybackVersion, aiEqLoading, analysis, measuredAnalysis, referenceTrack]);
+
   function renderMasteringPanelDragHandle(
     surface: 'compact',
     panelId: CompactMasteringPanelId,
@@ -5183,6 +5270,50 @@ export function App(): JSX.Element {
     const sampleRate = playbackAudioContextRef.current?.sampleRate ?? 44100;
     return computeEqGainCurve(eqBandGains, 256, 20, 20000, sampleRate);
   }, [eqBandGains, eqEnabled]);
+
+  // Compute reference difference EQ curve: dB difference per band between reference and mix tonal balance.
+  // Maps the 3-band (low/mid/high) tonal balance to our 6-band EQ, then generates a smooth curve.
+  const refDiffCurve = useMemo(() => {
+    if (!showRefDiffCurve) return undefined;
+    if (!analysis || !referenceTrack?.previewAnalysis) return undefined;
+
+    const mixTb = analysis.tonalBalance;
+    const refTb = referenceTrack.previewAnalysis.tonalBalance;
+
+    // Convert energy fractions to dB (relative), then compute difference.
+    // dB = 10 * log10(energy_fraction). Difference in dB tells us "how much to boost/cut to match".
+    const safeLog = (v: number) => (v > 0 ? 10 * Math.log10(v) : -60);
+    const lowDiffDb = safeLog(refTb.low) - safeLog(mixTb.low);
+    const midDiffDb = safeLog(refTb.mid) - safeLog(mixTb.mid);
+    const highDiffDb = safeLog(refTb.high) - safeLog(mixTb.high);
+
+    // Map 3-band deltas to 6-band gains: Sub & Low use lowDiffDb, LowMid & Mid use midDiffDb, HM & Hi use highDiffDb
+    const bandGains = [
+      lowDiffDb,                              // Sub
+      lowDiffDb * 0.5 + midDiffDb * 0.5,     // Low (blend)
+      midDiffDb,                              // Low-Mid
+      midDiffDb * 0.5 + highDiffDb * 0.5,    // Mid (blend)
+      highDiffDb,                              // High-Mid
+      highDiffDb,                              // High
+    ];
+
+    // Clamp gains to +/-12 dB for the curve display
+    const clampedGains = bandGains.map((g) => Math.max(-12, Math.min(12, g)));
+    const hasAny = clampedGains.some((g) => Math.abs(g) > 0.01);
+    if (!hasAny) return undefined;
+
+    const sampleRate = playbackAudioContextRef.current?.sampleRate ?? 44100;
+    return computeEqGainCurve(clampedGains, 256, 20, 20000, sampleRate);
+  }, [showRefDiffCurve, analysis, referenceTrack]);
+
+  // Compute AI-recommended EQ curve from the AI's per-band gain suggestions.
+  const aiEqCurve = useMemo(() => {
+    if (!showAiEqCurve || !aiRecommendedEq) return undefined;
+    const hasAny = aiRecommendedEq.some((g) => Math.abs(g) > 0.01);
+    if (!hasAny) return undefined;
+    const sampleRate = playbackAudioContextRef.current?.sampleRate ?? 44100;
+    return computeEqGainCurve(aiRecommendedEq, 256, 20, 20000, sampleRate);
+  }, [showAiEqCurve, aiRecommendedEq]);
 
   async function loadReferenceTrack(
     sourceType: ReferenceTrackSource,
@@ -9198,6 +9329,8 @@ export function App(): JSX.Element {
                         onBandToggle={handleBandToggle}
                         isPlaying={isPlaying}
                         eqGainCurve={eqGainCurve}
+                        aiEqCurve={aiEqCurve}
+                        refDiffCurve={refDiffCurve}
                       />
                       <EqGainSliders
                         gains={eqBandGains}
@@ -9210,6 +9343,57 @@ export function App(): JSX.Element {
                         onToggleEq={handleToggleEq}
                         songKey={selectedSongId ?? undefined}
                       />
+                      <div className="eq-overlay-toggles-row">
+                        {referenceTrack && (
+                          <button
+                            type="button"
+                            className={`ghost eq-overlay-toggle eq-overlay-toggle--ref-diff${showRefDiffCurve ? ' eq-overlay-toggle--active' : ''}`}
+                            data-testid="eq-overlay-toggle-ref-diff"
+                            onClick={() => setShowRefDiffCurve((prev) => !prev)}
+                            title={showRefDiffCurve ? 'Hide reference difference EQ curve' : 'Show EQ curve needed to match the reference track\'s tonal balance'}
+                          >
+                            Ref {'\u0394'}
+                          </button>
+                        )}
+                        {ENABLE_AGENT_FEATURES && (
+                          <button
+                            type="button"
+                            className={`ghost eq-overlay-toggle eq-overlay-toggle--ai-eq${showAiEqCurve && aiRecommendedEq ? ' eq-overlay-toggle--active' : ''}${aiEqLoading ? ' eq-overlay-toggle--loading' : ''}`}
+                            data-testid="eq-overlay-toggle-ai-eq"
+                            onClick={() => {
+                              if (aiRecommendedEq) {
+                                setShowAiEqCurve((prev) => !prev);
+                              } else {
+                                handleRequestAiEq();
+                              }
+                            }}
+                            disabled={aiEqLoading}
+                            title={
+                              aiEqLoading
+                                ? 'AI is analyzing your track...'
+                                : aiRecommendedEq
+                                  ? showAiEqCurve
+                                    ? 'Hide AI-recommended EQ curve'
+                                    : 'Show AI-recommended EQ curve'
+                                  : 'Ask AI to recommend an EQ curve for this track'
+                            }
+                          >
+                            {aiEqLoading ? 'AI...' : 'AI EQ'}
+                          </button>
+                        )}
+                        {aiRecommendedEq && ENABLE_AGENT_FEATURES && (
+                          <button
+                            type="button"
+                            className="ghost eq-overlay-toggle eq-overlay-toggle--ai-refresh"
+                            data-testid="eq-overlay-refresh-ai-eq"
+                            onClick={handleRequestAiEq}
+                            disabled={aiEqLoading}
+                            title="Re-generate AI EQ recommendation"
+                          >
+                            {'\u21BB'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="analysis-overlay-viz-meters">
                       <div className="analysis-section-header">

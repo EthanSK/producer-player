@@ -39,6 +39,60 @@ export function readStoredAgentSystemPrompt(): string {
   return stored && stored.length > 0 ? stored : DEFAULT_AGENT_SYSTEM_PROMPT;
 }
 
+export interface AiEqPromptStats {
+  tonalBalance?: { low: number; mid: number; high: number };
+  crestFactorDb?: number;
+  rmsDbfs?: number;
+  integratedLufs?: number | null;
+  truePeakDbfs?: number | null;
+  loudnessRangeLufs?: number | null;
+  referenceFileName?: string;
+  referenceTonalBalance?: { low: number; mid: number; high: number };
+}
+
+/**
+ * Build a structured prompt that asks the AI agent for EQ recommendations
+ * in a parseable JSON format, using the supplied mastering stats as context.
+ */
+export function buildAiEqRecommendationPrompt(stats: AiEqPromptStats): string {
+  const parts: string[] = [
+    'Analyze this track and recommend a mastering EQ curve.',
+    'Consider the current LUFS, true peak, tonal balance, crest factor, dynamic range, and any reference track comparison.',
+  ];
+
+  if (stats.tonalBalance) {
+    parts.push(
+      `Current tonal balance: low=${(stats.tonalBalance.low * 100).toFixed(1)}%, mid=${(stats.tonalBalance.mid * 100).toFixed(1)}%, high=${(stats.tonalBalance.high * 100).toFixed(1)}%.`
+    );
+  }
+  if (stats.crestFactorDb != null && stats.rmsDbfs != null) {
+    parts.push(`Crest factor: ${stats.crestFactorDb.toFixed(1)} dB, RMS: ${stats.rmsDbfs.toFixed(1)} dBFS.`);
+  }
+  if (stats.integratedLufs != null) {
+    parts.push(
+      `Integrated LUFS: ${stats.integratedLufs.toFixed(1)}, True Peak: ${stats.truePeakDbfs?.toFixed(1) ?? 'N/A'} dBTP, LRA: ${stats.loudnessRangeLufs?.toFixed(1) ?? 'N/A'} LU.`
+    );
+  }
+  if (stats.referenceFileName && stats.referenceTonalBalance) {
+    const rt = stats.referenceTonalBalance;
+    parts.push(
+      `Reference track "${stats.referenceFileName}" tonal balance: low=${(rt.low * 100).toFixed(1)}%, mid=${(rt.mid * 100).toFixed(1)}%, high=${(rt.high * 100).toFixed(1)}%.`
+    );
+  }
+
+  parts.push(
+    '',
+    'Respond with your analysis and a JSON block in this exact format:',
+    '```json',
+    '{"eq_recommendation": {"bands": [{"name": "Sub", "gain": 0}, {"name": "Low", "gain": 0}, {"name": "Low-Mid", "gain": 0}, {"name": "Mid", "gain": 0}, {"name": "High-Mid", "gain": 0}, {"name": "High", "gain": 0}], "reasoning": "Brief explanation"}}',
+    '```',
+    'Each gain is in dB (range -12 to +12). The 6 bands are: Sub (20-120 Hz), Low (120-500 Hz), Low-Mid (500-2000 Hz), Mid (2000-6000 Hz), High-Mid (6000-12000 Hz), High (12000-20000 Hz).',
+    'Be specific and practical. Base recommendations on the analysis data provided.',
+  );
+
+  return parts.join('\n');
+}
+
 export function captureAgentUiContext(): AgentUiContext {
   const rawDomSnapshot = document.documentElement?.outerHTML ?? '';
   const domSnapshot =

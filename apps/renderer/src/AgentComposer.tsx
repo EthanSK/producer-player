@@ -469,7 +469,7 @@ export function AgentComposer({
     }
 
     // Lazy-check the API key on first mic interaction to avoid
-    // triggering safeStorage/keychain access on app startup.
+    // reading the stored key file on app startup.
     if (!voiceSettingsCheckedRef.current) {
       voiceSettingsCheckedRef.current = true;
       await refreshVoiceSettings();

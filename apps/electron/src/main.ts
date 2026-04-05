@@ -1,6 +1,59 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, protocol, safeStorage, shell } from 'electron';
+
+// ---------------------------------------------------------------------------
+// Obfuscated file storage helpers (replaces safeStorage/keychain for API keys)
+// ---------------------------------------------------------------------------
+const OBFUSCATION_KEY = 'ProducerPlayerObfuscationKey2026';
+
+function obfuscate(plaintext: string): string {
+  const xored = Buffer.from(plaintext).map(
+    (byte, i) => byte ^ OBFUSCATION_KEY.charCodeAt(i % OBFUSCATION_KEY.length)
+  );
+  return Buffer.from(xored).toString('base64');
+}
+
+function deobfuscate(encoded: string): string {
+  const decoded = Buffer.from(encoded, 'base64');
+  const xored = decoded.map(
+    (byte, i) => byte ^ OBFUSCATION_KEY.charCodeAt(i % OBFUSCATION_KEY.length)
+  );
+  return Buffer.from(xored).toString('utf8');
+}
+
+/**
+ * Migrate a key from the old safeStorage `.enc` format to the new obfuscated
+ * `.key` format. Returns silently if the old file doesn't exist or can't be
+ * read/decrypted — the user will just need to re-enter the key.
+ */
+async function migrateEncToKey(baseName: string): Promise<void> {
+  const userDataDir = app.getPath('userData');
+  const oldPath = join(userDataDir, `${baseName}.enc`);
+  const newPath = join(userDataDir, `${baseName}.key`);
+
+  // Only migrate if old file exists and new file doesn't
+  if (!existsSync(oldPath) || existsSync(newPath)) return;
+
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = await fs.readFile(oldPath);
+      const plaintext = safeStorage.decryptString(encrypted);
+      if (plaintext) {
+        await fs.writeFile(newPath, obfuscate(plaintext), 'utf8');
+      }
+    }
+  } catch {
+    // Can't decrypt — that's fine, user re-enters key
+  }
+
+  // Clean up old file regardless of success
+  try {
+    await fs.unlink(oldPath);
+  } catch {
+    // ignore
+  }
+}
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, promises as fs, readFileSync } from 'node:fs';
 import { basename, dirname, extname, join, parse, resolve } from 'node:path';
@@ -3507,31 +3560,31 @@ function registerIpcHandlers(service: FileLibraryService): void {
     }
   );
 
+  // Migrate old safeStorage keys on first access (fire-and-forget; get handlers
+  // tolerate missing files gracefully so a race is harmless)
+  migrateEncToKey('deepgram-key').catch(() => {});
+  migrateEncToKey('assemblyai-key').catch(() => {});
+
   ipcMain.handle(
     IPC_CHANNELS.AGENT_STORE_DEEPGRAM_KEY,
     async (_event, key: string) => {
-      if (!safeStorage.isEncryptionAvailable()) {
-        throw new Error('Encryption is not available on this system.');
-      }
-      const encrypted = safeStorage.encryptString(key);
-      const statePath = join(app.getPath('userData'), 'deepgram-key.enc');
-      await fs.writeFile(statePath, encrypted);
+      const statePath = join(app.getPath('userData'), 'deepgram-key.key');
+      await fs.writeFile(statePath, obfuscate(key), 'utf8');
     }
   );
 
   ipcMain.handle(IPC_CHANNELS.AGENT_GET_DEEPGRAM_KEY, async () => {
-    if (!safeStorage.isEncryptionAvailable()) return null;
-    const statePath = join(app.getPath('userData'), 'deepgram-key.enc');
+    const statePath = join(app.getPath('userData'), 'deepgram-key.key');
     try {
-      const encrypted = await fs.readFile(statePath);
-      return safeStorage.decryptString(encrypted);
+      const encoded = await fs.readFile(statePath, 'utf8');
+      return deobfuscate(encoded);
     } catch {
       return null;
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_CLEAR_DEEPGRAM_KEY, async () => {
-    const statePath = join(app.getPath('userData'), 'deepgram-key.enc');
+    const statePath = join(app.getPath('userData'), 'deepgram-key.key');
     try {
       await fs.unlink(statePath);
     } catch {
@@ -3542,28 +3595,23 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_STORE_ASSEMBLYAI_KEY,
     async (_event, key: string) => {
-      if (!safeStorage.isEncryptionAvailable()) {
-        throw new Error('Encryption is not available on this system.');
-      }
-      const encrypted = safeStorage.encryptString(key);
-      const statePath = join(app.getPath('userData'), 'assemblyai-key.enc');
-      await fs.writeFile(statePath, encrypted);
+      const statePath = join(app.getPath('userData'), 'assemblyai-key.key');
+      await fs.writeFile(statePath, obfuscate(key), 'utf8');
     }
   );
 
   ipcMain.handle(IPC_CHANNELS.AGENT_GET_ASSEMBLYAI_KEY, async () => {
-    if (!safeStorage.isEncryptionAvailable()) return null;
-    const statePath = join(app.getPath('userData'), 'assemblyai-key.enc');
+    const statePath = join(app.getPath('userData'), 'assemblyai-key.key');
     try {
-      const encrypted = await fs.readFile(statePath);
-      return safeStorage.decryptString(encrypted);
+      const encoded = await fs.readFile(statePath, 'utf8');
+      return deobfuscate(encoded);
     } catch {
       return null;
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_CLEAR_ASSEMBLYAI_KEY, async () => {
-    const statePath = join(app.getPath('userData'), 'assemblyai-key.enc');
+    const statePath = join(app.getPath('userData'), 'assemblyai-key.key');
     try {
       await fs.unlink(statePath);
     } catch {

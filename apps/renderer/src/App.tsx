@@ -2250,7 +2250,7 @@ export function App(): JSX.Element {
 
     window.producerPlayer
       .getUserState()
-      .then((loadedState) => {
+      .then(async (loadedState) => {
         if (cancelled) return;
 
         // -----------------------------------------------------------------
@@ -2261,11 +2261,22 @@ export function App(): JSX.Element {
         // per-song reference tracks, EQ snapshots, etc.) was NOT included.
         // On first load, detect this and merge localStorage into the
         // unified state so nothing is lost.
-        const MIGRATION_FLAG = 'producer-player.unified-state-migrated.v1';
+        //
+        // v2 flag: bumped from v1 because a bug in the original migration
+        // set the flag before the async write completed, so a failed write
+        // would permanently prevent re-migration.
+        const MIGRATION_FLAG = 'producer-player.unified-state-migrated.v2';
         const userState = { ...loadedState };
 
         if (window.localStorage.getItem(MIGRATION_FLAG) !== 'true') {
+          void window.producerPlayer.rendererLog('info', '[migration] Starting localStorage -> unified state migration', {
+            albumTitleInState: userState.albumTitle,
+            albumArtLengthInState: userState.albumArtDataUrl?.length ?? 0,
+            ratingsCountInState: Object.keys(userState.songRatings).length,
+          });
+
           let migrated = false;
+          const migratedFields: string[] = [];
 
           // Album title
           const lsAlbumTitle = window.localStorage.getItem(ALBUM_TITLE_STORAGE_KEY);
@@ -2277,6 +2288,7 @@ export function App(): JSX.Element {
           ) {
             userState.albumTitle = lsAlbumTitle;
             migrated = true;
+            migratedFields.push(`albumTitle="${lsAlbumTitle}"`);
           }
 
           // Album art (data URL)
@@ -2288,6 +2300,7 @@ export function App(): JSX.Element {
           ) {
             userState.albumArtDataUrl = lsAlbumArt;
             migrated = true;
+            migratedFields.push(`albumArt(${lsAlbumArt.length} chars)`);
           }
 
           // Album checklists
@@ -2300,12 +2313,15 @@ export function App(): JSX.Element {
             ) {
               const parsed: unknown = JSON.parse(lsAlbumChecklist);
               if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                let count = 0;
                 for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
                   if (Array.isArray(value) && value.length > 0) {
                     userState.albumChecklists[key] = value as AlbumChecklistItem[];
                     migrated = true;
+                    count++;
                   }
                 }
+                if (count > 0) migratedFields.push(`albumChecklists(${count})`);
               }
             }
           } catch { /* ignore */ }
@@ -2331,13 +2347,17 @@ export function App(): JSX.Element {
                     integratedLufs: typeof e.integratedLufs === 'number' ? e.integratedLufs : null,
                   }];
                 });
-                if (userState.savedReferenceTracks.length > 0) migrated = true;
+                if (userState.savedReferenceTracks.length > 0) {
+                  migrated = true;
+                  migratedFields.push(`savedRefTracks(${userState.savedReferenceTracks.length})`);
+                }
               }
             }
           } catch { /* ignore */ }
 
           // Per-song reference tracks (dynamic keys)
           if (Object.keys(userState.perSongReferenceTracks).length === 0) {
+            let refCount = 0;
             for (let i = 0; i < window.localStorage.length; i++) {
               const key = window.localStorage.key(i);
               if (key && key.startsWith(REFERENCE_TRACK_PER_SONG_KEY_PREFIX)) {
@@ -2346,9 +2366,11 @@ export function App(): JSX.Element {
                 if (songId.length > 0 && val && val.length > 0) {
                   userState.perSongReferenceTracks[songId] = val;
                   migrated = true;
+                  refCount++;
                 }
               }
             }
+            if (refCount > 0) migratedFields.push(`perSongRefTracks(${refCount})`);
           }
 
           // Song ratings (merge, localStorage wins for missing keys)
@@ -2357,12 +2379,15 @@ export function App(): JSX.Element {
             if (lsRatings && lsRatings.length > 0) {
               const parsed: unknown = JSON.parse(lsRatings);
               if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                let ratingCount = 0;
                 for (const [id, rating] of Object.entries(parsed as Record<string, unknown>)) {
                   if (typeof rating === 'number' && !(id in userState.songRatings)) {
                     userState.songRatings[id] = rating;
                     migrated = true;
+                    ratingCount++;
                   }
                 }
+                if (ratingCount > 0) migratedFields.push(`ratings(${ratingCount})`);
               }
             }
           } catch { /* ignore */ }
@@ -2373,6 +2398,7 @@ export function App(): JSX.Element {
             if (lsChecklists && lsChecklists.length > 0) {
               const parsed: unknown = JSON.parse(lsChecklists);
               if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                let checklistCount = 0;
                 for (const [id, items] of Object.entries(parsed as Record<string, unknown>)) {
                   if (
                     Array.isArray(items) &&
@@ -2381,8 +2407,10 @@ export function App(): JSX.Element {
                   ) {
                     userState.songChecklists[id] = items as SongChecklistItem[];
                     migrated = true;
+                    checklistCount++;
                   }
                 }
+                if (checklistCount > 0) migratedFields.push(`checklists(${checklistCount})`);
               }
             }
           } catch { /* ignore */ }
@@ -2393,12 +2421,15 @@ export function App(): JSX.Element {
             if (lsPaths && lsPaths.length > 0) {
               const parsed: unknown = JSON.parse(lsPaths);
               if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                let pathCount = 0;
                 for (const [id, path] of Object.entries(parsed as Record<string, unknown>)) {
                   if (typeof path === 'string' && path.length > 0 && !(id in userState.songProjectFilePaths)) {
                     userState.songProjectFilePaths[id] = path;
                     migrated = true;
+                    pathCount++;
                   }
                 }
+                if (pathCount > 0) migratedFields.push(`projectPaths(${pathCount})`);
               }
             }
           } catch { /* ignore */ }
@@ -2409,6 +2440,7 @@ export function App(): JSX.Element {
             if (lsAp && lsAp.length > 0 && !userState.agentProvider) {
               userState.agentProvider = lsAp;
               migrated = true;
+              migratedFields.push('agentProvider');
             }
           } catch { /* ignore */ }
 
@@ -2418,12 +2450,14 @@ export function App(): JSX.Element {
             if (lsStt && lsStt.length > 0 && !userState.agentSttProvider) {
               userState.agentSttProvider = lsStt;
               migrated = true;
+              migratedFields.push('agentSttProvider');
             }
           } catch { /* ignore */ }
 
           // Agent models (dynamic keys)
           try {
             const modelPrefix = 'producer-player.agent-model.';
+            let modelCount = 0;
             for (let i = 0; i < window.localStorage.length; i++) {
               const key = window.localStorage.key(i);
               if (key && key.startsWith(modelPrefix)) {
@@ -2432,14 +2466,17 @@ export function App(): JSX.Element {
                 if (provider.length > 0 && val && val.length > 0 && !userState.agentModels[provider]) {
                   userState.agentModels[provider] = val;
                   migrated = true;
+                  modelCount++;
                 }
               }
             }
+            if (modelCount > 0) migratedFields.push(`agentModels(${modelCount})`);
           } catch { /* ignore */ }
 
           // Agent thinking (dynamic keys)
           try {
             const thinkingPrefix = 'producer-player.agent-thinking.';
+            let thinkingCount = 0;
             for (let i = 0; i < window.localStorage.length; i++) {
               const key = window.localStorage.key(i);
               if (key && key.startsWith(thinkingPrefix)) {
@@ -2448,9 +2485,11 @@ export function App(): JSX.Element {
                 if (provider.length > 0 && val && val.length > 0 && !userState.agentThinking[provider]) {
                   userState.agentThinking[provider] = val;
                   migrated = true;
+                  thinkingCount++;
                 }
               }
             }
+            if (thinkingCount > 0) migratedFields.push(`agentThinking(${thinkingCount})`);
           } catch { /* ignore */ }
 
           // Agent system prompt
@@ -2459,6 +2498,7 @@ export function App(): JSX.Element {
             if (lsSp && lsSp.length > 0 && !userState.agentSystemPrompt) {
               userState.agentSystemPrompt = lsSp;
               migrated = true;
+              migratedFields.push('agentSystemPrompt');
             }
           } catch { /* ignore */ }
 
@@ -2471,6 +2511,7 @@ export function App(): JSX.Element {
               if (lsVal !== userState.referenceLevelMatchEnabled) {
                 userState.referenceLevelMatchEnabled = lsVal;
                 migrated = true;
+                migratedFields.push(`refLevelMatch=${lsVal}`);
               }
             }
           } catch { /* ignore */ }
@@ -2484,6 +2525,7 @@ export function App(): JSX.Element {
               if (lsVal !== userState.iCloudBackupEnabled) {
                 userState.iCloudBackupEnabled = lsVal;
                 migrated = true;
+                migratedFields.push(`iCloudBackup=${lsVal}`);
               }
             }
           } catch { /* ignore */ }
@@ -2497,6 +2539,7 @@ export function App(): JSX.Element {
               if (lsVal !== userState.autoUpdateEnabled) {
                 userState.autoUpdateEnabled = lsVal;
                 migrated = true;
+                migratedFields.push(`autoUpdate=${lsVal}`);
               }
             }
           } catch { /* ignore */ }
@@ -2505,6 +2548,7 @@ export function App(): JSX.Element {
           try {
             const eqPrefix = 'producer-player-eq-snapshots-';
             if (Object.keys(userState.eqSnapshots).length === 0) {
+              let eqCount = 0;
               for (let i = 0; i < window.localStorage.length; i++) {
                 const key = window.localStorage.key(i);
                 if (key && key.startsWith(eqPrefix)) {
@@ -2514,23 +2558,36 @@ export function App(): JSX.Element {
                     try {
                       const parsed: unknown = JSON.parse(raw);
                       if (Array.isArray(parsed) && parsed.length > 0) {
-                        // Store as-is — the renderer reads EQ snapshots directly
-                        // from localStorage, but persisting to unified state
-                        // preserves them across profile changes.
                         userState.eqSnapshots[songKey] = parsed as ProducerPlayerUserState['eqSnapshots'][string];
                         migrated = true;
+                        eqCount++;
                       }
                     } catch { /* ignore */ }
                   }
                 }
               }
+              if (eqCount > 0) migratedFields.push(`eqSnapshots(${eqCount})`);
             }
           } catch { /* ignore */ }
 
-          // Mark migration as done and persist enriched state
-          window.localStorage.setItem(MIGRATION_FLAG, 'true');
+          // Persist enriched state, then set the flag only on success
           if (migrated) {
-            void window.producerPlayer.setUserState(userState).catch(() => undefined);
+            void window.producerPlayer.rendererLog('info', '[migration] Migrated fields from localStorage', {
+              fields: migratedFields.join(', '),
+            });
+            try {
+              await window.producerPlayer.setUserState(userState);
+              window.localStorage.setItem(MIGRATION_FLAG, 'true');
+              void window.producerPlayer.rendererLog('info', '[migration] Migration persisted successfully');
+            } catch (err) {
+              void window.producerPlayer.rendererLog('error', '[migration] Failed to persist migrated state', {
+                error: String(err),
+              });
+              // Do NOT set the flag — retry on next launch
+            }
+          } else {
+            void window.producerPlayer.rendererLog('info', '[migration] No localStorage data to migrate');
+            window.localStorage.setItem(MIGRATION_FLAG, 'true');
           }
         }
 

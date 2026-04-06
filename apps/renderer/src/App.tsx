@@ -318,6 +318,68 @@ const MASTERING_CACHE_DISCLOSURE_REMINDER =
   'If you reference cached track analyses, explicitly tell the user those values came from the mastering cache.';
 const AI_EQ_PER_SONG_KEY_PREFIX = 'producer-player.ai-eq-recommendation.';
 const EQ_LIVE_STATE_PER_SONG_KEY_PREFIX = 'producer-player.eq-live-state.';
+const MIX_REF_SHORTCUT_STORAGE_KEY = 'producer-player.mix-ref-shortcut.v1';
+
+interface StoredShortcut {
+  key: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+}
+
+const DEFAULT_MIX_REF_SHORTCUT: StoredShortcut = {
+  key: 'r',
+  metaKey: true,
+  ctrlKey: false,
+  altKey: false,
+  shiftKey: false,
+};
+
+function readStoredShortcut(): StoredShortcut {
+  if (typeof window === 'undefined') return DEFAULT_MIX_REF_SHORTCUT;
+  try {
+    const raw = window.localStorage.getItem(MIX_REF_SHORTCUT_STORAGE_KEY);
+    if (!raw) return DEFAULT_MIX_REF_SHORTCUT;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as StoredShortcut).key === 'string'
+    ) {
+      return parsed as StoredShortcut;
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_MIX_REF_SHORTCUT;
+}
+
+function persistStoredShortcut(shortcut: StoredShortcut): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(MIX_REF_SHORTCUT_STORAGE_KEY, JSON.stringify(shortcut));
+  } catch { /* ignore */ }
+}
+
+function formatShortcutLabel(shortcut: StoredShortcut): string {
+  const parts: string[] = [];
+  if (shortcut.metaKey) parts.push('\u2318');
+  if (shortcut.ctrlKey) parts.push('Ctrl');
+  if (shortcut.altKey) parts.push('Alt');
+  if (shortcut.shiftKey) parts.push('Shift');
+  const keyLabel = shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key;
+  parts.push(keyLabel);
+  return parts.join('+');
+}
+
+function shortcutMatchesEvent(shortcut: StoredShortcut, event: KeyboardEvent): boolean {
+  return (
+    event.key.toLowerCase() === shortcut.key.toLowerCase() &&
+    event.metaKey === shortcut.metaKey &&
+    event.ctrlKey === shortcut.ctrlKey &&
+    event.altKey === shortcut.altKey &&
+    event.shiftKey === shortcut.shiftKey
+  );
+}
 
 interface PersistedEqLiveState {
   gains: number[];
@@ -1691,6 +1753,9 @@ export function App(): JSX.Element {
   const inspectorVersionSampleRatePendingVersionIdsRef = useRef<Set<string>>(new Set());
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+  const [mixRefShortcut, setMixRefShortcut] = useState<StoredShortcut>(readStoredShortcut);
+  const [shortcutRecording, setShortcutRecording] = useState(false);
+  const [shortcutSectionExpanded, setShortcutSectionExpanded] = useState(false);
   const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(() =>
     window.localStorage.getItem(MORE_METRICS_EXPANDED_KEY) === 'true'
   );
@@ -2182,7 +2247,12 @@ export function App(): JSX.Element {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setAnalysisExpanded(false);
+        // Close the quick switcher first if it's open; otherwise close the overlay.
+        if (quickSwitcherOpen) {
+          setQuickSwitcherOpen(false);
+        } else {
+          setAnalysisExpanded(false);
+        }
       }
     };
 
@@ -2190,21 +2260,25 @@ export function App(): JSX.Element {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [analysisExpanded]);
+  }, [analysisExpanded, quickSwitcherOpen]);
 
-  // R key shortcut to toggle Mix/Reference playback (mastering fullscreen only)
+  // Customizable keyboard shortcut to toggle Mix/Reference playback (mastering fullscreen only).
+  // Default: Cmd+R (macOS) / Ctrl+R (Windows/Linux). User can rebind via the Shortcut section.
   useEffect(() => {
     if (!analysisExpanded) return;
 
-    const handleRKey = (event: KeyboardEvent) => {
+    const handleShortcutKey = (event: KeyboardEvent) => {
       // Don't trigger when focus is in a text input
       const tag = (event.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (event.target as HTMLElement)?.isContentEditable) {
         return;
       }
-      if (event.key !== 'r' && event.key !== 'R') return;
-      // Don't trigger if modifier keys are pressed
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      // Check against the stored shortcut
+      if (!shortcutMatchesEvent(mixRefShortcut, event)) return;
+
+      // Prevent browser refresh (Cmd+R / Ctrl+R default behavior)
+      event.preventDefault();
 
       // Toggle mix ↔ reference (only if reference is loaded)
       if (referenceTrack) {
@@ -2228,9 +2302,37 @@ export function App(): JSX.Element {
       }
     };
 
-    window.addEventListener('keydown', handleRKey);
-    return () => window.removeEventListener('keydown', handleRKey);
-  }, [analysisExpanded, referenceTrack, playbackPreviewMode, eqEnabled, eqBandGains]);
+    window.addEventListener('keydown', handleShortcutKey);
+    return () => window.removeEventListener('keydown', handleShortcutKey);
+  }, [analysisExpanded, referenceTrack, playbackPreviewMode, eqEnabled, eqBandGains, mixRefShortcut]);
+
+  // Shortcut recording: listen for the next keypress combo and save it
+  useEffect(() => {
+    if (!shortcutRecording) return;
+
+    const handleRecord = (event: KeyboardEvent) => {
+      // Ignore bare modifier keys (wait for a real key)
+      if (['Meta', 'Control', 'Alt', 'Shift'].includes(event.key)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const newShortcut: StoredShortcut = {
+        key: event.key,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        shiftKey: event.shiftKey,
+      };
+
+      setMixRefShortcut(newShortcut);
+      persistStoredShortcut(newShortcut);
+      setShortcutRecording(false);
+    };
+
+    window.addEventListener('keydown', handleRecord, true);
+    return () => window.removeEventListener('keydown', handleRecord, true);
+  }, [shortcutRecording]);
 
   // Close quick switcher when mastering overlay closes
   useEffect(() => {
@@ -4532,6 +4634,15 @@ export function App(): JSX.Element {
 
   // Request AI-recommended EQ curve via the agent chat session.
   // Sends a structured prompt and watches for the JSON response via agent events.
+  //
+  // Correctness note: `analysis` and `measuredAnalysis` are React state that re-derives
+  // whenever `selectedPlaybackVersionId` changes (see the useEffect at the top that calls
+  // `analyzeTrackFromUrl` / `analyzeAudioFile`). They always reflect the CURRENTLY selected
+  // song. `selectedPlaybackVersion` is derived from the current `selectedPlaybackVersionId`
+  // via snapshot lookup. `requestSongId` captures the song ID at call time so the persisted
+  // recommendation goes to the correct song even if the user switches tracks before the
+  // agent finishes. The prompt builder therefore uses the current song's stats, and the
+  // result is persisted under the current song's ID.
   const handleRequestAiEq = useCallback(() => {
     if (!selectedPlaybackVersion || aiEqLoading) return;
 
@@ -6851,7 +6962,7 @@ export function App(): JSX.Element {
       setSelectedPlaybackVersionId(nextPlaybackVersionId);
     }
 
-    setQuickSwitcherOpen(false);
+    // Panel stays open — user closes via toggle button, backdrop click, or Escape.
 
     if (!nextPlaybackVersionId) return;
 
@@ -10544,9 +10655,6 @@ export function App(): JSX.Element {
                   </div>
                   <div className="reference-panel-layout">
                   <div className="reference-panel-controls">
-                  <p className="muted">
-                    Load a reference track to A/B against your mix.
-                  </p>
                   <div className="analysis-reference-actions">
                     <button
                       type="button"
@@ -10631,6 +10739,48 @@ export function App(): JSX.Element {
                       ) : null}
                     </div>
                   </div>
+                  </div>
+
+                  <div style={{ marginTop: 6, marginBottom: 2 }}>
+                    <button
+                      type="button"
+                      className="ghost"
+                      style={{ fontSize: 11, padding: '2px 6px', opacity: 0.7 }}
+                      onClick={() => setShortcutSectionExpanded((v) => !v)}
+                      data-testid="shortcut-section-toggle"
+                      title="Configure the keyboard shortcut for Mix/Reference toggle"
+                    >
+                      {shortcutSectionExpanded ? '\u25BC' : '\u25B6'} Shortcut: {formatShortcutLabel(mixRefShortcut)}
+                    </button>
+                    {shortcutSectionExpanded ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 12 }}>
+                        <span className="muted">Current: <strong>{formatShortcutLabel(mixRefShortcut)}</strong></span>
+                        <button
+                          type="button"
+                          className={shortcutRecording ? 'active' : 'ghost'}
+                          style={{ fontSize: 11, padding: '2px 8px' }}
+                          onClick={() => setShortcutRecording((v) => !v)}
+                          data-testid="shortcut-change-button"
+                          title={shortcutRecording ? 'Press any key combo to set the new shortcut' : 'Click to record a new shortcut'}
+                        >
+                          {shortcutRecording ? 'Press a key combo\u2026' : 'Change'}
+                        </button>
+                        {JSON.stringify(mixRefShortcut) !== JSON.stringify(DEFAULT_MIX_REF_SHORTCUT) ? (
+                          <button
+                            type="button"
+                            className="ghost"
+                            style={{ fontSize: 11, padding: '2px 8px' }}
+                            onClick={() => {
+                              setMixRefShortcut(DEFAULT_MIX_REF_SHORTCUT);
+                              persistStoredShortcut(DEFAULT_MIX_REF_SHORTCUT);
+                            }}
+                            title="Reset to default shortcut"
+                          >
+                            Reset
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="analysis-reference-slot active" data-testid="analysis-reference-slot-a">

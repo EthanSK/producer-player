@@ -4151,7 +4151,14 @@ export function App(): JSX.Element {
       : null;
   const referencePlaybackKey = getReferencePlaybackKey(referenceTrack);
   const isRefMode = playbackPreviewMode === 'reference' && referenceTrack !== null;
-  const referenceModeSuffix = isRefMode ? ' (Using Reference)' : '';
+  const selectedNormalizationPlatform = getNormalizationPlatformProfile(
+    selectedNormalizationPlatformId
+  );
+  const referenceModeSuffix = isRefMode
+    ? normalizationPreviewEnabled
+      ? ` (Using Reference + ${selectedNormalizationPlatform.shortLabel} Preview)`
+      : ' (Using Reference)'
+    : '';
   const showingReferenceSuffix = referenceModeSuffix;
   const usingReferenceSuffix = referenceModeSuffix;
   const activePreviewAnalysis = isRefMode ? referenceTrack?.previewAnalysis ?? null : analysis;
@@ -4189,20 +4196,22 @@ export function App(): JSX.Element {
   const referenceShortTermEstimate = referenceTrack
     ? estimateShortTermLufs(referenceTrack.previewAnalysis, 0)
     : null;
-  const selectedNormalizationPlatform = getNormalizationPlatformProfile(
-    selectedNormalizationPlatformId
-  );
+  // When playing reference, compute normalization from the reference track's measured LUFS
+  // so the user can compare "how does my mix sound on Spotify" vs "how does the reference sound on Spotify".
+  const normalizationSourceAnalysis = isRefMode
+    ? referenceTrack?.measuredAnalysis ?? null
+    : measuredAnalysis;
   const normalizationPreview = computePlatformNormalizationPreview(
-    measuredAnalysis,
+    normalizationSourceAnalysis,
     selectedNormalizationPlatform
   );
   const normalizationPreviewByPlatformId = useMemo(() => {
     const map = new Map<NormalizationPlatformId, ReturnType<typeof computePlatformNormalizationPreview>>();
     for (const platform of NORMALIZATION_PLATFORM_PROFILES) {
-      map.set(platform.id, computePlatformNormalizationPreview(measuredAnalysis, platform));
+      map.set(platform.id, computePlatformNormalizationPreview(normalizationSourceAnalysis, platform));
     }
     return map;
-  }, [measuredAnalysis]);
+  }, [normalizationSourceAnalysis]);
   const masteringCacheTrackSummaries = useMemo(() => {
     return albumActiveVersions.map(({ song, version }) => {
       const cachedEntry = masteringCacheByVersionId[version.id];
@@ -4738,7 +4747,10 @@ export function App(): JSX.Element {
     }
 
     // --- Insert EQ peaking filters in series (if any band has non-zero gain and EQ is enabled) ---
-    const hasEqGain = eqEnabled && eqBandGains.some((g) => g !== 0);
+    // Skip EQ entirely when playing the reference track — reference audio should be clean/unmodified.
+    // The EQ sliders still show the mix's EQ settings visually for quick A/B comparison.
+    const isReferencePlayback = playbackPreviewMode === 'reference';
+    const hasEqGain = eqEnabled && eqBandGains.some((g) => g !== 0) && !isReferencePlayback;
     if (hasEqGain) {
       for (let i = 0; i < FREQUENCY_BANDS.length; i++) {
         const g = eqBandGains[i];
@@ -4782,7 +4794,7 @@ export function App(): JSX.Element {
         gainNode.connect(audioContext.destination);
       } catch { /* ignore */ }
     };
-  }, [midSideMode, soloedBands, eqBandGains, eqEnabled, desiredPlaybackKey]);
+  }, [midSideMode, soloedBands, eqBandGains, eqEnabled, desiredPlaybackKey, playbackPreviewMode]);
 
   async function resumePlaybackContextIfNeeded(): Promise<void> {
     const playbackAudioContext = playbackAudioContextRef.current;

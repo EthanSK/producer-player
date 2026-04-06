@@ -12,6 +12,9 @@ export const EQ_GAIN_DEFAULT_DB = 0;
 /** Maximum number of saved EQ snapshots. */
 const MAX_EQ_SNAPSHOTS = 10;
 const EQ_SNAPSHOTS_STORAGE_KEY_PREFIX = 'producer-player-eq-snapshots';
+/** Old global key used before per-song storage was introduced. */
+const EQ_SNAPSHOTS_OLD_GLOBAL_KEY = 'producer-player-eq-snapshots';
+const EQ_SNAPSHOTS_GLOBAL_MIGRATED_KEY = 'producer-player-eq-snapshots-global-migrated';
 
 export interface EqSnapshot {
   id: string;
@@ -23,11 +26,9 @@ function storageKeyForSong(songKey: string): string {
   return `${EQ_SNAPSHOTS_STORAGE_KEY_PREFIX}-${songKey}`;
 }
 
-function loadSnapshots(songKey: string | undefined): EqSnapshot[] {
-  if (!songKey) return [];
+function parseSnapshotArray(raw: string | null): EqSnapshot[] {
+  if (!raw) return [];
   try {
-    const raw = localStorage.getItem(storageKeyForSong(songKey));
-    if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
@@ -38,6 +39,32 @@ function loadSnapshots(songKey: string | undefined): EqSnapshot[] {
         Array.isArray((s as EqSnapshot).gains) &&
         typeof (s as EqSnapshot).timestamp === 'number'
     );
+  } catch {
+    return [];
+  }
+}
+
+function loadSnapshots(songKey: string | undefined): EqSnapshot[] {
+  if (!songKey) return [];
+  try {
+    const perSong = parseSnapshotArray(localStorage.getItem(storageKeyForSong(songKey)));
+    if (perSong.length > 0) return perSong;
+
+    // Migrate from old global key (pre per-song storage) if available and not yet migrated.
+    const alreadyMigrated = localStorage.getItem(EQ_SNAPSHOTS_GLOBAL_MIGRATED_KEY);
+    if (!alreadyMigrated) {
+      const globalSnapshots = parseSnapshotArray(localStorage.getItem(EQ_SNAPSHOTS_OLD_GLOBAL_KEY));
+      if (globalSnapshots.length > 0) {
+        // Copy old global snapshots to this song's per-song key
+        localStorage.setItem(storageKeyForSong(songKey), JSON.stringify(globalSnapshots));
+        localStorage.setItem(EQ_SNAPSHOTS_GLOBAL_MIGRATED_KEY, 'true');
+        return globalSnapshots;
+      }
+      // Mark as migrated even if empty so we only check once
+      localStorage.setItem(EQ_SNAPSHOTS_GLOBAL_MIGRATED_KEY, 'true');
+    }
+
+    return [];
   } catch {
     return [];
   }

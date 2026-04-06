@@ -1,0 +1,6 @@
+{
+  "swift.disable": true,
+  "sourcekit-lsp.disable": true,
+  "swift.path": "",
+  "sourcekit-lsp.serverPath": ""
+}

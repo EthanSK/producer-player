@@ -317,6 +317,15 @@ const MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION = 1;
 const MASTERING_CACHE_DISCLOSURE_REMINDER =
   'If you reference cached track analyses, explicitly tell the user those values came from the mastering cache.';
 const AI_EQ_PER_SONG_KEY_PREFIX = 'producer-player.ai-eq-recommendation.';
+const EQ_LIVE_STATE_PER_SONG_KEY_PREFIX = 'producer-player.eq-live-state.';
+
+interface PersistedEqLiveState {
+  gains: number[];
+  eqEnabled: boolean;
+  showAiEqCurve: boolean;
+  showRefDiffCurve: boolean;
+  showEqTonalBalance: boolean;
+}
 
 interface MasteringCacheStatusState {
   status: 'fresh' | 'stale' | 'missing' | 'pending' | 'error';
@@ -1225,6 +1234,37 @@ function readAiEqForSong(songId: string): number[] | null {
     const parsed: unknown = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length >= 6 && parsed.every((v) => typeof v === 'number')) {
       return parsed as number[];
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+/** Persist the live EQ state for a song (debounced by caller). */
+function persistEqLiveStateForSong(songId: string, state: PersistedEqLiveState): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      `${EQ_LIVE_STATE_PER_SONG_KEY_PREFIX}${songId}`,
+      JSON.stringify(state),
+    );
+  } catch { /* localStorage may be full */ }
+}
+
+/** Read persisted live EQ state for a song. */
+function readEqLiveStateForSong(songId: string): PersistedEqLiveState | null {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(`${EQ_LIVE_STATE_PER_SONG_KEY_PREFIX}${songId}`);
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      Array.isArray((parsed as PersistedEqLiveState).gains) &&
+      (parsed as PersistedEqLiveState).gains.length >= 6 &&
+      typeof (parsed as PersistedEqLiveState).eqEnabled === 'boolean'
+    ) {
+      return parsed as PersistedEqLiveState;
     }
   } catch { /* ignore */ }
   return null;
@@ -2151,6 +2191,46 @@ export function App(): JSX.Element {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [analysisExpanded]);
+
+  // R key shortcut to toggle Mix/Reference playback (mastering fullscreen only)
+  useEffect(() => {
+    if (!analysisExpanded) return;
+
+    const handleRKey = (event: KeyboardEvent) => {
+      // Don't trigger when focus is in a text input
+      const tag = (event.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (event.target as HTMLElement)?.isContentEditable) {
+        return;
+      }
+      if (event.key !== 'r' && event.key !== 'R') return;
+      // Don't trigger if modifier keys are pressed
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      // Toggle mix ↔ reference (only if reference is loaded)
+      if (referenceTrack) {
+        const nextMode = playbackPreviewMode === 'mix' ? 'reference' : 'mix';
+        // Save current EQ state for the source we're leaving, restore the one we're entering
+        if (nextMode !== playbackPreviewMode) {
+          const currentEqState = { enabled: eqEnabled, gains: [...eqBandGains] };
+          if (playbackPreviewMode === 'mix') {
+            mixEqStateRef.current = currentEqState;
+            const restored = referenceEqStateRef.current;
+            setEqEnabled(restored.enabled);
+            setEqBandGains([...restored.gains]);
+          } else {
+            referenceEqStateRef.current = currentEqState;
+            const restored = mixEqStateRef.current;
+            setEqEnabled(restored.enabled);
+            setEqBandGains([...restored.gains]);
+          }
+        }
+        setPlaybackPreviewMode(nextMode);
+      }
+    };
+
+    window.addEventListener('keydown', handleRKey);
+    return () => window.removeEventListener('keydown', handleRKey);
+  }, [analysisExpanded, referenceTrack, playbackPreviewMode, eqEnabled, eqBandGains]);
 
   // Close quick switcher when mastering overlay closes
   useEffect(() => {
@@ -4448,15 +4528,50 @@ export function App(): JSX.Element {
 
     setAiEqLoading(true);
 
+    // Build other tracks' tonal balance for album consistency
+    const otherTracksTonalBalance: Array<{ name: string; low: number; mid: number; high: number }> = [];
+    for (const song of albumSongs) {
+      if (song.id === selectedPlaybackVersion.songId) continue;
+      for (const version of song.versions) {
+        const cached = previewAnalysisCacheRef.current.get(version.id);
+        if (cached?.tonalBalance) {
+          otherTracksTonalBalance.push({
+            name: version.fileName,
+            low: cached.tonalBalance.low,
+            mid: cached.tonalBalance.mid,
+            high: cached.tonalBalance.high,
+          });
+          break; // one version per song is enough
+        }
+      }
+    }
+
     const prompt = buildAiEqRecommendationPrompt({
       tonalBalance: analysis?.tonalBalance,
       crestFactorDb: analysis?.crestFactorDb,
       rmsDbfs: analysis?.rmsDbfs,
+      peakDbfs: analysis?.peakDbfs,
+      dcOffset: analysis?.dcOffset,
+      clipCount: analysis?.clipCount,
       integratedLufs: measuredAnalysis?.integratedLufs,
       truePeakDbfs: measuredAnalysis?.truePeakDbfs,
       loudnessRangeLufs: measuredAnalysis?.loudnessRangeLufs,
+      meanVolumeDbfs: measuredAnalysis?.meanVolumeDbfs,
+      maxMomentaryLufs: measuredAnalysis?.maxMomentaryLufs,
+      maxShortTermLufs: measuredAnalysis?.maxShortTermLufs,
+      samplePeakDbfs: measuredAnalysis?.samplePeakDbfs,
+      sampleRateHz: measuredAnalysis?.sampleRateHz,
       referenceFileName: referenceTrack?.fileName,
       referenceTonalBalance: referenceTrack?.previewAnalysis?.tonalBalance,
+      referenceIntegratedLufs: referenceTrack?.measuredAnalysis?.integratedLufs,
+      referenceTruePeakDbfs: referenceTrack?.measuredAnalysis?.truePeakDbfs,
+      referenceLoudnessRangeLufs: referenceTrack?.measuredAnalysis?.loudnessRangeLufs,
+      referenceCrestFactorDb: referenceTrack?.previewAnalysis?.crestFactorDb,
+      referenceRmsDbfs: referenceTrack?.previewAnalysis?.rmsDbfs,
+      otherTracksTonalBalance: otherTracksTonalBalance.length > 0 ? otherTracksTonalBalance : undefined,
+      currentEqGains: eqBandGains,
+      eqEnabled,
+      midSideMode,
     });
 
     // Capture the songId at request time so we persist to the correct song
@@ -4487,7 +4602,7 @@ export function App(): JSX.Element {
       id: `ai-eq-recommend-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       prompt,
     });
-  }, [selectedPlaybackVersion, aiEqLoading, analysis, measuredAnalysis, referenceTrack]);
+  }, [selectedPlaybackVersion, aiEqLoading, analysis, measuredAnalysis, referenceTrack, albumSongs, eqBandGains, eqEnabled, midSideMode]);
 
   function renderMasteringPanelDragHandle(
     surface: 'compact',
@@ -6209,6 +6324,54 @@ export function App(): JSX.Element {
     // Show the curve automatically if a stored recommendation exists
     setShowAiEqCurve(stored !== null);
   }, [selectedSongId]);
+
+  // Restore per-song live EQ state when song changes
+  const autoLoadEqLiveSongIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedSongId || selectedSongId === autoLoadEqLiveSongIdRef.current) return;
+    autoLoadEqLiveSongIdRef.current = selectedSongId;
+
+    const stored = readEqLiveStateForSong(selectedSongId);
+    if (stored) {
+      setEqBandGains([...stored.gains]);
+      setEqEnabled(stored.eqEnabled);
+      setShowAiEqCurve(stored.showAiEqCurve);
+      setShowRefDiffCurve(stored.showRefDiffCurve);
+      setShowEqTonalBalance(stored.showEqTonalBalance);
+      // Keep the mix EQ ref in sync so A/B toggling works correctly
+      mixEqStateRef.current = { enabled: stored.eqEnabled, gains: [...stored.gains] };
+    } else {
+      // Reset to defaults for songs without saved EQ state
+      setEqBandGains(FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB));
+      setEqEnabled(false);
+      setShowRefDiffCurve(false);
+      setShowEqTonalBalance(false);
+      mixEqStateRef.current = {
+        enabled: false,
+        gains: FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB),
+      };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSongId]);
+
+  // Auto-save live EQ state per-song (debounced 500ms)
+  const eqLiveSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!selectedSongId) return;
+    if (eqLiveSaveTimerRef.current) clearTimeout(eqLiveSaveTimerRef.current);
+    eqLiveSaveTimerRef.current = setTimeout(() => {
+      persistEqLiveStateForSong(selectedSongId, {
+        gains: [...eqBandGains],
+        eqEnabled,
+        showAiEqCurve,
+        showRefDiffCurve,
+        showEqTonalBalance,
+      });
+    }, 500);
+    return () => {
+      if (eqLiveSaveTimerRef.current) clearTimeout(eqLiveSaveTimerRef.current);
+    };
+  }, [selectedSongId, eqBandGains, eqEnabled, showAiEqCurve, showRefDiffCurve, showEqTonalBalance]);
 
   function handleReferencePreviewModeChange(nextMode: 'mix' | 'reference'): void {
     if (nextMode === 'reference' && !referenceTrack) {
@@ -10224,7 +10387,7 @@ export function App(): JSX.Element {
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
                       <div className="analysis-panel-header-row">
                         <div className="analysis-section-header">
-                          <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{usingReferenceSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high).\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
+                          <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{usingReferenceSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high). Hover the spectrum to see a crosshair with the exact frequency and dB at that point.\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nEQ Features:\n- Manual EQ sliders: Drag the horizontal sliders on each band to boost or cut that frequency range (±12 dB). Double-click a slider to reset it.\n- EQ On/Off toggle: Bypass the EQ without clearing your slider positions. Click 'EQ On' / 'EQ Off' to toggle.\n- EQ Snapshots: Click 'Save' to store the current EQ settings. Snapshots are per-track. Click a snapshot pill to restore it, or × to delete.\n- AI Recommended EQ (cyan dashed curve): Click 'Get AI EQ' to ask the AI agent for a recommended mastering EQ curve based on your track's analysis. The recommendation appears as a cyan dashed overlay.\n- Use AI EQ button: Apply the AI recommendation to your EQ sliders with one click.\n- Reference Delta (green dotted curve): When a reference track is loaded, toggle 'Ref Δ' to show the tonal balance difference between your mix and the reference as a green dashed curve.\n- Show EQ'd Tonal Balance toggle: When EQ is active, toggle this to see how your tonal balance would change with the current EQ applied.\n- R key shortcut: Press R to quickly toggle between Mix and Reference playback (only when a reference track is loaded).\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
                           <p className="analysis-section-subtitle">Real-time frequency content — click a band to solo; Shift+click to exclude.</p>
                         </div>
                         {renderMasteringPanelDragHandle('fullscreen', 'visualizations')}

@@ -1,6 +1,6 @@
 {
   "name": "producer-player",
-  "version": "2.52.0",
+  "version": "2.53.0",
   "private": true,
   "description": "Producer Player desktop app for producers managing album tracks, exports, and ordering.",
   "author": "EthanSK",
@@ -49,7 +49,7 @@
     "version:check": "node ./scripts/check-version-consistency.mjs",
     "version:bump:check": "node ./scripts/check-version-bump.mjs",
     "version:bump:patch": "node ./scripts/bump-version.mjs && npm run version:sync",
-    "version:bump:minor": "node ./scripts/bump-version.mjs major && npm run version:sync",
+    "version:bump:minor": "node ./scripts/bump-version.mjs minor && npm run version:sync",
     "release:desktop:mac": "npm run build:mac",
     "release:desktop:linux": "npm run build && electron-builder --linux zip --publish never",
     "release:desktop:win": "npm run build && electron-builder --win zip --publish never",

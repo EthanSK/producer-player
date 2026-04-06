@@ -46,8 +46,28 @@ export interface AiEqPromptStats {
   integratedLufs?: number | null;
   truePeakDbfs?: number | null;
   loudnessRangeLufs?: number | null;
+  peakDbfs?: number;
+  dcOffset?: number;
+  clipCount?: number;
+  meanVolumeDbfs?: number | null;
+  maxMomentaryLufs?: number | null;
+  maxShortTermLufs?: number | null;
+  samplePeakDbfs?: number | null;
+  sampleRateHz?: number | null;
   referenceFileName?: string;
   referenceTonalBalance?: { low: number; mid: number; high: number };
+  referenceIntegratedLufs?: number | null;
+  referenceTruePeakDbfs?: number | null;
+  referenceLoudnessRangeLufs?: number | null;
+  referenceCrestFactorDb?: number;
+  referenceRmsDbfs?: number;
+  /** Other tracks' tonal balance for album consistency context. */
+  otherTracksTonalBalance?: ReadonlyArray<{ name: string; low: number; mid: number; high: number }>;
+  /** Current EQ slider positions so the AI knows what has already been adjusted. */
+  currentEqGains?: readonly number[];
+  eqEnabled?: boolean;
+  /** Mid/side listening mode. */
+  midSideMode?: 'stereo' | 'mid' | 'side';
 }
 
 /**
@@ -57,27 +77,104 @@ export interface AiEqPromptStats {
 export function buildAiEqRecommendationPrompt(stats: AiEqPromptStats): string {
   const parts: string[] = [
     'Analyze this track and recommend a mastering EQ curve.',
-    'Consider the current LUFS, true peak, tonal balance, crest factor, dynamic range, and any reference track comparison.',
+    'Consider ALL of the following analysis data when making your recommendation.',
   ];
 
+  // Tonal balance
   if (stats.tonalBalance) {
     parts.push(
       `Current tonal balance: low=${(stats.tonalBalance.low * 100).toFixed(1)}%, mid=${(stats.tonalBalance.mid * 100).toFixed(1)}%, high=${(stats.tonalBalance.high * 100).toFixed(1)}%.`
     );
   }
+
+  // Dynamics and levels
   if (stats.crestFactorDb != null && stats.rmsDbfs != null) {
     parts.push(`Crest factor: ${stats.crestFactorDb.toFixed(1)} dB, RMS: ${stats.rmsDbfs.toFixed(1)} dBFS.`);
   }
+
+  // Full loudness stats
   if (stats.integratedLufs != null) {
     parts.push(
       `Integrated LUFS: ${stats.integratedLufs.toFixed(1)}, True Peak: ${stats.truePeakDbfs?.toFixed(1) ?? 'N/A'} dBTP, LRA: ${stats.loudnessRangeLufs?.toFixed(1) ?? 'N/A'} LU.`
     );
   }
-  if (stats.referenceFileName && stats.referenceTonalBalance) {
-    const rt = stats.referenceTonalBalance;
+  if (stats.meanVolumeDbfs != null) {
+    parts.push(`Mean volume: ${stats.meanVolumeDbfs.toFixed(1)} dBFS.`);
+  }
+  if (stats.maxMomentaryLufs != null) {
+    parts.push(`Max momentary LUFS: ${stats.maxMomentaryLufs.toFixed(1)}.`);
+  }
+  if (stats.maxShortTermLufs != null) {
+    parts.push(`Max short-term LUFS: ${stats.maxShortTermLufs.toFixed(1)}.`);
+  }
+  if (stats.samplePeakDbfs != null) {
+    parts.push(`Sample peak: ${stats.samplePeakDbfs.toFixed(1)} dBFS.`);
+  }
+  if (stats.peakDbfs != null) {
+    parts.push(`Web Audio peak: ${stats.peakDbfs.toFixed(1)} dBFS.`);
+  }
+
+  // Clip and DC offset info
+  if (stats.clipCount != null && stats.clipCount > 0) {
+    parts.push(`Clip count: ${stats.clipCount} clipped samples detected.`);
+  }
+  if (stats.dcOffset != null && Math.abs(stats.dcOffset) > 0.0001) {
+    parts.push(`DC offset: ${stats.dcOffset.toFixed(4)} (non-zero DC offset present).`);
+  }
+
+  // Sample rate
+  if (stats.sampleRateHz != null) {
+    parts.push(`Sample rate: ${stats.sampleRateHz} Hz.`);
+  }
+
+  // Reference track analysis (full)
+  if (stats.referenceFileName) {
+    const refParts: string[] = [`Reference track: "${stats.referenceFileName}".`];
+    if (stats.referenceTonalBalance) {
+      const rt = stats.referenceTonalBalance;
+      refParts.push(
+        `Reference tonal balance: low=${(rt.low * 100).toFixed(1)}%, mid=${(rt.mid * 100).toFixed(1)}%, high=${(rt.high * 100).toFixed(1)}%.`
+      );
+    }
+    if (stats.referenceIntegratedLufs != null) {
+      refParts.push(`Reference integrated LUFS: ${stats.referenceIntegratedLufs.toFixed(1)}.`);
+    }
+    if (stats.referenceTruePeakDbfs != null) {
+      refParts.push(`Reference true peak: ${stats.referenceTruePeakDbfs.toFixed(1)} dBTP.`);
+    }
+    if (stats.referenceLoudnessRangeLufs != null) {
+      refParts.push(`Reference LRA: ${stats.referenceLoudnessRangeLufs.toFixed(1)} LU.`);
+    }
+    if (stats.referenceCrestFactorDb != null && stats.referenceRmsDbfs != null) {
+      refParts.push(`Reference crest factor: ${stats.referenceCrestFactorDb.toFixed(1)} dB, RMS: ${stats.referenceRmsDbfs.toFixed(1)} dBFS.`);
+    }
+    parts.push(refParts.join(' '));
+  }
+
+  // Other tracks for album consistency
+  if (stats.otherTracksTonalBalance && stats.otherTracksTonalBalance.length > 0) {
+    parts.push('Other tracks in the album (for consistency context):');
+    for (const t of stats.otherTracksTonalBalance) {
+      parts.push(
+        `  - "${t.name}": low=${(t.low * 100).toFixed(1)}%, mid=${(t.mid * 100).toFixed(1)}%, high=${(t.high * 100).toFixed(1)}%`
+      );
+    }
+  }
+
+  // Current EQ state
+  if (stats.currentEqGains && stats.currentEqGains.length >= 6) {
+    const bandNames = ['Sub', 'Low', 'Low-Mid', 'Mid', 'High-Mid', 'High'];
+    const eqDesc = bandNames
+      .map((name, i) => `${name}: ${stats.currentEqGains![i] > 0 ? '+' : ''}${stats.currentEqGains![i].toFixed(1)} dB`)
+      .join(', ');
     parts.push(
-      `Reference track "${stats.referenceFileName}" tonal balance: low=${(rt.low * 100).toFixed(1)}%, mid=${(rt.mid * 100).toFixed(1)}%, high=${(rt.high * 100).toFixed(1)}%.`
+      `Current EQ settings (${stats.eqEnabled ? 'enabled' : 'bypassed'}): ${eqDesc}.`
     );
+  }
+
+  // Mid/side mode
+  if (stats.midSideMode && stats.midSideMode !== 'stereo') {
+    parts.push(`Currently monitoring in ${stats.midSideMode} mode.`);
   }
 
   parts.push(
@@ -87,7 +184,7 @@ export function buildAiEqRecommendationPrompt(stats: AiEqPromptStats): string {
     '{"eq_recommendation": {"bands": [{"name": "Sub", "gain": 0}, {"name": "Low", "gain": 0}, {"name": "Low-Mid", "gain": 0}, {"name": "Mid", "gain": 0}, {"name": "High-Mid", "gain": 0}, {"name": "High", "gain": 0}], "reasoning": "Brief explanation"}}',
     '```',
     'Each gain is in dB (range -12 to +12). The 6 bands are: Sub (20-120 Hz), Low (120-500 Hz), Low-Mid (500-2000 Hz), Mid (2000-6000 Hz), High-Mid (6000-12000 Hz), High (12000-20000 Hz).',
-    'Be specific and practical. Base recommendations on the analysis data provided.',
+    'Be specific and practical. Base recommendations on ALL the analysis data provided. If a reference track is loaded, prioritize matching its tonal character. If other album tracks are provided, consider album consistency.',
   );
 
   return parts.join('\n');

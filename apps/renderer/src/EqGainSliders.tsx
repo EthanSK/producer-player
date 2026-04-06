@@ -194,7 +194,7 @@ export function EqGainSliders({
       </div>
       {snapshots.length > 0 && (
         <div className="eq-snapshots-row" data-testid="eq-snapshots-row">
-          {snapshots.map((snap, idx) => (
+          {[...snapshots].reverse().map((snap, idx) => (
             <div key={snap.id} className="eq-snapshot-pill" data-testid={`eq-snapshot-${idx}`}>
               <button
                 type="button"

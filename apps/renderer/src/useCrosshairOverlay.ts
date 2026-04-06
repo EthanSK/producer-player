@@ -173,5 +173,36 @@ export function drawCrosshair(
     ctx.fillText(yLabel, yLabelX + yLabelW / 2, yLabelY + yLabelH / 2);
   }
 
+  // Combined "Hz | dB" tooltip near the crosshair intersection
+  if (xLabel && yLabel) {
+    const combinedText = `${xLabel}  |  ${yLabel}`;
+    ctx.font = '11px Inter, sans-serif';
+    const combinedMetrics = ctx.measureText(combinedText);
+    const combinedW = combinedMetrics.width + labelPadH * 2 + 4;
+    const combinedH = 18;
+    const gap = 10;
+
+    // Position: above and to the right of the crosshair by default
+    let combinedX = cx + gap;
+    let combinedY = cy - combinedH - gap;
+
+    // Keep within plot bounds
+    if (combinedX + combinedW > plotRight) combinedX = cx - combinedW - gap;
+    if (combinedY < plotTop) combinedY = cy + gap;
+
+    ctx.fillStyle = 'rgba(14, 22, 32, 0.92)';
+    ctx.beginPath();
+    ctx.roundRect(combinedX, combinedY, combinedW, combinedH, 4);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(92, 167, 255, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(220, 235, 255, 0.95)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(combinedText, combinedX + combinedW / 2, combinedY + combinedH / 2);
+  }
+
   ctx.restore();
 }

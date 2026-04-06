@@ -518,6 +518,7 @@ export function AgentChatPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [sessionActive, setSessionActive] = useState(false);
   const [provider, setProvider] = useState<AgentProviderId>(() => readStoredProvider());
   const [modelByProvider, setModelByProvider] = useState<
@@ -562,6 +563,9 @@ export function AgentChatPanel({
   const onboardingScheduledRef = useRef(false);
   const lastHandledPromptRequestIdRef = useRef<string | null>(null);
   const ignoredTurnCompleteCountRef = useRef(0);
+  const isOpenRef = useRef(isOpen);
+
+  isOpenRef.current = isOpen;
 
   const availableModels = AGENT_MODEL_OPTIONS_BY_PROVIDER[provider];
   const currentModel = availableModels.some((option) => option.id === modelByProvider[provider])
@@ -693,6 +697,9 @@ export function AgentChatPanel({
           const completedId = streamingMessageIdRef.current;
           streamingMessageIdRef.current = null;
           setIsStreaming(false);
+          if (completedId && !isOpenRef.current) {
+            setUnreadCount((prev) => prev + 1);
+          }
           if (completedId) {
             setMessages((prev) => {
               const next = prev.map((m) => {
@@ -822,6 +829,7 @@ export function AgentChatPanel({
       const next = !prev;
       if (next) {
         localStorage.setItem(AGENT_PANEL_SEEN_STORAGE_KEY, 'true');
+        setUnreadCount(0);
       } else {
         setSettingsOpen(false);
         setHistoryOpen(false);
@@ -1114,7 +1122,7 @@ export function AgentChatPanel({
         onClick={handleTogglePanel}
         data-testid="agent-panel-toggle"
         title={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'}
-        aria-label={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'}
+        aria-label={isOpen ? 'Minimize Producey Boy' : `Open Producey Boy${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
       >
         <svg
           viewBox="0 0 24 24"
@@ -1128,6 +1136,11 @@ export function AgentChatPanel({
         >
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
+        {!isOpen && unreadCount > 0 && (
+          <span className="agent-toggle-badge" data-testid="agent-toggle-badge">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        )}
       </button>
 
       <div

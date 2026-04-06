@@ -316,6 +316,7 @@ const FEATURE_REQUEST_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=featur
 const MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION = 1;
 const MASTERING_CACHE_DISCLOSURE_REMINDER =
   'If you reference cached track analyses, explicitly tell the user those values came from the mastering cache.';
+const AI_EQ_PER_SONG_KEY_PREFIX = 'producer-player.ai-eq-recommendation.';
 
 interface MasteringCacheStatusState {
   status: 'fresh' | 'stale' | 'missing' | 'pending' | 'error';
@@ -1202,6 +1203,31 @@ function persistReferenceTrackForSong(songId: string, filePath: string): void {
 function readReferenceTrackForSong(songId: string): string | null {
   if (typeof window === 'undefined') return null;
   return window.localStorage.getItem(`${REFERENCE_TRACK_PER_SONG_KEY_PREFIX}${songId}`) ?? null;
+}
+
+/** Persist AI-recommended EQ gains for a song. */
+function persistAiEqForSong(songId: string, gains: number[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      `${AI_EQ_PER_SONG_KEY_PREFIX}${songId}`,
+      JSON.stringify(gains),
+    );
+  } catch { /* localStorage may be full */ }
+}
+
+/** Read persisted AI EQ gains for a song. */
+function readAiEqForSong(songId: string): number[] | null {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(`${AI_EQ_PER_SONG_KEY_PREFIX}${songId}`);
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length >= 6 && parsed.every((v) => typeof v === 'number')) {
+      return parsed as number[];
+    }
+  } catch { /* ignore */ }
+  return null;
 }
 
 function formatAlbumDuration(totalSeconds: number | null): string {
@@ -4433,6 +4459,9 @@ export function App(): JSX.Element {
       referenceTonalBalance: referenceTrack?.previewAnalysis?.tonalBalance,
     });
 
+    // Capture the songId at request time so we persist to the correct song
+    const requestSongId = selectedPlaybackVersion.songId;
+
     // Accumulate text deltas from the agent response and parse on completion
     let accumulated = '';
 
@@ -4445,6 +4474,7 @@ export function App(): JSX.Element {
         if (parsed) {
           setAiRecommendedEq(parsed);
           setShowAiEqCurve(true);
+          persistAiEqForSong(requestSongId, parsed);
         }
         setAiEqLoading(false);
       } else if (event.type === 'error') {
@@ -6166,6 +6196,18 @@ export function App(): JSX.Element {
       void handleLoadReferenceByFilePath(persistedPath);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSongId]);
+
+  // Restore per-song AI EQ recommendation when song changes
+  const autoLoadAiEqSongIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedSongId || selectedSongId === autoLoadAiEqSongIdRef.current) return;
+    autoLoadAiEqSongIdRef.current = selectedSongId;
+
+    const stored = readAiEqForSong(selectedSongId);
+    setAiRecommendedEq(stored);
+    // Show the curve automatically if a stored recommendation exists
+    setShowAiEqCurve(stored !== null);
   }, [selectedSongId]);
 
   function handleReferencePreviewModeChange(nextMode: 'mix' | 'reference'): void {
@@ -10245,20 +10287,36 @@ export function App(): JSX.Element {
                                   : 'Ask AI to recommend an EQ curve for this track'
                             }
                           >
-                            {aiEqLoading ? 'AI...' : 'AI EQ'}
+                            {aiEqLoading ? 'Analyzing...' : aiRecommendedEq ? 'AI EQ' : 'AI Recommend'}
                           </button>
                         )}
                         {aiRecommendedEq && ENABLE_AGENT_FEATURES && (
-                          <button
-                            type="button"
-                            className="ghost eq-overlay-toggle eq-overlay-toggle--ai-refresh"
-                            data-testid="eq-overlay-refresh-ai-eq"
-                            onClick={handleRequestAiEq}
-                            disabled={aiEqLoading}
-                            title="Re-generate AI EQ recommendation"
-                          >
-                            {'\u21BB'}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="ghost eq-overlay-toggle eq-overlay-toggle--ai-apply"
+                              data-testid="eq-overlay-apply-ai-eq"
+                              onClick={() => {
+                                if (aiRecommendedEq) {
+                                  handleEqRestoreGains(aiRecommendedEq);
+                                  setEqEnabled(true);
+                                }
+                              }}
+                              title="Copy the AI-recommended EQ values to the EQ sliders"
+                            >
+                              Use AI EQ
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost eq-overlay-toggle eq-overlay-toggle--ai-refresh"
+                              data-testid="eq-overlay-refresh-ai-eq"
+                              onClick={handleRequestAiEq}
+                              disabled={aiEqLoading}
+                              title="Re-generate AI EQ recommendation"
+                            >
+                              {'\u21BB'}
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>

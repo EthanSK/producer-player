@@ -495,13 +495,14 @@ export function SpectrumAnalyzer({
         ctx.setLineDash([]);
       };
 
-      // Reference Difference EQ curve overlay (fullscreen only, green/lime)
+      // Reference Difference EQ curve overlay (fullscreen only, green/lime, dashed)
       if (isFullScreen && refDiffCurve && refDiffCurve.length > 1) {
         drawOverlayCurve(
           refDiffCurve,
           'rgba(120, 230, 80, 0.7)',
           'rgba(120, 230, 80, 0.08)',
           'rgba(120, 230, 80, 0.2)',
+          [6, 3],
         );
       }
 

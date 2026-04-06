@@ -3083,6 +3083,19 @@ button.checklist-play-toggle[data-playing='true'] {
   background: rgba(80, 220, 255, 0.1);
 }
 
+/* Apply AI EQ button */
+.eq-overlay-toggle--ai-apply {
+  color: rgba(80, 220, 255, 0.85);
+  border: 1px solid rgba(80, 220, 255, 0.35);
+  background: rgba(80, 220, 255, 0.1);
+}
+
+.eq-overlay-toggle--ai-apply:hover {
+  color: rgba(80, 220, 255, 1);
+  border-color: rgba(80, 220, 255, 0.55);
+  background: rgba(80, 220, 255, 0.18);
+}
+
 /* Section header with subtitle */
 .analysis-section-header {
   display: grid;

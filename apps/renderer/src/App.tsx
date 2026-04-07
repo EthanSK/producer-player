@@ -2268,9 +2268,8 @@ export function App(): JSX.Element {
     if (!analysisExpanded) return;
 
     const handleShortcutKey = (event: KeyboardEvent) => {
-      // Don't trigger when focus is in a text input
-      const tag = (event.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || (event.target as HTMLElement)?.isContentEditable) {
+      // Don't trigger when focus is in a text-entry input (but allow range sliders, etc.)
+      if (isTextEntryElement(event.target as Element | null)) {
         return;
       }
 
@@ -2279,6 +2278,7 @@ export function App(): JSX.Element {
 
       // Prevent browser refresh (Cmd+R / Ctrl+R default behavior)
       event.preventDefault();
+      event.stopPropagation();
 
       // Toggle mix ↔ reference (only if reference is loaded)
       if (referenceTrack) {
@@ -8924,7 +8924,7 @@ export function App(): JSX.Element {
               aria-label="Export playlist ordering"
               title={
                 canExportPlaylistOrder
-                  ? 'Export the current album selection + ordering (with metadata) as JSON.'
+                  ? 'Export track ordering + song metadata as a standalone JSON file for sharing or transferring between machines. (For a full settings/checklists/ratings backup, use Export State in Support & Feedback.)'
                   : 'Link a folder first to export track order.'
               }
               disabled={!canExportPlaylistOrder}
@@ -8941,7 +8941,7 @@ export function App(): JSX.Element {
               aria-label="Import playlist ordering"
               title={
                 canImportPlaylistOrder
-                  ? 'Import a previously exported playlist/order JSON and apply it to the current library.'
+                  ? 'Import a previously exported playlist/order JSON and apply it to the current library. (For restoring a full settings backup, use Import State in Support & Feedback.)'
                   : 'Link the album folder first to import track order.'
               }
               disabled={!canImportPlaylistOrder}
@@ -8959,7 +8959,7 @@ export function App(): JSX.Element {
               <span aria-hidden="true">🚶</span>
             </button>
             <div className="actions-help-group">
-              <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• ☑ (Album Checklist) — Opens a project-wide checklist for high-level tasks that apply to the whole album, not individual songs.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and metadata as a JSON file for backup or transfer.\n\n• ⤒ (Import Order) — Imports a previously exported JSON file to restore track ordering.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
+              <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• ☑ (Album Checklist) — Opens a project-wide checklist for high-level tasks that apply to the whole album, not individual songs.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and song metadata as a standalone JSON file for sharing or transferring between machines. Different from Export State (in Support & Feedback), which backs up all settings, checklists, and ratings.\n\n• ⤒ (Import Order) — Imports a previously exported ordering JSON to restore track order. Different from Import State (in Support & Feedback), which restores a full settings backup.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
             </div>
           </div>
         </header>

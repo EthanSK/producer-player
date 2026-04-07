@@ -145,10 +145,12 @@ export function EqGainSliders({
     setSnapshots((prev) => {
       const next = [...prev, snap];
       // Circular buffer: drop oldest when exceeding max
-      if (next.length > MAX_EQ_SNAPSHOTS) {
-        return next.slice(next.length - MAX_EQ_SNAPSHOTS);
-      }
-      return next;
+      const trimmed = next.length > MAX_EQ_SNAPSHOTS
+        ? next.slice(next.length - MAX_EQ_SNAPSHOTS)
+        : next;
+      // Persist immediately so the save isn't deferred to useEffect
+      saveSnapshots(songKey, trimmed);
+      return trimmed;
     });
   }
 
@@ -157,7 +159,12 @@ export function EqGainSliders({
   }
 
   function handleDeleteSnapshot(id: string): void {
-    setSnapshots((prev) => prev.filter((s) => s.id !== id));
+    setSnapshots((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      // Persist immediately so the deletion isn't deferred to useEffect
+      saveSnapshots(songKey, next);
+      return next;
+    });
   }
 
   return (

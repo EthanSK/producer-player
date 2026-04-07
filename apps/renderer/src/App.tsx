@@ -4369,6 +4369,29 @@ export function App(): JSX.Element {
       masteringCacheUpdatedAt,
     ]
   );
+  // ---------------------------------------------------------------------------
+  // Audio gain interaction: Level Match + Platform Normalization + Reference
+  //
+  // When all three features are active simultaneously, the combined gain is:
+  //   appliedNormalizationGainDb = platformNormGain + levelMatchGain
+  //
+  // 1. Level Match ON + Reference playing:
+  //    referenceLevelMatchGainDb = mixLufs - refLufs.
+  //    This adjusts reference playback so it sounds equally loud as the mix.
+  //
+  // 2. Platform Norm ON + Reference playing:
+  //    normalizationSourceAnalysis switches to the reference track's measured
+  //    LUFS (see ~10 lines above), so normalization is computed from the
+  //    reference's own loudness — i.e. "how would the platform treat this
+  //    reference track?".
+  //
+  // 3. All three ON:
+  //    The reference is first normalized to the platform target (what the
+  //    platform would do to it), then level-matched to the mix (so A/B
+  //    comparison is fair). This is the correct order because the user wants
+  //    to hear: "how does my mix compare to the reference on Spotify, at
+  //    matched loudness?".
+  // ---------------------------------------------------------------------------
   const referenceLevelMatchGainDb = (() => {
     if (
       !referenceLevelMatchEnabled ||

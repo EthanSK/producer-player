@@ -3067,6 +3067,7 @@ export function App(): JSX.Element {
         referenceLevelMatchEnabled,
         iCloudBackupEnabled,
         autoUpdateEnabled,
+        lastFileDialogDirectory: '', // managed by main process
       };
 
       // Enrich with agent settings from localStorage (these are managed by

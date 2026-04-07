@@ -55,7 +55,7 @@ async function migrateEncToKey(baseName: string): Promise<void> {
   }
 }
 import type { OpenDialogOptions } from 'electron';
-import { createReadStream, existsSync, promises as fs, readFileSync } from 'node:fs';
+import { createReadStream, existsSync, statSync, promises as fs, readFileSync } from 'node:fs';
 import { basename, dirname, extname, join, parse, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import log from 'electron-log/main';
@@ -237,6 +237,8 @@ let mainWindow: BrowserWindow | null = null;
 let libraryService: FileLibraryService | null = null;
 let userStateService: UserStateService | null = null;
 let shouldAttemptSidecarOrderRestore = false;
+/** Remembers the last directory the user navigated to in any file/folder picker. */
+let lastFileDialogDirectory = '';
 let playbackProtocolRegistered = false;
 const playbackTranscodeJobs = new Map<string, Promise<string>>();
 const linkedFolderSecurityBookmarks = new Map<string, string>();
@@ -2121,6 +2123,33 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
   };
 }
 
+/**
+ * Update the in-memory last-used dialog directory and persist it to user state.
+ * Accepts a file path or directory path — if a file, its parent directory is used.
+ */
+function rememberDialogDirectory(selectedPath: string): void {
+  try {
+    const info = statSync(selectedPath);
+    lastFileDialogDirectory = info.isDirectory() ? selectedPath : dirname(selectedPath);
+  } catch {
+    lastFileDialogDirectory = dirname(selectedPath);
+  }
+  if (userStateService) {
+    void userStateService.patchUserState({ lastFileDialogDirectory });
+  }
+}
+
+/**
+ * Return a `defaultPath` value for a dialog, preferring an explicit path,
+ * then falling back to the remembered directory.
+ */
+function resolveDialogDefaultPath(explicit?: string | null): string | undefined {
+  if (typeof explicit === 'string' && explicit.trim().length > 0) {
+    return resolve(explicit);
+  }
+  return lastFileDialogDirectory.length > 0 ? lastFileDialogDirectory : undefined;
+}
+
 async function pickReferenceTrack(): Promise<ReferenceTrackSelection | null> {
   const testSelectionPath = TEST_REFERENCE_IMPORT_PATH;
 
@@ -2140,6 +2169,9 @@ async function pickReferenceTrack(): Promise<ReferenceTrackSelection | null> {
       ],
     };
 
+    const defaultPath = resolveDialogDefaultPath();
+    if (defaultPath) dialogOptions.defaultPath = defaultPath;
+
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, dialogOptions)
       : await dialog.showOpenDialog(dialogOptions);
@@ -2150,6 +2182,8 @@ async function pickReferenceTrack(): Promise<ReferenceTrackSelection | null> {
   if (!selectedPath) {
     return null;
   }
+
+  rememberDialogDirectory(selectedPath);
 
   const playbackSource = await resolvePlaybackSource(selectedPath);
   return {
@@ -2172,9 +2206,8 @@ async function pickProjectFile(initialPath?: string | null): Promise<ProjectFile
       properties: ['openFile'],
     };
 
-    if (typeof initialPath === 'string' && initialPath.trim().length > 0) {
-      dialogOptions.defaultPath = resolve(initialPath);
-    }
+    const defaultPath = resolveDialogDefaultPath(initialPath);
+    if (defaultPath) dialogOptions.defaultPath = defaultPath;
 
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, dialogOptions)
@@ -2186,6 +2219,8 @@ async function pickProjectFile(initialPath?: string | null): Promise<ProjectFile
   if (!selectedPath) {
     return null;
   }
+
+  rememberDialogDirectory(selectedPath);
 
   return {
     filePath: selectedPath,
@@ -3171,6 +3206,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
       securityScopedBookmarks: IS_MAC_APP_STORE_SANDBOX,
     };
 
+    const defaultPath = resolveDialogDefaultPath();
+    if (defaultPath) dialogOptions.defaultPath = defaultPath;
+
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, dialogOptions)
       : await dialog.showOpenDialog(dialogOptions);
@@ -3178,6 +3216,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
     if (result.canceled || result.filePaths.length === 0) {
       return service.getSnapshot();
     }
+
+    rememberDialogDirectory(result.filePaths[0]);
 
     let snapshot = service.getSnapshot();
     for (const [index, selectedPath] of result.filePaths.entries()) {
@@ -3274,23 +3314,28 @@ function registerIpcHandlers(service: FileLibraryService): void {
         ? validated.selection.selectedFolderName.replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
         : 'playlist';
 
-      const defaultPath = `producer-player-${folderSlug}-order.json`;
+      const saveFileName = `producer-player-${folderSlug}-order.json`;
+      const saveDefaultPath = lastFileDialogDirectory.length > 0
+        ? join(lastFileDialogDirectory, saveFileName)
+        : saveFileName;
 
       const result = mainWindow
         ? await dialog.showSaveDialog(mainWindow, {
             title: 'Export playlist ordering',
-            defaultPath,
+            defaultPath: saveDefaultPath,
             filters: [{ name: 'JSON', extensions: ['json'] }],
           })
         : await dialog.showSaveDialog({
             title: 'Export playlist ordering',
-            defaultPath,
+            defaultPath: saveDefaultPath,
             filters: [{ name: 'JSON', extensions: ['json'] }],
           });
 
       if (result.canceled || !result.filePath) {
         return { filePath: null };
       }
+
+      rememberDialogDirectory(result.filePath);
 
       await fs.writeFile(result.filePath, raw, 'utf8');
       return { filePath: result.filePath };
@@ -3304,17 +3349,18 @@ function registerIpcHandlers(service: FileLibraryService): void {
       return parsePlaylistOrderExport(JSON.parse(raw));
     }
 
+    const importDialogOptions: OpenDialogOptions = {
+      title: 'Import playlist ordering',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    };
+
+    const importDefaultPath = resolveDialogDefaultPath();
+    if (importDefaultPath) importDialogOptions.defaultPath = importDefaultPath;
+
     const result = mainWindow
-      ? await dialog.showOpenDialog(mainWindow, {
-          title: 'Import playlist ordering',
-          properties: ['openFile'],
-          filters: [{ name: 'JSON', extensions: ['json'] }],
-        })
-      : await dialog.showOpenDialog({
-          title: 'Import playlist ordering',
-          properties: ['openFile'],
-          filters: [{ name: 'JSON', extensions: ['json'] }],
-        });
+      ? await dialog.showOpenDialog(mainWindow, importDialogOptions)
+      : await dialog.showOpenDialog(importDialogOptions);
 
     if (result.canceled || result.filePaths.length === 0) {
       return null;
@@ -3324,6 +3370,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
     if (!filePath) {
       return null;
     }
+
+    rememberDialogDirectory(filePath);
 
     const raw = await fs.readFile(filePath, 'utf8');
     return parsePlaylistOrderExport(JSON.parse(raw));
@@ -3342,14 +3390,16 @@ function registerIpcHandlers(service: FileLibraryService): void {
         await fs.rm(outputDirectoryPath, { recursive: true, force: true });
         await fs.mkdir(outputDirectoryPath, { recursive: true });
       } else {
+        const exportDefaultPath = validated.selection.selectedFolderPath
+          ? resolve(validated.selection.selectedFolderPath)
+          : resolveDialogDefaultPath() ?? app.getPath('documents');
+
         const dialogOptions: OpenDialogOptions = {
           title: 'Choose export destination folder',
           message:
             'Producer Player will create a new folder with each track\'s latest version in album order.',
           buttonLabel: 'Create latest-version export folder',
-          defaultPath: validated.selection.selectedFolderPath
-            ? resolve(validated.selection.selectedFolderPath)
-            : app.getPath('documents'),
+          defaultPath: exportDefaultPath,
           properties: ['openDirectory', 'createDirectory'],
           securityScopedBookmarks: IS_MAC_APP_STORE_SANDBOX,
         };
@@ -3366,6 +3416,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
         if (!selectedParentDirectory) {
           return { folderPath: null, exportedCount: 0 };
         }
+
+        rememberDialogDirectory(selectedParentDirectory);
 
         const resolvedParentDirectory = resolve(selectedParentDirectory);
         const parentStats = await fs.stat(resolvedParentDirectory);
@@ -3582,6 +3634,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
       properties: ['openDirectory', 'createDirectory'],
     };
 
+    const exportDefaultPath = resolveDialogDefaultPath();
+    if (exportDefaultPath) dialogOptions.defaultPath = exportDefaultPath;
+
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, dialogOptions)
       : await dialog.showOpenDialog(dialogOptions);
@@ -3589,6 +3644,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
     if (result.canceled || result.filePaths.length === 0) {
       return { success: false, error: 'Export cancelled.' };
     }
+
+    rememberDialogDirectory(result.filePaths[0]);
 
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -3636,6 +3693,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
       properties: ['openFile', 'openDirectory'],
     };
 
+    const importDefaultPath = resolveDialogDefaultPath();
+    if (importDefaultPath) dialogOptions.defaultPath = importDefaultPath;
+
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, dialogOptions)
       : await dialog.showOpenDialog(dialogOptions);
@@ -3643,6 +3703,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
     if (result.canceled || result.filePaths.length === 0) {
       return { success: false, error: 'Import cancelled.' };
     }
+
+    rememberDialogDirectory(result.filePaths[0]);
 
     try {
       // Determine the export directory: if user selected a file, use its parent
@@ -3930,6 +3992,16 @@ app.whenReady().then(async () => {
         {},
       );
     }
+  }
+
+  // Restore last-used file dialog directory from persisted state
+  try {
+    const initialState = await userStateService.readUserState();
+    if (initialState.lastFileDialogDirectory) {
+      lastFileDialogDirectory = initialState.lastFileDialogDirectory;
+    }
+  } catch {
+    // Non-critical — fall back to OS default
   }
 
   const service = await ensureLibraryService();

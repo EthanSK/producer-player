@@ -228,6 +228,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     referenceLevelMatchEnabled: true,
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
+    lastFileDialogDirectory: '',
   };
 }
 
@@ -275,6 +276,8 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.iCloudBackupEnabled === 'boolean' ? raw.iCloudBackupEnabled : fallback.iCloudBackupEnabled,
     autoUpdateEnabled:
       typeof raw.autoUpdateEnabled === 'boolean' ? raw.autoUpdateEnabled : fallback.autoUpdateEnabled,
+    lastFileDialogDirectory:
+      typeof raw.lastFileDialogDirectory === 'string' ? raw.lastFileDialogDirectory : '',
   };
 }
 

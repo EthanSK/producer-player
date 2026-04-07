@@ -302,6 +302,9 @@ export interface ProducerPlayerUserState {
   referenceLevelMatchEnabled: boolean;
   iCloudBackupEnabled: boolean;
   autoUpdateEnabled: boolean;
+
+  // File dialog
+  lastFileDialogDirectory: string; // Remembers last-used directory across all file pickers
 }
 
 export interface UserStateImportResult {

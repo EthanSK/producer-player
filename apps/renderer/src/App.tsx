@@ -15,6 +15,7 @@ import type {
   ICloudAvailabilityResult,
   ICloudBackupData,
   LibrarySnapshot,
+  PersistedEqLiveState,
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
   ProducerPlayerEnvironment,
@@ -381,13 +382,7 @@ function shortcutMatchesEvent(shortcut: StoredShortcut, event: KeyboardEvent): b
   );
 }
 
-interface PersistedEqLiveState {
-  gains: number[];
-  eqEnabled: boolean;
-  showAiEqCurve: boolean;
-  showRefDiffCurve: boolean;
-  showEqTonalBalance: boolean;
-}
+// PersistedEqLiveState is imported from @producer-player/contracts
 
 interface MasteringCacheStatusState {
   status: 'fresh' | 'stale' | 'missing' | 'pending' | 'error';
@@ -2778,6 +2773,56 @@ export function App(): JSX.Element {
             }
           } catch { /* ignore */ }
 
+          // EQ live states (dynamic keys — per-song)
+          try {
+            if (Object.keys(userState.eqLiveStates).length === 0) {
+              let eqLiveCount = 0;
+              for (let i = 0; i < window.localStorage.length; i++) {
+                const key = window.localStorage.key(i);
+                if (key && key.startsWith(EQ_LIVE_STATE_PER_SONG_KEY_PREFIX)) {
+                  const songId = key.slice(EQ_LIVE_STATE_PER_SONG_KEY_PREFIX.length);
+                  const raw = window.localStorage.getItem(key);
+                  if (songId.length > 0 && raw && raw.length > 0) {
+                    try {
+                      const parsed: unknown = JSON.parse(raw);
+                      if (typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as Record<string, unknown>).gains)) {
+                        userState.eqLiveStates[songId] = parsed as ProducerPlayerUserState['eqLiveStates'][string];
+                        migrated = true;
+                        eqLiveCount++;
+                      }
+                    } catch { /* ignore */ }
+                  }
+                }
+              }
+              if (eqLiveCount > 0) migratedFields.push(`eqLiveStates(${eqLiveCount})`);
+            }
+          } catch { /* ignore */ }
+
+          // AI EQ recommendations (dynamic keys — per-song)
+          try {
+            if (Object.keys(userState.aiEqRecommendations).length === 0) {
+              let aiEqCount = 0;
+              for (let i = 0; i < window.localStorage.length; i++) {
+                const key = window.localStorage.key(i);
+                if (key && key.startsWith(AI_EQ_PER_SONG_KEY_PREFIX)) {
+                  const songId = key.slice(AI_EQ_PER_SONG_KEY_PREFIX.length);
+                  const raw = window.localStorage.getItem(key);
+                  if (songId.length > 0 && raw && raw.length > 0) {
+                    try {
+                      const parsed: unknown = JSON.parse(raw);
+                      if (Array.isArray(parsed) && parsed.length >= 6 && parsed.every((v) => typeof v === 'number')) {
+                        userState.aiEqRecommendations[songId] = parsed as number[];
+                        migrated = true;
+                        aiEqCount++;
+                      }
+                    } catch { /* ignore */ }
+                  }
+                }
+              }
+              if (aiEqCount > 0) migratedFields.push(`aiEqRecommendations(${aiEqCount})`);
+            }
+          } catch { /* ignore */ }
+
           // Persist enriched state, then set the flag only on success
           if (migrated) {
             void window.producerPlayer.rendererLog('info', '[migration] Migrated fields from localStorage', {
@@ -2877,6 +2922,29 @@ export function App(): JSX.Element {
           setAutoUpdateEnabled(userState.autoUpdateEnabled);
         }
 
+        // Populate localStorage from unified state for EQ data (localStorage = fast cache)
+        if (userState.eqSnapshots && Object.keys(userState.eqSnapshots).length > 0) {
+          for (const [songKey, snaps] of Object.entries(userState.eqSnapshots)) {
+            try {
+              window.localStorage.setItem(`producer-player-eq-snapshots-${songKey}`, JSON.stringify(snaps));
+            } catch { /* ignore */ }
+          }
+        }
+        if (userState.eqLiveStates && Object.keys(userState.eqLiveStates).length > 0) {
+          for (const [songId, state] of Object.entries(userState.eqLiveStates)) {
+            try {
+              window.localStorage.setItem(`${EQ_LIVE_STATE_PER_SONG_KEY_PREFIX}${songId}`, JSON.stringify(state));
+            } catch { /* ignore */ }
+          }
+        }
+        if (userState.aiEqRecommendations && Object.keys(userState.aiEqRecommendations).length > 0) {
+          for (const [songId, gains] of Object.entries(userState.aiEqRecommendations)) {
+            try {
+              window.localStorage.setItem(`${AI_EQ_PER_SONG_KEY_PREFIX}${songId}`, JSON.stringify(gains));
+            } catch { /* ignore */ }
+          }
+        }
+
         setUnifiedStateReady(true);
       })
       .catch(() => {
@@ -2930,7 +2998,67 @@ export function App(): JSX.Element {
           }
           return result;
         })(),
-        eqSnapshots: {},
+        eqSnapshots: (() => {
+          // Collect per-song EQ snapshots from localStorage
+          const result: Record<string, { id: string; gains: number[]; timestamp: number }[]> = {};
+          const prefix = 'producer-player-eq-snapshots-';
+          for (let i = 0; i < window.localStorage.length; i++) {
+            const key = window.localStorage.key(i);
+            if (key && key.startsWith(prefix)) {
+              const songKey = key.slice(prefix.length);
+              const raw = window.localStorage.getItem(key);
+              if (songKey.length > 0 && raw && raw.length > 0) {
+                try {
+                  const parsed: unknown = JSON.parse(raw);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    result[songKey] = parsed as { id: string; gains: number[]; timestamp: number }[];
+                  }
+                } catch { /* ignore */ }
+              }
+            }
+          }
+          return result;
+        })(),
+        eqLiveStates: (() => {
+          // Collect per-song EQ live state from localStorage
+          const result: Record<string, { gains: number[]; eqEnabled: boolean; showAiEqCurve: boolean; showRefDiffCurve: boolean; showEqTonalBalance: boolean }> = {};
+          for (let i = 0; i < window.localStorage.length; i++) {
+            const key = window.localStorage.key(i);
+            if (key && key.startsWith(EQ_LIVE_STATE_PER_SONG_KEY_PREFIX)) {
+              const songId = key.slice(EQ_LIVE_STATE_PER_SONG_KEY_PREFIX.length);
+              const raw = window.localStorage.getItem(key);
+              if (songId.length > 0 && raw && raw.length > 0) {
+                try {
+                  const parsed: unknown = JSON.parse(raw);
+                  if (typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as Record<string, unknown>).gains)) {
+                    result[songId] = parsed as { gains: number[]; eqEnabled: boolean; showAiEqCurve: boolean; showRefDiffCurve: boolean; showEqTonalBalance: boolean };
+                  }
+                } catch { /* ignore */ }
+              }
+            }
+          }
+          return result;
+        })(),
+        aiEqRecommendations: (() => {
+          // Collect per-song AI EQ recommendations from localStorage
+          const result: Record<string, number[]> = {};
+          for (let i = 0; i < window.localStorage.length; i++) {
+            const key = window.localStorage.key(i);
+            if (key && key.startsWith(AI_EQ_PER_SONG_KEY_PREFIX)) {
+              const songId = key.slice(AI_EQ_PER_SONG_KEY_PREFIX.length);
+              const raw = window.localStorage.getItem(key);
+              if (songId.length > 0 && raw && raw.length > 0) {
+                try {
+                  const parsed: unknown = JSON.parse(raw);
+                  if (Array.isArray(parsed) && parsed.length >= 6 && parsed.every((v) => typeof v === 'number')) {
+                    result[songId] = parsed as number[];
+                  }
+                } catch { /* ignore */ }
+              }
+            }
+          }
+          return result;
+        })(),
         agentProvider: '',
         agentModels: {},
         agentThinking: {},
@@ -3066,6 +3194,23 @@ export function App(): JSX.Element {
       if (userState.perSongReferenceTracks) {
         for (const [songId, filePath] of Object.entries(userState.perSongReferenceTracks)) {
           persistReferenceTrackForSong(songId, filePath);
+        }
+      }
+
+      // Sync EQ data into localStorage cache
+      if (userState.eqSnapshots) {
+        for (const [songKey, snaps] of Object.entries(userState.eqSnapshots)) {
+          try { window.localStorage.setItem(`producer-player-eq-snapshots-${songKey}`, JSON.stringify(snaps)); } catch { /* ignore */ }
+        }
+      }
+      if (userState.eqLiveStates) {
+        for (const [songId, state] of Object.entries(userState.eqLiveStates)) {
+          try { window.localStorage.setItem(`${EQ_LIVE_STATE_PER_SONG_KEY_PREFIX}${songId}`, JSON.stringify(state)); } catch { /* ignore */ }
+        }
+      }
+      if (userState.aiEqRecommendations) {
+        for (const [songId, gains] of Object.entries(userState.aiEqRecommendations)) {
+          try { window.localStorage.setItem(`${AI_EQ_PER_SONG_KEY_PREFIX}${songId}`, JSON.stringify(gains)); } catch { /* ignore */ }
         }
       }
 

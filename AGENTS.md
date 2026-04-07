@@ -56,11 +56,29 @@ On first launch after the update, if `producer-player-user-state.json` doesn't e
 - "Export State" button in sidebar exports the entire `ProducerPlayerUserState` as JSON via a save dialog
 - "Import State" button reads a JSON file, validates the schema, and applies the full state
 
-### State Storage Rule
+### Critical: User Data Storage Rule
 
-User-authored data (anything the user creates, inputs, or configures) MUST be stored
-in the unified state file, NOT only in localStorage. localStorage is per-Chromium-profile
-(LevelDB keyed by executable path) and does NOT transfer between dev and production builds.
+ALL user-authored data MUST be persisted to the unified state file
+(producer-player-user-state.json), NOT localStorage alone.
+
+localStorage can be used as a FAST CACHE for immediate reads, but every
+write must also sync to the unified state file via the debounced IPC sync.
+
+Reason: localStorage is not flushed to disk on Ctrl+C/SIGINT. Only the
+unified state file (written via fs.writeFileSync in the main process)
+survives hard kills. Additionally, localStorage is per-Chromium-profile
+(LevelDB keyed by executable path) and does NOT transfer between dev and
+production builds.
+
+When adding new persisted state:
+1. Add the field to `ProducerPlayerUserState` in `packages/contracts/src/index.ts`
+2. Add a parser for the field in `apps/electron/src/state-service.ts` (`parseUserState`)
+3. Add the field to `createDefaultUserState()` in the same file
+4. Include it in the debounced state sync in `App.tsx` (the `setTimeout(() => { ... }, 500)` block)
+5. Load it from unified state on startup (the `getUserState()` `.then(...)` block in `App.tsx`)
+6. Sync it back to localStorage in `onUserStateChanged` listener (for import support)
+7. Add a migration path in the one-time migration block if the data previously lived in localStorage
+8. localStorage is optional (cache only)
 
 Only UI layout preferences (panel order, expanded/collapsed states, onboarding-seen
 flags) should remain localStorage-only.

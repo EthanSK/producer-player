@@ -11,6 +11,7 @@ import log from 'electron-log/main';
 import type {
   AlbumChecklistItem,
   EqSnapshot,
+  PersistedEqLiveState,
   ProducerPlayerUserState,
   SavedReferenceTrack,
   SongChecklistItem,
@@ -142,17 +143,47 @@ function parseEqSnapshots(value: unknown): Record<string, EqSnapshot[]> {
         if (!isRecord(item)) return [];
         if (
           typeof item.id !== 'string' ||
-          typeof item.label !== 'string' ||
-          typeof item.createdAt !== 'string' ||
-          !Array.isArray(item.bands)
+          !Array.isArray(item.gains) ||
+          typeof item.timestamp !== 'number'
         ) return [];
         return [{
           id: item.id,
-          label: item.label,
-          createdAt: item.createdAt,
-          bands: item.bands as { name: string; gain: number }[],
+          gains: item.gains as number[],
+          timestamp: item.timestamp,
         }];
       });
+    }
+  }
+  return result;
+}
+
+function parseEqLiveStates(value: unknown): Record<string, PersistedEqLiveState> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, PersistedEqLiveState> = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (
+      isRecord(val) &&
+      Array.isArray(val.gains) &&
+      typeof val.eqEnabled === 'boolean'
+    ) {
+      result[key] = {
+        gains: val.gains as number[],
+        eqEnabled: val.eqEnabled,
+        showAiEqCurve: typeof val.showAiEqCurve === 'boolean' ? val.showAiEqCurve : false,
+        showRefDiffCurve: typeof val.showRefDiffCurve === 'boolean' ? val.showRefDiffCurve : false,
+        showEqTonalBalance: typeof val.showEqTonalBalance === 'boolean' ? val.showEqTonalBalance : false,
+      };
+    }
+  }
+  return result;
+}
+
+function parseAiEqRecommendations(value: unknown): Record<string, number[]> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, number[]> = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (Array.isArray(val) && val.length >= 6 && val.every((v) => typeof v === 'number')) {
+      result[key] = val as number[];
     }
   }
   return result;
@@ -187,6 +218,8 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     savedReferenceTracks: [],
     perSongReferenceTracks: {},
     eqSnapshots: {},
+    eqLiveStates: {},
+    aiEqRecommendations: {},
     agentProvider: '',
     agentModels: {},
     agentThinking: {},
@@ -229,6 +262,8 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     savedReferenceTracks: parseSavedReferenceTracks(raw.savedReferenceTracks),
     perSongReferenceTracks: parsePerSongReferenceTracks(raw.perSongReferenceTracks),
     eqSnapshots: parseEqSnapshots(raw.eqSnapshots),
+    eqLiveStates: parseEqLiveStates(raw.eqLiveStates),
+    aiEqRecommendations: parseAiEqRecommendations(raw.aiEqRecommendations),
     agentProvider: typeof raw.agentProvider === 'string' ? raw.agentProvider : '',
     agentModels: parseStringMapRecord(raw.agentModels),
     agentThinking: parseStringMapRecord(raw.agentThinking),

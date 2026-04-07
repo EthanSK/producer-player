@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import type { EqSnapshot } from '@producer-player/contracts';
 import { FREQUENCY_BANDS, frequencyToX } from './audioEngine';
 
 const MIN_FREQ = 20;
@@ -16,11 +17,7 @@ const EQ_SNAPSHOTS_STORAGE_KEY_PREFIX = 'producer-player-eq-snapshots';
 const EQ_SNAPSHOTS_OLD_GLOBAL_KEY = 'producer-player-eq-snapshots';
 const EQ_SNAPSHOTS_GLOBAL_MIGRATED_KEY = 'producer-player-eq-snapshots-global-migrated';
 
-export interface EqSnapshot {
-  id: string;
-  gains: number[];
-  timestamp: number;
-}
+export type { EqSnapshot } from '@producer-player/contracts';
 
 function storageKeyForSong(songKey: string): string {
   return `${EQ_SNAPSHOTS_STORAGE_KEY_PREFIX}-${songKey}`;

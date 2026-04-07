@@ -243,9 +243,16 @@ export interface SavedReferenceTrack {
 
 export interface EqSnapshot {
   id: string;
-  label: string;
-  createdAt: string;
-  bands: { name: string; gain: number }[];
+  gains: number[];
+  timestamp: number;
+}
+
+export interface PersistedEqLiveState {
+  gains: number[];
+  eqEnabled: boolean;
+  showAiEqCurve: boolean;
+  showRefDiffCurve: boolean;
+  showEqTonalBalance: boolean;
 }
 
 /**
@@ -277,6 +284,12 @@ export interface ProducerPlayerUserState {
 
   // EQ snapshots (per-song)
   eqSnapshots: Record<string, EqSnapshot[]>;
+
+  // EQ live state (per-song) — slider positions, enabled state, curve toggles
+  eqLiveStates: Record<string, PersistedEqLiveState>;
+
+  // AI EQ recommendations (per-song) — gain arrays suggested by AI
+  aiEqRecommendations: Record<string, number[]>;
 
   // Agent settings
   agentProvider: string;

@@ -135,7 +135,7 @@ async function transcribeWithAssemblyAi(audioBlob: Blob, key: string): Promise<s
     },
     body: JSON.stringify({
       audio_url: uploadUrl,
-      speech_model: 'universal',
+      speech_models: ['universal-3-pro'],
     }),
   });
 

@@ -657,7 +657,7 @@ function getPathTail(value: string | null | undefined): string {
 }
 
 function buildMissingFileMessage(filePath: string | null | undefined): string {
-  return `Couldn’t find ${getPathTail(filePath)} on disk. Rescan or relink the folder.`;
+  return `Couldn't find ${getPathTail(filePath)} on disk. Rescan or relink the folder.`;
 }
 
 function formatDate(value: string | null): string {
@@ -1880,6 +1880,8 @@ export function App(): JSX.Element {
   const handleSkipSecondsRef = useRef<(offsetSeconds: number) => void>(() => undefined);
   const playbackAudioContextRef = useRef<AudioContext | null>(null);
   const playbackGainNodeRef = useRef<GainNode | null>(null);
+  const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const targetGainLinearRef = useRef(DEFAULT_PLAYBACK_VOLUME);
   const playbackAnalyserNodeRef = useRef<AnalyserNode | null>(null);
   const bandSoloFiltersRef = useRef<BiquadFilterNode[]>([]);
   const handleChecklistItemTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
@@ -1949,6 +1951,7 @@ export function App(): JSX.Element {
         0,
         nextVolume * gainDbToLinear(nextNormalizationGainDb)
       );
+      targetGainLinearRef.current = totalGainLinear;
       const gainNode = playbackGainNodeRef.current;
 
       if (gainNode) {
@@ -3569,7 +3572,7 @@ export function App(): JSX.Element {
           ? `${extensionText} isn't supported for playback yet.`
           : 'The track took too long to load.';
 
-      const message = `Playback couldn’t start. ${supportText} ${buildPlaybackFallbackGuidance(
+      const message = `Playback couldn't start. ${supportText} ${buildPlaybackFallbackGuidance(
         source
       )}`;
 
@@ -3678,10 +3681,19 @@ export function App(): JSX.Element {
 
       void resumePlaybackContextIfNeeded()
         .then(() => audio.play())
+        .then(() => {
+          // Micro-crossfade: ramp gain back up after playback starts
+          const gn = playbackGainNodeRef.current;
+          const ctx = playbackAudioContextRef.current;
+          if (gn && ctx) {
+            gn.gain.setValueAtTime(gn.gain.value, ctx.currentTime);
+            gn.gain.linearRampToValueAtTime(targetGainLinearRef.current, ctx.currentTime + 0.015);
+          }
+        })
         .catch((cause: unknown) => {
           const message = cause instanceof Error ? cause.message : String(cause);
           setPlaybackError(
-            `Playback couldn’t start: ${message}. ${buildPlaybackFallbackGuidance(
+            `Playback couldn't start: ${message}. ${buildPlaybackFallbackGuidance(
               playbackSourceRef.current
             )}`
           );
@@ -3830,6 +3842,10 @@ export function App(): JSX.Element {
 
     return () => {
       clearPlaybackLoadTimeout();
+      if (crossfadeTimerRef.current !== null) {
+        clearTimeout(crossfadeTimerRef.current);
+        crossfadeTimerRef.current = null;
+      }
       playOnNextLoadRef.current = false;
 
       audio.pause();
@@ -4753,7 +4769,7 @@ export function App(): JSX.Element {
           : 'I am currently auditioning my mix.';
 
       return [
-        `I’m mastering "${trackTitle}" in Producer Player.`,
+        `I'm mastering "${trackTitle}" in Producer Player.`,
         fileName && fileName !== trackTitle ? `File/version: ${fileName}.` : null,
         `Panel clicked: ${panelMeta.label} (${surfaceLabel}).`,
         `Panel focus: ${panelMeta.focus}.`,
@@ -5145,6 +5161,10 @@ export function App(): JSX.Element {
       playbackPreviewMode === 'reference' ? 'no-reference-preview' : 'no-selected-version';
 
     clearPlaybackLoadTimeout();
+    if (crossfadeTimerRef.current !== null) {
+      clearTimeout(crossfadeTimerRef.current);
+      crossfadeTimerRef.current = null;
+    }
     setPlaybackError(null);
 
     if (!activeSourceKey || !activePlaybackFilePath) {
@@ -5213,31 +5233,60 @@ export function App(): JSX.Element {
       return;
     }
 
-    if (!audio.paused) {
+    const wasPlaying = !audio.paused;
+    if (wasPlaying) {
       playOnNextLoadRef.current = true;
     }
 
-    audio.pause();
-    lastLoadedSongIdRef.current = activeSourceKey;
-    audio.removeAttribute('src');
-    audio.src = activeSource.url;
+    const gainNode = playbackGainNodeRef.current;
+    const audioContext = playbackAudioContextRef.current;
 
-    const supportHintRaw = activeSource.mimeType ? audio.canPlayType(activeSource.mimeType) : '';
-    const supportHint =
-      supportHintRaw === 'probably' || supportHintRaw === 'maybe' ? supportHintRaw : 'no';
+    /** Apply the source change, log it, and start loading. */
+    const commitSourceSwitch = () => {
+      audio.pause();
+      lastLoadedSongIdRef.current = activeSourceKey;
+      audio.removeAttribute('src');
+      audio.src = activeSource.url;
 
-    setPlaybackSourceSupport(supportHint);
+      const supportHintRaw = activeSource.mimeType ? audio.canPlayType(activeSource.mimeType) : '';
+      const supportHint =
+        supportHintRaw === 'probably' || supportHintRaw === 'maybe' ? supportHintRaw : 'no';
 
-    logPlaybackEvent('source-selected', {
-      mode: playbackPreviewMode,
-      filePath: activeSource.filePath,
-      url: activeSource.url,
-      mimeType: activeSource.mimeType,
-      supportHint,
-      pendingRestoreTimeSeconds: pendingRestoreTimeRef.current,
-    });
+      setPlaybackSourceSupport(supportHint);
 
-    audio.load();
+      logPlaybackEvent('source-selected', {
+        mode: playbackPreviewMode,
+        filePath: activeSource.filePath,
+        url: activeSource.url,
+        mimeType: activeSource.mimeType,
+        supportHint,
+        pendingRestoreTimeSeconds: pendingRestoreTimeRef.current,
+      });
+
+      // Hold gain at 0 during load so the fade-in after canplay is click-free.
+      // Only needed when playback was active (crossfade path).
+      if (wasPlaying && gainNode && audioContext) {
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+      }
+
+      audio.load();
+    };
+
+    // Micro-crossfade: ramp gain to 0 before switching to avoid an audible click
+    if (wasPlaying && gainNode && audioContext) {
+      gainNode.gain.setValueAtTime(gainNode.gain.value, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.015);
+
+      if (crossfadeTimerRef.current !== null) {
+        clearTimeout(crossfadeTimerRef.current);
+      }
+      crossfadeTimerRef.current = setTimeout(() => {
+        crossfadeTimerRef.current = null;
+        commitSourceSwitch();
+      }, 15);
+    } else {
+      commitSourceSwitch();
+    }
   }, [
     desiredPlaybackFilePath,
     desiredPlaybackKey,
@@ -5978,7 +6027,7 @@ export function App(): JSX.Element {
         } catch (cause: unknown) {
           const message = cause instanceof Error ? cause.message : String(cause);
           setPlaybackError(
-            `Playback couldn’t start: ${message}. ${buildPlaybackFallbackGuidance(
+            `Playback couldn't start: ${message}. ${buildPlaybackFallbackGuidance(
               playbackSourceRef.current
             )}`
           );
@@ -6168,7 +6217,7 @@ export function App(): JSX.Element {
         logPlaybackEvent('play-requested-direct');
       } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
-        setPlaybackError(`Playback couldn’t start: ${message}. ${buildPlaybackFallbackGuidance(source)}`);
+        setPlaybackError(`Playback couldn't start: ${message}. ${buildPlaybackFallbackGuidance(source)}`);
         logPlaybackEvent('play-rejected', {
           message,
         });
@@ -7472,7 +7521,7 @@ export function App(): JSX.Element {
       })
       .catch(() => {
         setMigrationSchemaCopied(false);
-        setMigrationParseError('Couldn’t copy the schema. Try again.');
+        setMigrationParseError("Couldn't copy the schema. Try again.");
       });
   }
 
@@ -8620,7 +8669,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row analysis-normalization-header-row-compact">
                     <div className="analysis-panel-header-title-block">
-                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Comparing with Spotify? The app and Spotify may output at different volume levels through your audio interface. For an accurate comparison, play the same track in both, then adjust Spotify's volume until your audio interface meters show the same level. Once matched, your A/B comparisons are accurate."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
+                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Spotify may sound louder. Spotify's output volume can differ from this app's — this doesn't mean the normalization is wrong. To compare fairly, adjust Spotify's volume until both sound equally loud on the same track, then A/B your mix."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
                       <p className="muted" data-testid="analysis-normalization-summary">
                         {normalizationSummaryText}
                       </p>
@@ -11261,7 +11310,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'normalization')}
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Comparing with Spotify? The app and Spotify may output at different volume levels through your audio interface. For an accurate comparison, play the same track in both, then adjust Spotify's volume until your audio interface meters show the same level. Once matched, your A/B comparisons are accurate."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
+                    <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Spotify may sound louder. Spotify's output volume can differ from this app's — this doesn't mean the normalization is wrong. To compare fairly, adjust Spotify's volume until both sound equally loud on the same track, then A/B your mix."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'normalization')}
                   </div>
                   <div className="analysis-normalization-header">

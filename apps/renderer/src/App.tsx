@@ -2257,11 +2257,9 @@ export function App(): JSX.Element {
     };
   }, [analysisExpanded, quickSwitcherOpen]);
 
-  // Customizable keyboard shortcut to toggle Mix/Reference playback (mastering fullscreen only).
+  // Customizable keyboard shortcut to toggle Mix/Reference playback (global — works in any view).
   // Default: Cmd+R (macOS) / Ctrl+R (Windows/Linux). User can rebind via the Shortcut section.
   useEffect(() => {
-    if (!analysisExpanded) return;
-
     const handleShortcutKey = (event: KeyboardEvent) => {
       // Don't trigger when focus is in a text-entry input (but allow range sliders, etc.)
       if (isTextEntryElement(event.target as Element | null)) {
@@ -2299,7 +2297,7 @@ export function App(): JSX.Element {
 
     window.addEventListener('keydown', handleShortcutKey);
     return () => window.removeEventListener('keydown', handleShortcutKey);
-  }, [analysisExpanded, referenceTrack, playbackPreviewMode, eqEnabled, eqBandGains, mixRefShortcut]);
+  }, [referenceTrack, playbackPreviewMode, eqEnabled, eqBandGains, mixRefShortcut]);
 
   // Shortcut recording: listen for the next keypress combo and save it
   useEffect(() => {
@@ -4402,11 +4400,7 @@ export function App(): JSX.Element {
   const selectedNormalizationPlatform = getNormalizationPlatformProfile(
     selectedNormalizationPlatformId
   );
-  const referenceModeSuffix = isRefMode
-    ? normalizationPreviewEnabled
-      ? ` (Using Reference + ${selectedNormalizationPlatform.shortLabel} Preview)`
-      : ' (Using Reference)'
-    : '';
+  const referenceModeSuffix = isRefMode ? ' (Using Reference)' : '';
   const showingReferenceSuffix = referenceModeSuffix;
   const usingReferenceSuffix = referenceModeSuffix;
   const activePreviewAnalysis = isRefMode ? referenceTrack?.previewAnalysis ?? null : analysis;
@@ -8626,7 +8620,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row analysis-normalization-header-row-compact">
                     <div className="analysis-panel-header-title-block">
-                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
+                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Comparing with Spotify? The app and Spotify may output at different volume levels through your audio interface. For an accurate comparison, play the same track in both, then adjust Spotify's volume until your audio interface meters show the same level. Once matched, your A/B comparisons are accurate."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
                       <p className="muted" data-testid="analysis-normalization-summary">
                         {normalizationSummaryText}
                       </p>
@@ -11267,7 +11261,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'normalization')}
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
+                    <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Comparing with Spotify? The app and Spotify may output at different volume levels through your audio interface. For an accurate comparison, play the same track in both, then adjust Spotify's volume until your audio interface meters show the same level. Once matched, your A/B comparisons are accurate."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'normalization')}
                   </div>
                   <div className="analysis-normalization-header">

@@ -865,7 +865,7 @@ function formatAppliedChangeMainText(level: number | null | undefined): string {
 
 function formatPercent(value: number): string {
   if (!Number.isFinite(value)) {
-    return '0%';
+    return '—';
   }
 
   return `${Math.round(value * 100)}%`;
@@ -8244,9 +8244,9 @@ export function App(): JSX.Element {
               <span
                 className="sidebar-branding-version"
                 data-testid="producer-player-branding-version"
-                title={`Current app version ${environment.appVersion.displayVersion}`}
+                title={loading ? 'Loading version…' : `Current app version ${environment.appVersion.displayVersion}`}
               >
-                {environment.appVersion.displayVersion}
+                {loading ? '—' : environment.appVersion.displayVersion}
               </span>
             </div>
             {SHOW_3000AD_BRANDING && (
@@ -11335,7 +11335,9 @@ export function App(): JSX.Element {
                           ? activePreviewAnalysis.clipCount > 0
                             ? `${activePreviewAnalysis.clipCount} sample${activePreviewAnalysis.clipCount === 1 ? '' : 's'}`
                             : 'None'
-                          : 'Loading…'}
+                          : activePreviewAnalysisStatus === 'loading'
+                            ? 'Loading…'
+                            : '—'}
                       </strong>
                     </div>
                     <div className="analysis-stat-card" title="DC Offset — mean sample value. Non-zero DC offset wastes headroom.">
@@ -11345,7 +11347,9 @@ export function App(): JSX.Element {
                           ? Math.abs(activePreviewAnalysis.dcOffset) > 0.001
                             ? `${(activePreviewAnalysis.dcOffset * 100).toFixed(3)}% ⚠`
                             : 'Clean'
-                          : 'Loading…'}
+                          : activePreviewAnalysisStatus === 'loading'
+                            ? 'Loading…'
+                            : '—'}
                       </strong>
                     </div>
                   </div>

@@ -4,6 +4,99 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [2.63] - 2026-04-08
+
+### Features
+- Inline Mix/Ref toggle on EQ row, AI EQ applies to selected bands only
+
+## [2.62] - 2026-04-08
+
+### Fixes
+- Enforce two-part version format (x.y), prevent non-zero patch
+
+## [2.61] - 2026-04-08
+
+### Fixes
+- Accurate Spotify comparison tip, click-free song/reference switching
+
+## [2.59.1] - 2026-04-08
+
+### Fixes
+- Fix volume matching tip, clean graph labels, add global Cmd+R shortcut
+
+## [2.59] - 2026-04-08
+
+### Documentation
+- Add level match and referencing workflow guidance to help dialog
+
+## [2.58] - 2026-04-08
+
+### Fixes
+- Fix AssemblyAI voice transcription in agent chat
+
+## [2.57] - 2026-04-08
+
+### Fixes
+- File picker remembers last-used directory
+
+## [2.56] - 2026-04-08
+
+### Fixes
+- Move EQ snapshots/state to unified file, add data storage rules to AGENTS.md
+
+### Documentation
+- Rewrite README with better focus and website-quality copy
+
+## [2.55] - 2026-04-07
+
+### Documentation
+- Add comment explaining level match, platform normalization, and reference interaction
+
+## [2.54.2] - 2026-04-07
+
+### Fixes
+- Fix Cmd+R event propagation, immediate EQ snapshot save
+
+## [2.54.1] - 2026-04-07
+
+### Fixes
+- Cmd+R reference toggle, custom shortcuts, song switcher stays open, remove duplicate text, verify AI EQ
+
+## [2.54] - 2026-04-07
+
+### Fixes
+- Enable HMR for faster dev, bypass EQ for reference tracks, apply platform normalization to reference, migrate EQ snapshots
+
+## [2.53] - 2026-04-07
+
+### Features
+- Spectrum hover shows Hz and dB values, full per-track EQ state, R key shortcut for reference toggle, richer AI prompt context, help dialog update, reverse snapshot order
+
+## [2.52] - 2026-04-07
+
+### Features
+- Agent notification badge, AI EQ UX improvements, per-track AI recommendations
+
+## [2.51] - 2026-04-07
+
+### Fixes
+- Properly disable Swift extension, rename Package.swift
+
+## [2.50] - 2026-04-07
+
+### Maintenance
+- Add VS Code settings to disable Swift LSP for this workspace
+
+## [2.49] - 2026-04-05
+
+### Maintenance
+- Revert custom hot reload, restore default dev workflow
+
+## [2.48] - 2026-04-05
+
+### Fixes
+- Make localStorage migration robust with logging and retry on failure
+
 ## [2.47] - 2026-04-05
 
 ### Fixes

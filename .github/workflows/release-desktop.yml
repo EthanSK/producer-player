@@ -264,6 +264,116 @@ jobs:
       - name: Show assets
         run: ls -lah release-assets
 
+      - name: Generate changelog from commits
+        id: changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current_tag="${{ needs.compute-version.outputs.release_tag }}"
+
+          # Fetch all tags so we can find the previous one
+          git fetch --tags --force 2>/dev/null || true
+
+          # Find previous tag by listing all tags sorted by version, then picking
+          # the one right before the current tag
+          prev_tag=$(git tag --sort=-version:refname | grep -A1 "^${current_tag}$" | tail -1)
+          if [ "$prev_tag" = "$current_tag" ] || [ -z "$prev_tag" ]; then
+            # Fallback: get first commit
+            prev_tag=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "Generating changelog: ${prev_tag}..${current_tag}"
+
+          features=""
+          fixes=""
+          maintenance=""
+          docs=""
+          other=""
+
+          while IFS= read -r line; do
+            # Strip leading short hash
+            msg="${line#* }"
+            if [[ "$msg" == feat:* ]]; then
+              features="${features}\n- ${msg#feat: }"
+            elif [[ "$msg" == feat\(* ]]; then
+              features="${features}\n- ${msg}"
+            elif [[ "$msg" == fix:* ]]; then
+              fixes="${fixes}\n- ${msg#fix: }"
+            elif [[ "$msg" == fix\(* ]]; then
+              fixes="${fixes}\n- ${msg}"
+            elif [[ "$msg" == chore:* || "$msg" == refactor:* ]]; then
+              if [[ "$msg" != *"bump version"* ]]; then
+                maintenance="${maintenance}\n- ${msg#chore: }"
+              fi
+            elif [[ "$msg" == docs:* ]]; then
+              docs="${docs}\n- ${msg#docs: }"
+            elif [[ "$msg" == doc:* ]]; then
+              docs="${docs}\n- ${msg#doc: }"
+            elif [[ "$msg" != *"bump version"* && "$msg" != "Merge "* ]]; then
+              other="${other}\n- ${msg}"
+            fi
+          done < <(git log --oneline "${prev_tag}..${current_tag}" --)
+
+          changelog=""
+          if [ -n "$features" ]; then
+            changelog="${changelog}### Features${features}\n\n"
+          fi
+          if [ -n "$fixes" ]; then
+            changelog="${changelog}### Fixes${fixes}\n\n"
+          fi
+          if [ -n "$maintenance" ]; then
+            changelog="${changelog}### Maintenance${maintenance}\n\n"
+          fi
+          if [ -n "$docs" ]; then
+            changelog="${changelog}### Documentation${docs}\n\n"
+          fi
+          if [ -n "$other" ]; then
+            changelog="${changelog}### Other${other}\n\n"
+          fi
+
+          if [ -z "$changelog" ]; then
+            changelog="Maintenance release.\n"
+          fi
+
+          # Write to file to avoid escaping issues
+          printf "%b" "$changelog" > /tmp/release_changelog.md
+          echo "prev_tag=${prev_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Compose release body
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          display_version="${{ needs.compute-version.outputs.display_version }}"
+          repo="${{ github.repository }}"
+          sha="${{ github.sha }}"
+          run_id="${{ github.run_id }}"
+          prev_tag="${{ steps.changelog.outputs.prev_tag }}"
+          release_tag="${{ needs.compute-version.outputs.release_tag }}"
+
+          {
+            echo "## Producer Player v${display_version}"
+            echo ""
+            cat /tmp/release_changelog.md
+            echo "---"
+            echo ""
+            echo "**Stable direct latest-download links** (auto-follow new releases):"
+            echo ""
+            echo "| Platform | Stable URL |"
+            echo "|----------|------------|"
+            echo "| macOS (Universal: Apple Silicon + Intel) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-mac-universal.zip\` |"
+            echo "| Linux (x64) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-linux-x64.zip\` |"
+            echo "| Windows (x64) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-win-x64.zip\` |"
+            echo ""
+            echo "Versioned assets are attached below for auditing/reproducibility."
+            echo ""
+            echo "Commit: \`${sha}\`"
+            echo "Workflow run: https://github.com/${repo}/actions/runs/${run_id}"
+            echo ""
+            echo "**Full Changelog**: https://github.com/${repo}/compare/${prev_tag}...${release_tag}"
+          } > /tmp/release_body.md
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -272,23 +382,6 @@ jobs:
           name: ${{ needs.compute-version.outputs.release_name }}
           prerelease: false
           make_latest: true
-          generate_release_notes: true
-          body: |
-            ## Producer Player v${{ needs.compute-version.outputs.display_version }}
-
-            **Stable direct latest-download links** (auto-follow new releases):
-
-            | Platform | Stable URL |
-            |----------|------------|
-            | macOS (Universal: Apple Silicon + Intel) | `https://github.com/${{ github.repository }}/releases/latest/download/Producer-Player-latest-mac-universal.zip` |
-            | Linux (x64) | `https://github.com/${{ github.repository }}/releases/latest/download/Producer-Player-latest-linux-x64.zip` |
-            | Windows (x64) | `https://github.com/${{ github.repository }}/releases/latest/download/Producer-Player-latest-win-x64.zip` |
-
-            Versioned assets are attached below for auditing/reproducibility.
-
-            Commit: `${{ github.sha }}`
-            Workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            ---
+          body_path: /tmp/release_body.md
           files: |
             release-assets/*

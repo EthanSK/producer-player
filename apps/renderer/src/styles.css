@@ -2899,19 +2899,45 @@ button.checklist-play-toggle[data-playing='true'] {
   color: rgba(255, 180, 60, 1);
 }
 
-/* EQ controls row (Reset + Save buttons side by side) */
+/* EQ controls row — left EQ buttons, right Mix/Ref toggle */
 .eq-controls-row {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+}
+
+.eq-controls-left {
+  display: flex;
   gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.eq-controls-right {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Snapshot pills inline within the left group */
+.eq-snapshots-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   align-items: center;
 }
 
 /* Inline Mix/Ref toggle inside the EQ controls row */
 .eq-inline-ab {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
-  margin-left: auto;
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
 }
 
 .eq-inline-ab-actions {
@@ -3019,13 +3045,7 @@ button.checklist-play-toggle[data-playing='true'] {
   color: rgba(100, 200, 255, 1);
 }
 
-/* EQ Snapshot pills row */
-.eq-snapshots-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 2px;
-}
+/* EQ Snapshot pills row (legacy standalone — kept for reference, now inline via .eq-snapshots-inline) */
 
 .eq-snapshot-pill {
   display: flex;

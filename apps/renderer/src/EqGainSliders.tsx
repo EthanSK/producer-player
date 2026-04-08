@@ -192,29 +192,29 @@ export function EqGainSliders({
         })}
       </div>
       <div className="eq-controls-row">
-        {onToggleEq && (
-          <button
-            type="button"
-            className={`ghost eq-toggle-button${eqEnabled ? '' : ' eq-toggle-button--off'}`}
-            data-testid="eq-toggle"
-            onClick={onToggleEq}
-            title={eqEnabled ? 'Bypass EQ (keep slider positions).' : 'Re-enable EQ.'}
-          >
-            {eqEnabled ? 'EQ On' : 'EQ Off'}
-          </button>
-        )}
-        {hasAnyGain && (
-          <button
-            type="button"
-            className="ghost eq-reset-all-button"
-            data-testid="eq-reset-all"
-            onClick={onResetAll}
-            title="Reset all EQ bands to 0 dB."
-          >
-            Reset EQ
-          </button>
-        )}
-        {hasAnyGain && (
+        <div className="eq-controls-left">
+          {onToggleEq && (
+            <button
+              type="button"
+              className={`ghost eq-toggle-button${eqEnabled ? '' : ' eq-toggle-button--off'}`}
+              data-testid="eq-toggle"
+              onClick={onToggleEq}
+              title={eqEnabled ? 'Bypass EQ (keep slider positions).' : 'Re-enable EQ.'}
+            >
+              {eqEnabled ? 'EQ On' : 'EQ Off'}
+            </button>
+          )}
+          {hasAnyGain && (
+            <button
+              type="button"
+              className="ghost eq-reset-all-button"
+              data-testid="eq-reset-all"
+              onClick={onResetAll}
+              title="Reset all EQ bands to 0 dB."
+            >
+              Reset EQ
+            </button>
+          )}
           <button
             type="button"
             className="ghost eq-save-snapshot-button"
@@ -224,36 +224,40 @@ export function EqGainSliders({
           >
             Save
           </button>
-        )}
-        {rightContent}
-      </div>
-      {snapshots.length > 0 && (
-        <div className="eq-snapshots-row" data-testid="eq-snapshots-row">
-          {[...snapshots].reverse().map((snap, idx) => (
-            <div key={snap.id} className="eq-snapshot-pill" data-testid={`eq-snapshot-${idx}`}>
-              <button
-                type="button"
-                className="eq-snapshot-pill-button"
-                onClick={() => handleRestoreSnapshot(snap)}
-                title={snap.gains.map(formatGainCompact).join('  ')}
-              >
-                <span className="eq-snapshot-pill-label">
-                  {snap.gains.map(formatGainCompact).join(' ')}
-                </span>
-              </button>
-              <button
-                type="button"
-                className="eq-snapshot-delete"
-                data-testid={`eq-snapshot-delete-${idx}`}
-                onClick={() => handleDeleteSnapshot(snap.id)}
-                title="Delete snapshot"
-              >
-                &times;
-              </button>
+          {snapshots.length > 0 && (
+            <div className="eq-snapshots-inline" data-testid="eq-snapshots-row">
+              {[...snapshots].reverse().map((snap, idx) => (
+                <div key={snap.id} className="eq-snapshot-pill" data-testid={`eq-snapshot-${idx}`}>
+                  <button
+                    type="button"
+                    className="eq-snapshot-pill-button"
+                    onClick={() => handleRestoreSnapshot(snap)}
+                    title={snap.gains.map(formatGainCompact).join('  ')}
+                  >
+                    <span className="eq-snapshot-pill-label">
+                      {snap.gains.map(formatGainCompact).join(' ')}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="eq-snapshot-delete"
+                    data-testid={`eq-snapshot-delete-${idx}`}
+                    onClick={() => handleDeleteSnapshot(snap.id)}
+                    title="Delete snapshot"
+                  >
+                    &times;
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
-      )}
+        {rightContent && (
+          <div className="eq-controls-right">
+            {rightContent}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

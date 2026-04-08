@@ -10749,6 +10749,45 @@ export function App(): JSX.Element {
                         eqEnabled={eqEnabled}
                         onToggleEq={handleToggleEq}
                         songKey={selectedSongId ?? undefined}
+                        rightContent={referenceTrack ? (
+                          <div className="eq-inline-ab" data-testid="eq-inline-ab">
+                            <div className="eq-inline-ab-actions" role="group" aria-label="Inline A/B toggle">
+                              <button
+                                type="button"
+                                className={playbackPreviewMode === 'mix' ? 'active' : 'ghost'}
+                                onClick={() => handleReferencePreviewModeChange('mix')}
+                                data-testid="eq-inline-ab-mix"
+                                title="Listen to your mix."
+                              >
+                                Mix
+                              </button>
+                              <button
+                                type="button"
+                                className={playbackPreviewMode === 'reference' ? 'active' : 'ghost'}
+                                onClick={() => handleReferencePreviewModeChange('reference')}
+                                data-testid="eq-inline-ab-reference"
+                                title="Listen to the reference track."
+                              >
+                                Ref
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              className={`ghost eq-inline-level-match${referenceLevelMatchEnabled ? ' eq-inline-level-match--active' : ''}`}
+                              onClick={() => setReferenceLevelMatchEnabled((v) => {
+                                const next = !v;
+                                window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
+                                return next;
+                              })}
+                              data-testid="eq-inline-level-match"
+                              title={referenceLevelMatchEnabled
+                                ? `Level Match On${referenceLevelMatchGainDb !== 0 ? ` (${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB)` : ''}`
+                                : 'Level Match Off — enable to match reference volume to your mix'}
+                            >
+                              {referenceLevelMatchEnabled ? 'LM' : 'LM'}
+                            </button>
+                          </div>
+                        ) : undefined}
                       />
                       <div className="eq-overlay-toggles-row">
                         {referenceTrack && (
@@ -10796,13 +10835,26 @@ export function App(): JSX.Element {
                               data-testid="eq-overlay-apply-ai-eq"
                               onClick={() => {
                                 if (aiRecommendedEq) {
-                                  handleEqRestoreGains(aiRecommendedEq);
+                                  if (soloedBands.size > 0) {
+                                    // Only apply AI gains for soloed bands, keep others unchanged
+                                    const merged = [...eqBandGains];
+                                    for (const idx of soloedBands) {
+                                      if (idx < aiRecommendedEq.length) {
+                                        merged[idx] = aiRecommendedEq[idx];
+                                      }
+                                    }
+                                    handleEqRestoreGains(merged);
+                                  } else {
+                                    handleEqRestoreGains(aiRecommendedEq);
+                                  }
                                   setEqEnabled(true);
                                 }
                               }}
-                              title="Copy the AI-recommended EQ values to the EQ sliders"
+                              title={soloedBands.size > 0
+                                ? 'Apply AI EQ only for the currently soloed frequency bands'
+                                : 'Copy the AI-recommended EQ values to the EQ sliders'}
                             >
-                              Use AI EQ
+                              {soloedBands.size > 0 ? 'Use AI EQ for selected range' : 'Use AI EQ'}
                             </button>
                             <button
                               type="button"

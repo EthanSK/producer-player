@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { EqSnapshot } from '@producer-player/contracts';
 import { FREQUENCY_BANDS, frequencyToX } from './audioEngine';
 
@@ -103,6 +103,8 @@ export interface EqGainSlidersProps {
   onToggleEq?: () => void;
   /** Unique key for the current song — snapshots are stored per-song. */
   songKey?: string;
+  /** Optional content rendered at the right end of the EQ controls row. */
+  rightContent?: ReactNode;
 }
 
 /**
@@ -119,6 +121,7 @@ export function EqGainSliders({
   eqEnabled = true,
   onToggleEq,
   songKey,
+  rightContent,
 }: EqGainSlidersProps): JSX.Element {
   const hasAnyGain = gains.some((g) => g !== EQ_GAIN_DEFAULT_DB);
   const [snapshots, setSnapshots] = useState<EqSnapshot[]>(() => loadSnapshots(songKey));
@@ -222,6 +225,7 @@ export function EqGainSliders({
             Save
           </button>
         )}
+        {rightContent}
       </div>
       {snapshots.length > 0 && (
         <div className="eq-snapshots-row" data-testid="eq-snapshots-row">

@@ -2906,6 +2906,74 @@ button.checklist-play-toggle[data-playing='true'] {
   align-items: center;
 }
 
+/* Inline Mix/Ref toggle inside the EQ controls row */
+.eq-inline-ab {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.eq-inline-ab-actions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.eq-inline-ab-actions button {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.eq-inline-ab-actions button.active {
+  color: rgba(255, 200, 60, 0.95);
+  border: 1px solid rgba(255, 200, 60, 0.5);
+  background: rgba(255, 200, 60, 0.12);
+}
+
+.eq-inline-ab-actions button.ghost {
+  color: rgba(180, 180, 180, 0.6);
+  border: 1px solid rgba(180, 180, 180, 0.2);
+  background: rgba(180, 180, 180, 0.04);
+}
+
+.eq-inline-ab-actions button.ghost:hover {
+  color: rgba(180, 180, 180, 0.85);
+  background: rgba(180, 180, 180, 0.1);
+}
+
+.eq-inline-level-match {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: rgba(180, 180, 180, 0.5);
+  border: 1px solid rgba(180, 180, 180, 0.2);
+  background: rgba(180, 180, 180, 0.04);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.eq-inline-level-match:hover {
+  color: rgba(180, 180, 180, 0.8);
+  background: rgba(180, 180, 180, 0.1);
+}
+
+.eq-inline-level-match--active {
+  color: rgba(120, 220, 120, 0.85);
+  border-color: rgba(120, 220, 120, 0.4);
+  background: rgba(120, 220, 120, 0.1);
+}
+
+.eq-inline-level-match--active:hover {
+  color: rgba(120, 220, 120, 1);
+  background: rgba(120, 220, 120, 0.15);
+}
+
 /* EQ on/off toggle button */
 .eq-toggle-button {
   font-size: 11px;

@@ -189,6 +189,16 @@ async function main() {
     );
   }
 
+  // Enforce two-part versioning: patch must always be 0
+  if (currentSemver.patch !== 0) {
+    throw new Error(
+      `package.json version "${currentSemver.raw}" has a non-zero patch (${currentSemver.patch}). ` +
+      `Producer Player uses two-part versioning (x.y display / x.y.0 internal). ` +
+      `The patch component must always be 0. ` +
+      `Fix package.json and use "npm run version:bump:patch" or "npm run version:bump:minor" to bump.`
+    );
+  }
+
   console.log(
     `[version:bump:check] OK — package.json version increased from ${baseSemver.display} to ${currentSemver.display}.`
   );

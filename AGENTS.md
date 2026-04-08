@@ -108,18 +108,21 @@ flags) should remain localStorage-only.
 
 ## Release Versioning
 
+- **Version format is ALWAYS x.y (display) / x.y.0 (internal). Never x.y.z where z > 0.**
+- Do NOT manually edit the `version` field in `package.json`. Always use the bump scripts.
 - Every meaningful Producer Player code/content change that is intended to ship should advance the app version before it lands on `main`.
 - `package.json` is the single source of truth for the app version.
-- Default bump level: **patch**.
-- Use a **minor** bump for clearly meaningful user-facing feature work or noticeably broader UX/product changes.
+- Default bump level: **patch** (which increments the minor/y part: 2.59 -> 2.60).
+- Use a **minor** bump for clearly meaningful user-facing feature work or noticeably broader UX/product changes (which increments the major/x part: 2.60 -> 3.0).
 - Commit messages should make that intent legible:
   - `feat:` (or `feat(...)`) → minor bump
   - `fix:`, `chore:`, `refactor:`, `docs:`, `test:` → patch bump by default
   - `[minor]` in the commit subject/body can force a minor bump when needed
 - Before shipping a meaningful change, run one of:
-  - `npm run version:bump:patch`
-  - `npm run version:bump:minor`
+  - `npm run version:bump:patch`  (bumps y: 2.59 -> 2.60)
+  - `npm run version:bump:minor`  (bumps x: 2.59 -> 3.0)
 - Then run:
   - `npm run version:check`
   - `npm run version:bump:check`
 - CI now enforces that release-relevant file changes cannot land without a version bump in `package.json`.
+- CI and scripts also enforce that the patch component is always 0. A non-zero patch (e.g. 2.59.1) will fail validation.

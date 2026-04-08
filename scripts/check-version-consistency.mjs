@@ -78,6 +78,15 @@ async function main() {
     throw new Error('CI workflow must run version consistency checks.');
   }
 
+  // Enforce two-part versioning: patch must always be 0
+  const patchMatch = packageVersion.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (patchMatch && Number(patchMatch[3]) !== 0) {
+    throw new Error(
+      `package.json version "${packageVersion}" has a non-zero patch. ` +
+      `Producer Player uses two-part versioning (x.y display / x.y.0 internal). The patch must always be 0.`
+    );
+  }
+
   console.log(`[version:check] OK — unified version source is package.json (${packageVersion}).`);
 }
 

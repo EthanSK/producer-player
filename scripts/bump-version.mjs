@@ -1,10 +1,15 @@
 /**
  * Custom version bump script for the two-part versioning scheme (x.y).
  *
+ * IMPORTANT: Producer Player uses a TWO-PART version format.
+ *   - Display version: x.y (e.g. 2.60)
+ *   - Internal semver:  x.y.0 (patch is ALWAYS 0)
+ *   - NEVER produce x.y.z where z > 0
+ *
  * package.json stores versions as x.y.0 (valid semver with patch always 0).
  * The display version is x.y (patch part stripped).
  *
- * Usage:
+ * Do NOT manually edit the version in package.json. Always use this script:
  *   node scripts/bump-version.mjs          — bump the y part (2.14 -> 2.15)
  *   node scripts/bump-version.mjs major    — bump the x part (2.14 -> 3.0)
  */
@@ -29,6 +34,15 @@ async function main() {
     throw new Error(`Current version "${currentVersion}" is not in the expected x.y.0 format.`);
   }
 
+  const currentPatch = Number(match[3]);
+  if (currentPatch !== 0) {
+    throw new Error(
+      `Current version "${currentVersion}" has a non-zero patch (${currentPatch}). ` +
+      `Producer Player uses two-part versioning (x.y) where the internal patch is always 0. ` +
+      `Fix package.json to x.y.0 format before bumping.`
+    );
+  }
+
   let major = Number(match[1]);
   let minor = Number(match[2]);
 
@@ -40,6 +54,11 @@ async function main() {
   }
 
   const nextVersion = `${major}.${minor}.0`;
+
+  // Defensive: ensure we never produce a version with non-zero patch
+  if (!nextVersion.endsWith('.0')) {
+    throw new Error(`Bug: computed version "${nextVersion}" does not end with .0. This should never happen.`);
+  }
 
   // Preserve formatting: replace only the version field value
   const updatedRaw = raw.replace(

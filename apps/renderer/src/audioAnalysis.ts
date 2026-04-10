@@ -270,7 +270,9 @@ export async function analyzeTrackFromUrl(
     const context = new AudioContext();
 
     try {
-      const buffer = await context.decodeAudioData(bytes.slice(0));
+      // Pass the fetched buffer directly so we do not allocate a second
+      // full-size copy of long audio files right before decode.
+      const buffer = await context.decodeAudioData(bytes);
       ensureNotAborted(signal);
 
       const mono = createMonoData(buffer);

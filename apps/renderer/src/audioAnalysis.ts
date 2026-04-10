@@ -24,7 +24,10 @@ const LOUDNESS_FRAME_SECONDS = 0.25;
 const LOW_BAND_CUTOFF_HZ = 250;
 const HIGH_BAND_CUTOFF_HZ = 4_000;
 
-let sharedAudioContext: AudioContext | null = null;
+// Full-track decode can be very memory-hungry for long WAV/AIFF files.
+// Keep preview analyses serialized so rapid track switches do not stack
+// multiple huge decode jobs in parallel and blow up renderer memory.
+let analysisQueueTail: Promise<void> = Promise.resolve();
 
 function createAbortError(): Error {
   return new DOMException('The analysis request was aborted.', 'AbortError');
@@ -60,27 +63,21 @@ function amplitudeToDbfs(value: number): number {
   return Math.max(MIN_DECIBELS, 20 * Math.log10(value));
 }
 
-function getAudioContext(): AudioContext {
-  if (!sharedAudioContext) {
-    sharedAudioContext = new AudioContext();
+async function runSerializedAnalysis<T>(task: () => Promise<T>): Promise<T> {
+  const previous = analysisQueueTail.catch(() => undefined);
+  let release: () => void = () => undefined;
+
+  analysisQueueTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+
+  try {
+    return await task();
+  } finally {
+    release();
   }
-
-  return sharedAudioContext;
-}
-
-async function decodeAudioBuffer(url: string, signal?: AbortSignal): Promise<AudioBuffer> {
-  ensureNotAborted(signal);
-
-  const response = await fetch(url, { signal });
-  if (!response.ok) {
-    throw new Error(`Failed to fetch analysis source (${response.status}).`);
-  }
-
-  const bytes = await response.arrayBuffer();
-  ensureNotAborted(signal);
-
-  const context = getAudioContext();
-  return context.decodeAudioData(bytes.slice(0));
 }
 
 function createMonoData(buffer: AudioBuffer): Float32Array {
@@ -259,35 +256,53 @@ export async function analyzeTrackFromUrl(
   url: string,
   signal?: AbortSignal
 ): Promise<TrackAnalysisResult> {
-  const buffer = await decodeAudioBuffer(url, signal);
-  ensureNotAborted(signal);
+  return runSerializedAnalysis(async () => {
+    ensureNotAborted(signal);
 
-  const mono = createMonoData(buffer);
-  const { peakDbfs, integratedLufsEstimate } = calculatePeakAndIntegrated(mono);
-  const { frameDurationSeconds, frameLoudnessDbfs } = calculateFrameLoudnessDbfs(
-    mono,
-    buffer.sampleRate
-  );
-  const tonalBalance = calculateTonalBalance(mono, buffer.sampleRate);
-  const rmsDbfs = calculateRmsDbfs(mono);
-  const crestFactorDb = peakDbfs - rmsDbfs;
-  const dcOffset = calculateDcOffset(mono);
-  const clipCount = countClips(mono);
-  const waveformPeaks = computeWaveformPeaks(mono, WAVEFORM_BUCKET_COUNT);
+    const response = await fetch(url, { signal });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch analysis source (${response.status}).`);
+    }
 
-  return {
-    peakDbfs,
-    integratedLufsEstimate,
-    frameLoudnessDbfs,
-    frameDurationSeconds,
-    durationSeconds: buffer.duration,
-    tonalBalance,
-    rmsDbfs,
-    crestFactorDb,
-    dcOffset,
-    clipCount,
-    waveformPeaks,
-  };
+    const bytes = await response.arrayBuffer();
+    ensureNotAborted(signal);
+
+    const context = new AudioContext();
+
+    try {
+      const buffer = await context.decodeAudioData(bytes.slice(0));
+      ensureNotAborted(signal);
+
+      const mono = createMonoData(buffer);
+      const { peakDbfs, integratedLufsEstimate } = calculatePeakAndIntegrated(mono);
+      const { frameDurationSeconds, frameLoudnessDbfs } = calculateFrameLoudnessDbfs(
+        mono,
+        buffer.sampleRate
+      );
+      const tonalBalance = calculateTonalBalance(mono, buffer.sampleRate);
+      const rmsDbfs = calculateRmsDbfs(mono);
+      const crestFactorDb = peakDbfs - rmsDbfs;
+      const dcOffset = calculateDcOffset(mono);
+      const clipCount = countClips(mono);
+      const waveformPeaks = computeWaveformPeaks(mono, WAVEFORM_BUCKET_COUNT);
+
+      return {
+        peakDbfs,
+        integratedLufsEstimate,
+        frameLoudnessDbfs,
+        frameDurationSeconds,
+        durationSeconds: buffer.duration,
+        tonalBalance,
+        rmsDbfs,
+        crestFactorDb,
+        dcOffset,
+        clipCount,
+        waveformPeaks,
+      };
+    } finally {
+      void context.close().catch(() => undefined);
+    }
+  });
 }
 
 export function estimateShortTermLufs(

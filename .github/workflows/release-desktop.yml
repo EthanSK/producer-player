@@ -275,12 +275,39 @@ jobs:
           # Fetch all tags so we can find the previous one
           git fetch --tags --force 2>/dev/null || true
 
-          # Find previous tag by listing all tags sorted by version, then picking
-          # the one right before the current tag
-          prev_tag=$(git tag --sort=-version:refname | grep -A1 "^${current_tag}$" | tail -1)
-          if [ "$prev_tag" = "$current_tag" ] || [ -z "$prev_tag" ]; then
+          # Find previous tag by listing all tags sorted by version. If the
+          # current tag already exists in the repo (retriggered build), pick
+          # the entry right after it; otherwise fall back to the newest
+          # existing tag. Guard every pipeline so a missing match under
+          # `pipefail` doesn't abort the step.
+          all_tags="$(git tag --sort=-version:refname || true)"
+          prev_tag=""
+          if [ -n "$all_tags" ]; then
+            found_current=0
+            while IFS= read -r tag; do
+              if [ "$found_current" -eq 1 ]; then
+                prev_tag="$tag"
+                break
+              fi
+              if [ "$tag" = "$current_tag" ]; then
+                found_current=1
+              fi
+            done <<< "$all_tags"
+
+            if [ -z "$prev_tag" ]; then
+              # Current tag not found (typical for a fresh release) — fall
+              # back to the newest existing tag that isn't the current one.
+              while IFS= read -r tag; do
+                if [ "$tag" != "$current_tag" ] && [ -n "$tag" ]; then
+                  prev_tag="$tag"
+                  break
+                fi
+              done <<< "$all_tags"
+            fi
+          fi
+          if [ -z "$prev_tag" ]; then
             # Fallback: get first commit
-            prev_tag=$(git rev-list --max-parents=0 HEAD)
+            prev_tag="$(git rev-list --max-parents=0 HEAD)"
           fi
 
           echo "Generating changelog: ${prev_tag}..${current_tag}"

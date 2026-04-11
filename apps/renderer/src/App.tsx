@@ -6343,12 +6343,14 @@ export function App(): JSX.Element {
     setSoloedBands((prev) => {
       let next: Set<number>;
       if (shiftKey) {
-        // Shift+click: select all bands EXCEPT the clicked one (exclude mode)
-        next = new Set(FREQUENCY_BANDS.map((_, i) => i));
-        next.delete(bandIndex);
-        // If the result is the same as current selection, clear all (toggle off)
-        if (next.size === prev.size && Array.from(next).every((i) => prev.has(i))) {
+        // Shift+click: replace current selection with only the clicked band
+        // (intentional behavior change — previously this selected every band
+        // EXCEPT the clicked one, which was rarely useful).
+        // If the clicked band is already the sole selection, clear (toggle off).
+        if (prev.size === 1 && prev.has(bandIndex)) {
           next = new Set<number>();
+        } else {
+          next = new Set<number>([bandIndex]);
         }
       } else {
         next = new Set(prev);
@@ -10744,7 +10746,7 @@ export function App(): JSX.Element {
                       <div className="analysis-panel-header-row">
                         <div className="analysis-section-header">
                           <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{usingReferenceSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high). Hover the spectrum to see a crosshair with the exact frequency and dB at that point.\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nEQ Features:\n- Manual EQ sliders: Drag the horizontal sliders on each band to boost or cut that frequency range (±12 dB). Double-click a slider to reset it.\n- EQ On/Off toggle: Bypass the EQ without clearing your slider positions. Click 'EQ On' / 'EQ Off' to toggle.\n- EQ Snapshots: Click 'Save' to store the current EQ settings. Snapshots are per-track. Click a snapshot pill to restore it, or × to delete.\n- AI Recommended EQ (cyan dashed curve): Click 'Get AI EQ' to ask the AI agent for a recommended mastering EQ curve based on your track's analysis. The recommendation appears as a cyan dashed overlay.\n- Use AI EQ button: Apply the AI recommendation to your EQ sliders with one click.\n- Reference Delta (green dotted curve): When a reference track is loaded, toggle 'Ref Δ' to show the tonal balance difference between your mix and the reference as a green dashed curve.\n- Show EQ'd Tonal Balance toggle: When EQ is active, toggle this to see how your tonal balance would change with the current EQ applied.\n- R key shortcut: Press R to quickly toggle between Mix and Reference playback (only when a reference track is loaded).\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
-                          <p className="analysis-section-subtitle">Real-time frequency content — click a band to solo; Shift+click to exclude.</p>
+                          <p className="analysis-section-subtitle">Real-time frequency content — click a band to solo; Shift+click to replace the selection with just that band.</p>
                         </div>
                         {renderMasteringPanelDragHandle('fullscreen', 'visualizations')}
                       </div>

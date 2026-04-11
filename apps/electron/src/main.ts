@@ -844,6 +844,11 @@ let currentAutoUpdateState: AutoUpdateState = {
   error: null,
 };
 
+// When true, the next `update-available` event should immediately trigger a download.
+// Used by the background scheduler (and the renderer's explicit Download & Install button)
+// so that user-initiated rechecks never auto-download.
+let shouldAutoDownloadOnNextAvailable = false;
+
 function emitAutoUpdateState(state: AutoUpdateState): void {
   currentAutoUpdateState = state;
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -853,7 +858,10 @@ function emitAutoUpdateState(state: AutoUpdateState): void {
 
 function configureAutoUpdater(): void {
   autoUpdater.logger = log;
-  autoUpdater.autoDownload = true;
+  // Manual download flow: the renderer drives downloads via the "Download & Install" button.
+  // The background scheduler below explicitly triggers downloadUpdate() after update-available
+  // to preserve the automatic background-update behaviour for users who opt in.
+  autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowDowngrade = false;
 
@@ -882,10 +890,23 @@ function configureAutoUpdater(): void {
       progress: null,
       error: null,
     });
+
+    // If this check was kicked off by the background scheduler (or an explicit
+    // opt-in request), start downloading now. Rechecks triggered from the
+    // renderer's Recheck button leave this flag false and will NOT auto-download.
+    if (shouldAutoDownloadOnNextAvailable) {
+      shouldAutoDownloadOnNextAvailable = false;
+      void autoUpdater.downloadUpdate().catch((error: unknown) => {
+        log.warn('[producer-player:auto-update] background download failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
   });
 
   autoUpdater.on('update-not-available', (info) => {
     log.info('[producer-player:auto-update] no update available', { version: info.version });
+    shouldAutoDownloadOnNextAvailable = false;
     // IMPORTANT: Always use toDisplayVersion() when showing versions to users
     emitAutoUpdateState({
       status: 'not-available',
@@ -929,6 +950,7 @@ function configureAutoUpdater(): void {
     log.warn('[producer-player:auto-update] error', {
       message: error.message,
     });
+    shouldAutoDownloadOnNextAvailable = false;
     emitAutoUpdateState({
       status: 'error',
       version: currentAutoUpdateState.version,
@@ -959,14 +981,18 @@ function scheduleAutomaticUpdateChecks(): void {
   configureAutoUpdater();
 
   autoUpdateCheckStartupTimeout = setTimeout(() => {
+    shouldAutoDownloadOnNextAvailable = true;
     void autoUpdater.checkForUpdates().catch((error: unknown) => {
+      shouldAutoDownloadOnNextAvailable = false;
       log.warn('[producer-player:auto-update] scheduled check failed', {
         error: error instanceof Error ? error.message : String(error),
       });
     });
 
     autoUpdateCheckInterval = setInterval(() => {
+      shouldAutoDownloadOnNextAvailable = true;
       void autoUpdater.checkForUpdates().catch((error: unknown) => {
+        shouldAutoDownloadOnNextAvailable = false;
         log.warn('[producer-player:auto-update] periodic check failed', {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -3581,7 +3607,26 @@ function registerIpcHandlers(service: FileLibraryService): void {
       log.info('[producer-player:auto-update] skipping check (not packaged or test mode)');
       return;
     }
+    // Renderer-initiated rechecks must never auto-download; the user clicks
+    // "Download & Install" explicitly once the check surfaces an available update.
+    shouldAutoDownloadOnNextAvailable = false;
     await autoUpdater.checkForUpdates();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_DOWNLOAD, async () => {
+    if (!app.isPackaged || IS_TEST_MODE) {
+      log.info('[producer-player:auto-update] skipping download (not packaged or test mode)');
+      return;
+    }
+    log.info('[producer-player:auto-update] download requested by renderer');
+    try {
+      await autoUpdater.downloadUpdate();
+    } catch (error: unknown) {
+      log.warn('[producer-player:auto-update] renderer download failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_INSTALL, async () => {

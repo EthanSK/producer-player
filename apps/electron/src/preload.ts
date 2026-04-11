@@ -147,6 +147,10 @@ const bridge: ProducerPlayerBridge = {
     await ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_CHECK);
   },
 
+  async autoUpdateDownload() {
+    await ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_DOWNLOAD);
+  },
+
   async autoUpdateInstall() {
     await ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_INSTALL);
   },

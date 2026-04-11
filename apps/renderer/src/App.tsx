@@ -6766,6 +6766,14 @@ export function App(): JSX.Element {
     setUpdateCheckStatus('checking');
     setUpdateCheckResult(null);
 
+    // Kick off the electron-updater recheck in parallel so the in-app
+    // "Download & Install" flow has a fresh autoUpdateState to drive from.
+    // Since autoDownload is disabled in the main process, this will NOT
+    // start a download on its own — the user must click Download & Install.
+    void window.producerPlayer.autoUpdateCheck().catch(() => {
+      // Swallow — the GitHub-API check below owns the user-visible error message.
+    });
+
     try {
       const result = await window.producerPlayer.checkForUpdates();
       setUpdateCheckResult(result);
@@ -6787,11 +6795,9 @@ export function App(): JSX.Element {
     }
   }
 
-  async function handleDownloadUpdate(): Promise<void> {
+  async function handleDownloadAndInstallUpdate(): Promise<void> {
     await runVoidTask(async () => {
-      await window.producerPlayer.openUpdateDownload(
-        updateCheckResult?.downloadUrl ?? updateCheckResult?.releaseUrl ?? null
-      );
+      await window.producerPlayer.autoUpdateDownload();
     });
   }
 
@@ -7915,6 +7921,15 @@ export function App(): JSX.Element {
   const canDownloadUpdate =
     updateCheckResult?.status === 'update-available' &&
     Boolean(updateCheckResult.downloadUrl || updateCheckResult.releaseUrl);
+  // The in-app "Download & Install" button drives electron-updater directly.
+  // It becomes enabled once either the GitHub-API recheck reports an available
+  // update, or electron-updater itself has transitioned to the `available` state.
+  // While a download is in-flight or already complete, the button is suppressed
+  // so the user can't re-trigger the pipeline mid-flight.
+  const canDownloadAndInstallUpdate =
+    (canDownloadUpdate || autoUpdateState.status === 'available') &&
+    autoUpdateState.status !== 'downloading' &&
+    autoUpdateState.status !== 'downloaded';
   const autoUpdateDownloadPercent =
     autoUpdateState.status === 'downloading' && autoUpdateState.progress
       ? Math.round(autoUpdateState.progress.percent)
@@ -9772,23 +9787,10 @@ export function App(): JSX.Element {
                 }}
                 data-testid="support-feedback-check-updates"
                 disabled={updateCheckStatus === 'checking'}
-                title="Check if a newer version is available."
+                title="Recheck the update feed without downloading anything."
               >
-                {updateCheckStatus === 'checking' ? 'Checking…' : 'Check for Updates'}
+                {updateCheckStatus === 'checking' ? 'Rechecking…' : 'Recheck for Updates'}
               </button>
-              {canDownloadUpdate ? (
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => {
-                    void handleDownloadUpdate();
-                  }}
-                  data-testid="support-feedback-download-update"
-                  title="Download the latest update."
-                >
-                  Download Update
-                </button>
-              ) : null}
               {autoUpdateState.status === 'downloaded' ? (
                 <button
                   type="button"
@@ -9799,9 +9801,28 @@ export function App(): JSX.Element {
                   data-testid="support-feedback-restart-update"
                   title="Restart the app to apply the downloaded update."
                 >
-                  Restart &amp; Update
+                  Install &amp; Restart
                 </button>
-              ) : null}
+              ) : (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    void handleDownloadAndInstallUpdate();
+                  }}
+                  data-testid="support-feedback-download-update"
+                  disabled={!canDownloadAndInstallUpdate}
+                  title={
+                    canDownloadAndInstallUpdate
+                      ? 'Download the available update and install it on next restart.'
+                      : 'Recheck first — enabled once an update is available.'
+                  }
+                >
+                  {autoUpdateState.status === 'downloading'
+                    ? 'Downloading…'
+                    : 'Download & Install'}
+                </button>
+              )}
             </div>
             {updateStatusText ? (
               <p

@@ -10,6 +10,20 @@
   --accent-strong: #3d8dff;
   --success: #5fd28f;
   --danger: #ff7d7d;
+  /*
+   * Reference-track color palette. Used whenever the A/B toggle is in
+   * "reference" mode to give the user unmistakable visual feedback that
+   * they are hearing the reference, not their mix. Warm amber is chosen
+   * to maximally contrast the cool blue --accent (mix) color.
+   */
+  --color-reference: #ffb454;
+  --color-reference-strong: #ffc773;
+  --color-reference-soft-08: rgba(255, 180, 84, 0.08);
+  --color-reference-soft-12: rgba(255, 180, 84, 0.12);
+  --color-reference-soft-18: rgba(255, 180, 84, 0.18);
+  --color-reference-soft-22: rgba(255, 180, 84, 0.22);
+  --color-reference-soft-35: rgba(255, 180, 84, 0.35);
+  --color-reference-soft-55: rgba(255, 180, 84, 0.55);
 }
 
 * {
@@ -3776,4 +3790,163 @@ button.checklist-play-toggle[data-playing='true'] {
   width: 100%;
   max-width: 260px;
   outline: none;
+}
+
+/* ============================================================
+ * Reference-mode color coding
+ *
+ * The root app shell carries [data-reference-mode="true"] whenever the
+ * user is auditioning the reference track (via the Mix/Reference A/B
+ * toggle, Cmd+R shortcut, etc.). Every rule in this section is
+ * scoped under that attribute, so it only applies while reference
+ * playback is active. The goal is a subtle but unambiguous amber
+ * wash across every surface the reference actually affects — slider
+ * backgrounds, the mix/ref toggle, the floating A/B panel, the
+ * reference stats rail, and inline "Reference"/"Ref" labels.
+ * Canvas-backed graphs (loudness history, waveform, spectrum,
+ * vectorscope, crest factor, histogram) read `isReference` directly
+ * and recolor their strokes/fills in JS — those can't be styled
+ * from CSS because they render to a bitmap.
+ * ============================================================ */
+
+/* Inline textual markers — wrap the word "Reference"/"Ref" in a
+ * <span class="reference-text"> to pick up the amber accent in help
+ * text and tooltips regardless of whether reference mode is active. */
+.reference-text {
+  color: var(--color-reference);
+}
+
+/* Reference-color button variant. Used by the Reference side of the
+ * A/B toggle so that the button itself reads as amber even when the
+ * user is currently in Mix mode (so the target of the click is
+ * obvious). When reference-mode is active it lights up fully. */
+button.reference-action {
+  border-color: rgba(255, 180, 84, 0.35);
+  background: var(--color-reference-soft-08);
+  color: var(--color-reference-strong);
+}
+
+button.reference-action:hover:not(:disabled) {
+  border-color: var(--color-reference);
+  background: var(--color-reference-soft-12);
+}
+
+button.reference-action.active {
+  border-color: var(--color-reference);
+  background: var(--color-reference-soft-22);
+  color: var(--color-reference-strong);
+}
+
+/* When reference mode is live, brighten the already-active Reference
+ * button so it reads as "currently playing". */
+[data-reference-mode='true'] button.reference-action.active {
+  border-color: var(--color-reference-strong);
+  background: var(--color-reference-soft-35);
+  color: #fff6e6;
+  box-shadow: 0 0 0 1px var(--color-reference-soft-55) inset;
+}
+
+/* Recolor generic .active buttons inside reference mode so the app's
+ * usual blue highlight becomes amber. Scoped carefully to the shells
+ * we actually want to shift — we don't want mode-toggle pills in the
+ * sidebar picker to flip colors. */
+[data-reference-mode='true'] .analysis-ab-actions button.active,
+[data-reference-mode='true'] .eq-inline-ab-actions button.active,
+[data-reference-mode='true'] .floating-ab-panel .floating-ab-buttons button.active {
+  border-color: var(--color-reference);
+  background: var(--color-reference-soft-22);
+  color: var(--color-reference-strong);
+}
+
+/* The floating A/B panel sits on top of the mastering view — give it
+ * a warm outline so users see at a glance where reference playback is
+ * coming from. */
+[data-reference-mode='true'] .floating-ab-panel {
+  border-color: var(--color-reference-soft-55);
+  box-shadow: 0 0 0 1px var(--color-reference-soft-22),
+    0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+[data-reference-mode='true'] .floating-ab-panel .floating-ab-level-match button.active {
+  border-color: var(--color-reference);
+  background: var(--color-reference-soft-22);
+  color: var(--color-reference-strong);
+}
+
+/* Level Match pill (the little LM button embedded next to EQ sliders)
+ * also switches to amber, since Level Match is intrinsically tied to
+ * reference comparison. */
+[data-reference-mode='true'] .eq-inline-level-match--active {
+  border-color: var(--color-reference) !important;
+  background: var(--color-reference-soft-22) !important;
+  color: var(--color-reference-strong) !important;
+}
+
+/* Subtle amber wash on the EQ slider track + thumb so the user sees
+ * the reference is affecting what they hear (the reference's EQ
+ * snapshot is restored when toggling to ref mode). Kept intentionally
+ * soft so the per-band colors still read. */
+[data-reference-mode='true'] .eq-slider-track {
+  background: var(--color-reference-soft-08);
+  box-shadow: inset 0 0 0 1px var(--color-reference-soft-12);
+}
+
+[data-reference-mode='true'] .eq-slider-track:hover {
+  background: var(--color-reference-soft-12);
+}
+
+[data-reference-mode='true'] .eq-slider-zero-line {
+  background: var(--color-reference-soft-35);
+}
+
+/* Mastering analysis panel gets an amber top-rail to make it obvious,
+ * in the compact and fullscreen layouts alike, that the metrics are
+ * now sourced from the reference track. */
+[data-reference-mode='true'] .analysis-panel {
+  box-shadow: inset 0 2px 0 0 var(--color-reference-soft-55);
+}
+
+[data-reference-mode='true'] .analysis-overlay-card {
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6),
+    inset 0 3px 0 0 var(--color-reference);
+}
+
+/* Section titles inside the mastering overlay pick up a faint amber
+ * tint in ref mode — enough to register in peripheral vision. */
+[data-reference-mode='true'] .analysis-overlay-header-title h2 {
+  color: var(--color-reference-strong);
+}
+
+/* Inline reference rail (currently-active reference summary) gets a
+ * persistent amber border whenever reference mode is live, so the
+ * reference stat cards read as "this is the source". */
+[data-reference-mode='true'] .analysis-reference-inline {
+  border-color: var(--color-reference-soft-55);
+  background: var(--color-reference-soft-08);
+}
+
+/* Reference panel in the mastering overlay — when active, give its
+ * header a warm bar. */
+[data-reference-mode='true'] .analysis-reference-slot.active {
+  border-color: var(--color-reference);
+}
+
+/* The "Reference" text on the saved-reference-track rows + recent
+ * reference buttons shifts to amber in ref mode. */
+[data-reference-mode='true'] .saved-reference-track-row.active,
+[data-reference-mode='true'] .recent-reference-track-btn.active {
+  border-color: var(--color-reference);
+  background: var(--color-reference-soft-12);
+}
+
+/* Help tooltips / small "Reference" pills inside body copy. */
+[data-reference-mode='true'] .reference-text {
+  color: var(--color-reference-strong);
+  text-shadow: 0 0 8px rgba(255, 180, 84, 0.25);
+}
+
+/* Crosshair / focus-visible rings within reference mode shift color
+ * so keyboard focus is still visible on amber surfaces. */
+[data-reference-mode='true'] button:focus-visible {
+  outline-color: var(--color-reference-soft-55);
 }

@@ -22,6 +22,13 @@ interface SpectrumAnalyzerProps {
   aiEqCurve?: ReadonlyArray<{ freq: number; gainDb: number }>;
   /** Optional reference-difference EQ curve overlay (green/lime). */
   refDiffCurve?: ReadonlyArray<{ freq: number; gainDb: number }>;
+  /**
+   * When true, the spectrum represents the reference track — the curve
+   * stroke, fill gradient and glow shift from the default cool blue →
+   * rainbow to a warm amber so the user knows at a glance that the live
+   * spectrum they're staring at belongs to the reference, not the mix.
+   */
+  isReference?: boolean;
 }
 
 const MIN_FREQ = 20;
@@ -55,6 +62,7 @@ export function SpectrumAnalyzer({
   eqGainCurve,
   aiEqCurve,
   refDiffCurve,
+  isReference = false,
 }: SpectrumAnalyzerProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -280,18 +288,30 @@ export function SpectrumAnalyzer({
       }
 
       if (points.length > 1) {
-        // Create gradient for the spectrum fill
+        // Create gradient for the spectrum fill. The mix uses a rainbow
+        // low→high that mirrors the per-band tonal palette; the reference
+        // collapses to a warm amber so it reads as "secondary source".
         const gradient = ctx.createLinearGradient(0, 0, width, 0);
-        gradient.addColorStop(0, 'rgba(92, 167, 255, 0.4)');
-        gradient.addColorStop(0.3, 'rgba(61, 201, 224, 0.4)');
-        gradient.addColorStop(0.6, 'rgba(61, 219, 184, 0.35)');
-        gradient.addColorStop(1, 'rgba(142, 232, 107, 0.3)');
-
         const strokeGradient = ctx.createLinearGradient(0, 0, width, 0);
-        strokeGradient.addColorStop(0, '#5ca7ff');
-        strokeGradient.addColorStop(0.3, '#3dc9e0');
-        strokeGradient.addColorStop(0.6, '#3ddbb8');
-        strokeGradient.addColorStop(1, '#8ee86b');
+        if (isReference) {
+          gradient.addColorStop(0, 'rgba(255, 150, 60, 0.4)');
+          gradient.addColorStop(0.5, 'rgba(255, 180, 84, 0.4)');
+          gradient.addColorStop(1, 'rgba(255, 210, 130, 0.35)');
+
+          strokeGradient.addColorStop(0, '#ff9a42');
+          strokeGradient.addColorStop(0.5, '#ffb454');
+          strokeGradient.addColorStop(1, '#ffd070');
+        } else {
+          gradient.addColorStop(0, 'rgba(92, 167, 255, 0.4)');
+          gradient.addColorStop(0.3, 'rgba(61, 201, 224, 0.4)');
+          gradient.addColorStop(0.6, 'rgba(61, 219, 184, 0.35)');
+          gradient.addColorStop(1, 'rgba(142, 232, 107, 0.3)');
+
+          strokeGradient.addColorStop(0, '#5ca7ff');
+          strokeGradient.addColorStop(0.3, '#3dc9e0');
+          strokeGradient.addColorStop(0.6, '#3ddbb8');
+          strokeGradient.addColorStop(1, '#8ee86b');
+        }
 
         // Draw filled area under curve
         ctx.beginPath();
@@ -311,9 +331,15 @@ export function SpectrumAnalyzer({
 
         // Vertical gradient for fill (brighter at top, faded at bottom)
         const fillGradient = ctx.createLinearGradient(0, 0, 0, height);
-        fillGradient.addColorStop(0, 'rgba(92, 167, 255, 0.35)');
-        fillGradient.addColorStop(0.5, 'rgba(92, 167, 255, 0.12)');
-        fillGradient.addColorStop(1, 'rgba(92, 167, 255, 0.02)');
+        if (isReference) {
+          fillGradient.addColorStop(0, 'rgba(255, 180, 84, 0.35)');
+          fillGradient.addColorStop(0.5, 'rgba(255, 180, 84, 0.12)');
+          fillGradient.addColorStop(1, 'rgba(255, 180, 84, 0.02)');
+        } else {
+          fillGradient.addColorStop(0, 'rgba(92, 167, 255, 0.35)');
+          fillGradient.addColorStop(0.5, 'rgba(92, 167, 255, 0.12)');
+          fillGradient.addColorStop(1, 'rgba(92, 167, 255, 0.02)');
+        }
 
         ctx.fillStyle = fillGradient;
         ctx.fill();
@@ -340,7 +366,9 @@ export function SpectrumAnalyzer({
 
         // Glow effect on the line
         ctx.shadowBlur = isFullScreen ? 8 : 4;
-        ctx.shadowColor = 'rgba(92, 167, 255, 0.5)';
+        ctx.shadowColor = isReference
+          ? 'rgba(255, 180, 84, 0.5)'
+          : 'rgba(92, 167, 255, 0.5)';
         ctx.stroke();
         ctx.shadowBlur = 0;
       }
@@ -632,6 +660,7 @@ export function SpectrumAnalyzer({
     eqGainCurve,
     aiEqCurve,
     refDiffCurve,
+    isReference,
   ]);
 
   const handleClick = useCallback(

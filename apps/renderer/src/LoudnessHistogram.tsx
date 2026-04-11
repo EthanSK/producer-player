@@ -4,6 +4,13 @@ interface LoudnessHistogramProps {
   frameLoudnessDbfs: readonly number[];
   width: number;
   height: number;
+  /**
+   * When true, the histogram is showing the reference track's data. The
+   * semantic per-bar colors (green sweet spot, red too-loud, etc.) are
+   * preserved because they carry meaning — instead we frame the canvas
+   * with an amber outline.
+   */
+  isReference?: boolean;
 }
 
 const PADDING_LEFT = 44;
@@ -48,6 +55,7 @@ export function LoudnessHistogram({
   frameLoudnessDbfs,
   width,
   height,
+  isReference = false,
 }: LoudnessHistogramProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -185,7 +193,14 @@ export function LoudnessHistogram({
   return (
     <canvas
       ref={canvasRef}
-      style={{ width, height, borderRadius: 8 }}
+      style={{
+        width,
+        height,
+        borderRadius: 8,
+        boxShadow: isReference
+          ? '0 0 0 1px rgba(255, 180, 84, 0.55), inset 0 0 0 1px rgba(255, 180, 84, 0.15)'
+          : undefined,
+      }}
       data-testid="loudness-histogram"
     />
   );

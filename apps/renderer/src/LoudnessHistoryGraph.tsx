@@ -11,7 +11,26 @@ interface LoudnessHistoryGraphProps {
   height: number;
   /** Called when the user clicks on the graph to seek to a time position. */
   onSeek?: (timeSeconds: number) => void;
+  /**
+   * When true, the graph represents the reference track's loudness history —
+   * the curve, fill and integrated-LUFS marker all pick up the reference
+   * amber accent instead of the default blue so the user sees at a glance
+   * which source they're looking at.
+   */
+  isReference?: boolean;
 }
+
+/** Mix (default) curve color — matches --accent (#5ca7ff). */
+const MIX_LINE_COLOR = '#5ca7ff';
+const MIX_LINE_SOFT_06 = 'rgba(92, 167, 255, 0.6)';
+const MIX_LINE_SOFT_09 = 'rgba(92, 167, 255, 0.9)';
+const MIX_LINE_FILL = 'rgba(92, 167, 255, 0.08)';
+
+/** Reference curve color — matches --color-reference (#ffb454). */
+const REF_LINE_COLOR = '#ffb454';
+const REF_LINE_SOFT_06 = 'rgba(255, 180, 84, 0.6)';
+const REF_LINE_SOFT_09 = 'rgba(255, 180, 84, 0.95)';
+const REF_LINE_FILL = 'rgba(255, 180, 84, 0.1)';
 
 const DB_MIN = -60;
 const DB_MAX = 0;
@@ -33,9 +52,15 @@ export function LoudnessHistoryGraph({
   width,
   height,
   onSeek,
+  isReference = false,
 }: LoudnessHistoryGraphProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
+
+  const lineColor = isReference ? REF_LINE_COLOR : MIX_LINE_COLOR;
+  const lineColorSoft06 = isReference ? REF_LINE_SOFT_06 : MIX_LINE_SOFT_06;
+  const lineColorSoft09 = isReference ? REF_LINE_SOFT_09 : MIX_LINE_SOFT_09;
+  const lineFillColor = isReference ? REF_LINE_FILL : MIX_LINE_FILL;
 
   const { mousePosRef } = useCrosshairOverlay({
     canvasRef,
@@ -132,7 +157,7 @@ export function LoudnessHistoryGraph({
     const intLufs = analysis.integratedLufsEstimate;
     if (intLufs > DB_MIN) {
       const intY = PADDING_TOP + plotH * (1 - (intLufs - DB_MIN) / (DB_MAX - DB_MIN));
-      ctx.strokeStyle = 'rgba(92, 167, 255, 0.6)';
+      ctx.strokeStyle = lineColorSoft06;
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
@@ -141,7 +166,7 @@ export function LoudnessHistoryGraph({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      ctx.fillStyle = 'rgba(92, 167, 255, 0.9)';
+      ctx.fillStyle = lineColorSoft09;
       ctx.font = '10px Inter, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(`${intLufs.toFixed(1)} LUFS`, PADDING_LEFT + plotW + 2, intY + 3);
@@ -149,7 +174,7 @@ export function LoudnessHistoryGraph({
 
     // Draw loudness curve
     ctx.beginPath();
-    ctx.strokeStyle = '#5ca7ff';
+    ctx.strokeStyle = lineColor;
     ctx.lineWidth = 1.5;
 
     let started = false;
@@ -175,7 +200,7 @@ export function LoudnessHistoryGraph({
       ctx.lineTo(lastX, PADDING_TOP + plotH);
       ctx.lineTo(PADDING_LEFT, PADDING_TOP + plotH);
       ctx.closePath();
-      ctx.fillStyle = 'rgba(92, 167, 255, 0.08)';
+      ctx.fillStyle = lineFillColor;
       ctx.fill();
     }
 
@@ -225,7 +250,17 @@ export function LoudnessHistoryGraph({
         }
       );
     }
-  }, [analysis, currentTimeSeconds, width, height, mousePosRef]);
+  }, [
+    analysis,
+    currentTimeSeconds,
+    width,
+    height,
+    mousePosRef,
+    lineColor,
+    lineColorSoft06,
+    lineColorSoft09,
+    lineFillColor,
+  ]);
 
   useEffect(() => {
     if (animFrameRef.current) {

@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
+  type ReactNode,
   type WheelEvent,
 } from 'react';
 import type {
@@ -4417,8 +4418,23 @@ export function App(): JSX.Element {
     selectedNormalizationPlatformId
   );
   const referenceModeSuffix = isRefMode ? ' (Using Reference)' : '';
-  const showingReferenceSuffix = referenceModeSuffix;
-  const usingReferenceSuffix = referenceModeSuffix;
+  /**
+   * JSX node version of the "(Using Reference)" suffix. When reference mode
+   * is active, the word "Reference" is wrapped in a .reference-text span so
+   * it picks up the amber accent; when inactive, renders nothing. We keep
+   * the plain-string version around for places that need a flat label (AI
+   * prompts, tests, etc.).
+   */
+  const referenceModeSuffixNode: ReactNode = isRefMode ? (
+    <>
+      {' ('}
+      <span className="reference-text">Using Reference</span>
+      {')'}
+    </>
+  ) : null;
+  // Keep the plain string form around in case future code (AI prompts,
+  // tests, exports) needs a flat label. Reference: referenceModeSuffix.
+  void referenceModeSuffix;
   const activePreviewAnalysis = isRefMode ? referenceTrack?.previewAnalysis ?? null : analysis;
   const activePreviewAnalysisStatus = isRefMode ? referenceStatus : analysisStatus;
   const activeMeasuredAnalysis = isRefMode ? referenceTrack?.measuredAnalysis ?? null : measuredAnalysis;
@@ -8165,7 +8181,11 @@ export function App(): JSX.Element {
     .join(' + ');
 
   return (
-    <div className="app-shell" data-testid="app-shell">
+    <div
+      className="app-shell"
+      data-testid="app-shell"
+      data-reference-mode={isRefMode ? 'true' : 'false'}
+    >
       {autoUpdateState.status === 'downloaded' &&
        !(updateBannerDismissed && dismissedUpdateVersion === autoUpdateState.version) ? (
         <div
@@ -8594,7 +8614,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-integrated-stat"
                   title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file."
                 >
-                  <span className="analysis-stat-label">Integrated LUFS{showingReferenceSuffix} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /></span>
+                  <span className="analysis-stat-label">Integrated LUFS{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /></span>
                   <strong>{measuredIntegratedText}</strong>
                 </div>
                 <div
@@ -8602,7 +8622,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-short-term-stat"
                   title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback."
                 >
-                  <span className="analysis-stat-label">Current loudness{showingReferenceSuffix} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /></span>
+                  <span className="analysis-stat-label">Current loudness{referenceModeSuffixNode} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /></span>
                   <strong>{shortTermEstimateText}</strong>
                 </div>
               </div>
@@ -8641,7 +8661,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-lra-stat"
                   title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units."
                 >
-                  <span className="analysis-stat-label">Loudness range{showingReferenceSuffix} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /></span>
+                  <span className="analysis-stat-label">Loudness range{referenceModeSuffixNode} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /></span>
                   <strong>{measuredLraText}</strong>
                 </div>
                 <div
@@ -8649,7 +8669,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-true-peak-stat"
                   title="True Peak — the highest inter-sample peak level in the track, measured via oversampling."
                 >
-                  <span className="analysis-stat-label">True Peak{showingReferenceSuffix} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /></span>
+                  <span className="analysis-stat-label">True Peak{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /></span>
                   <strong>{measuredTruePeakText}</strong>
                 </div>
                 <div
@@ -8657,7 +8677,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-max-short-term-stat"
                   title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time."
                 >
-                  <span className="analysis-stat-label">Peak short-term{showingReferenceSuffix} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /></span>
+                  <span className="analysis-stat-label">Peak short-term{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /></span>
                   <strong>{measuredMaxShortTermText}</strong>
                 </div>
                 <div
@@ -8665,7 +8685,7 @@ export function App(): JSX.Element {
                   data-testid="analysis-max-momentary-stat"
                   title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time."
                 >
-                  <span className="analysis-stat-label">Peak momentary{showingReferenceSuffix} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /></span>
+                  <span className="analysis-stat-label">Peak momentary{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /></span>
                   <strong>{measuredMaxMomentaryText}</strong>
                 </div>
               </div>
@@ -8804,7 +8824,7 @@ export function App(): JSX.Element {
                   <div className="analysis-tonal-balance-wrapper">
                     <div className="analysis-panel-header-row">
                       <p className="analysis-tonal-balance-heading" data-testid="analysis-tonal-balance-heading">
-                        Tonal balance{showEqTonalBalance && hasActiveEqGains ? ' (EQ\u2019d)' : ''}{usingReferenceSuffix}
+                        Tonal balance{showEqTonalBalance && hasActiveEqGains ? ' (EQ\u2019d)' : ''}{referenceModeSuffixNode}
                       </p>
                       {renderMasteringPanelDragHandle('compact', 'tonal-balance')}
                     </div>
@@ -8916,7 +8936,7 @@ export function App(): JSX.Element {
                   </button>
                   <button
                     type="button"
-                    className={playbackPreviewMode === 'reference' ? 'active' : 'ghost'}
+                    className={`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`}
                     onClick={() => handleReferencePreviewModeChange('reference')}
                     data-testid="analysis-ab-reference"
                     disabled={!referenceTrack || referenceStatus === 'loading'}
@@ -9466,6 +9486,7 @@ export function App(): JSX.Element {
                   activeBands={soloedBands}
                   onBandToggle={handleBandToggle}
                   isPlaying={isPlaying}
+                  isReference={isRefMode}
                 />
                 <LevelMeter
                   analyserNode={analyserNode}
@@ -10745,7 +10766,7 @@ export function App(): JSX.Element {
                     <div className="analysis-overlay-viz-spectrum" ref={spectrumFullContainerRef}>
                       <div className="analysis-panel-header-row">
                         <div className="analysis-section-header">
-                          <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{usingReferenceSuffix} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high). Hover the spectrum to see a crosshair with the exact frequency and dB at that point.\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nEQ Features:\n- Manual EQ sliders: Drag the horizontal sliders on each band to boost or cut that frequency range (±12 dB). Double-click a slider to reset it.\n- EQ On/Off toggle: Bypass the EQ without clearing your slider positions. Click 'EQ On' / 'EQ Off' to toggle.\n- EQ Snapshots: Click 'Save' to store the current EQ settings. Snapshots are per-track. Click a snapshot pill to restore it, or × to delete.\n- AI Recommended EQ (cyan dashed curve): Click 'Get AI EQ' to ask the AI agent for a recommended mastering EQ curve based on your track's analysis. The recommendation appears as a cyan dashed overlay.\n- Use AI EQ button: Apply the AI recommendation to your EQ sliders with one click.\n- Reference Delta (green dotted curve): When a reference track is loaded, toggle 'Ref Δ' to show the tonal balance difference between your mix and the reference as a green dashed curve.\n- Show EQ'd Tonal Balance toggle: When EQ is active, toggle this to see how your tonal balance would change with the current EQ applied.\n- R key shortcut: Press R to quickly toggle between Mix and Reference playback (only when a reference track is loaded).\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
+                          <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high). Hover the spectrum to see a crosshair with the exact frequency and dB at that point.\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nEQ Features:\n- Manual EQ sliders: Drag the horizontal sliders on each band to boost or cut that frequency range (±12 dB). Double-click a slider to reset it.\n- EQ On/Off toggle: Bypass the EQ without clearing your slider positions. Click 'EQ On' / 'EQ Off' to toggle.\n- EQ Snapshots: Click 'Save' to store the current EQ settings. Snapshots are per-track. Click a snapshot pill to restore it, or × to delete.\n- AI Recommended EQ (cyan dashed curve): Click 'Get AI EQ' to ask the AI agent for a recommended mastering EQ curve based on your track's analysis. The recommendation appears as a cyan dashed overlay.\n- Use AI EQ button: Apply the AI recommendation to your EQ sliders with one click.\n- Reference Delta (green dotted curve): When a reference track is loaded, toggle 'Ref Δ' to show the tonal balance difference between your mix and the reference as a green dashed curve.\n- Show EQ'd Tonal Balance toggle: When EQ is active, toggle this to see how your tonal balance would change with the current EQ applied.\n- R key shortcut: Press R to quickly toggle between Mix and Reference playback (only when a reference track is loaded).\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /></h4>
                           <p className="analysis-section-subtitle">Real-time frequency content — click a band to solo; Shift+click to replace the selection with just that band.</p>
                         </div>
                         {renderMasteringPanelDragHandle('fullscreen', 'visualizations')}
@@ -10761,6 +10782,7 @@ export function App(): JSX.Element {
                         eqGainCurve={eqGainCurve}
                         aiEqCurve={aiEqCurve}
                         refDiffCurve={refDiffCurve}
+                        isReference={isRefMode}
                       />
                       <EqGainSliders
                         gains={eqBandGains}
@@ -10786,7 +10808,7 @@ export function App(): JSX.Element {
                               </button>
                               <button
                                 type="button"
-                                className={playbackPreviewMode === 'reference' ? 'active' : 'ghost'}
+                                className={`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`}
                                 onClick={() => handleReferencePreviewModeChange('reference')}
                                 data-testid="eq-inline-ab-reference"
                                 title="Listen to the reference track."
@@ -10991,7 +11013,7 @@ export function App(): JSX.Element {
                       </button>
                       <button
                         type="button"
-                        className={playbackPreviewMode === 'reference' ? 'active' : 'ghost'}
+                        className={`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`}
                         onClick={() => handleReferencePreviewModeChange('reference')}
                         data-testid="analysis-overlay-ab-reference"
                         disabled={!referenceTrack || referenceStatus === 'loading'}
@@ -11163,7 +11185,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'loudness-history')}
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Loudness History{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: A blue curve showing your track's rolling loudness over time. The dashed line marks the overall loudness estimate for the loaded track, and the white vertical line shows the current playback position. The shaded area makes it easier to see where sections feel denser or lighter.\n\nWhat to look for: A relatively consistent curve usually means controlled loudness. Big dips may point to sections that feel too small; sharp jumps may point to sections that hit harder than intended. Use it to compare sections against each other, then confirm the final number with the Integrated LUFS stat.\n\nTip: Compare the shape against a reference track in the same genre. If your curve is almost flat all the way through, the song may be over-compressed."} links={LOUDNESS_HISTORY_LINKS} /></h3>
+                    <h3>Loudness History{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: A blue curve showing your track's rolling loudness over time. The dashed line marks the overall loudness estimate for the loaded track, and the white vertical line shows the current playback position. The shaded area makes it easier to see where sections feel denser or lighter.\n\nWhat to look for: A relatively consistent curve usually means controlled loudness. Big dips may point to sections that feel too small; sharp jumps may point to sections that hit harder than intended. Use it to compare sections against each other, then confirm the final number with the Integrated LUFS stat.\n\nTip: Compare the shape against a reference track in the same genre. If your curve is almost flat all the way through, the song may be over-compressed."} links={LOUDNESS_HISTORY_LINKS} /></h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'loudness-history')}
                   </div>
                   <LoudnessHistoryGraph
@@ -11173,6 +11195,7 @@ export function App(): JSX.Element {
                     width={Math.max(400, spectrumFullWidth)}
                     height={140}
                     onSeek={handleSeek}
+                    isReference={isRefMode}
                   />
                 </section>
 
@@ -11187,7 +11210,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'waveform')}
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Waveform{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: Symmetrical bars showing the peak amplitude of your audio at each moment in time. Taller bars = louder moments, shorter bars = quieter. Bars to the left of the white playback cursor are bright blue (already played), bars to the right are dimmer (upcoming). The Y-axis goes from -1.0 to +1.0 (full digital scale).\n\nWhat to look for: A healthy waveform has visible variation — loud choruses and quieter verses. If the bars are all maxed out at 1.0 with no variation, your track is likely over-compressed or clipping. Gaps (no bars) indicate silence.\n\nTip: Compare the height of your loudest and quietest sections. If there's barely any difference, consider backing off your limiter to restore dynamics."} links={WAVEFORM_LINKS} /></h3>
+                    <h3>Waveform{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: Symmetrical bars showing the peak amplitude of your audio at each moment in time. Taller bars = louder moments, shorter bars = quieter. Bars to the left of the white playback cursor are bright blue (already played), bars to the right are dimmer (upcoming). The Y-axis goes from -1.0 to +1.0 (full digital scale).\n\nWhat to look for: A healthy waveform has visible variation — loud choruses and quieter verses. If the bars are all maxed out at 1.0 with no variation, your track is likely over-compressed or clipping. Gaps (no bars) indicate silence.\n\nTip: Compare the height of your loudest and quietest sections. If there's barely any difference, consider backing off your limiter to restore dynamics."} links={WAVEFORM_LINKS} /></h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'waveform')}
                   </div>
                   <WaveformDisplay
@@ -11199,6 +11222,7 @@ export function App(): JSX.Element {
                     width={Math.max(400, spectrumFullWidth)}
                     height={100}
                     onSeek={handleSeek}
+                    isReference={isRefMode}
                   />
                 </section>
 
@@ -11216,7 +11240,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                     <div className="analysis-section-header">
-                    <h4>Stereo Correlation{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: A horizontal meter with a glowing indicator that moves between -1 (left) and +1 (right). The background fades from red on the left, through yellow in the center, to green on the right. The numeric value is shown in the top-right corner, colored to match the zone.\n\nWhat to look for: Green zone (+0.5 to +1) = great mono compatibility — your track sounds solid on phone speakers and mono systems. Yellow zone (0 to +0.5) = some stereo content, generally fine. Red zone (below 0) = phase issues — left and right channels are canceling each other, which sounds thin or hollow in mono.\n\nTip: If the indicator dips into the red during certain parts, check for over-widened stereo effects, poorly set up chorus/phaser plugins, or samples that were accidentally phase-inverted."} links={STEREO_CORRELATION_LINKS} /></h4>
+                    <h4>Stereo Correlation{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: A horizontal meter with a glowing indicator that moves between -1 (left) and +1 (right). The background fades from red on the left, through yellow in the center, to green on the right. The numeric value is shown in the top-right corner, colored to match the zone.\n\nWhat to look for: Green zone (+0.5 to +1) = great mono compatibility — your track sounds solid on phone speakers and mono systems. Yellow zone (0 to +0.5) = some stereo content, generally fine. Red zone (below 0) = phase issues — left and right channels are canceling each other, which sounds thin or hollow in mono.\n\nTip: If the indicator dips into the red during certain parts, check for over-widened stereo effects, poorly set up chorus/phaser plugins, or samples that were accidentally phase-inverted."} links={STEREO_CORRELATION_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Phase relationship between L/R channels (+1 = mono compatible, -1 = out of phase)</p>
                     </div>
                     {renderMasteringPanelDragHandle('fullscreen', 'stereo-correlation')}
@@ -11256,7 +11280,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                       <div className="analysis-section-header">
-                      <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{showEqTonalBalance && hasActiveEqGains ? ' (EQ\u2019d)' : ''}{usingReferenceSuffix} <HelpTooltip text="Shows how your audio energy is distributed across three broad frequency bands. Low (20-250 Hz) covers sub and bass. Mid (250-4000 Hz) covers vocals, guitars, synths, and most musical detail. High (4000-20000 Hz) covers presence, air, and brightness. Each band is shown as a percentage of total energy. Use the numbers as a rough guide, not a rulebook: many balanced masters fall somewhere around 30-40% Low, 40-50% Mid, and 15-25% High, but genre and arrangement matter." links={TONAL_BALANCE_LINKS} /></h4>
+                      <h4 data-testid="analysis-overlay-tonal-balance-heading">Tonal Balance{showEqTonalBalance && hasActiveEqGains ? ' (EQ\u2019d)' : ''}{referenceModeSuffixNode} <HelpTooltip text="Shows how your audio energy is distributed across three broad frequency bands. Low (20-250 Hz) covers sub and bass. Mid (250-4000 Hz) covers vocals, guitars, synths, and most musical detail. High (4000-20000 Hz) covers presence, air, and brightness. Each band is shown as a percentage of total energy. Use the numbers as a rough guide, not a rulebook: many balanced masters fall somewhere around 30-40% Low, 40-50% Mid, and 15-25% High, but genre and arrangement matter." links={TONAL_BALANCE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Low/mid/high energy distribution</p>
                       </div>
                       {renderMasteringPanelDragHandle('fullscreen', 'tonal-balance')}
@@ -11311,48 +11335,48 @@ export function App(): JSX.Element {
                   data-testid="analysis-overlay-loudness-peaks"
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Loudness &amp; peaks{showingReferenceSuffix}</h3>
+                    <h3>Loudness &amp; peaks{referenceModeSuffixNode}</h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'loudness-peaks')}
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide analysis-overlay-loudness-peaks-grid">
                     <div className="analysis-stat-card" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
-                      <span className="analysis-stat-label">Integrated LUFS{showingReferenceSuffix} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /></span>
+                      <span className="analysis-stat-label">Integrated LUFS{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /></span>
                       <strong>{measuredIntegratedText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
-                      <span className="analysis-stat-label">Current loudness{showingReferenceSuffix} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /></span>
+                      <span className="analysis-stat-label">Current loudness{referenceModeSuffixNode} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /></span>
                       <strong>{shortTermEstimateText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
-                      <span className="analysis-stat-label">Loudness range{showingReferenceSuffix} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /></span>
+                      <span className="analysis-stat-label">Loudness range{referenceModeSuffixNode} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /></span>
                       <strong>{measuredLraText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="True Peak — the highest inter-sample peak level in the track, measured via oversampling.">
-                      <span className="analysis-stat-label">True Peak{showingReferenceSuffix} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /></span>
+                      <span className="analysis-stat-label">True Peak{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /></span>
                       <strong>{measuredTruePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Sample Peak — the highest digital sample value in the track, without oversampling.">
-                      <span className="analysis-stat-label">Sample peak{showingReferenceSuffix} <HelpTooltip text={"What this measures: The highest absolute sample value found in the audio file, measured directly from the digital samples without oversampling. This is what your DAW's standard peak meter shows. It will always be equal to or lower than True Peak because it cannot detect peaks that form between samples during reconstruction.\n\nGood values: Below 0 dBFS. If sample peak is at 0 dBFS, the signal is hitting the digital ceiling. For a properly mastered track, sample peak should be below -0.3 dBFS at minimum, but True Peak is the more important number to watch.\n\nIf it's wrong: If sample peak is at 0 dBFS, you are almost certainly clipping on playback (True Peak will be even higher). Use a true peak limiter with the ceiling set to -1 dBTP. Sample peak matters most when working in contexts where true peak metering is unavailable, or when checking raw recordings before mastering."} links={TRUE_PEAK_LINKS} /></span>
+                      <span className="analysis-stat-label">Sample peak{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The highest absolute sample value found in the audio file, measured directly from the digital samples without oversampling. This is what your DAW's standard peak meter shows. It will always be equal to or lower than True Peak because it cannot detect peaks that form between samples during reconstruction.\n\nGood values: Below 0 dBFS. If sample peak is at 0 dBFS, the signal is hitting the digital ceiling. For a properly mastered track, sample peak should be below -0.3 dBFS at minimum, but True Peak is the more important number to watch.\n\nIf it's wrong: If sample peak is at 0 dBFS, you are almost certainly clipping on playback (True Peak will be even higher). Use a true peak limiter with the ceiling set to -1 dBTP. Sample peak matters most when working in contexts where true peak metering is unavailable, or when checking raw recordings before mastering."} links={TRUE_PEAK_LINKS} /></span>
                       <strong>{measuredSamplePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time.">
-                      <span className="analysis-stat-label">Peak short-term{showingReferenceSuffix} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /></span>
+                      <span className="analysis-stat-label">Peak short-term{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /></span>
                       <strong>{measuredMaxShortTermText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
-                      <span className="analysis-stat-label">Peak momentary{showingReferenceSuffix} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /></span>
+                      <span className="analysis-stat-label">Peak momentary{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /></span>
                       <strong>{measuredMaxMomentaryText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Average volume level across the entire track (RMS-based), in dBFS.">
-                      <span className="analysis-stat-label">Mean volume{showingReferenceSuffix} <HelpTooltip text={"What this measures: The average (RMS) level of your entire track expressed in dBFS. RMS stands for Root Mean Square — it squares every sample, averages them, then takes the square root, giving a value that correlates closely with perceived loudness. Unlike LUFS, it does not apply perceptual weighting, so it is a purely mathematical average of signal energy.\n\nGood values: For a mastered pop/rock track, typically -10 to -16 dBFS. Unmastered mixes are usually -18 to -24 dBFS. A heavily limited master might read -8 to -6 dBFS. Classical and acoustic music: -20 to -30 dBFS.\n\nIf it's wrong: Mean volume that is very close to the peak level means the track is heavily limited (low crest factor). If it is very far from the peak (more than 18 dB), the track has large untamed transients. Compare with the crest factor reading to assess your dynamic balance."} links={MEAN_VOLUME_LINKS} /></span>
+                      <span className="analysis-stat-label">Mean volume{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The average (RMS) level of your entire track expressed in dBFS. RMS stands for Root Mean Square — it squares every sample, averages them, then takes the square root, giving a value that correlates closely with perceived loudness. Unlike LUFS, it does not apply perceptual weighting, so it is a purely mathematical average of signal energy.\n\nGood values: For a mastered pop/rock track, typically -10 to -16 dBFS. Unmastered mixes are usually -18 to -24 dBFS. A heavily limited master might read -8 to -6 dBFS. Classical and acoustic music: -20 to -30 dBFS.\n\nIf it's wrong: Mean volume that is very close to the peak level means the track is heavily limited (low crest factor). If it is very far from the peak (more than 18 dB), the track has large untamed transients. Compare with the crest factor reading to assess your dynamic balance."} links={MEAN_VOLUME_LINKS} /></span>
                       <strong>{measuredMeanVolumeText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Crest Factor — difference between peak and RMS levels. Higher values indicate more dynamic range.">
-                      <span className="analysis-stat-label">Crest Factor{showingReferenceSuffix} <HelpTooltip text={"What this measures: The difference between the sample peak level and the RMS (average) level, in dB. Formula: Crest Factor = Peak dBFS minus RMS dBFS. A higher crest factor means your transients stick out further above the average level — the music has more punch and snap. A lower value means the waveform is more like a brick wall.\n\nGood values: Unmastered/raw mixes: 12-18 dB. Well-mastered pop/rock: 8-12 dB. Heavily limited EDM/hip-hop: 4-8 dB. Extremely squashed masters: under 4 dB. Classical and jazz: 15-20+ dB.\n\nIf it's wrong: Below 6 dB usually means aggressive limiting has crushed your transients — the track will sound loud but lifeless and fatiguing. Above 18 dB could mean uncontrolled peaks that waste headroom. Use a limiter to tame peaks or back off limiting to restore dynamics, depending on which direction you need to go."} links={CREST_FACTOR_LINKS} /></span>
+                      <span className="analysis-stat-label">Crest Factor{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The difference between the sample peak level and the RMS (average) level, in dB. Formula: Crest Factor = Peak dBFS minus RMS dBFS. A higher crest factor means your transients stick out further above the average level — the music has more punch and snap. A lower value means the waveform is more like a brick wall.\n\nGood values: Unmastered/raw mixes: 12-18 dB. Well-mastered pop/rock: 8-12 dB. Heavily limited EDM/hip-hop: 4-8 dB. Extremely squashed masters: under 4 dB. Classical and jazz: 15-20+ dB.\n\nIf it's wrong: Below 6 dB usually means aggressive limiting has crushed your transients — the track will sound loud but lifeless and fatiguing. Above 18 dB could mean uncontrolled peaks that waste headroom. Use a limiter to tame peaks or back off limiting to restore dynamics, depending on which direction you need to go."} links={CREST_FACTOR_LINKS} /></span>
                       <strong>{activeCrestFactorText}</strong>
                     </div>
                     <div className="analysis-stat-card" title="Number of samples at or above 0 dBFS (digital clipping).">
-                      <span className="analysis-stat-label">Clip Count{showingReferenceSuffix} <HelpTooltip text={"What this measures: The number of individual samples in the file whose absolute value reaches or exceeds 1.0 (0 dBFS) — the digital ceiling. Each clipped sample represents a moment where the signal was too loud to be represented digitally and was hard-clipped, causing distortion.\n\nGood values: Zero. Any non-zero clip count means digital distortion is present in the file. Even a single clipped sample is technically distortion, though a handful may not be audible. Hundreds or thousands of clips will be clearly audible as harsh, crunchy distortion.\n\nIf it's wrong: Reduce gain before your limiter, or lower the limiter output ceiling. If clips are coming from the mix bus, pull down your fader or gain-stage your plugins. Note: some producers intentionally use hard clipping as a creative effect (e.g., clip-to-zero mastering in hip-hop), but the clips should be intentional and controlled, not accidental."} links={CLIP_COUNT_LINKS} /></span>
+                      <span className="analysis-stat-label">Clip Count{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The number of individual samples in the file whose absolute value reaches or exceeds 1.0 (0 dBFS) — the digital ceiling. Each clipped sample represents a moment where the signal was too loud to be represented digitally and was hard-clipped, causing distortion.\n\nGood values: Zero. Any non-zero clip count means digital distortion is present in the file. Even a single clipped sample is technically distortion, though a handful may not be audible. Hundreds or thousands of clips will be clearly audible as harsh, crunchy distortion.\n\nIf it's wrong: Reduce gain before your limiter, or lower the limiter output ceiling. If clips are coming from the mix bus, pull down your fader or gain-stage your plugins. Note: some producers intentionally use hard clipping as a creative effect (e.g., clip-to-zero mastering in hip-hop), but the clips should be intentional and controlled, not accidental."} links={CLIP_COUNT_LINKS} /></span>
                       <strong>
                         {activePreviewAnalysisStatus === 'ready' && activePreviewAnalysis
                           ? activePreviewAnalysis.clipCount > 0
@@ -11364,7 +11388,7 @@ export function App(): JSX.Element {
                       </strong>
                     </div>
                     <div className="analysis-stat-card" title="DC Offset — mean sample value. Non-zero DC offset wastes headroom.">
-                      <span className="analysis-stat-label">DC Offset{showingReferenceSuffix} <HelpTooltip text={"What this measures: The mean (average) of all sample values in the file. A perfectly centered waveform has a DC offset of 0. A non-zero value means the entire waveform is shifted above or below the center line. The threshold for a warning here is 0.1% (mean sample value > 0.001).\n\nGood values: As close to 0% as possible. Anything under 0.1% is considered clean. Above 0.1% triggers a warning because it wastes headroom — if your waveform is shifted up by 0.5%, you lose 0.5% of your available peak range.\n\nIf it's wrong: DC offset is usually caused by faulty hardware (cheap audio interfaces, phantom power leakage), certain analog-modeled plugins, or recording with a bad cable. Fix it by applying a high-pass filter at a very low frequency (10-20 Hz) or use your DAW's DC offset removal tool (most have one in the audio editor). Always fix DC offset before mastering."} links={DC_OFFSET_LINKS} /></span>
+                      <span className="analysis-stat-label">DC Offset{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The mean (average) of all sample values in the file. A perfectly centered waveform has a DC offset of 0. A non-zero value means the entire waveform is shifted above or below the center line. The threshold for a warning here is 0.1% (mean sample value > 0.001).\n\nGood values: As close to 0% as possible. Anything under 0.1% is considered clean. Above 0.1% triggers a warning because it wastes headroom — if your waveform is shifted up by 0.5%, you lose 0.5% of your available peak range.\n\nIf it's wrong: DC offset is usually caused by faulty hardware (cheap audio interfaces, phantom power leakage), certain analog-modeled plugins, or recording with a bad cable. Fix it by applying a high-pass filter at a very low frequency (10-20 Hz) or use your DAW's DC offset removal tool (most have one in the audio editor). Always fix DC offset before mastering."} links={DC_OFFSET_LINKS} /></span>
                       <strong>
                         {activePreviewAnalysisStatus === 'ready' && activePreviewAnalysis
                           ? Math.abs(activePreviewAnalysis.dcOffset) > 0.001
@@ -11570,7 +11594,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                       <div className="analysis-section-header">
-                      <h4>Vectorscope{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: A circular display where blue dots trace your stereo signal in real-time, with a fading trail so you can see the shape over time. The vertical axis (M) is the Mid/mono signal (L+R), and the horizontal axis (S) is the Side signal (L-R). L and R labels mark the diagonal directions for pure left and pure right.\n\nWhat to look for: A tall, narrow vertical shape = mostly mono content (centered vocals, bass). A wider spread = more stereo width. A roughly even shape = balanced stereo image. If it leans consistently toward L or R, your mix is off-center. A thin horizontal line means the signal is pure side information with no center — usually a problem.\n\nTip: Bass and kick should appear mostly vertical (centered). If your low end spreads wide on the vectorscope, consider narrowing it with a mid/side EQ. A natural, full mix typically looks like a fuzzy vertical oval."} links={VECTORSCOPE_LINKS} /></h4>
+                      <h4>Vectorscope{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: A circular display where blue dots trace your stereo signal in real-time, with a fading trail so you can see the shape over time. The vertical axis (M) is the Mid/mono signal (L+R), and the horizontal axis (S) is the Side signal (L-R). L and R labels mark the diagonal directions for pure left and pure right.\n\nWhat to look for: A tall, narrow vertical shape = mostly mono content (centered vocals, bass). A wider spread = more stereo width. A roughly even shape = balanced stereo image. If it leans consistently toward L or R, your mix is off-center. A thin horizontal line means the signal is pure side information with no center — usually a problem.\n\nTip: Bass and kick should appear mostly vertical (centered). If your low end spreads wide on the vectorscope, consider narrowing it with a mid/side EQ. A natural, full mix typically looks like a fuzzy vertical oval."} links={VECTORSCOPE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Stereo image — wider spread = wider stereo field, vertical = mono</p>
                       </div>
                       {renderMasteringPanelDragHandle('fullscreen', 'vectorscope')}
@@ -11581,6 +11605,7 @@ export function App(): JSX.Element {
                         analyserNodeR={analyserNodeR}
                         size={200}
                         isPlaying={isPlaying}
+                        isReference={isRefMode}
                       />
                     </div>
                 </section>
@@ -11600,7 +11625,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                       <div className="analysis-section-header">
-                      <h4>Mid/Side Monitoring{showingReferenceSuffix} <HelpTooltip text="Listen to just the center (Mid) or sides (Side) of your stereo mix separately. Mid = vocals, bass, kick. Side = reverb, width, panning. Useful for checking stereo balance." links={MID_SIDE_LINKS} /></h4>
+                      <h4>Mid/Side Monitoring{referenceModeSuffixNode} <HelpTooltip text="Listen to just the center (Mid) or sides (Side) of your stereo mix separately. Mid = vocals, bass, kick. Side = reverb, width, panning. Useful for checking stereo balance." links={MID_SIDE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">Listen to Mid (center) or Side (stereo width) in isolation</p>
                       </div>
                       {renderMasteringPanelDragHandle('fullscreen', 'mid-side-monitoring')}
@@ -11650,19 +11675,19 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                     <div className="analysis-section-header">
-                    <h4>K-Metering{showingReferenceSuffix} <HelpTooltip text={"What this measures: Bob Katz's K-System metering, which shifts the meter scale so 0 dB represents a calibrated reference level instead of the digital ceiling. K-14 sets 0 dB = -14 dBFS (designed for pop, rock, and electronic music). K-20 sets 0 dB = -20 dBFS (designed for film, classical, and broadcast). The value shown is your track's RMS level on that K-scale.\n\nGood values: On K-14, your average level should hover around 0 dB (meaning your RMS is around -14 dBFS). Peaks above +4 dB on K-14 are loud. On K-20, average around 0 dB means your RMS is around -20 dBFS — typical for dynamic content like film and orchestral music.\n\nIf it's wrong: If your K-14 reading is consistently above +4 dB, you are mastering very loud with limited dynamics. If it reads well below -6 dB on K-14, your track is unusually quiet for commercial music. Use K-14 for most music production and K-20 when working on film, classical, or anything requiring wide dynamic range."} links={K_METERING_LINKS} /></h4>
+                    <h4>K-Metering{referenceModeSuffixNode} <HelpTooltip text={"What this measures: Bob Katz's K-System metering, which shifts the meter scale so 0 dB represents a calibrated reference level instead of the digital ceiling. K-14 sets 0 dB = -14 dBFS (designed for pop, rock, and electronic music). K-20 sets 0 dB = -20 dBFS (designed for film, classical, and broadcast). The value shown is your track's RMS level on that K-scale.\n\nGood values: On K-14, your average level should hover around 0 dB (meaning your RMS is around -14 dBFS). Peaks above +4 dB on K-14 are loud. On K-20, average around 0 dB means your RMS is around -20 dBFS — typical for dynamic content like film and orchestral music.\n\nIf it's wrong: If your K-14 reading is consistently above +4 dB, you are mastering very loud with limited dynamics. If it reads well below -6 dB on K-14, your track is unusually quiet for commercial music. Use K-14 for most music production and K-20 when working on film, classical, or anything requiring wide dynamic range."} links={K_METERING_LINKS} /></h4>
                     <p className="analysis-section-subtitle">K-weighted meter scales calibrated for different content types — 0 dB on the K-scale represents the reference listening level</p>
                     </div>
                     {renderMasteringPanelDragHandle('fullscreen', 'k-metering')}
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
                     <div className="analysis-stat-card" title="K-14: 0 dB on meter = -14 dBFS. Best for most music.">
-                      <span className="analysis-stat-label">K-14 Metering{showingReferenceSuffix}</span>
+                      <span className="analysis-stat-label">K-14 Metering{referenceModeSuffixNode}</span>
                       <strong>{k14MeteringText}</strong>
                       <span className="muted">Reference: 0 dB = -14 dBFS (pop/rock/electronic)</span>
                     </div>
                     <div className="analysis-stat-card" title="K-20: 0 dB on meter = -20 dBFS. Best for film/classical.">
-                      <span className="analysis-stat-label">K-20 Metering{showingReferenceSuffix}</span>
+                      <span className="analysis-stat-label">K-20 Metering{referenceModeSuffixNode}</span>
                       <strong>{k20MeteringText}</strong>
                       <span className="muted">Reference: 0 dB = -20 dBFS (film/classical/broadcast)</span>
                     </div>
@@ -11684,7 +11709,7 @@ export function App(): JSX.Element {
                   >
                     <div className="analysis-panel-header-row">
                       <div className="analysis-section-header">
-                      <h4>Quick Diagnostics{showingReferenceSuffix} <HelpTooltip text={"What this measures: A quick classification of your track's dynamic character based on the crest factor (peak-to-RMS difference). High DR means crest factor above 10 dB — your transients and dynamics are well-preserved. Medium DR is 6-10 dB — typical for commercial masters. Low DR means below 6 dB — the track is heavily compressed or limited.\n\nGood values: Depends on genre and intent. Pop/rock: Medium DR (6-10 dB) is normal. EDM/hip-hop: Medium to Low DR is common. Acoustic/jazz/classical: High DR (above 10 dB) is expected. There is no single right answer — it depends on what the music needs.\n\nIf it's wrong: Low DR with a track that should breathe (acoustic, jazz) means you have over-limited. Try reducing limiter gain reduction or using less bus compression. High DR on a track meant to compete on playlists may need more limiting. The goal is to match the dynamic feel that serves the song, not chase a number."} links={DYNAMIC_RANGE_LINKS} /></h4>
+                      <h4>Quick Diagnostics{referenceModeSuffixNode} <HelpTooltip text={"What this measures: A quick classification of your track's dynamic character based on the crest factor (peak-to-RMS difference). High DR means crest factor above 10 dB — your transients and dynamics are well-preserved. Medium DR is 6-10 dB — typical for commercial masters. Low DR means below 6 dB — the track is heavily compressed or limited.\n\nGood values: Depends on genre and intent. Pop/rock: Medium DR (6-10 dB) is normal. EDM/hip-hop: Medium to Low DR is common. Acoustic/jazz/classical: High DR (above 10 dB) is expected. There is no single right answer — it depends on what the music needs.\n\nIf it's wrong: Low DR with a track that should breathe (acoustic, jazz) means you have over-limited. Try reducing limiter gain reduction or using less bus compression. High DR on a track meant to compete on playlists may need more limiting. The goal is to match the dynamic feel that serves the song, not chase a number."} links={DYNAMIC_RANGE_LINKS} /></h4>
                       <p className="analysis-section-subtitle">At-a-glance health checks for your master</p>
                       </div>
                       {renderMasteringPanelDragHandle('fullscreen', 'pro-indicators')}
@@ -11800,7 +11825,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                     <div className="analysis-section-header">
-                    <h4>Dynamic Range / Crest Factor{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: A real-time line graph plotting the crest factor (peak-to-RMS difference) over the last 30 seconds. The crest factor measures how much transient headroom your audio has — the gap between the loudest peak and the average (RMS) level.\n\nColor coding: Green (above 8 dB) means healthy dynamics with well-preserved transients. Yellow (6-8 dB) indicates moderate compression typical of commercial masters. Red (below 6 dB) signals heavily compressed or limited audio — the dynamics are being crushed.\n\nWhat to look for: Watch how the line moves during different sections. Verses might show higher crest factor while choruses drop lower as limiting kicks in. If the line stays consistently in the red zone, you may be over-limiting.\n\nTip: Compare this graph during your loudest chorus vs. your quietest verse. If both sections show similar crest factor, your master might lack dynamic contrast."} links={CREST_FACTOR_HISTORY_LINKS} /></h4>
+                    <h4>Dynamic Range / Crest Factor{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: A real-time line graph plotting the crest factor (peak-to-RMS difference) over the last 30 seconds. The crest factor measures how much transient headroom your audio has — the gap between the loudest peak and the average (RMS) level.\n\nColor coding: Green (above 8 dB) means healthy dynamics with well-preserved transients. Yellow (6-8 dB) indicates moderate compression typical of commercial masters. Red (below 6 dB) signals heavily compressed or limited audio — the dynamics are being crushed.\n\nWhat to look for: Watch how the line moves during different sections. Verses might show higher crest factor while choruses drop lower as limiting kicks in. If the line stays consistently in the red zone, you may be over-limiting.\n\nTip: Compare this graph during your loudest chorus vs. your quietest verse. If both sections show similar crest factor, your master might lack dynamic contrast."} links={CREST_FACTOR_HISTORY_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Real-time peak-to-RMS difference — green = healthy dynamics, red = crushed</p>
                     </div>
                     {renderMasteringPanelDragHandle('fullscreen', 'crest-factor-history')}
@@ -11810,6 +11835,7 @@ export function App(): JSX.Element {
                     width={spectrumFullWidth}
                     height={200}
                     isPlaying={isPlaying}
+                    isReference={isRefMode}
                   />
                 </section>
 
@@ -11827,7 +11853,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                     <div className="analysis-section-header">
-                    <h4>Mid/Side Spectrum{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: Two overlaid spectrum curves — blue for Mid (L+R summed) and orange for Side (L-R). Both share the same frequency axis as the main spectrum analyzer.\n\nWhat to look for: Bass frequencies (below ~200 Hz) should be predominantly Mid (blue) with minimal Side (orange) — this ensures mono-compatible low end. If orange is dominant in the lows, your bass is too wide and may collapse on mono playback. In the highs, Side content is normal (reverb, panned elements).\n\nTip: Use this alongside the Mid/Side Monitoring controls to listen and compare."} links={MID_SIDE_SPECTRUM_LINKS} /></h4>
+                    <h4>Mid/Side Spectrum{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: Two overlaid spectrum curves — blue for Mid (L+R summed) and orange for Side (L-R). Both share the same frequency axis as the main spectrum analyzer.\n\nWhat to look for: Bass frequencies (below ~200 Hz) should be predominantly Mid (blue) with minimal Side (orange) — this ensures mono-compatible low end. If orange is dominant in the lows, your bass is too wide and may collapse on mono playback. In the highs, Side content is normal (reverb, panned elements).\n\nTip: Use this alongside the Mid/Side Monitoring controls to listen and compare."} links={MID_SIDE_SPECTRUM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Frequency content split into Mid (center) and Side (stereo width)</p>
                     </div>
                     {renderMasteringPanelDragHandle('fullscreen', 'mid-side-spectrum')}
@@ -11838,6 +11864,7 @@ export function App(): JSX.Element {
                     width={spectrumFullWidth}
                     height={240}
                     isPlaying={isPlaying}
+                    isReference={isRefMode}
                   />
                 </section>
 
@@ -11857,7 +11884,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                     <div className="analysis-section-header">
-                    <h4>Loudness Distribution{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. Green dashed lines mark the streaming target range (-16 to -6 LUFS).\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: This is built from the full-track analysis, so you can inspect the complete distribution immediately without waiting for playback or scroll position."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
+                    <h4>Loudness Distribution{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. Green dashed lines mark the streaming target range (-16 to -6 LUFS).\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: This is built from the full-track analysis, so you can inspect the complete distribution immediately without waiting for playback or scroll position."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Statistical distribution of loudness levels across the full analyzed track</p>
                     </div>
                     {renderMasteringPanelDragHandle('fullscreen', 'loudness-histogram')}
@@ -11866,6 +11893,7 @@ export function App(): JSX.Element {
                     frameLoudnessDbfs={activePreviewAnalysis?.frameLoudnessDbfs ?? []}
                     width={spectrumFullWidth}
                     height={200}
+                    isReference={isRefMode}
                   />
                 </section>
 
@@ -11881,7 +11909,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                     <div className="analysis-section-header">
-                    <h4>Spectrogram{showingReferenceSuffix} <HelpTooltip text={"What you're seeing: A scrolling 2D heatmap — X is time, Y is frequency (20 Hz to 20 kHz, logarithmic), color intensity is amplitude. Dark blue = quiet, green = moderate, yellow = loud, red = very loud.\n\nWhat to look for: A persistent bright horizontal band indicates a resonant frequency that may need EQ. Vertical bright lines are transients (drums, clicks). Gradual color shifts show arrangement dynamics between sections.\n\nTip: Especially useful for spotting issues a real-time spectrum misses — like a rogue frequency that appears briefly, or gradual tonal drift across sections."} links={SPECTROGRAM_LINKS} /></h4>
+                    <h4>Spectrogram{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: A scrolling 2D heatmap — X is time, Y is frequency (20 Hz to 20 kHz, logarithmic), color intensity is amplitude. Dark blue = quiet, green = moderate, yellow = loud, red = very loud.\n\nWhat to look for: A persistent bright horizontal band indicates a resonant frequency that may need EQ. Vertical bright lines are transients (drums, clicks). Gradual color shifts show arrangement dynamics between sections.\n\nTip: Especially useful for spotting issues a real-time spectrum misses — like a rogue frequency that appears briefly, or gradual tonal drift across sections."} links={SPECTROGRAM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Scrolling frequency heatmap — time vs. frequency vs. amplitude</p>
                     </div>
                     {renderMasteringPanelDragHandle('fullscreen', 'spectrogram')}
@@ -11891,6 +11919,7 @@ export function App(): JSX.Element {
                     width={spectrumFullWidth}
                     height={260}
                     isPlaying={isPlaying}
+                    isReference={isRefMode}
                   />
                 </section>
               </div>
@@ -11913,7 +11942,7 @@ export function App(): JSX.Element {
                 </button>
                 <button
                   type="button"
-                  className={playbackPreviewMode === 'reference' ? 'active' : 'ghost'}
+                  className={`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`}
                   onClick={() => handleReferencePreviewModeChange('reference')}
                   disabled={referenceStatus === 'loading'}
                   data-testid="floating-ab-reference"

@@ -5,6 +5,8 @@ interface VectorscopeProps {
   analyserNodeR: AnalyserNode | null;
   size: number;
   isPlaying: boolean;
+  /** When true, the scope dots render in the reference amber instead of the mix blue. */
+  isReference?: boolean;
 }
 
 export function Vectorscope({
@@ -12,6 +14,7 @@ export function Vectorscope({
   analyserNodeR,
   size,
   isPlaying,
+  isReference = false,
 }: VectorscopeProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -140,7 +143,9 @@ export function Vectorscope({
 
       // Draw current samples on trail canvas
       if (trailCtx) {
-        trailCtx.fillStyle = 'rgba(92, 167, 255, 0.6)';
+        trailCtx.fillStyle = isReference
+          ? 'rgba(255, 180, 84, 0.7)'
+          : 'rgba(92, 167, 255, 0.6)';
         const step = Math.max(1, Math.floor(fftSize / 512));
         for (let i = 0; i < fftSize; i += step) {
           const l = bufferL![i];
@@ -173,7 +178,7 @@ export function Vectorscope({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [analyserNodeL, analyserNodeR, size, isPlaying]);
+  }, [analyserNodeL, analyserNodeR, size, isPlaying, isReference]);
 
   return (
     <canvas

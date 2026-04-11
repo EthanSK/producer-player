@@ -5,6 +5,12 @@ interface SpectrogramProps {
   width: number;
   height: number;
   isPlaying: boolean;
+  /**
+   * When true, the spectrogram is showing the reference track. The
+   * dB-heatmap color scheme carries meaning (loudness magnitude) so it
+   * is preserved; an amber frame is drawn around the canvas instead.
+   */
+  isReference?: boolean;
 }
 
 const PADDING_LEFT = 44;
@@ -54,6 +60,7 @@ export function Spectrogram({
   width,
   height,
   isPlaying,
+  isReference = false,
 }: SpectrogramProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -243,7 +250,14 @@ export function Spectrogram({
   return (
     <canvas
       ref={canvasRef}
-      style={{ width, height, borderRadius: 8 }}
+      style={{
+        width,
+        height,
+        borderRadius: 8,
+        boxShadow: isReference
+          ? '0 0 0 1px rgba(255, 180, 84, 0.55), inset 0 0 0 1px rgba(255, 180, 84, 0.15)'
+          : undefined,
+      }}
       data-testid="spectrogram"
     />
   );

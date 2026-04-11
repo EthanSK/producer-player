@@ -6,6 +6,13 @@ interface CrestFactorGraphProps {
   width: number;
   height: number;
   isPlaying: boolean;
+  /**
+   * When true, the user is monitoring the reference track. The traffic-light
+   * color semantics (red/yellow/green for crushed/moderate/healthy) are kept
+   * because they carry meaning, but a warm amber outline is drawn around
+   * the canvas frame to signal "this is the reference".
+   */
+  isReference?: boolean;
 }
 
 const PADDING_LEFT = 44;
@@ -27,6 +34,7 @@ export function CrestFactorGraph({
   width,
   height,
   isPlaying,
+  isReference = false,
 }: CrestFactorGraphProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -279,7 +287,14 @@ export function CrestFactorGraph({
   return (
     <canvas
       ref={canvasRef}
-      style={{ width, height, borderRadius: 8 }}
+      style={{
+        width,
+        height,
+        borderRadius: 8,
+        boxShadow: isReference
+          ? '0 0 0 1px rgba(255, 180, 84, 0.55), inset 0 0 0 1px rgba(255, 180, 84, 0.15)'
+          : undefined,
+      }}
       data-testid="crest-factor-graph"
     />
   );

@@ -14,7 +14,15 @@ interface WaveformDisplayProps {
   height: number;
   /** Called when the user clicks on the waveform to seek to a time position. */
   onSeek?: (timeSeconds: number) => void;
+  /** When true, the waveform belongs to the reference track — render amber instead of blue. */
+  isReference?: boolean;
 }
+
+/** Color stops for the waveform bars — blue for mix, amber for reference. */
+const WAVEFORM_MIX_PAST = 'rgba(92, 167, 255, 0.8)';
+const WAVEFORM_MIX_FUTURE = 'rgba(92, 167, 255, 0.3)';
+const WAVEFORM_REF_PAST = 'rgba(255, 180, 84, 0.85)';
+const WAVEFORM_REF_FUTURE = 'rgba(255, 180, 84, 0.32)';
 
 const PADDING_LEFT = 30;
 const PADDING_RIGHT = 4;
@@ -57,9 +65,13 @@ export function WaveformDisplay({
   width,
   height,
   onSeek,
+  isReference = false,
 }: WaveformDisplayProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
+
+  const pastColor = isReference ? WAVEFORM_REF_PAST : WAVEFORM_MIX_PAST;
+  const futureColor = isReference ? WAVEFORM_REF_FUTURE : WAVEFORM_MIX_FUTURE;
 
   const { mousePosRef } = useCrosshairOverlay({
     canvasRef,
@@ -170,9 +182,7 @@ export function WaveformDisplay({
 
       // Color based on playback position
       const isPast = x < playX;
-      ctx.fillStyle = isPast
-        ? 'rgba(92, 167, 255, 0.8)'
-        : 'rgba(92, 167, 255, 0.3)';
+      ctx.fillStyle = isPast ? pastColor : futureColor;
 
       // Draw symmetrical bar
       ctx.fillRect(x, centerY - barH, Math.max(1, barWidth - 0.5), barH * 2);
@@ -232,7 +242,17 @@ export function WaveformDisplay({
         }
       );
     }
-  }, [waveformPeaks, analysis, currentTimeSeconds, durationSeconds, width, height, mousePosRef]);
+  }, [
+    waveformPeaks,
+    analysis,
+    currentTimeSeconds,
+    durationSeconds,
+    width,
+    height,
+    mousePosRef,
+    pastColor,
+    futureColor,
+  ]);
 
   useEffect(() => {
     if (animFrameRef.current) {

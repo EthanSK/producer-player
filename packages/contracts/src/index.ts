@@ -377,6 +377,7 @@ export type AutoUpdateStatus =
   | 'not-available'
   | 'downloading'
   | 'downloaded'
+  | 'installing'
   | 'error';
 
 export interface AutoUpdateProgress {

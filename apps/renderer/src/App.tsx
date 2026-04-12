@@ -6799,10 +6799,10 @@ export function App(): JSX.Element {
     setUpdateCheckStatus('checking');
     setUpdateCheckResult(null);
 
-    // Kick off the electron-updater check in parallel. The main process sets
-    // `shouldAutoDownloadOnNextAvailable` before dispatching the check, so a
-    // found update immediately starts downloading in the background and the
-    // Install & Restart button enables when the download completes.
+    // Kick off the electron-updater check in parallel. The main process no
+    // longer auto-downloads on a renderer-initiated check — it just reports
+    // status via AUTO_UPDATE_STATE_CHANGED, which flips the "Download and
+    // Install" button to enabled when an update is found.
     void window.producerPlayer.autoUpdateCheck().catch(() => {
       // Swallow — the GitHub-API check below owns the user-visible error message.
     });
@@ -6831,6 +6831,15 @@ export function App(): JSX.Element {
   async function handleAutoUpdateCheck(): Promise<void> {
     await runVoidTask(async () => {
       await window.producerPlayer.autoUpdateCheck();
+    });
+  }
+
+  async function handleDownloadAndInstallUpdate(): Promise<void> {
+    // One-click: kick off the download. The main process flips
+    // `installAfterDownload` so that `update-downloaded` automatically calls
+    // `quitAndInstall` — the user never has to click a second button.
+    await runVoidTask(async () => {
+      await window.producerPlayer.autoUpdateDownload();
     });
   }
 
@@ -7948,10 +7957,12 @@ export function App(): JSX.Element {
   const canDownloadUpdate =
     updateCheckResult?.status === 'update-available' &&
     Boolean(updateCheckResult.downloadUrl || updateCheckResult.releaseUrl);
-  // The Install & Restart button is enabled only once the background download
-  // has completed. Checking for updates auto-starts the download via the main process, so
-  // the user never needs an intermediate "Download" click.
-  const canInstallAndRestartUpdate = autoUpdateState.status === 'downloaded';
+  // The "Download and Install" button is enabled when we know an update is
+  // available (via a user check or a background auto-check). Clicking it
+  // kicks off the download; the main process auto-installs on completion.
+  const canDownloadAndInstallUpdate = autoUpdateState.status === 'available';
+  const isDownloadingUpdate = autoUpdateState.status === 'downloading';
+  const isInstallingUpdate = autoUpdateState.status === 'installing';
   const autoUpdateDownloadPercent =
     autoUpdateState.status === 'downloading' && autoUpdateState.progress
       ? Math.round(autoUpdateState.progress.percent)
@@ -7961,13 +7972,15 @@ export function App(): JSX.Element {
       case 'checking':
         return 'Checking for updates…';
       case 'available':
-        return `Update ${autoUpdateState.version ?? ''} available — downloading…`.trim();
+        return `Update ${autoUpdateState.version ?? ''} available.`.trim();
       case 'downloading':
         return autoUpdateDownloadPercent !== null
           ? `Downloading update… ${autoUpdateDownloadPercent}%`
           : 'Downloading update…';
       case 'downloaded':
-        return `Update ${autoUpdateState.version ?? ''} ready to install.`.trim();
+        return `Update ${autoUpdateState.version ?? ''} downloaded — installing…`.trim();
+      case 'installing':
+        return `Installing update ${autoUpdateState.version ?? ''}…`.trim();
       case 'not-available':
         return "You're on the latest version.";
       case 'error':
@@ -8978,8 +8991,13 @@ export function App(): JSX.Element {
                       <strong>{referenceTruePeakText}</strong>
                     </div>
                     <div className="analysis-stat-card compact">
-                      <span className="analysis-stat-label">Loudness difference</span>
+                      <span className="analysis-stat-label">Integrated loudness difference</span>
                       <strong>{formatSignedLevel(activeReferenceComparison.integratedDeltaDb)}</strong>
+                      <span className="muted">
+                        {activeReferenceComparison.integratedDeltaDb !== null
+                          ? `mix − ref (full-track avg) — ${activeReferenceComparison.integratedDeltaDb >= 0 ? 'louder' : 'quieter'} than reference`
+                          : 'mix integrated LUFS − ref integrated LUFS'}
+                      </span>
                     </div>
                   </>
                 ) : (
@@ -9822,21 +9840,29 @@ export function App(): JSX.Element {
                 type="button"
                 className="ghost"
                 onClick={() => {
-                  void handleAutoUpdateInstall();
+                  void handleDownloadAndInstallUpdate();
                 }}
-                data-testid="support-feedback-restart-update"
-                disabled={!canInstallAndRestartUpdate}
+                data-testid="support-feedback-download-install-update"
+                disabled={
+                  !canDownloadAndInstallUpdate || isDownloadingUpdate || isInstallingUpdate
+                }
                 title={
-                  canInstallAndRestartUpdate
-                    ? 'Restart the app to apply the downloaded update.'
-                    : autoUpdateState.status === 'downloading'
-                      ? 'Download in progress — enabled once the update is ready to install.'
-                      : 'Check for an update. Install & Restart unlocks once the download completes.'
+                  isInstallingUpdate
+                    ? 'Installing update — the app will restart momentarily.'
+                    : isDownloadingUpdate
+                      ? 'Download in progress — the update will install automatically when ready.'
+                      : canDownloadAndInstallUpdate
+                        ? 'Download the update and install it automatically (the app will restart).'
+                        : 'Click "Check for Updates" first. This enables when an update is available.'
                 }
               >
-                {autoUpdateState.status === 'downloading' && autoUpdateDownloadPercent !== null
-                  ? `Downloading… ${autoUpdateDownloadPercent}%`
-                  : 'Install & Restart'}
+                {isInstallingUpdate
+                  ? 'Installing…'
+                  : isDownloadingUpdate
+                    ? autoUpdateDownloadPercent !== null
+                      ? `Downloading… ${autoUpdateDownloadPercent}%`
+                      : 'Downloading…'
+                    : 'Download and Install'}
               </button>
             </div>
             {updateStatusText ? (
@@ -11556,28 +11582,57 @@ export function App(): JSX.Element {
                       </p>
                       <div className="analysis-detail-grid analysis-detail-grid-wide">
                         <div className="analysis-stat-card">
-                          <span className="analysis-stat-label">Loudness difference</span>
+                          <span className="analysis-stat-label">Integrated loudness difference</span>
                           <strong>{formatSignedLevel(activeReferenceComparison.integratedDeltaDb)}</strong>
+                          <span className="muted">
+                            {activeReferenceComparison.integratedDeltaDb !== null
+                              ? `mix integrated LUFS − ref integrated LUFS — your mix is ${Math.abs(activeReferenceComparison.integratedDeltaDb).toFixed(1)} dB ${activeReferenceComparison.integratedDeltaDb >= 0 ? 'louder than' : 'quieter than'} reference (full-track average)`
+                              : 'mix integrated LUFS − ref integrated LUFS (full-track average)'}
+                          </span>
+                          {referenceLevelMatchEnabled &&
+                          activeReferenceComparison.integratedDeltaDb !== null &&
+                          Math.abs(activeReferenceComparison.integratedDeltaDb - referenceLevelMatchGainDb) > 0.1 ? (
+                            <span className="muted" style={{ fontSize: 11, fontStyle: 'italic' }}>
+                              Level Match uses the fast preview analysis ({referenceLevelMatchGainDb >= 0 ? '+' : ''}{referenceLevelMatchGainDb.toFixed(1)} dB); this card uses the slower, more accurate measured analysis.
+                            </span>
+                          ) : null}
                         </div>
                         <div className="analysis-stat-card">
                           <span className="analysis-stat-label">True peak delta</span>
                           <strong>{formatSignedLevel(activeReferenceComparison.truePeakDeltaDb)}</strong>
+                          <span className="muted">
+                            {activeReferenceComparison.truePeakDeltaDb !== null
+                              ? `mix true peak − ref true peak — your mix peaks ${Math.abs(activeReferenceComparison.truePeakDeltaDb).toFixed(1)} dB ${activeReferenceComparison.truePeakDeltaDb >= 0 ? 'higher than' : 'lower than'} reference`
+                              : 'mix true peak − ref true peak'}
+                          </span>
                         </div>
                         <div className="analysis-stat-card">
-                          <span className="analysis-stat-label">Current loudness difference</span>
+                          <span className="analysis-stat-label">Short-term loudness difference</span>
                           <strong>{formatSignedLevel(activeReferenceComparison.shortTermDeltaDb)}</strong>
+                          <span className="muted">
+                            mix short-term LUFS − ref short-term LUFS (3-second window at current playback position)
+                          </span>
                         </div>
                         <div className="analysis-stat-card">
                           <span className="analysis-stat-label">Low tilt delta</span>
                           <strong>{formatSignedLevel(activeReferenceComparison.tonalDelta.low * 100)}</strong>
+                          <span className="muted">
+                            {`mix has ${Math.abs(activeReferenceComparison.tonalDelta.low * 100).toFixed(1)}% ${activeReferenceComparison.tonalDelta.low >= 0 ? 'more' : 'less'} low-band energy than reference`}
+                          </span>
                         </div>
                         <div className="analysis-stat-card">
                           <span className="analysis-stat-label">Mid tilt delta</span>
                           <strong>{formatSignedLevel(activeReferenceComparison.tonalDelta.mid * 100)}</strong>
+                          <span className="muted">
+                            {`mix has ${Math.abs(activeReferenceComparison.tonalDelta.mid * 100).toFixed(1)}% ${activeReferenceComparison.tonalDelta.mid >= 0 ? 'more' : 'less'} mid-band energy than reference`}
+                          </span>
                         </div>
                         <div className="analysis-stat-card">
                           <span className="analysis-stat-label">High tilt delta</span>
                           <strong>{formatSignedLevel(activeReferenceComparison.tonalDelta.high * 100)}</strong>
+                          <span className="muted">
+                            {`mix has ${Math.abs(activeReferenceComparison.tonalDelta.high * 100).toFixed(1)}% ${activeReferenceComparison.tonalDelta.high >= 0 ? 'more' : 'less'} high-band energy than reference`}
+                          </span>
                         </div>
                       </div>
                     </div>

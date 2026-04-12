@@ -844,11 +844,18 @@ let currentAutoUpdateState: AutoUpdateState = {
   error: null,
 };
 
-// When true, the next `update-available` event should immediately trigger a download.
-// Both the background scheduler AND renderer-initiated checks set this to true — the
-// UX is "click Check for Updates once, and if an update exists it downloads automatically." The
-// dedicated "Install & Restart" button only handles the final restart step.
+// When true, the next `update-available` event should immediately trigger a
+// download. ONLY the background scheduler flips this on — renderer-initiated
+// "Check for Updates" clicks leave it false so the check surfaces status
+// without downloading anything. The user explicitly kicks off the download
+// via the "Download and Install" button.
 let shouldAutoDownloadOnNextAvailable = false;
+
+// When true, a successful `update-downloaded` event should immediately call
+// `quitAndInstall`. This is flipped on by the renderer-initiated
+// `AUTO_UPDATE_DOWNLOAD` IPC so the "Download and Install" button performs
+// both actions from a single click.
+let installAfterDownload = false;
 
 function emitAutoUpdateState(state: AutoUpdateState): void {
   currentAutoUpdateState = state;
@@ -859,11 +866,11 @@ function emitAutoUpdateState(state: AutoUpdateState): void {
 
 function configureAutoUpdater(): void {
   autoUpdater.logger = log;
-  // We flip `shouldAutoDownloadOnNextAvailable` before every intentional check so the
-  // `update-available` handler can kick off `downloadUpdate()` itself. We leave the
-  // built-in `autoDownload` off so that any stray/unsolicited check (e.g. during
-  // tests, or a future codepath we add by mistake) doesn't silently start a download
-  // without us deciding to.
+  // The background scheduler flips `shouldAutoDownloadOnNextAvailable` before
+  // its check, so `update-available` kicks off `downloadUpdate()` itself in
+  // that path. Renderer "Check for Updates" clicks never flip the flag — they
+  // just report status. We leave the built-in `autoDownload` off so stray
+  // checks don't silently start a download without us deciding to.
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowDowngrade = false;
@@ -894,9 +901,10 @@ function configureAutoUpdater(): void {
       error: null,
     });
 
-    // Every intentional check flips `shouldAutoDownloadOnNextAvailable` beforehand,
-    // so a found update kicks off the download automatically. The user sees
-    // "Check for Updates → Downloading → Install & Restart" without any extra clicks.
+    // The background scheduler flips `shouldAutoDownloadOnNextAvailable`
+    // before its check so a found update kicks off `downloadUpdate()` here
+    // without user involvement. Renderer "Check for Updates" clicks never
+    // flip this flag, so they just surface status to the UI.
     if (shouldAutoDownloadOnNextAvailable) {
       shouldAutoDownloadOnNextAvailable = false;
       void autoUpdater.downloadUpdate().catch((error: unknown) => {
@@ -941,9 +949,44 @@ function configureAutoUpdater(): void {
   autoUpdater.on('update-downloaded', (info) => {
     log.info('[producer-player:auto-update] update downloaded', { version: info.version });
     // IMPORTANT: Always use toDisplayVersion() when showing versions to users
+    const displayVersion = info.version ? toDisplayVersion(info.version) : null;
+
+    // If the renderer kicked off the download via "Download and Install",
+    // quitAndInstall runs automatically so the user doesn't have to click a
+    // second button. In that path we skip the 'downloaded' state and go
+    // straight to 'installing' to avoid flashing a "download ready" banner
+    // right before the app restarts.
+    // Background-scheduler downloads leave this flag false — they emit
+    // 'downloaded' and rely on `autoInstallOnAppQuit` for the existing
+    // "install on next normal quit" behavior.
+    if (installAfterDownload) {
+      installAfterDownload = false;
+      log.info('[producer-player:auto-update] auto-installing downloaded update');
+      emitAutoUpdateState({
+        status: 'installing',
+        version: displayVersion,
+        progress: null,
+        error: null,
+      });
+      try {
+        autoUpdater.quitAndInstall(false, true);
+      } catch (error: unknown) {
+        log.warn('[producer-player:auto-update] quitAndInstall failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        emitAutoUpdateState({
+          status: 'error',
+          version: displayVersion,
+          progress: null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
+
     emitAutoUpdateState({
       status: 'downloaded',
-      version: info.version ? toDisplayVersion(info.version) : null,
+      version: displayVersion,
       progress: null,
       error: null,
     });
@@ -954,6 +997,7 @@ function configureAutoUpdater(): void {
       message: error.message,
     });
     shouldAutoDownloadOnNextAvailable = false;
+    installAfterDownload = false;
     emitAutoUpdateState({
       status: 'error',
       version: currentAutoUpdateState.version,
@@ -3610,16 +3654,11 @@ function registerIpcHandlers(service: FileLibraryService): void {
       log.info('[producer-player:auto-update] skipping check (not packaged or test mode)');
       return;
     }
-    // Renderer-initiated checks auto-download on a hit. The "update-available"
-    // handler sees this flag and fires `downloadUpdate()` itself so the user
-    // doesn't have to click a second button.
-    shouldAutoDownloadOnNextAvailable = true;
-    try {
-      await autoUpdater.checkForUpdates();
-    } catch (error: unknown) {
-      shouldAutoDownloadOnNextAvailable = false;
-      throw error;
-    }
+    // Renderer-initiated checks do NOT auto-download. They only report status
+    // via the AUTO_UPDATE_STATE_CHANGED events so the UI can surface "Update
+    // available" and enable the "Download and Install" button. The user then
+    // explicitly triggers the download via AUTO_UPDATE_DOWNLOAD.
+    await autoUpdater.checkForUpdates();
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_DOWNLOAD, async () => {
@@ -3628,9 +3667,14 @@ function registerIpcHandlers(service: FileLibraryService): void {
       return;
     }
     log.info('[producer-player:auto-update] download requested by renderer');
+    // Arm the post-download auto-install. The `update-downloaded` handler
+    // sees this and calls `quitAndInstall` automatically so "Download and
+    // Install" is a single click from the user's POV.
+    installAfterDownload = true;
     try {
       await autoUpdater.downloadUpdate();
     } catch (error: unknown) {
+      installAfterDownload = false;
       log.warn('[producer-player:auto-update] renderer download failed', {
         error: error instanceof Error ? error.message : String(error),
       });

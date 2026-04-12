@@ -218,7 +218,7 @@ export const IPC_CHANNELS = {
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
-export type TransportCommand = 'play-pause' | 'next-track' | 'previous-track';
+export type TransportCommand = 'play-pause' | 'next-track' | 'previous-track' | 'seek-forward' | 'seek-backward';
 export type TransportCommandListener = (command: TransportCommand) => void;
 
 export interface SongChecklistItem {

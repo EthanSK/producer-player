@@ -1062,6 +1062,8 @@ function registerGlobalMediaShortcuts(): void {
     ['MediaPlayPause', 'play-pause'],
     ['MediaNextTrack', 'next-track'],
     ['MediaPreviousTrack', 'previous-track'],
+    ['MediaFastForward', 'seek-forward'],
+    ['MediaRewind', 'seek-backward'],
   ];
 
   for (const [accelerator, command] of bindings) {

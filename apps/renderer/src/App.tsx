@@ -5521,7 +5521,20 @@ export function App(): JSX.Element {
         return;
       }
 
-      transportActionRef.current.previous();
+      if (command === 'previous-track') {
+        transportActionRef.current.previous();
+        return;
+      }
+
+      if (command === 'seek-forward') {
+        handleSkipSecondsRef.current(10);
+        return;
+      }
+
+      if (command === 'seek-backward') {
+        handleSkipSecondsRef.current(-10);
+        return;
+      }
     });
   }, []);
 
@@ -10640,118 +10653,6 @@ export function App(): JSX.Element {
                 )}
               </div>
               <div className="analysis-overlay-header-controls">
-                {selectedPlaybackVersion ? (
-                  <div className="analysis-overlay-transport" data-testid="analysis-overlay-transport">
-                    <button
-                      type="button"
-                      className="analysis-overlay-transport-button analysis-overlay-skip-button"
-                      data-testid="analysis-overlay-skip-back-10"
-                      onClick={() => handleSkipSeconds(-10)}
-                      title="Skip back 10 seconds"
-                      aria-label="Skip back 10 seconds"
-                    >
-                      −10s
-                    </button>
-                    <button
-                      type="button"
-                      className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
-                      data-testid="analysis-overlay-skip-back-5"
-                      onClick={() => handleSkipSeconds(-5)}
-                      title="Skip back 5 seconds"
-                      aria-label="Skip back 5 seconds"
-                    >
-                      −5s
-                    </button>
-                    <button
-                      type="button"
-                      className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
-                      data-testid="analysis-overlay-skip-back-1"
-                      onClick={() => handleSkipSeconds(-1)}
-                      title="Skip back 1 second"
-                      aria-label="Skip back 1 second"
-                    >
-                      −1s
-                    </button>
-                    <button
-                      type="button"
-                      className="analysis-overlay-transport-button"
-                      data-testid="analysis-overlay-prev"
-                      onClick={() => handlePreviousTrack()}
-                      title="Previous track"
-                      aria-label="Previous track"
-                    >
-                      ◀◀
-                    </button>
-                    <button
-                      type="button"
-                      className="analysis-overlay-transport-button analysis-overlay-play-toggle"
-                      data-testid="analysis-overlay-play-toggle"
-                      data-playing={isPlaying ? 'true' : 'false'}
-                      aria-label={isPlaying ? 'Pause' : 'Play'}
-                      title={isPlaying ? 'Pause playback' : 'Resume playback'}
-                      onClick={() => {
-                        void handleTogglePlayback();
-                      }}
-                    >
-                      <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="analysis-overlay-transport-button"
-                      data-testid="analysis-overlay-next"
-                      onClick={() => handleNextTrack()}
-                      title="Next track"
-                      aria-label="Next track"
-                    >
-                      ▶▶
-                    </button>
-                    <button
-                      type="button"
-                      className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
-                      data-testid="analysis-overlay-skip-forward-1"
-                      onClick={() => handleSkipSeconds(1)}
-                      title="Skip forward 1 second"
-                      aria-label="Skip forward 1 second"
-                    >
-                      +1s
-                    </button>
-                    <button
-                      type="button"
-                      className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
-                      data-testid="analysis-overlay-skip-forward-5"
-                      onClick={() => handleSkipSeconds(5)}
-                      title="Skip forward 5 seconds"
-                      aria-label="Skip forward 5 seconds"
-                    >
-                      +5s
-                    </button>
-                    <button
-                      type="button"
-                      className="analysis-overlay-transport-button analysis-overlay-skip-button"
-                      data-testid="analysis-overlay-skip-forward-10"
-                      onClick={() => handleSkipSeconds(10)}
-                      title="Skip forward 10 seconds"
-                      aria-label="Skip forward 10 seconds"
-                    >
-                      +10s
-                    </button>
-                    <span className="analysis-overlay-transport-time muted" data-testid="analysis-overlay-time">
-                      {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
-                    </span>
-                    <input
-                      type="range"
-                      className="analysis-overlay-transport-scrubber"
-                      min={0}
-                      max={durationSeconds > 0 ? durationSeconds : 0}
-                      step={0.1}
-                      value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
-                      disabled={durationSeconds <= 0}
-                      onChange={(event) => handleSeek(Number(event.target.value))}
-                      data-testid="analysis-overlay-scrubber"
-                      title="Scrub through the track"
-                    />
-                  </div>
-                ) : null}
                 <div className="analysis-overlay-header-actions">
                   <button
                     type="button"
@@ -12001,6 +11902,121 @@ export function App(): JSX.Element {
               <p className="muted">Pick a track to see mastering analysis.</p>
             )}
           </div>
+
+          {selectedPlaybackVersion ? (
+            <div className="mastering-playback-float" data-testid="mastering-playback-float">
+              <div className="analysis-overlay-transport" data-testid="analysis-overlay-transport">
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button"
+                  data-testid="analysis-overlay-skip-back-10"
+                  onClick={() => handleSkipSeconds(-10)}
+                  title="Skip back 10 seconds"
+                  aria-label="Skip back 10 seconds"
+                >
+                  −10s
+                </button>
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                  data-testid="analysis-overlay-skip-back-5"
+                  onClick={() => handleSkipSeconds(-5)}
+                  title="Skip back 5 seconds"
+                  aria-label="Skip back 5 seconds"
+                >
+                  −5s
+                </button>
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                  data-testid="analysis-overlay-skip-back-1"
+                  onClick={() => handleSkipSeconds(-1)}
+                  title="Skip back 1 second"
+                  aria-label="Skip back 1 second"
+                >
+                  −1s
+                </button>
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button"
+                  data-testid="analysis-overlay-prev"
+                  onClick={() => handlePreviousTrack()}
+                  title="Previous track"
+                  aria-label="Previous track"
+                >
+                  ◀◀
+                </button>
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-play-toggle"
+                  data-testid="analysis-overlay-play-toggle"
+                  data-playing={isPlaying ? 'true' : 'false'}
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  title={isPlaying ? 'Pause playback' : 'Resume playback'}
+                  onClick={() => {
+                    void handleTogglePlayback();
+                  }}
+                >
+                  <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button"
+                  data-testid="analysis-overlay-next"
+                  onClick={() => handleNextTrack()}
+                  title="Next track"
+                  aria-label="Next track"
+                >
+                  ▶▶
+                </button>
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                  data-testid="analysis-overlay-skip-forward-1"
+                  onClick={() => handleSkipSeconds(1)}
+                  title="Skip forward 1 second"
+                  aria-label="Skip forward 1 second"
+                >
+                  +1s
+                </button>
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                  data-testid="analysis-overlay-skip-forward-5"
+                  onClick={() => handleSkipSeconds(5)}
+                  title="Skip forward 5 seconds"
+                  aria-label="Skip forward 5 seconds"
+                >
+                  +5s
+                </button>
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button"
+                  data-testid="analysis-overlay-skip-forward-10"
+                  onClick={() => handleSkipSeconds(10)}
+                  title="Skip forward 10 seconds"
+                  aria-label="Skip forward 10 seconds"
+                >
+                  +10s
+                </button>
+                <span className="analysis-overlay-transport-time muted" data-testid="analysis-overlay-time">
+                  {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
+                </span>
+                <input
+                  type="range"
+                  className="analysis-overlay-transport-scrubber"
+                  min={0}
+                  max={durationSeconds > 0 ? durationSeconds : 0}
+                  step={0.1}
+                  value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
+                  disabled={durationSeconds <= 0}
+                  onChange={(event) => handleSeek(Number(event.target.value))}
+                  data-testid="analysis-overlay-scrubber"
+                  title="Scrub through the track"
+                />
+              </div>
+            </div>
+          ) : null}
 
           {referenceTrack ? (
             <div className="floating-ab-panel" data-testid="floating-ab-panel">

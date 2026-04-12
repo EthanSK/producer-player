@@ -188,7 +188,9 @@ const bridge: ProducerPlayerBridge = {
       if (
         command === 'play-pause' ||
         command === 'next-track' ||
-        command === 'previous-track'
+        command === 'previous-track' ||
+        command === 'seek-forward' ||
+        command === 'seek-backward'
       ) {
         listener(command as TransportCommand);
       }

@@ -1366,6 +1366,39 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   white-space: nowrap;
 }
 
+/* ── Floating Mastering Playback Bar ── */
+
+.mastering-playback-float {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(18, 22, 30, 0.82);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  max-width: calc(100% - 360px);
+  flex-wrap: wrap;
+}
+
+.mastering-playback-float .analysis-overlay-transport {
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.mastering-playback-float .analysis-overlay-transport-scrubber {
+  width: 160px;
+  min-width: 80px;
+  flex: 1 1 80px;
+}
+
 /* ── Quick Song Switcher Floating Toggle ── */
 
 .quick-switcher-toggle {

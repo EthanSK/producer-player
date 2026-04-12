@@ -842,11 +842,18 @@ input[type='range'] {
 .analysis-ab-row {
   display: flex;
   gap: 10px;
+  align-items: start;
+  flex-wrap: wrap;
 }
 
 .analysis-ab-row > .analysis-ab-toggle {
   flex: 1 1 0;
   min-width: 0;
+}
+
+.analysis-ab-shortcut {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .analysis-ab-toggle {

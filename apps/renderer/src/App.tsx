@@ -4573,9 +4573,9 @@ export function App(): JSX.Element {
     ) {
       return 0;
     }
-    const mixLufs = analysis.integratedLufsEstimate;
-    const refLufs = referenceTrack.previewAnalysis.integratedLufsEstimate;
-    if (!Number.isFinite(mixLufs) || !Number.isFinite(refLufs)) return 0;
+    const mixLufs = measuredAnalysis?.integratedLufs;
+    const refLufs = referenceTrack.measuredAnalysis.integratedLufs;
+    if (mixLufs == null || refLufs == null || !Number.isFinite(mixLufs) || !Number.isFinite(refLufs)) return 0;
     return mixLufs - refLufs;
   })();
 
@@ -9553,6 +9553,21 @@ export function App(): JSX.Element {
               >
                 {`Open in ${fileManagerLabel(environment.platform)}`}
               </button>
+              {selectedPlaybackSongId && songProjectFilePaths[selectedPlaybackSongId] ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    const projectPath = songProjectFilePaths[selectedPlaybackSongId];
+                    if (projectPath) {
+                      void window.producerPlayer.revealFile(projectPath);
+                    }
+                  }}
+                  title={`Open this song's project file in ${fileManagerLabel(environment.platform)}.`}
+                >
+                  {`Open project in ${fileManagerLabel(environment.platform)}`}
+                </button>
+              ) : null}
             </div>
 
             <div className="player-transport">
@@ -10845,8 +10860,8 @@ export function App(): JSX.Element {
                               })}
                               data-testid="eq-inline-level-match"
                               aria-disabled={normalizationPreviewEnabled || undefined}
-                              title={normalizationPreviewEnabled
-                                ? 'Level Match paused — overridden by Platform Preview (platform normalization already equalizes both tracks)'
+                              title={normalizationPreviewEnabled && referenceLevelMatchEnabled
+                                ? 'Level Match On (overridden while Platform Preview is on — platform normalization already equalizes both tracks)'
                                 : referenceLevelMatchEnabled
                                 ? `Level Match On${referenceLevelMatchGainDb !== 0 ? ` (${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB)` : ''}`
                                 : 'Level Match Off — enable to match reference volume to your mix'}
@@ -11060,30 +11075,25 @@ export function App(): JSX.Element {
                         disabled={!referenceTrack}
                         aria-disabled={normalizationPreviewEnabled || undefined}
                         title={
-                          normalizationPreviewEnabled
-                            ? 'Level Match paused — overridden by Platform Preview (platform normalization already equalizes both tracks to the target loudness)'
+                          normalizationPreviewEnabled && referenceLevelMatchEnabled
+                            ? 'Overridden while Platform Preview is on — platform normalization already equalizes both tracks to the target loudness'
                             : "Automatically adjust reference playback gain to match your mix's integrated LUFS"
                         }
                         data-testid="analysis-level-match-toggle"
                       >
-                        {normalizationPreviewEnabled
-                          ? '(Level Match) — paused'
-                          : referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
+                        {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
                       </button>
-                      {normalizationPreviewEnabled ? (
-                        <span className="muted level-match-overridden-note" style={{ fontSize: 12, marginLeft: 8 }}>
-                          Platform Preview on
-                        </span>
-                      ) : referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
+                      {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-                          {`${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
+                          {normalizationPreviewEnabled
+                            ? '(overridden by Platform Preview)'
+                            : `${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
                         </span>
                       ) : null}
                     </div>
                   </div>
-                  </div>
 
-                  <div style={{ marginTop: 6, marginBottom: 2 }}>
+                  <div className="analysis-ab-shortcut" style={{ marginLeft: 'auto', alignSelf: 'center' }}>
                     <button
                       type="button"
                       className="ghost"
@@ -11123,6 +11133,7 @@ export function App(): JSX.Element {
                         ) : null}
                       </div>
                     ) : null}
+                  </div>
                   </div>
 
                   <div className="analysis-reference-slot active" data-testid="analysis-reference-slot-a">
@@ -11228,6 +11239,7 @@ export function App(): JSX.Element {
                     width={Math.max(400, spectrumFullWidth)}
                     height={140}
                     onSeek={handleSeek}
+                    measuredIntegratedLufs={activeMeasuredAnalysis?.integratedLufs}
                     isReference={isRefMode}
                   />
                 </section>
@@ -12024,21 +12036,19 @@ export function App(): JSX.Element {
                   })}
                   aria-disabled={normalizationPreviewEnabled || undefined}
                   title={
-                    normalizationPreviewEnabled
-                      ? 'Level Match paused — overridden by Platform Preview (platform normalization already equalizes both tracks to the target loudness)'
+                    normalizationPreviewEnabled && referenceLevelMatchEnabled
+                      ? 'Overridden while Platform Preview is on — platform normalization already equalizes both tracks to the target loudness'
                       : 'Match playback levels between mix and reference'
                   }
                   data-testid="floating-ab-level-match"
                 >
-                  {normalizationPreviewEnabled
-                    ? '(Level Match) — paused'
-                    : referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
+                  {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
                 </button>
-                {normalizationPreviewEnabled ? (
-                  <span className="muted level-match-overridden-note">Platform Preview on</span>
-                ) : referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
+                {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                   <span className="muted">
-                    {`${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
+                    {normalizationPreviewEnabled
+                      ? '(overridden by Platform Preview)'
+                      : `${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
                   </span>
                 ) : null}
               </div>
@@ -12072,7 +12082,6 @@ export function App(): JSX.Element {
             <>
               <div
                 className="quick-switcher-backdrop"
-                onClick={() => setQuickSwitcherOpen(false)}
                 aria-hidden="true"
               />
               <div

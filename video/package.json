@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "start": "npx remotion studio",
-    "build": "npx remotion render ProducerPlayerExplainer out/producer-player-explainer.mp4",
-    "build:web": "npx remotion render ProducerPlayerExplainer out/producer-player-explainer-web.mp4 --scale=0.667"
+    "build": "npx remotion render ProducerPlayerExplainer out/producer-player-explainer.mp4 --crf=15",
+    "build:web": "npx remotion render ProducerPlayerExplainer out/producer-player-explainer-web.mp4 --crf=18"
   },
   "dependencies": {
     "@remotion/cli": "4.0.438",

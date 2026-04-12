@@ -310,7 +310,14 @@ jobs:
             prev_tag="$(git rev-list --max-parents=0 HEAD)"
           fi
 
-          echo "Generating changelog: ${prev_tag}..${current_tag}"
+          # If current_tag isn't a valid git ref yet (typical for fresh
+          # releases on branch pushes), use HEAD instead.
+          log_end="${current_tag}"
+          if ! git rev-parse --verify "${current_tag}" >/dev/null 2>&1; then
+            log_end="HEAD"
+          fi
+
+          echo "Generating changelog: ${prev_tag}..${log_end}"
 
           features=""
           fixes=""
@@ -340,7 +347,7 @@ jobs:
             elif [[ "$msg" != *"bump version"* && "$msg" != "Merge "* ]]; then
               other="${other}\n- ${msg}"
             fi
-          done < <(git log --oneline "${prev_tag}..${current_tag}" --)
+          done < <(git log --oneline "${prev_tag}..${log_end}" --)
 
           changelog=""
           if [ -n "$features" ]; then
@@ -381,6 +388,8 @@ jobs:
 
           {
             echo "## Producer Player v${display_version}"
+            echo ""
+            echo "## What's New"
             echo ""
             cat /tmp/release_changelog.md
             echo "---"

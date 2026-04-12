@@ -12,6 +12,12 @@ interface LoudnessHistoryGraphProps {
   /** Called when the user clicks on the graph to seek to a time position. */
   onSeek?: (timeSeconds: number) => void;
   /**
+   * Measured integrated LUFS from ffmpeg (null while measuring). When provided,
+   * this value is used for the horizontal reference line instead of the
+   * WebAudio RMS estimate.
+   */
+  measuredIntegratedLufs?: number | null;
+  /**
    * When true, the graph represents the reference track's loudness history —
    * the curve, fill and integrated-LUFS marker all pick up the reference
    * amber accent instead of the default blue so the user sees at a glance
@@ -52,6 +58,7 @@ export function LoudnessHistoryGraph({
   width,
   height,
   onSeek,
+  measuredIntegratedLufs,
   isReference = false,
 }: LoudnessHistoryGraphProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -154,8 +161,8 @@ export function LoudnessHistoryGraph({
     ctx.restore();
 
     // Integrated LUFS reference line
-    const intLufs = analysis.integratedLufsEstimate;
-    if (intLufs > DB_MIN) {
+    const intLufs = measuredIntegratedLufs ?? null;
+    if (intLufs !== null && intLufs > DB_MIN) {
       const intY = PADDING_TOP + plotH * (1 - (intLufs - DB_MIN) / (DB_MAX - DB_MIN));
       ctx.strokeStyle = lineColorSoft06;
       ctx.lineWidth = 1;

@@ -113,6 +113,7 @@ import {
   persistPanelOrder,
   readPanelOrderFromStorage,
 } from './masteringPanelLayout';
+import { computeEffectiveReferenceLevelMatchGainDb } from './referenceLevelMatchGain';
 
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
@@ -4544,10 +4545,9 @@ export function App(): JSX.Element {
   // ---------------------------------------------------------------------------
   // Audio gain interaction: Level Match + Platform Normalization + Reference
   //
-  // When all three features are active simultaneously, the combined gain is:
-  //   appliedNormalizationGainDb = platformNormGain + levelMatchGain
+  //   appliedNormalizationGainDb = platformNormGain + effectiveLevelMatchGain
   //
-  // 1. Level Match ON + Reference playing:
+  // 1. Level Match ON + Reference playing (Platform Norm OFF):
   //    referenceLevelMatchGainDb = mixLufs - refLufs.
   //    This adjusts reference playback so it sounds equally loud as the mix.
   //
@@ -4555,14 +4555,13 @@ export function App(): JSX.Element {
   //    normalizationSourceAnalysis switches to the reference track's measured
   //    LUFS (see ~10 lines above), so normalization is computed from the
   //    reference's own loudness — i.e. "how would the platform treat this
-  //    reference track?".
+  //    reference track?". The mix is normalized from its own measured LUFS.
+  //    Both tracks therefore already land at the platform target loudness.
   //
-  // 3. All three ON:
-  //    The reference is first normalized to the platform target (what the
-  //    platform would do to it), then level-matched to the mix (so A/B
-  //    comparison is fair). This is the correct order because the user wants
-  //    to hear: "how does my mix compare to the reference on Spotify, at
-  //    matched loudness?".
+  // 3. Both ON (Platform Norm + Level Match):
+  //    Level Match is forced to 0 because Platform Norm already equalizes
+  //    both tracks to the target loudness. Level Match only has an effect
+  //    when Platform Norm is off.
   // ---------------------------------------------------------------------------
   const referenceLevelMatchGainDb = (() => {
     if (
@@ -4579,12 +4578,28 @@ export function App(): JSX.Element {
     return mixLufs - refLufs;
   })();
 
+  // Bug fix (2026-04): when Platform Normalization is ON *and* Level Match
+  // is ON while listening to the reference, the old code added both gains
+  // together. That double-corrected the reference and broke the A/B invariant.
+  // Repro (pre-fix): mix at -12 LUFS, ref at -8 LUFS, Spotify target -14 LUFS.
+  //   Mix: platformGain = -2 dB → plays at -14 LUFS.
+  //   Ref: platformGain = -6 dB + levelMatch (+(mix - ref) = -4 dB) = -10 dB
+  //        → ref plays at -18 LUFS, 4 dB quieter than the mix.
+  // Fix (see referenceLevelMatchGain.ts): when Platform Norm is on, it
+  // already equalizes both tracks to the platform target, so Level Match
+  // becomes redundant and is forced to 0. Level Match still works normally
+  // when Platform Norm is off.
+  const effectiveReferenceLevelMatchGainDb = computeEffectiveReferenceLevelMatchGainDb({
+    referenceLevelMatchGainDb,
+    normalizationPreviewEnabled,
+  });
+
   const appliedNormalizationGainDb =
     (normalizationPreviewEnabled &&
     normalizationPreview !== null &&
     normalizationPreview.appliedGainDb !== null
       ? normalizationPreview.appliedGainDb
-      : 0) + referenceLevelMatchGainDb;
+      : 0) + effectiveReferenceLevelMatchGainDb;
   const activeReferenceComparison =
     analysis && measuredAnalysis && referenceTrack
       ? {
@@ -8695,7 +8710,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row analysis-normalization-header-row-compact">
                     <div className="analysis-panel-header-title-block">
-                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Spotify may sound louder. Spotify's output volume can differ from this app's — this doesn't mean the normalization is wrong. To compare fairly, adjust Spotify's volume until both sound equally loud on the same track, then A/B your mix."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
+                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Compare against Spotify at 100% volume. With Platform Preview on, this app plays your mix at the same loudness Spotify would (e.g. -14 LUFS for Spotify). Open the same track in Spotify at system/app volume 100% and A/B — both should sound equally loud. If one is noticeably louder, check your system output level and that no other audio processing is in the chain."} links={PLATFORM_NORMALIZATION_LINKS} /></strong>
                       <p className="muted" data-testid="analysis-normalization-summary">
                         {normalizationSummaryText}
                       </p>
@@ -10802,7 +10817,9 @@ export function App(): JSX.Element {
                                 return next;
                               })}
                               data-testid="eq-inline-level-match"
-                              title={referenceLevelMatchEnabled
+                              title={normalizationPreviewEnabled && referenceLevelMatchEnabled
+                                ? 'Level Match On (overridden while Platform Preview is on — platform normalization already equalizes both tracks)'
+                                : referenceLevelMatchEnabled
                                 ? `Level Match On${referenceLevelMatchGainDb !== 0 ? ` (${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB)` : ''}`
                                 : 'Level Match Off — enable to match reference volume to your mix'}
                             >
@@ -11013,14 +11030,20 @@ export function App(): JSX.Element {
                           return next;
                         })}
                         disabled={!referenceTrack}
-                        title="Automatically adjust reference playback gain to match your mix's integrated LUFS"
+                        title={
+                          normalizationPreviewEnabled && referenceLevelMatchEnabled
+                            ? 'Overridden while Platform Preview is on — platform normalization already equalizes both tracks to the target loudness'
+                            : "Automatically adjust reference playback gain to match your mix's integrated LUFS"
+                        }
                         data-testid="analysis-level-match-toggle"
                       >
                         {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
                       </button>
                       {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-                          {referenceLevelMatchGainDb > 0 ? '+' : ''}{referenceLevelMatchGainDb.toFixed(1)} dB
+                          {normalizationPreviewEnabled
+                            ? '(overridden by Platform Preview)'
+                            : `${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
                         </span>
                       ) : null}
                     </div>
@@ -11390,7 +11413,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'normalization')}
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Spotify may sound louder. Spotify's output volume can differ from this app's — this doesn't mean the normalization is wrong. To compare fairly, adjust Spotify's volume until both sound equally loud on the same track, then A/B your mix."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
+                    <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Compare against Spotify at 100% volume. With Platform Preview on, this app plays your mix at the same loudness Spotify would (e.g. -14 LUFS for Spotify). Open the same track in Spotify at system/app volume 100% and A/B — both should sound equally loud. If one is noticeably louder, check your system output level and that no other audio processing is in the chain."} links={PLATFORM_NORMALIZATION_LINKS} /></h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'normalization')}
                   </div>
                   <div className="analysis-normalization-header">
@@ -11937,14 +11960,20 @@ export function App(): JSX.Element {
                     window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                     return next;
                   })}
-                  title="Match playback levels between mix and reference"
+                  title={
+                    normalizationPreviewEnabled && referenceLevelMatchEnabled
+                      ? 'Overridden while Platform Preview is on — platform normalization already equalizes both tracks to the target loudness'
+                      : 'Match playback levels between mix and reference'
+                  }
                   data-testid="floating-ab-level-match"
                 >
                   {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
                 </button>
                 {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                   <span className="muted">
-                    {referenceLevelMatchGainDb > 0 ? '+' : ''}{referenceLevelMatchGainDb.toFixed(1)} dB
+                    {normalizationPreviewEnabled
+                      ? '(overridden by Platform Preview)'
+                      : `${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
                   </span>
                 ) : null}
               </div>

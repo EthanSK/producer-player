@@ -9689,13 +9689,16 @@ export function App(): JSX.Element {
                 Request a Feature
               </button>
             </div>
-            <p
-              className="muted"
-              data-testid="support-feedback-update-info"
-              style={{ marginTop: '8px', fontSize: '11px' }}
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => { void window.producerPlayer.autoUpdateCheck(); }}
+              data-testid="support-feedback-check-update"
+              title="Check for available updates."
+              style={{ marginTop: '8px' }}
             >
-              Updates are managed automatically. Use Producer Player &gt; Check for Updates in the menu bar to check manually.
-            </p>
+              Check for Updates
+            </button>
             <label
               data-testid="support-feedback-auto-update-toggle"
               style={{

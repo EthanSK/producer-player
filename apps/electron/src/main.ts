@@ -845,8 +845,8 @@ let currentAutoUpdateState: AutoUpdateState = {
 };
 
 // When true, the next `update-available` event should immediately trigger a download.
-// Both the background scheduler AND renderer-initiated rechecks set this to true — the
-// UX is "click Recheck once, and if an update exists it downloads automatically." The
+// Both the background scheduler AND renderer-initiated checks set this to true — the
+// UX is "click Check for Updates once, and if an update exists it downloads automatically." The
 // dedicated "Install & Restart" button only handles the final restart step.
 let shouldAutoDownloadOnNextAvailable = false;
 
@@ -896,7 +896,7 @@ function configureAutoUpdater(): void {
 
     // Every intentional check flips `shouldAutoDownloadOnNextAvailable` beforehand,
     // so a found update kicks off the download automatically. The user sees
-    // "Recheck → Downloading → Install & Restart" without any extra clicks.
+    // "Check for Updates → Downloading → Install & Restart" without any extra clicks.
     if (shouldAutoDownloadOnNextAvailable) {
       shouldAutoDownloadOnNextAvailable = false;
       void autoUpdater.downloadUpdate().catch((error: unknown) => {
@@ -3610,7 +3610,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
       log.info('[producer-player:auto-update] skipping check (not packaged or test mode)');
       return;
     }
-    // Renderer-initiated rechecks auto-download on a hit. The "update-available"
+    // Renderer-initiated checks auto-download on a hit. The "update-available"
     // handler sees this flag and fires `downloadUpdate()` itself so the user
     // doesn't have to click a second button.
     shouldAutoDownloadOnNextAvailable = true;

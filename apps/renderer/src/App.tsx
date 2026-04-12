@@ -6799,7 +6799,7 @@ export function App(): JSX.Element {
     setUpdateCheckStatus('checking');
     setUpdateCheckResult(null);
 
-    // Kick off the electron-updater recheck in parallel. The main process sets
+    // Kick off the electron-updater check in parallel. The main process sets
     // `shouldAutoDownloadOnNextAvailable` before dispatching the check, so a
     // found update immediately starts downloading in the background and the
     // Install & Restart button enables when the download completes.
@@ -7949,7 +7949,7 @@ export function App(): JSX.Element {
     updateCheckResult?.status === 'update-available' &&
     Boolean(updateCheckResult.downloadUrl || updateCheckResult.releaseUrl);
   // The Install & Restart button is enabled only once the background download
-  // has completed. Rechecking auto-starts the download via the main process, so
+  // has completed. Checking for updates auto-starts the download via the main process, so
   // the user never needs an intermediate "Download" click.
   const canInstallAndRestartUpdate = autoUpdateState.status === 'downloaded';
   const autoUpdateDownloadPercent =
@@ -9814,9 +9814,9 @@ export function App(): JSX.Element {
                 }}
                 data-testid="support-feedback-check-updates"
                 disabled={updateCheckStatus === 'checking'}
-                title="Recheck the update feed without downloading anything."
+                title="Check the update feed without downloading anything."
               >
-                {updateCheckStatus === 'checking' ? 'Rechecking…' : 'Recheck for Updates'}
+                {updateCheckStatus === 'checking' ? 'Checking…' : 'Check for Updates'}
               </button>
               <button
                 type="button"
@@ -9831,7 +9831,7 @@ export function App(): JSX.Element {
                     ? 'Restart the app to apply the downloaded update.'
                     : autoUpdateState.status === 'downloading'
                       ? 'Download in progress — enabled once the update is ready to install.'
-                      : 'Recheck to look for an update. Install & Restart unlocks once the download completes.'
+                      : 'Check for an update. Install & Restart unlocks once the download completes.'
                 }
               >
                 {autoUpdateState.status === 'downloading' && autoUpdateDownloadPercent !== null

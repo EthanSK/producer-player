@@ -2970,9 +2970,9 @@ button.checklist-play-toggle[data-playing='true'] {
 }
 
 .eq-inline-ab-actions button.active {
-  color: rgba(255, 200, 60, 0.95);
-  border: 1px solid rgba(255, 200, 60, 0.5);
-  background: rgba(255, 200, 60, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(92, 167, 255, 0.5);
+  background: rgba(92, 167, 255, 0.15);
 }
 
 .eq-inline-ab-actions button.ghost {

@@ -10810,20 +10810,21 @@ export function App(): JSX.Element {
                             </div>
                             <button
                               type="button"
-                              className={`ghost eq-inline-level-match${referenceLevelMatchEnabled ? ' eq-inline-level-match--active' : ''}`}
+                              className={`ghost eq-inline-level-match${referenceLevelMatchEnabled && !normalizationPreviewEnabled ? ' eq-inline-level-match--active' : ''}${normalizationPreviewEnabled ? ' level-match--overridden' : ''}`}
                               onClick={() => setReferenceLevelMatchEnabled((v) => {
                                 const next = !v;
                                 window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                                 return next;
                               })}
                               data-testid="eq-inline-level-match"
-                              title={normalizationPreviewEnabled && referenceLevelMatchEnabled
-                                ? 'Level Match On (overridden while Platform Preview is on — platform normalization already equalizes both tracks)'
+                              aria-disabled={normalizationPreviewEnabled || undefined}
+                              title={normalizationPreviewEnabled
+                                ? 'Level Match paused — overridden by Platform Preview (platform normalization already equalizes both tracks)'
                                 : referenceLevelMatchEnabled
                                 ? `Level Match On${referenceLevelMatchGainDb !== 0 ? ` (${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB)` : ''}`
                                 : 'Level Match Off — enable to match reference volume to your mix'}
                             >
-                              {referenceLevelMatchEnabled ? 'LM' : 'LM'}
+                              LM
                             </button>
                           </div>
                         ) : undefined}
@@ -11018,32 +11019,37 @@ export function App(): JSX.Element {
                     </div>
                   </div>
 
-                  <div className="analysis-ab-toggle">
+                  <div className={`analysis-ab-toggle${normalizationPreviewEnabled ? ' level-match--overridden' : ''}`}>
                     <span className="analysis-ab-label">Level Match <HelpTooltip text="Without level matching, the louder track almost always sounds better to your ears — it's a psychoacoustic trick, not a quality difference. Level Match evens the playing field by calculating the loudness gap between your mix and the reference (mix LUFS minus reference LUFS) and applying that gain offset to the reference during playback. Now both tracks play at roughly the same perceived volume, so you can compare actual quality — EQ, dynamics, stereo image — not just who's louder." links={REFERENCE_TRACK_LINKS} /></span>
                     <div className="analysis-ab-actions" role="group" aria-label="Level match toggle">
                       <button
                         type="button"
-                        className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
+                        className={referenceLevelMatchEnabled && !normalizationPreviewEnabled ? 'active' : 'ghost'}
                         onClick={() => setReferenceLevelMatchEnabled((v) => {
                           const next = !v;
                           window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                           return next;
                         })}
                         disabled={!referenceTrack}
+                        aria-disabled={normalizationPreviewEnabled || undefined}
                         title={
-                          normalizationPreviewEnabled && referenceLevelMatchEnabled
-                            ? 'Overridden while Platform Preview is on — platform normalization already equalizes both tracks to the target loudness'
+                          normalizationPreviewEnabled
+                            ? 'Level Match paused — overridden by Platform Preview (platform normalization already equalizes both tracks to the target loudness)'
                             : "Automatically adjust reference playback gain to match your mix's integrated LUFS"
                         }
                         data-testid="analysis-level-match-toggle"
                       >
-                        {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
+                        {normalizationPreviewEnabled
+                          ? '(Level Match) — paused'
+                          : referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
                       </button>
-                      {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
+                      {normalizationPreviewEnabled ? (
+                        <span className="muted level-match-overridden-note" style={{ fontSize: 12, marginLeft: 8 }}>
+                          Platform Preview on
+                        </span>
+                      ) : referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-                          {normalizationPreviewEnabled
-                            ? '(overridden by Platform Preview)'
-                            : `${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
+                          {`${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
                         </span>
                       ) : null}
                     </div>
@@ -11951,29 +11957,32 @@ export function App(): JSX.Element {
                   Reference
                 </button>
               </div>
-              <div className="floating-ab-level-match">
+              <div className={`floating-ab-level-match${normalizationPreviewEnabled ? ' level-match--overridden' : ''}`}>
                 <button
                   type="button"
-                  className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
+                  className={referenceLevelMatchEnabled && !normalizationPreviewEnabled ? 'active' : 'ghost'}
                   onClick={() => setReferenceLevelMatchEnabled((v) => {
                     const next = !v;
                     window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                     return next;
                   })}
+                  aria-disabled={normalizationPreviewEnabled || undefined}
                   title={
-                    normalizationPreviewEnabled && referenceLevelMatchEnabled
-                      ? 'Overridden while Platform Preview is on — platform normalization already equalizes both tracks to the target loudness'
+                    normalizationPreviewEnabled
+                      ? 'Level Match paused — overridden by Platform Preview (platform normalization already equalizes both tracks to the target loudness)'
                       : 'Match playback levels between mix and reference'
                   }
                   data-testid="floating-ab-level-match"
                 >
-                  {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
+                  {normalizationPreviewEnabled
+                    ? '(Level Match) — paused'
+                    : referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
                 </button>
-                {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
+                {normalizationPreviewEnabled ? (
+                  <span className="muted level-match-overridden-note">Platform Preview on</span>
+                ) : referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                   <span className="muted">
-                    {normalizationPreviewEnabled
-                      ? '(overridden by Platform Preview)'
-                      : `${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
+                    {`${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
                   </span>
                 ) : null}
               </div>

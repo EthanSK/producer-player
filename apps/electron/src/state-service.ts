@@ -15,6 +15,7 @@ import type {
   ProducerPlayerUserState,
   SavedReferenceTrack,
   SongChecklistItem,
+  WindowBounds,
 } from '@producer-player/contracts';
 
 // ---------------------------------------------------------------------------
@@ -189,6 +190,26 @@ function parseAiEqRecommendations(value: unknown): Record<string, number[]> {
   return result;
 }
 
+function parseWindowBounds(value: unknown): WindowBounds | null {
+  if (!isRecord(value)) return null;
+  const { x, y, width, height, isMaximized } = value as Partial<WindowBounds>;
+  if (
+    typeof x !== 'number' || !Number.isFinite(x) ||
+    typeof y !== 'number' || !Number.isFinite(y) ||
+    typeof width !== 'number' || !Number.isFinite(width) || width <= 0 ||
+    typeof height !== 'number' || !Number.isFinite(height) || height <= 0
+  ) {
+    return null;
+  }
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height),
+    isMaximized: typeof isMaximized === 'boolean' ? isMaximized : false,
+  };
+}
+
 function parseStringMapRecord(value: unknown): Record<string, string> {
   if (!isRecord(value)) return {};
   const entries = Object.entries(value).flatMap(([k, v]) => {
@@ -229,6 +250,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
     lastFileDialogDirectory: '',
+    windowBounds: null,
   };
 }
 
@@ -278,6 +300,7 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.autoUpdateEnabled === 'boolean' ? raw.autoUpdateEnabled : fallback.autoUpdateEnabled,
     lastFileDialogDirectory:
       typeof raw.lastFileDialogDirectory === 'string' ? raw.lastFileDialogDirectory : '',
+    windowBounds: parseWindowBounds(raw.windowBounds),
   };
 }
 

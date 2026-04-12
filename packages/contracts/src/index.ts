@@ -306,6 +306,21 @@ export interface ProducerPlayerUserState {
 
   // File dialog
   lastFileDialogDirectory: string; // Remembers last-used directory across all file pickers
+
+  // Main window bounds — persisted across relaunches so the app reopens where
+  // it was last positioned. `null` on first launch or when no valid bounds are
+  // known yet; the main-process loader validates against currently-connected
+  // displays before applying so disconnected-monitor positions fall back to a
+  // centered window.
+  windowBounds: WindowBounds | null;
+}
+
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isMaximized: boolean;
 }
 
 export interface UserStateImportResult {

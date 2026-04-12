@@ -3071,6 +3071,7 @@ export function App(): JSX.Element {
         iCloudBackupEnabled,
         autoUpdateEnabled,
         lastFileDialogDirectory: '', // managed by main process
+        windowBounds: null, // managed by main process — ignored on write
       };
 
       // Enrich with agent settings from localStorage (these are managed by

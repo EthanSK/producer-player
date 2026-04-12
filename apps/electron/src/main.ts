@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, protocol, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, protocol, safeStorage, screen, shell } from 'electron';
 
 // ---------------------------------------------------------------------------
 // Obfuscated file storage helpers (replaces safeStorage/keychain for API keys)
@@ -87,6 +87,7 @@ import type {
   UpdateCheckResult,
   SongWithVersions,
   TransportCommand,
+  WindowBounds,
 } from '@producer-player/contracts';
 import {
   AUDIO_EXTENSIONS,
@@ -2867,6 +2868,194 @@ function buildEnvironmentInfo(): ProducerPlayerEnvironment {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Main window bounds persistence
+// ---------------------------------------------------------------------------
+
+const DEFAULT_MAIN_WINDOW_WIDTH = 1380;
+const DEFAULT_MAIN_WINDOW_HEIGHT = 940;
+const MIN_MAIN_WINDOW_WIDTH = 1100;
+const MIN_MAIN_WINDOW_HEIGHT = 780;
+const WINDOW_BOUNDS_SAVE_DEBOUNCE_MS = 400;
+// An on-screen region must be at least this many pixels wide/tall for the
+// saved bounds to be considered "still visible" on the given display — stops
+// windows that are barely peeking over a display edge from being restored in
+// an unreachable position.
+const MIN_VISIBLE_AREA_PX = 100;
+
+let windowBoundsSaveTimer: NodeJS.Timeout | null = null;
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function rectsIntersectArea(a: Rect, b: Rect): number {
+  const left = Math.max(a.x, b.x);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const top = Math.max(a.y, b.y);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  if (right <= left || bottom <= top) return 0;
+  return (right - left) * (bottom - top);
+}
+
+/**
+ * Validate saved window bounds against currently-connected displays.
+ *
+ * Returns a rect to apply if the bounds still intersect a display by at least
+ * `MIN_VISIBLE_AREA_PX` on both axes (clamping the result into that display's
+ * workArea so windows dragged partially off-screen come back fully visible),
+ * or `null` if the monitor they lived on is no longer connected.
+ */
+function validateWindowBoundsForCurrentDisplays(bounds: WindowBounds): Rect | null {
+  const displays = screen.getAllDisplays();
+  if (displays.length === 0) return null;
+
+  const savedRect: Rect = {
+    x: bounds.x,
+    y: bounds.y,
+    width: Math.max(bounds.width, MIN_MAIN_WINDOW_WIDTH),
+    height: Math.max(bounds.height, MIN_MAIN_WINDOW_HEIGHT),
+  };
+
+  let bestDisplay: Electron.Display | null = null;
+  let bestArea = 0;
+  for (const display of displays) {
+    const area = rectsIntersectArea(savedRect, display.workArea);
+    if (area > bestArea) {
+      bestArea = area;
+      bestDisplay = display;
+    }
+  }
+
+  if (!bestDisplay) return null;
+
+  // Require a meaningful visible region on at least one display. If the saved
+  // window is entirely off-screen (e.g. the second monitor was disconnected),
+  // fall back to the centered default.
+  const intersectLeft = Math.max(savedRect.x, bestDisplay.workArea.x);
+  const intersectRight = Math.min(
+    savedRect.x + savedRect.width,
+    bestDisplay.workArea.x + bestDisplay.workArea.width,
+  );
+  const intersectTop = Math.max(savedRect.y, bestDisplay.workArea.y);
+  const intersectBottom = Math.min(
+    savedRect.y + savedRect.height,
+    bestDisplay.workArea.y + bestDisplay.workArea.height,
+  );
+  const visibleWidth = intersectRight - intersectLeft;
+  const visibleHeight = intersectBottom - intersectTop;
+  if (visibleWidth < MIN_VISIBLE_AREA_PX || visibleHeight < MIN_VISIBLE_AREA_PX) {
+    return null;
+  }
+
+  // Clamp into the chosen display's workArea so the window opens fully
+  // on-screen, even if the user had dragged it slightly off an edge.
+  const workArea = bestDisplay.workArea;
+  const clampedWidth = Math.min(savedRect.width, workArea.width);
+  const clampedHeight = Math.min(savedRect.height, workArea.height);
+  const clampedX = Math.min(
+    Math.max(savedRect.x, workArea.x),
+    workArea.x + workArea.width - clampedWidth,
+  );
+  const clampedY = Math.min(
+    Math.max(savedRect.y, workArea.y),
+    workArea.y + workArea.height - clampedHeight,
+  );
+
+  return {
+    x: Math.round(clampedX),
+    y: Math.round(clampedY),
+    width: Math.round(clampedWidth),
+    height: Math.round(clampedHeight),
+  };
+}
+
+function captureWindowBounds(window: BrowserWindow): WindowBounds | null {
+  try {
+    // `getNormalBounds()` returns the non-maximized bounds so we can restore
+    // the correct unmaximized size after the user unmaximizes.
+    const normalBounds = window.getNormalBounds();
+    return {
+      x: Math.round(normalBounds.x),
+      y: Math.round(normalBounds.y),
+      width: Math.round(normalBounds.width),
+      height: Math.round(normalBounds.height),
+      isMaximized: window.isMaximized(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function scheduleWindowBoundsSave(window: BrowserWindow): void {
+  if (!userStateService) return;
+  if (IS_TEST_MODE) return;
+  if (window.isDestroyed()) return;
+
+  if (windowBoundsSaveTimer) {
+    clearTimeout(windowBoundsSaveTimer);
+  }
+  windowBoundsSaveTimer = setTimeout(() => {
+    windowBoundsSaveTimer = null;
+    if (window.isDestroyed()) return;
+    const bounds = captureWindowBounds(window);
+    if (!bounds || !userStateService) return;
+    void userStateService.patchUserState({ windowBounds: bounds }).catch((error: unknown) => {
+      log.warn('[producer-player] Failed to persist window bounds', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, WINDOW_BOUNDS_SAVE_DEBOUNCE_MS);
+}
+
+function saveWindowBoundsImmediately(window: BrowserWindow): void {
+  if (!userStateService) return;
+  if (IS_TEST_MODE) return;
+  if (window.isDestroyed()) return;
+
+  if (windowBoundsSaveTimer) {
+    clearTimeout(windowBoundsSaveTimer);
+    windowBoundsSaveTimer = null;
+  }
+  const bounds = captureWindowBounds(window);
+  if (!bounds) return;
+  void userStateService.patchUserState({ windowBounds: bounds }).catch((error: unknown) => {
+    log.warn('[producer-player] Failed to persist window bounds on close', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
+async function loadRestoredWindowBounds(): Promise<{
+  bounds: Rect | null;
+  shouldMaximize: boolean;
+}> {
+  if (!userStateService) return { bounds: null, shouldMaximize: false };
+  if (IS_TEST_MODE) return { bounds: null, shouldMaximize: false };
+
+  try {
+    const state = await userStateService.readUserState();
+    const saved = state.windowBounds;
+    if (!saved) return { bounds: null, shouldMaximize: false };
+
+    const validated = validateWindowBoundsForCurrentDisplays(saved);
+    if (!validated) {
+      log.info('[producer-player] Saved window bounds did not intersect any display; using default');
+      return { bounds: null, shouldMaximize: saved.isMaximized };
+    }
+
+    return { bounds: validated, shouldMaximize: saved.isMaximized };
+  } catch (error) {
+    log.warn('[producer-player] Failed to load persisted window bounds', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { bounds: null, shouldMaximize: false };
+  }
+}
+
 async function createMainWindow(): Promise<void> {
   const productionIndexPath = findProductionIndexPath();
   const developmentMode = isDevelopment();
@@ -2889,13 +3078,17 @@ async function createMainWindow(): Promise<void> {
     app.dock.setIcon(nativeImage.createFromPath(windowIconPath));
   }
 
+  const restored = await loadRestoredWindowBounds();
+  const restoredBounds = restored.bounds;
+  const shouldRestoreMaximized = restored.shouldMaximize;
+
   mainWindow = new BrowserWindow({
     title: 'Producer Player',
-    width: 1380,
-    height: 940,
-    minWidth: 1100,
-    minHeight: 780,
-    center: true,
+    width: restoredBounds?.width ?? DEFAULT_MAIN_WINDOW_WIDTH,
+    height: restoredBounds?.height ?? DEFAULT_MAIN_WINDOW_HEIGHT,
+    ...(restoredBounds ? { x: restoredBounds.x, y: restoredBounds.y } : { center: true }),
+    minWidth: MIN_MAIN_WINDOW_WIDTH,
+    minHeight: MIN_MAIN_WINDOW_HEIGHT,
     backgroundColor: '#0a0f14',
     autoHideMenuBar: true,
     ...(IS_TEST_MODE ? { enableLargerThanScreen: true } : {}),
@@ -2910,6 +3103,33 @@ async function createMainWindow(): Promise<void> {
     },
     show: IS_TEST_MODE && !SHOULD_SHOW_TEST_WINDOW_INACTIVE && !SHOULD_KEEP_TEST_WINDOW_HIDDEN,
   });
+
+  // Persist window bounds whenever the user moves, resizes, or toggles
+  // maximize state, plus one last synchronous save right before close so the
+  // most recent bounds always win the race with app quit.
+  if (!IS_TEST_MODE) {
+    const persistingWindow = mainWindow;
+    const onBoundsChanged = (): void => scheduleWindowBoundsSave(persistingWindow);
+    persistingWindow.on('move', onBoundsChanged);
+    persistingWindow.on('resize', onBoundsChanged);
+    persistingWindow.on('maximize', onBoundsChanged);
+    persistingWindow.on('unmaximize', onBoundsChanged);
+    persistingWindow.on('close', () => {
+      saveWindowBoundsImmediately(persistingWindow);
+    });
+  }
+
+  if (shouldRestoreMaximized && !IS_TEST_MODE) {
+    // Maximize AFTER construction so BrowserWindow has already stored the
+    // normal (unmaximized) bounds we passed in above — that way toggling back
+    // out of maximize restores to the user's previously-saved size.
+    const windowToMaximize = mainWindow;
+    windowToMaximize.once('ready-to-show', () => {
+      if (!windowToMaximize.isDestroyed()) {
+        windowToMaximize.maximize();
+      }
+    });
+  }
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
@@ -3234,7 +3454,13 @@ async function loadDataFromICloud(): Promise<ICloudLoadResult> {
         const iCloudTime = new Date(iCloudUnifiedParsed.updatedAt).getTime();
         const localTime = new Date(localState.updatedAt).getTime();
         if (iCloudTime > localTime) {
-          await userStateService.writeUserState(iCloudUnifiedParsed);
+          // Window bounds are per-machine — never let an iCloud restore from
+          // a different Mac move this machine's window position.
+          const preservedBounds: ProducerPlayerUserState = {
+            ...iCloudUnifiedParsed,
+            windowBounds: localState.windowBounds,
+          };
+          await userStateService.writeUserState(preservedBounds);
           log.info('[producer-player:icloud] Restored newer unified state from iCloud');
 
           // Notify renderer of updated state
@@ -3705,7 +3931,15 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.SET_USER_STATE, async (_event, state: ProducerPlayerUserState) => {
     if (!userStateService) throw new Error('User state service not initialized');
-    const updated = await userStateService.writeUserState(state);
+    // Window bounds are authoritatively owned by the main process — preserve
+    // whatever we already have on disk so a renderer sync can't clobber the
+    // latest bounds captured by move/resize listeners.
+    const existing = await userStateService.readUserState();
+    const merged: ProducerPlayerUserState = {
+      ...state,
+      windowBounds: existing.windowBounds,
+    };
+    const updated = await userStateService.writeUserState(merged);
 
     // Also sync the linked folders and song order into the library service
     // so old-format persistence continues to work during the transition.
@@ -3825,6 +4059,11 @@ function registerIpcHandlers(service: FileLibraryService): void {
         if (typeof validated.schemaVersion !== 'number' || validated.schemaVersion < 1) {
           return { success: false, error: 'Invalid state file: missing or invalid schemaVersion.' };
         }
+
+        // Preserve the current machine's window bounds across imports so a
+        // state file from another Mac doesn't reposition this window.
+        const currentState = await userStateService.readUserState();
+        validated.windowBounds = currentState.windowBounds;
 
         await userStateService.writeUserState(validated);
 
@@ -4119,6 +4358,9 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   log.info('App quitting');
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    saveWindowBoundsImmediately(mainWindow);
+  }
   globalShortcut.unregisterAll();
   clearAutomaticUpdateChecks();
   releaseAllFolderSecurityScopes();

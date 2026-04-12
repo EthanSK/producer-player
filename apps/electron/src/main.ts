@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, protocol, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, protocol, safeStorage, screen, shell } from 'electron';
 
 // ---------------------------------------------------------------------------
 // Obfuscated file storage helpers (replaces safeStorage/keychain for API keys)
@@ -1047,6 +1047,216 @@ function scheduleAutomaticUpdateChecks(): void {
       });
     }, AUTO_UPDATE_CHECK_INTERVAL_MS);
   }, AUTO_UPDATE_CHECK_DELAY_MS);
+}
+
+// ---------------------------------------------------------------------------
+// Interactive (user-initiated) update check via native dialog
+// ---------------------------------------------------------------------------
+
+/**
+ * User-initiated "Check for Updates" flow. Uses native dialog.showMessageBox
+ * for a standard macOS-style update experience.
+ */
+async function checkForUpdatesInteractive(): Promise<void> {
+  if (!app.isPackaged || IS_TEST_MODE) {
+    log.info('[producer-player:auto-update] interactive check skipped (not packaged or test mode)');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Updates Unavailable',
+        message: 'Updates are not available in development mode.',
+        buttons: ['OK'],
+      });
+    }
+    return;
+  }
+
+  // Show a "checking" dialog isn't needed — the check is fast. Just run it.
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    if (!result || !result.updateInfo) {
+      // No update info means we're up to date
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        await dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: 'No Updates Available',
+          message: "You're up to date!",
+          detail: `Producer Player ${APP_VERSION_INFO.displayVersion} is the latest version.`,
+          buttons: ['OK'],
+        });
+      }
+      return;
+    }
+
+    const updateVersion = result.updateInfo.version
+      ? toDisplayVersion(result.updateInfo.version)
+      : 'latest';
+
+    // Compare versions to determine if there's actually a newer version
+    const currentComparable = toComparableVersion(APP_VERSION_INFO.semanticVersion);
+    const latestParsed = parseReleaseVersion(`v${result.updateInfo.version}`);
+    const latestComparable = toComparableVersion(latestParsed.semanticVersion);
+
+    if (currentComparable && latestComparable) {
+      const delta = compareSemver(latestComparable, currentComparable);
+      if (delta <= 0) {
+        // Also check build number for same semantic version
+        const latestBuildNumber = latestParsed.buildNumber;
+        const currentBuildNumber = APP_VERSION_INFO.buildNumber;
+        const buildDelta =
+          latestBuildNumber === null
+            ? 0
+            : currentBuildNumber === null
+              ? latestBuildNumber
+              : latestBuildNumber - currentBuildNumber;
+
+        if (buildDelta <= 0) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            await dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'No Updates Available',
+              message: "You're up to date!",
+              detail: `Producer Player ${APP_VERSION_INFO.displayVersion} is the latest version.`,
+              buttons: ['OK'],
+            });
+          }
+          return;
+        }
+      }
+    }
+
+    // Update available — show the dialog
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Available',
+      message: `Producer Player ${updateVersion} is available`,
+      detail: `You are currently on v${APP_VERSION_INFO.displayVersion}. Would you like to download and install the update?`,
+      buttons: ['Download and Install', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+
+    if (response === 0) {
+      // User clicked "Download and Install"
+      log.info('[producer-player:auto-update] user accepted interactive update');
+      installAfterDownload = true;
+
+      // Show a progress notification
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        emitAutoUpdateState({
+          status: 'downloading',
+          version: updateVersion,
+          progress: null,
+          error: null,
+        });
+      }
+
+      try {
+        await autoUpdater.downloadUpdate();
+        // The `update-downloaded` handler will see `installAfterDownload` and
+        // automatically call `quitAndInstall`.
+      } catch (error: unknown) {
+        installAfterDownload = false;
+        const message = error instanceof Error ? error.message : String(error);
+        log.warn('[producer-player:auto-update] interactive download failed', { error: message });
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          await dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Update Failed',
+            message: 'Could not download the update.',
+            detail: message,
+            buttons: ['OK'],
+          });
+        }
+      }
+    } else {
+      log.info('[producer-player:auto-update] user deferred interactive update');
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn('[producer-player:auto-update] interactive check failed', { error: message });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      await dialog.showMessageBox(mainWindow, {
+        type: 'error',
+        title: 'Update Check Failed',
+        message: 'Could not check for updates.',
+        detail: message,
+        buttons: ['OK'],
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Application menu with "Check for Updates" item
+// ---------------------------------------------------------------------------
+
+function buildApplicationMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: app.name || 'Producer Player',
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        {
+          label: 'Check for Updates\u2026',
+          click: () => {
+            void checkForUpdatesInteractive();
+          },
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front' },
+        { type: 'separator' },
+        { role: 'close' },
+      ],
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
 }
 
 function emitTransportCommand(command: TransportCommand): void {
@@ -3877,37 +4087,16 @@ function registerIpcHandlers(service: FileLibraryService): void {
     await openUpdateDownloadUrl(url);
   });
 
+  // Legacy IPC handlers kept for backwards compatibility — these now route
+  // through the native dialog flow rather than driving in-app UI.
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_CHECK, async () => {
-    if (!app.isPackaged || IS_TEST_MODE) {
-      log.info('[producer-player:auto-update] skipping check (not packaged or test mode)');
-      return;
-    }
-    // Renderer-initiated checks do NOT auto-download. They only report status
-    // via the AUTO_UPDATE_STATE_CHANGED events so the UI can surface "Update
-    // available" and enable the "Download and Install" button. The user then
-    // explicitly triggers the download via AUTO_UPDATE_DOWNLOAD.
-    await autoUpdater.checkForUpdates();
+    // Route to native dialog flow instead of in-app UI
+    void checkForUpdatesInteractive();
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_DOWNLOAD, async () => {
-    if (!app.isPackaged || IS_TEST_MODE) {
-      log.info('[producer-player:auto-update] skipping download (not packaged or test mode)');
-      return;
-    }
-    log.info('[producer-player:auto-update] download requested by renderer');
-    // Arm the post-download auto-install. The `update-downloaded` handler
-    // sees this and calls `quitAndInstall` automatically so "Download and
-    // Install" is a single click from the user's POV.
-    installAfterDownload = true;
-    try {
-      await autoUpdater.downloadUpdate();
-    } catch (error: unknown) {
-      installAfterDownload = false;
-      log.warn('[producer-player:auto-update] renderer download failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
+    // Route to native dialog flow
+    void checkForUpdatesInteractive();
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_INSTALL, async () => {
@@ -4345,6 +4534,7 @@ app.whenReady().then(async () => {
 
   const service = await ensureLibraryService();
   registerIpcHandlers(service);
+  buildApplicationMenu();
   await createMainWindow();
   registerGlobalMediaShortcuts();
   scheduleAutomaticUpdateChecks();

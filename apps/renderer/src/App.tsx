@@ -1707,6 +1707,11 @@ export function App(): JSX.Element {
     const stored = window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY);
     return stored !== 'false'; // default true
   });
+  // Tracks in-flight "Check for Updates" button press so we can disable the
+  // button + show a spinner. Prevents spamming the IPC and makes the UI feel
+  // responsive during the (sometimes slow) check. Error is shown briefly.
+  const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
+  const [checkForUpdatesError, setCheckForUpdatesError] = useState<string | null>(null);
   // Update banner state removed — updates handled via native dialog
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
   const [checklistDraftText, setChecklistDraftText] = useState('');
@@ -6711,12 +6716,16 @@ export function App(): JSX.Element {
     const stored = readEqLiveStateForSong(selectedSongId);
     if (stored) {
       setEqBandGains([...stored.gains]);
-      setEqEnabled(stored.eqEnabled);
+      // EQ "on" is intentionally NOT restored — it always defaults to off on
+      // fresh load so the mastering fullscreen view doesn't come up with EQ
+      // surprisingly still active from a previous session. The gains are
+      // preserved so flipping it back on re-applies the same curve.
+      setEqEnabled(false);
       setShowAiEqCurve(stored.showAiEqCurve);
       setShowRefDiffCurve(stored.showRefDiffCurve);
       setShowEqTonalBalance(stored.showEqTonalBalance);
       // Keep the mix EQ ref in sync so A/B toggling works correctly
-      mixEqStateRef.current = { enabled: stored.eqEnabled, gains: [...stored.gains] };
+      mixEqStateRef.current = { enabled: false, gains: [...stored.gains] };
     } else {
       // Reset to defaults for songs without saved EQ state
       setEqBandGains(FREQUENCY_BANDS.map(() => EQ_GAIN_DEFAULT_DB));
@@ -7020,8 +7029,19 @@ export function App(): JSX.Element {
 
   function freezeChecklistTimestampAtCurrentPlayback(options?: {
     syncPlaybackToCapturedTimestamp?: boolean;
+    /**
+     * When true (default), subtracts CHECKLIST_CAPTURE_LOOKBACK_SECONDS so the
+     * captured time sits slightly before the moment the user reacted. This
+     * matches the "I just heard something" typing UX. The explicit "Set now"
+     * button passes false so the captured time equals the actual playback
+     * position at click — no lookback.
+     */
+    useLookback?: boolean;
   }): void {
-    const timestamp = captureCurrentPlaybackTimestamp(CHECKLIST_CAPTURE_LOOKBACK_SECONDS);
+    const useLookback = options?.useLookback !== false;
+    const timestamp = captureCurrentPlaybackTimestamp(
+      useLookback ? CHECKLIST_CAPTURE_LOOKBACK_SECONDS : 0,
+    );
     if (timestamp === null) {
       return;
     }
@@ -7310,7 +7330,10 @@ export function App(): JSX.Element {
   }
 
   function handleChecklistSetNow(): void {
-    freezeChecklistTimestampAtCurrentPlayback();
+    // Explicit "Set now" button — capture the actual current playback
+    // position, no lookback. The lookback exists only for the
+    // type-on-input path where the user reacts to something they just heard.
+    freezeChecklistTimestampAtCurrentPlayback({ useLookback: false });
   }
 
   function highlightChecklistTimestamp(itemId: string): void {
@@ -8226,7 +8249,32 @@ export function App(): JSX.Element {
           <p>
             <strong>{formatLibraryStatusLabel(snapshot.status)}</strong> — {snapshot.statusMessage}
           </p>
-          <p className="muted">Last scan: {formatDate(snapshot.scannedAt)}</p>
+          <div
+            className="status-card-scan-row"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              marginTop: 2,
+            }}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              Last scan: {formatDate(snapshot.scannedAt)}
+            </p>
+            <button
+              type="button"
+              className="ghost"
+              style={{ fontSize: '0.85em', padding: '2px 8px' }}
+              onClick={() => {
+                void handleRescan();
+              }}
+              data-testid="rescan-button"
+              title="Rescan watched folders now. Saved ordering data is retained."
+            >
+              Rescan
+            </button>
+          </div>
 
           <label
             className="checkbox-row"
@@ -8989,17 +9037,6 @@ export function App(): JSX.Element {
           <div className="actions">
             <button
               type="button"
-              className="action-button"
-              onClick={() => {
-                void handleRescan();
-              }}
-              data-testid="rescan-button"
-              title="Rescan watched folders now. Saved ordering data is retained."
-            >
-              Rescan
-            </button>
-            <button
-              type="button"
               className="action-button secondary"
               onClick={handleOpenAlbumChecklist}
               data-testid="album-checklist-button"
@@ -9692,13 +9729,55 @@ export function App(): JSX.Element {
             <button
               type="button"
               className="ghost"
-              onClick={() => { void window.producerPlayer.autoUpdateCheck(); }}
+              onClick={async () => {
+                if (isCheckingForUpdates) return;
+                setIsCheckingForUpdates(true);
+                setCheckForUpdatesError(null);
+                try {
+                  await window.producerPlayer.autoUpdateCheck();
+                } catch (err) {
+                  setCheckForUpdatesError(
+                    err instanceof Error ? err.message : 'Could not check for updates.'
+                  );
+                } finally {
+                  setIsCheckingForUpdates(false);
+                }
+              }}
+              disabled={isCheckingForUpdates}
               data-testid="support-feedback-check-update"
-              title="Check for available updates."
-              style={{ marginTop: '8px' }}
+              title={
+                isCheckingForUpdates
+                  ? 'Checking for updates…'
+                  : 'Check for available updates.'
+              }
+              style={{
+                marginTop: '8px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                opacity: isCheckingForUpdates ? 0.7 : 1,
+                cursor: isCheckingForUpdates ? 'progress' : 'pointer',
+              }}
             >
-              Check for Updates
+              {isCheckingForUpdates && (
+                <span
+                  className="agent-mic-spinner"
+                  data-testid="support-feedback-check-update-spinner"
+                  style={{ width: 12, height: 12, borderWidth: 2 }}
+                  aria-hidden="true"
+                />
+              )}
+              {isCheckingForUpdates ? 'Checking…' : 'Check for Updates'}
             </button>
+            {checkForUpdatesError && (
+              <p
+                className="error"
+                style={{ fontSize: '0.85em', marginTop: '4px' }}
+                data-testid="support-feedback-check-update-error"
+              >
+                {checkForUpdatesError}
+              </p>
+            )}
             <label
               data-testid="support-feedback-auto-update-toggle"
               style={{
@@ -9909,7 +9988,7 @@ export function App(): JSX.Element {
                     className="checklist-set-now-button"
                     data-testid="song-checklist-set-now"
                     onClick={handleChecklistSetNow}
-                    title="Capture the moment just before what you heard"
+                    title="Set the timestamp to the exact current playback position"
                     aria-label="Set timestamp to current playback position"
                   >
                     <svg className="checklist-set-now-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -11623,7 +11702,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                     <div className="analysis-section-header">
-                    <h4>Loudness Distribution{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. Green dashed lines mark the streaming target range (-16 to -6 LUFS).\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: This is built from the full-track analysis, so you can inspect the complete distribution immediately without waiting for playback or scroll position."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
+                    <h4>Loudness Distribution{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: A histogram showing how often your audio sits at each loudness level (approximate LUFS). The X-axis shows loudness bins, Y-axis shows frequency of occurrence. The yellow dashed band shows the range of loudness targets streaming platforms use for normalization (-16 to -6 LUFS) — it is NOT a recommendation of where your master should sit. Your target depends on genre and platform.\n\nWhat to look for: A narrow spike means consistent loudness (heavily limited). A wider distribution means more dynamic variation. The shape reveals dynamic character that a single LRA number cannot.\n\nTip: This is built from the full-track analysis, so you can inspect the complete distribution immediately without waiting for playback or scroll position."} links={LOUDNESS_HISTOGRAM_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Statistical distribution of loudness levels across the full analyzed track</p>
                     </div>
                     {renderMasteringPanelDragHandle('fullscreen', 'loudness-histogram')}
@@ -11634,6 +11713,32 @@ export function App(): JSX.Element {
                     height={200}
                     isReference={isRefMode}
                   />
+                  <div
+                    className="loudness-histogram-legend"
+                    data-testid="loudness-histogram-legend"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      marginTop: 4,
+                      fontSize: 11,
+                      color: 'var(--color-text-secondary, #6b8199)',
+                    }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: 'inline-block',
+                        width: 14,
+                        height: 10,
+                        background: 'rgba(234, 179, 8, 0.18)',
+                        border: '1px dashed rgba(234, 179, 8, 0.7)',
+                        borderRadius: 2,
+                      }}
+                    />
+                    <span>Streaming range</span>
+                    <HelpTooltip text={"The yellow band spans the loudness targets (-16 to -6 LUFS) streaming platforms use for normalization. It is NOT a recommendation of where your master should sit — your target depends on the genre and the platform."} />
+                  </div>
                 </section>
 
                 {/* Spectrogram (Scrolling) */}

@@ -264,10 +264,13 @@ export function LoudnessHistogram({
     const rangeRight =
       plotLeft + ((-6 - BIN_MIN) / (BIN_MAX - BIN_MIN)) * plotWidth;
 
-    ctx.fillStyle = 'rgba(74, 222, 128, 0.06)';
+    // Streaming-range band uses a neutral yellow instead of green so it
+    // doesn't read as "this is where you SHOULD be" — it's descriptive, not
+    // prescriptive (see the hover tooltip in the legend for full copy).
+    ctx.fillStyle = 'rgba(234, 179, 8, 0.08)';
     ctx.fillRect(rangeLeft, plotTop, rangeRight - rangeLeft, plotHeight);
 
-    ctx.strokeStyle = 'rgba(74, 222, 128, 0.35)';
+    ctx.strokeStyle = 'rgba(234, 179, 8, 0.45)';
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
     ctx.moveTo(rangeLeft, plotTop);
@@ -280,7 +283,7 @@ export function LoudnessHistogram({
     ctx.setLineDash([]);
 
     // Range label — sits above the plot area in the new headroom.
-    ctx.fillStyle = 'rgba(134, 239, 172, 0.75)';
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.85)';
     ctx.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('Streaming range', (rangeLeft + rangeRight) / 2, plotTop - 10);

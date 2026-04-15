@@ -1384,19 +1384,23 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
-  max-width: calc(100% - 360px);
+  width: min(1200px, 80vw);
+  min-width: min(480px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
   flex-wrap: wrap;
+  box-sizing: border-box;
 }
 
 .mastering-playback-float .analysis-overlay-transport {
   justify-content: center;
   flex-wrap: wrap;
+  width: 100%;
 }
 
 .mastering-playback-float .analysis-overlay-transport-scrubber {
-  width: 160px;
-  min-width: 80px;
-  flex: 1 1 80px;
+  width: auto;
+  min-width: 200px;
+  flex: 1 1 320px;
 }
 
 /* ── Quick Song Switcher Floating Toggle ── */

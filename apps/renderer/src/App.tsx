@@ -2241,16 +2241,18 @@ export function App(): JSX.Element {
   }, [selectedPlaybackVersionId]);
 
   useEffect(() => {
-    if (!analysisExpanded) {
+    // Escape closes the quick switcher first (if open), then the mastering
+    // overlay. Runs globally because the quick switcher is now available from
+    // any view, not just the mastering fullscreen.
+    if (!analysisExpanded && !quickSwitcherOpen) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        // Close the quick switcher first if it's open; otherwise close the overlay.
         if (quickSwitcherOpen) {
           setQuickSwitcherOpen(false);
-        } else {
+        } else if (analysisExpanded) {
           setAnalysisExpanded(false);
         }
       }
@@ -2331,13 +2333,6 @@ export function App(): JSX.Element {
     window.addEventListener('keydown', handleRecord, true);
     return () => window.removeEventListener('keydown', handleRecord, true);
   }, [shortcutRecording]);
-
-  // Close quick switcher when mastering overlay closes
-  useEffect(() => {
-    if (!analysisExpanded) {
-      setQuickSwitcherOpen(false);
-    }
-  }, [analysisExpanded]);
 
   // ResizeObserver for full-screen spectrum width
   useEffect(() => {
@@ -11939,83 +11934,6 @@ export function App(): JSX.Element {
               </div>
             </div>
           ) : null}
-
-          <button
-            type="button"
-            className={`quick-switcher-toggle${quickSwitcherOpen ? ' active' : ''}`}
-            onClick={() => setQuickSwitcherOpen((v) => !v)}
-            data-testid="analysis-quick-switcher-button"
-            title={quickSwitcherOpen ? 'Close song switcher' : 'Switch songs'}
-            aria-label={quickSwitcherOpen ? 'Close song switcher' : 'Switch songs'}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="20"
-              height="20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
-          </button>
-          {quickSwitcherOpen ? (
-            <>
-              <div
-                className="quick-switcher-backdrop"
-                aria-hidden="true"
-              />
-              <div
-                className="quick-switcher-panel"
-                role="listbox"
-                aria-label="Quick song switcher"
-                data-testid="quick-switcher-panel"
-              >
-                <div className="quick-switcher-header">
-                  <h4>Songs</h4>
-                  <button
-                    type="button"
-                    className="quick-switcher-close"
-                    onClick={() => setQuickSwitcherOpen(false)}
-                    aria-label="Close song switcher"
-                    title="Close"
-                  >
-                    &times;
-                  </button>
-                </div>
-                <div className="quick-switcher-list">
-                  {albumSongs.map((song) => {
-                    const isActive = song.id === selectedPlaybackSongId;
-                    const versionCount = song.versions.length;
-                    return (
-                      <button
-                        key={song.id}
-                        type="button"
-                        role="option"
-                        aria-selected={isActive}
-                        className={`quick-switcher-item${isActive ? ' quick-switcher-item--active' : ''}`}
-                        onClick={() => handleQuickSwitcherSelect(song.id)}
-                        data-testid={`quick-switcher-item-${song.id}`}
-                        title={song.title}
-                      >
-                        <span className="quick-switcher-item-title">{song.title}</span>
-                        <span className="quick-switcher-item-meta">
-                          {versionCount} {versionCount === 1 ? 'version' : 'versions'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {albumSongs.length === 0 ? (
-                    <p className="quick-switcher-empty muted">No songs in this album.</p>
-                  ) : null}
-                </div>
-              </div>
-            </>
-          ) : null}
         </div>
       ) : null}
 
@@ -12211,6 +12129,83 @@ export function App(): JSX.Element {
           getAnalysisContext={getAnalysisContext}
           promptRequest={agentChatPromptRequest}
         />
+      ) : null}
+
+      {/*
+        App-wide quick song switcher. Rendered outside any modal/overlay so it's
+        accessible from every view. The panel does NOT render a backdrop — the
+        view behind (e.g. mastering fullscreen) stays fully interactive. It only
+        closes via the explicit close button, the toggle, or the Escape key.
+      */}
+      <button
+        type="button"
+        className={`quick-switcher-toggle${quickSwitcherOpen ? ' active' : ''}`}
+        onClick={() => setQuickSwitcherOpen((v) => !v)}
+        data-testid="quick-switcher-button"
+        title={quickSwitcherOpen ? 'Close song switcher' : 'Switch songs'}
+        aria-label={quickSwitcherOpen ? 'Close song switcher' : 'Switch songs'}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="20"
+          height="20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
+        </svg>
+      </button>
+      {quickSwitcherOpen ? (
+        <div
+          className="quick-switcher-panel"
+          role="listbox"
+          aria-label="Quick song switcher"
+          data-testid="quick-switcher-panel"
+        >
+          <div className="quick-switcher-header">
+            <h4>Songs</h4>
+            <button
+              type="button"
+              className="quick-switcher-close"
+              onClick={() => setQuickSwitcherOpen(false)}
+              aria-label="Close song switcher"
+              title="Close"
+            >
+              &times;
+            </button>
+          </div>
+          <div className="quick-switcher-list">
+            {albumSongs.map((song) => {
+              const isActive = song.id === selectedPlaybackSongId;
+              const versionCount = song.versions.length;
+              return (
+                <button
+                  key={song.id}
+                  type="button"
+                  role="option"
+                  aria-selected={isActive}
+                  className={`quick-switcher-item${isActive ? ' quick-switcher-item--active' : ''}`}
+                  onClick={() => handleQuickSwitcherSelect(song.id)}
+                  data-testid={`quick-switcher-item-${song.id}`}
+                  title={song.title}
+                >
+                  <span className="quick-switcher-item-title">{song.title}</span>
+                  <span className="quick-switcher-item-meta">
+                    {versionCount} {versionCount === 1 ? 'version' : 'versions'}
+                  </span>
+                </button>
+              );
+            })}
+            {albumSongs.length === 0 ? (
+              <p className="quick-switcher-empty muted">No songs in this album.</p>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       {/* Album art fullscreen lightbox */}

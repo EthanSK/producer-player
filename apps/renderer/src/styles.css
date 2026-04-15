@@ -1436,11 +1436,11 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 
 /* ── Quick Song Switcher Panel ── */
 
-.quick-switcher-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 940;
-}
+/*
+  No backdrop: the panel is non-modal and must not block interaction with the
+  view behind it (e.g. the mastering fullscreen). Close via the explicit close
+  button, the toggle, or Escape.
+*/
 
 .quick-switcher-panel {
   position: fixed;

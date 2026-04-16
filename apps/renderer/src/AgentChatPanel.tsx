@@ -1025,6 +1025,14 @@ export function AgentChatPanel({
     if (!eventHasFiles(event)) return;
     event.preventDefault();
     event.stopPropagation();
+    // Mirror T3 Code's behavior: ignore dragleave events whose relatedTarget is
+    // still inside the panel. Without this, crossing internal child boundaries
+    // (messages, chips, buttons) briefly decrements the counter and causes the
+    // overlay to flicker during a continuous drag.
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
     dragEnterCountRef.current = Math.max(0, dragEnterCountRef.current - 1);
     if (dragEnterCountRef.current === 0) {
       setIsDragOver(false);
@@ -1793,6 +1801,9 @@ export function AgentChatPanel({
           onRemoveAttachment={handleRemoveAttachment}
           onClearAttachments={handleClearAllAttachments}
           onDismissAttachmentError={() => setAttachmentError(null)}
+          onPasteFiles={(files) => {
+            void handleFilesAttached(files);
+          }}
         />
 
       </div>

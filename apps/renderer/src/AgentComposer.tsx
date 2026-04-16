@@ -22,6 +22,12 @@ interface AgentComposerProps {
   onRemoveAttachment?: (path: string) => void;
   onClearAttachments?: () => void;
   onDismissAttachmentError?: () => void;
+  /**
+   * Called when the user pastes files into the composer (cmd+v on a clipboard
+   * image screenshot, etc). Mirrors T3 Code's onComposerPaste — we pass the
+   * pasted files up so the panel can stage them alongside drag-and-drop.
+   */
+  onPasteFiles?: (files: File[]) => void;
 }
 
 function formatAttachmentSize(bytes: number): string {
@@ -349,6 +355,7 @@ export function AgentComposer({
   onRemoveAttachment,
   onClearAttachments,
   onDismissAttachmentError,
+  onPasteFiles,
 }: AgentComposerProps): JSX.Element {
   const [text, setText] = useState('');
   const [micState, setMicState] = useState<MicState>('idle');
@@ -751,6 +758,13 @@ export function AgentComposer({
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={(event) => {
+            if (!onPasteFiles) return;
+            const files = Array.from(event.clipboardData?.files ?? []);
+            if (files.length === 0) return;
+            event.preventDefault();
+            onPasteFiles(files);
+          }}
           placeholder={
             disabled
               ? 'Producey Boy is unavailable'

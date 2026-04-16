@@ -4326,6 +4326,19 @@ function registerIpcHandlers(service: FileLibraryService): void {
     // sees this and calls `quitAndInstall` automatically so "Download and
     // Install" is a single click from the user's POV.
     installAfterDownload = true;
+
+    // BUG FIX: emit 'downloading' immediately so the renderer hides the
+    // "Download and Install" button and shows progress feedback before the
+    // first `download-progress` event arrives. Without this the button
+    // stayed visible/clickable during the initial download handshake.
+    // Found by GPT-5.4 Codex review, 2026-04-16.
+    emitAutoUpdateState({
+      status: 'downloading',
+      version: currentAutoUpdateState.version,
+      progress: null,
+      error: null,
+    });
+
     try {
       await autoUpdater.downloadUpdate();
     } catch (error: unknown) {
@@ -4339,6 +4352,16 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_INSTALL, async () => {
     log.info('[producer-player:auto-update] quit and install requested');
+    // BUG FIX: emit 'installing' before quitAndInstall so the renderer
+    // reflects the transition instantly (the direct IPC path skipped this,
+    // unlike the installAfterDownload path in `update-downloaded`).
+    // Found by GPT-5.4 Codex review, 2026-04-16.
+    emitAutoUpdateState({
+      status: 'installing',
+      version: currentAutoUpdateState.version,
+      progress: null,
+      error: null,
+    });
     autoUpdater.quitAndInstall(false, true);
   });
 
@@ -4514,18 +4537,58 @@ function registerIpcHandlers(service: FileLibraryService): void {
           checklists: validated.songChecklists,
           projectFilePaths: validated.songProjectFilePaths,
         });
+
+        // BUG FIX: Also sync the legacy electron-state file so that
+        // linkedFolders and songOrder survive a restart. readPersistedState()
+        // reads from the legacy file, not unified state, so an import that
+        // only wrote unified state would lose library config on next launch.
+        const legacyPayload: PersistedState = {
+          version: 3,
+          linkedFolderPaths: validated.linkedFolders.map((f) => resolve(f.path)),
+          linkedFolderBookmarks: Object.fromEntries(
+            validated.linkedFolders
+              .filter((f) => f.bookmarkData)
+              .map((f) => [resolve(f.path), f.bookmarkData!])
+          ),
+          autoMoveOld: validated.autoMoveOld,
+          songOrder: validated.songOrder,
+          updatedAt: new Date().toISOString(),
+        };
+        void writeJsonAtomic(getStateFilePath(), legacyPayload).catch((err: unknown) => {
+          log.warn('[producer-player] Failed to sync legacy electron-state after import:', err);
+        });
       } else {
         log.warn('[producer-player] user-state.json not found in import folder, skipping');
       }
 
       // --- Apply local-storage.json ---
+      // BUG FIX: Filter out per-song localStorage keys that the unified state
+      // already authoritatively owns. Without this filter the F2 stale-key
+      // cleanup (in the renderer's onUserStateChanged handler) is undone by
+      // blindly restoring every key from the export's local-storage.json, and
+      // the next debounced sync scrapes the stale values back into unified
+      // state. Only UI-layout / non-per-song keys should be restored here.
+      const PER_SONG_LS_PREFIXES = [
+        'producer-player-reference-track-',
+        'producer-player-eq-snapshots-',
+        'producer-player-eq-live-state-',
+        'producer-player-ai-eq-',
+      ];
       const localStoragePath = join(importDir, 'local-storage.json');
       if (existsSync(localStoragePath) && mainWindow && !mainWindow.isDestroyed()) {
         try {
           const raw = await fs.readFile(localStoragePath, 'utf8');
           const lsData = JSON.parse(raw) as Record<string, string>;
           if (typeof lsData === 'object' && lsData !== null && !Array.isArray(lsData)) {
-            const sanitized = JSON.stringify(lsData);
+            // Strip per-song keys — unified state is the source of truth for
+            // these after import; letting them through would resurrect stale data.
+            const filtered: Record<string, string> = {};
+            for (const [key, value] of Object.entries(lsData)) {
+              if (!PER_SONG_LS_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+                filtered[key] = value;
+              }
+            }
+            const sanitized = JSON.stringify(filtered);
             await mainWindow.webContents.executeJavaScript(`
               (() => {
                 try {

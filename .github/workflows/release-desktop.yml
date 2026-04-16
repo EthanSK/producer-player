@@ -155,6 +155,7 @@ jobs:
       # ─────────────────────────────────────────────────────────────────
 
       - name: Build desktop package
+        id: build_desktop
         env:
           PRODUCER_PLAYER_BUILD_NUMBER: ${{ github.run_number }}
           PRODUCER_PLAYER_COMMIT_SHA: ${{ github.sha }}
@@ -165,6 +166,15 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release:desktop:${{ matrix.slug }}
+
+      # Surface the Apple agreement / notarization failure mode loudly so a
+      # broken Apple Developer agreement doesn't silently strand mac users on
+      # an old version for days. (See AGENTS.md "Updater / release pipeline".)
+      - name: Annotate notarization failure
+        if: failure() && matrix.slug == 'mac'
+        shell: bash
+        run: |
+          echo "::error title=macOS notarization failed::The macOS build failed, most likely because the Apple Developer Program License Agreement needs to be re-accepted at https://developer.apple.com/account/ (look for the yellow banner). After accepting it, re-run this workflow to publish the macOS update. Until then existing installs will see 'You are up to date' on the previously published version even though new versions exist in the repo."
 
       - name: Generate SHA-256 checksum (macOS/Linux)
         if: runner.os != 'Windows'
@@ -205,7 +215,16 @@ jobs:
 
   publish-release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    # Run as long as compute-version succeeded — even if some build-desktop
+    # matrix legs failed. This way a single-platform failure (typically mac
+    # notarization waiting on an Apple agreement re-acceptance) does not
+    # strand the OTHER platforms' users on stale versions. The macOS users
+    # remain stranded until the agreement is fixed and the workflow is
+    # re-run, but linux/win users continue to receive updates.
+    if: |
+      always() &&
+      needs.compute-version.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     needs:
       - compute-version
       - build-desktop
@@ -220,6 +239,30 @@ jobs:
           pattern: desktop-*-${{ github.ref_name }}
           merge-multiple: true
           path: release-assets
+
+      # Bail clearly if NO platform built. Otherwise continue and only ship
+      # the platforms that did build.
+      - name: Verify at least one platform built
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mac_zips=(release-assets/Producer-Player-*-mac-universal.zip)
+          linux_zips=(release-assets/Producer-Player-*-linux-x64.zip)
+          win_zips=(release-assets/Producer-Player-*-win-x64.zip)
+          if [ ${#mac_zips[@]} -eq 0 ] && [ ${#linux_zips[@]} -eq 0 ] && [ ${#win_zips[@]} -eq 0 ]; then
+            echo "::error title=No platform builds succeeded::Every platform's build job failed; nothing to publish. See the build-desktop job logs."
+            exit 1
+          fi
+          if [ ${#mac_zips[@]} -eq 0 ]; then
+            echo "::warning title=Skipping macOS in this release::No mac build artifact present (mac job likely failed). Existing macOS users will stay on the last successfully published macOS version. Re-run this workflow once mac notarization is restored."
+          fi
+          if [ ${#linux_zips[@]} -eq 0 ]; then
+            echo "::warning title=Skipping Linux in this release::No linux build artifact present."
+          fi
+          if [ ${#win_zips[@]} -eq 0 ]; then
+            echo "::warning title=Skipping Windows in this release::No windows build artifact present."
+          fi
 
       - name: Create stable latest-download aliases
         shell: bash
@@ -245,8 +288,15 @@ jobs:
             alias_name="${aliases[$i]}"
             matches=($pattern)
 
-            if [ ${#matches[@]} -ne 1 ]; then
-              echo "Expected exactly one match for pattern '$pattern', got ${#matches[@]}"
+            if [ ${#matches[@]} -eq 0 ]; then
+              # Platform's build job failed — skip its alias rather than
+              # failing the whole release. Other platforms still publish.
+              echo "::warning title=Missing build for $pattern::Skipping latest-alias for $alias_name; that platform did not build."
+              continue
+            fi
+
+            if [ ${#matches[@]} -gt 1 ]; then
+              echo "Expected at most one match for pattern '$pattern', got ${#matches[@]}"
               ls -lah
               exit 1
             fi

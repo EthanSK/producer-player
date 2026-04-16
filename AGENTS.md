@@ -17,6 +17,32 @@ This is REPO POLICY, not a voluntary release workflow trigger.
 If the push fails (non-fast-forward from concurrent work), rebase on
 origin and re-push — don't leave work stranded on a local branch.
 
+## Updater / release pipeline
+
+The in-app "Check for Updates" flow is electron-updater pointed at GitHub
+Releases (see `apps/electron/src/main.ts` → `configureAutoUpdater`). It
+fetches `latest-mac.yml` from the newest release of `EthanSK/producer-player`
+and compares versions. **It does NOT read `site/version.json`** — that file is
+only used by the marketing site for the displayed download version.
+
+Therefore: if existing installs report "you're up to date" on a stale
+version even though `package.json` (and the repo) is newer, the cause is
+almost always that the **Release Desktop workflow has been failing**, not
+the updater itself. The most common trigger is a macOS notarization 403:
+
+> "A required agreement is missing or has expired."
+
+Fix: log into https://developer.apple.com/account/ and accept the updated
+Program License Agreement, then re-run the latest failed workflow run
+(`gh run rerun <run-id> --repo EthanSK/producer-player`) or push a fresh
+commit. Until that's done, NO new mac release exists for users to update
+to, regardless of how many times anyone hits "Check for Updates".
+
+The workflow now (a) emits a loud `::error` annotation when mac
+notarization fails, and (b) lets `publish-release` ship whatever
+platforms DID build, so a single-platform failure no longer blocks the
+others.
+
 ## Screenshots & Video
 
 **After any UI changes:** Always retake screenshots and update the Remotion video with the latest app version before considering the work done.

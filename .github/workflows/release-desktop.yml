@@ -167,9 +167,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release:desktop:${{ matrix.slug }}
 
-      # Surface the Apple agreement / notarization failure mode loudly so a
-      # broken Apple Developer agreement doesn't silently strand mac users on
-      # an old version for days. (See AGENTS.md "Updater / release pipeline".)
+      # BUG FIX (2026-04-16, 68fd717): every Release Desktop run since 2026-04-12 failed silently
+      # at notarization 403. Users stuck on v2.82 for days with no visible error. This annotation
+      # surfaces the failure mode loudly so it can't happen again.
       - name: Annotate notarization failure
         if: failure() && matrix.slug == 'mac'
         shell: bash

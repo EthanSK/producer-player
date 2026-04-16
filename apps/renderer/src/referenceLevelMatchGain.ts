@@ -50,6 +50,9 @@ export interface CombinedGainInput {
   referenceProjectedLufs?: number | null;
 }
 
+// BUG FIX (2026-04-16, a992797): down-only platforms (YouTube/Tidal/Amazon) got 0 gain for both
+// tracks but they stayed at different loudness — forcing level match to 0 broke A/B by up to several dB.
+// Now computes residual delta from projected LUFS. Found by GPT-5.4 shadow audit, 2026-04-16.
 export function computeEffectiveReferenceLevelMatchGainDb(
   input: Pick<
     CombinedGainInput,

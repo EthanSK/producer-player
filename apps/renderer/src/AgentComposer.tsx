@@ -427,8 +427,9 @@ export function AgentComposer({
     };
   }, [refreshVoiceSettings]);
 
-  // Clean up on unmount — stop MediaRecorder + MediaStream tracks so the
-  // microphone is released even if unmount happens mid-recording. (GPT-5 audit F6)
+  // BUG FIX (2026-04-16, 6ae527b): unmount only closed AudioContext, leaving MediaRecorder and
+  // MediaStream tracks running — mic stayed active after component unmount mid-recording.
+  // Found by GPT-5.4 full-codebase audit, 2026-04-16.
   useEffect(() => {
     return () => {
       if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);

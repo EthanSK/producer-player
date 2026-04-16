@@ -223,10 +223,9 @@ async function clearAgentAttachments(paths: string[]): Promise<void> {
   await Promise.all(
     paths.map(async (candidate) => {
       if (typeof candidate !== 'string' || candidate.length === 0) return;
-      // Resolve to an absolute canonical path and verify it truly lives
-      // inside our attachment staging directory — not just a prefix match
-      // which could be fooled by a directory with the same prefix.
-      // (GPT-5 audit F5)
+      // BUG FIX (2026-04-16, 6ae527b): startsWith(dir) could be fooled by a same-prefix directory.
+      // Now uses resolve()+relative() for true containment.
+      // Found by GPT-5.4 full-codebase audit, 2026-04-16.
       const resolved = resolve(candidate);
       const rel = relative(dir, resolved);
       if (!rel || rel.startsWith('..') || resolve(dir, rel) !== resolved) return;
@@ -970,17 +969,13 @@ let shouldAutoDownloadOnNextAvailable = false;
 // both actions from a single click.
 let installAfterDownload = false;
 
-// GPT-5 shadow-audit finding: `configureAutoUpdater()` was invoked once at
-// startup AND again every time the renderer toggled auto-updates, which
-// attached a fresh copy of every event listener without removing the old
-// ones. After a few toggles we would exceed the EventEmitter default max
-// (10) and two listeners for `update-downloaded` could race — the first
-// clearing `installAfterDownload` and emitting `installing`, the second
-// seeing the cleared flag and emitting `downloaded`, regressing the state
-// machine. Guard with a one-shot flag so listener wiring happens exactly
-// once per process.
+// BUG FIX (2026-04-16, a992797): configureAutoUpdater() stacked duplicate listeners on every toggle.
+// After a few enable/disable cycles, racing `update-downloaded` handlers regressed the state machine.
+// Found by GPT-5.4 shadow audit, 2026-04-16.
 let autoUpdaterConfigured = false;
 
+// BUG FIX (2026-04-16, 8880480): raw HttpError stack traces were shown to users in the update
+// dialog. Now mapped to human-readable strings.
 /**
  * Map raw electron-updater errors into short, friendly strings for the UI.
  *
@@ -1214,12 +1209,9 @@ function clearAutomaticUpdateChecks(): void {
     autoUpdateCheckInterval = null;
   }
 
-  // GPT-5 shadow-audit finding: disabling auto-updates only cleared timers,
-  // leaving `shouldAutoDownloadOnNextAvailable` set from an in-flight
-  // scheduled check. When the response arrived the `update-available`
-  // handler would happily start `downloadUpdate()` despite the user having
-  // just turned auto-updates off. Reset the background-intent flags here so
-  // toggling auto-updates off is truly a stop.
+  // BUG FIX (2026-04-16, a992797): disabling auto-updates only cleared timers, not the in-flight
+  // download flag — an already-dispatched check would still trigger downloadUpdate().
+  // Found by GPT-5.4 shadow audit, 2026-04-16.
   shouldAutoDownloadOnNextAvailable = false;
 }
 
@@ -3166,9 +3158,9 @@ async function registerPlaybackProtocol(): Promise<void> {
 
     const resolvedPath = resolve(decodedPath);
 
-    // Only serve paths that were previously issued by buildPlaybackUrl.
-    // Without this check, a compromised renderer could construct a URL to
-    // read any local file. (GPT-5 audit F4)
+    // BUG FIX (2026-04-16, 6ae527b): producer-media:// served any base64-encoded path with no
+    // validation — arbitrary local file read. Now restricted to paths issued by buildPlaybackUrl.
+    // Found by GPT-5.4 full-codebase audit, 2026-04-16.
     if (!playbackAllowedPaths.has(resolvedPath)) {
       return new Response('Forbidden', { status: 403 });
     }
@@ -4309,6 +4301,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
     await openUpdateDownloadUrl(url);
   });
 
+  // BUG FIX (2026-04-16, 7296920): bc41257 changed these handlers to `void` fire-and-forget,
+  // so renderer `await` resolved immediately with undefined — UI never showed update states.
+  // Restored direct return so the renderer can drive the in-app update flow.
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_CHECK, async () => {
     if (!app.isPackaged || IS_TEST_MODE) {
       log.info('[producer-player:auto-update] skipping check (not packaged or test mode)');
@@ -4363,6 +4358,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
     return userStateService.readUserState();
   });
 
+  // BUG FIX (2026-04-16, 6ae527b): renderer's debounced sync sent placeholder values for
+  // linkedFolders/songOrder/autoMoveOld — only windowBounds was preserved, wiping library config.
+  // Found by GPT-5.4 full-codebase audit, 2026-04-16.
   ipcMain.handle(IPC_CHANNELS.SET_USER_STATE, async (_event, state: ProducerPlayerUserState) => {
     if (!userStateService) throw new Error('User state service not initialized');
     // Several fields are authoritatively owned by the main process and must

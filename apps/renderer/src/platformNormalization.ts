@@ -156,10 +156,9 @@ export function computePlatformNormalizationPreview(
         ? `${platform.label} would boost by ${rawGainDb.toFixed(1)} dB, but true peak headroom limits the boost to ${appliedGainDb.toFixed(1)} dB (capped at ${platform.truePeakCeilingDbtp.toFixed(0)} dBTP).`
         : `${platform.label} boosts this track by ${appliedGainDb.toFixed(1)} dB \u2014 enough headroom to stay under ${platform.truePeakCeilingDbtp.toFixed(0)} dBTP.`;
     } else {
-      // GPT-5 shadow-audit fix: previously we returned appliedGainDb =
-      // rawGainDb even though the explanation said the headroom cap
-      // couldn't be verified. That overstated confidence. Surface the
-      // "can't verify" state by nulling applied/projected.
+      // BUG FIX (2026-04-16, a992797): returned appliedGainDb = rawGainDb despite missing truePeak,
+      // overstating confidence. Now nulls applied/projected to surface uncertainty.
+      // Found by GPT-5.4 shadow audit, 2026-04-16.
       explanation = `${platform.label} would boost this track, but true peak data is not available to verify the headroom cap.`;
       return {
         platform,
@@ -172,10 +171,9 @@ export function computePlatformNormalizationPreview(
       };
     }
   } else {
-    // GPT-5 shadow-audit fix: peak-limited-upward platforms with loud
-    // tracks (rawGainDb <= 0) received the generic explanation instead
-    // of something specific — the user couldn't tell the platform was
-    // turning them down.
+    // BUG FIX (2026-04-16, a992797): peak-limited-upward platforms with loud tracks showed a
+    // generic explanation — user couldn't tell the platform was turning them down.
+    // Found by GPT-5.4 shadow audit, 2026-04-16.
     appliedGainDb = rawGainDb;
     explanation = `${platform.label} will turn this track down by ${Math.abs(roundDb(rawGainDb)).toFixed(1)} dB to hit ${platform.targetLufs.toFixed(0)} LUFS.`;
   }

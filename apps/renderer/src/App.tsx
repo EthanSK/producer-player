@@ -2002,13 +2002,9 @@ export function App(): JSX.Element {
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedReferenceClickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sourceRequestIdRef = useRef(0);
-  // GPT-5 shadow-audit finding: `loadReferenceTrack()` had no cancellation
-  // token, so two reference loads fired close together (e.g. user clicks
-  // one saved reference then quickly clicks another, or a song-switch
-  // auto-load races a manual pick) could resolve out of order. The slower
-  // older request would then overwrite the newer reference track, feeding
-  // the wrong analysis into level match + platform normalization. Mirror
-  // the same pattern we already use for mix-source loads.
+  // BUG FIX (2026-04-16, a992797): overlapping reference loads could resolve out of order,
+  // feeding stale analysis into level match. Added cancellation token mirroring mix-source pattern.
+  // Found by GPT-5.4 shadow audit, 2026-04-16.
   const referenceLoadRequestIdRef = useRef(0);
   const playbackSourceSupportRef = useRef<'unknown' | 'maybe' | 'probably' | 'no'>('unknown');
   const playbackSourceReadyRef = useRef(false);
@@ -3388,10 +3384,9 @@ export function App(): JSX.Element {
           : null;
       setActiveListeningDeviceId(incomingActiveId);
 
-      // Clear stale per-song localStorage keys BEFORE repopulating from the
-      // imported state. Without this, old keys survive import, get scraped by
-      // the next debounced unified-state sync, and silently resurrect data the
-      // import was meant to replace.  (GPT-5 audit F2)
+      // BUG FIX (2026-04-16, 6ae527b): stale per-song localStorage keys survived import, got
+      // scraped back into unified state by debounced sync, resurrecting data the import replaced.
+      // Found by GPT-5.4 full-codebase audit, 2026-04-16.
       const PER_SONG_PREFIXES = [
         REFERENCE_TRACK_PER_SONG_KEY_PREFIX,
         'producer-player-eq-snapshots-',
@@ -6924,11 +6919,9 @@ export function App(): JSX.Element {
     }
   }
 
-  // Task 41: Auto-load persisted reference track when song changes.
-  // GPT-5 shadow-audit fix: the old guard bailed out entirely if ANY
-  // reference was loaded, so song B would keep using song A's reference
-  // after a switch. Now we compare the persisted path for the new song
-  // with the currently loaded reference path and reload when they differ.
+  // BUG FIX (2026-04-16, a992797): auto-load bailed if ANY reference was loaded, so song B kept
+  // song A's reference. Now compares persisted path with loaded path and reloads when they differ.
+  // Found by GPT-5.4 shadow audit, 2026-04-16.
   const autoLoadRefSongIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedSongId || selectedSongId === autoLoadRefSongIdRef.current) return;

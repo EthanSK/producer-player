@@ -4309,16 +4309,37 @@ function registerIpcHandlers(service: FileLibraryService): void {
     await openUpdateDownloadUrl(url);
   });
 
-  // Legacy IPC handlers kept for backwards compatibility — these now route
-  // through the native dialog flow rather than driving in-app UI.
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_CHECK, async () => {
-    // Route to native dialog flow instead of in-app UI
-    void checkForUpdatesInteractive();
+    if (!app.isPackaged || IS_TEST_MODE) {
+      log.info('[producer-player:auto-update] skipping check (not packaged or test mode)');
+      return;
+    }
+    // Renderer-initiated checks do NOT auto-download. They only report status
+    // via the AUTO_UPDATE_STATE_CHANGED events so the UI can surface "Update
+    // available" and enable the "Download and Install" button. The user then
+    // explicitly triggers the download via AUTO_UPDATE_DOWNLOAD.
+    await autoUpdater.checkForUpdates();
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_DOWNLOAD, async () => {
-    // Route to native dialog flow
-    void checkForUpdatesInteractive();
+    if (!app.isPackaged || IS_TEST_MODE) {
+      log.info('[producer-player:auto-update] skipping download (not packaged or test mode)');
+      return;
+    }
+    log.info('[producer-player:auto-update] download requested by renderer');
+    // Arm the post-download auto-install. The `update-downloaded` handler
+    // sees this and calls `quitAndInstall` automatically so "Download and
+    // Install" is a single click from the user's POV.
+    installAfterDownload = true;
+    try {
+      await autoUpdater.downloadUpdate();
+    } catch (error: unknown) {
+      installAfterDownload = false;
+      log.warn('[producer-player:auto-update] renderer download failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_INSTALL, async () => {

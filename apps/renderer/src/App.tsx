@@ -29,6 +29,7 @@ import type {
   SongVersion,
   SongWithVersions,
   TransportCommand,
+  UpdateCheckResult,
 } from '@producer-player/contracts';
 import {
   analyzeTrackFromUrl,
@@ -1799,7 +1800,10 @@ export function App(): JSX.Element {
   >('idle');
   const [iCloudSyncError, setICloudSyncError] = useState<string | null>(null);
   const [iCloudInitialLoadDone, setICloudInitialLoadDone] = useState(false);
-  // updateCheckStatus/updateCheckResult state removed — updates handled via native dialog
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<
+    'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error'
+  >('idle');
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null);
   const [autoUpdateState, setAutoUpdateState] = useState<AutoUpdateState>({
     status: 'idle',
     version: null,
@@ -1810,12 +1814,8 @@ export function App(): JSX.Element {
     const stored = window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY);
     return stored !== 'false'; // default true
   });
-  // Tracks in-flight "Check for Updates" button press so we can disable the
-  // button + show a spinner. Prevents spamming the IPC and makes the UI feel
-  // responsive during the (sometimes slow) check. Error is shown briefly.
-  const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
-  const [checkForUpdatesError, setCheckForUpdatesError] = useState<string | null>(null);
-  // Update banner state removed — updates handled via native dialog
+  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
@@ -7066,8 +7066,53 @@ export function App(): JSX.Element {
     setFullscreenMasteringDropTargetPanelId(null);
   }
 
-  // Update handler functions removed — updates are now handled via native
-  // dialog from the macOS menu bar (checkForUpdatesInteractive in main.ts).
+  async function handleCheckForUpdates(): Promise<void> {
+    setUpdateCheckStatus('checking');
+    setUpdateCheckResult(null);
+
+    // Kick off the electron-updater check in parallel. The main process no
+    // longer auto-downloads on a renderer-initiated check — it just reports
+    // status via AUTO_UPDATE_STATE_CHANGED, which flips the "Download and
+    // Install" button to enabled when an update is found.
+    void window.producerPlayer.autoUpdateCheck().catch(() => {
+      // Swallow — the GitHub-API check below owns the user-visible error message.
+    });
+
+    try {
+      const result = await window.producerPlayer.checkForUpdates();
+      setUpdateCheckResult(result);
+      setUpdateCheckStatus(result.status === 'error' ? 'error' : result.status);
+    } catch (cause: unknown) {
+      setUpdateCheckStatus('error');
+      setUpdateCheckResult({
+        status: 'error',
+        currentVersion: 'Unknown',
+        latestVersion: null,
+        latestTag: null,
+        releaseUrl: `${PUBLIC_REPOSITORY_URL}/releases`,
+        downloadUrl: null,
+        releaseName: null,
+        publishedAt: null,
+        notes: null,
+        message: cause instanceof Error ? cause.message : 'Could not check for updates.',
+      });
+    }
+  }
+
+  async function handleDownloadAndInstallUpdate(): Promise<void> {
+    // One-click: kick off the download. The main process flips
+    // `installAfterDownload` so that `update-downloaded` automatically calls
+    // `quitAndInstall` — the user never has to click a second button.
+    await runVoidTask(async () => {
+      await window.producerPlayer.autoUpdateDownload();
+    });
+  }
+
+  async function handleAutoUpdateInstall(): Promise<void> {
+    await runVoidTask(async () => {
+      await window.producerPlayer.autoUpdateInstall();
+    });
+  }
 
   function handleSongRatingChange(songId: string, nextRatingValue: number): void {
     const nextRating = getNormalizedSliderRating(nextRatingValue);
@@ -8509,8 +8554,42 @@ export function App(): JSX.Element {
     return byVersionId;
   }, [inspectorVersionSampleRateByVersionId, inspectorVersions, masteringCacheByVersionId]);
   const checklistDraftIsEmpty = checklistDraftText.trim().length === 0;
-  // Update status text, download buttons, and progress bar removed — updates
-  // are now handled via native dialog from the macOS menu bar.
+  const updateStatusText =
+    updateCheckStatus === 'checking'
+      ? 'Checking for updates\u2026'
+      : updateCheckResult?.message ?? null;
+  // The "Download and Install" button is enabled when we know an update is
+  // available (via a user check or a background auto-check). Clicking it
+  // kicks off the download; the main process auto-installs on completion.
+  const canDownloadAndInstallUpdate = autoUpdateState.status === 'available';
+  const isDownloadingUpdate = autoUpdateState.status === 'downloading';
+  const isInstallingUpdate = autoUpdateState.status === 'installing';
+  const autoUpdateDownloadPercent =
+    autoUpdateState.status === 'downloading' && autoUpdateState.progress
+      ? Math.round(autoUpdateState.progress.percent)
+      : null;
+  const autoUpdateStatusText = (() => {
+    switch (autoUpdateState.status) {
+      case 'checking':
+        return 'Checking for updates\u2026';
+      case 'available':
+        return `Update ${autoUpdateState.version ?? ''} available.`.trim();
+      case 'downloading':
+        return autoUpdateDownloadPercent !== null
+          ? `Downloading update\u2026 ${autoUpdateDownloadPercent}%`
+          : 'Downloading update\u2026';
+      case 'downloaded':
+        return `Update ${autoUpdateState.version ?? ''} downloaded \u2014 restart to install.`.trim();
+      case 'installing':
+        return `Installing update ${autoUpdateState.version ?? ''}\u2026`.trim();
+      case 'not-available':
+        return "You're on the latest version.";
+      case 'error':
+        return autoUpdateState.error ?? 'Auto-update failed.';
+      default:
+        return null;
+    }
+  })();
 
   transportActionRef.current = {
     toggle: () => {
@@ -8725,7 +8804,79 @@ export function App(): JSX.Element {
       data-testid="app-shell"
       data-reference-mode={isRefMode ? 'true' : 'false'}
     >
-      {/* Update banner removed — updates are handled via native dialog from the menu bar */}
+      {autoUpdateState.status === 'downloaded' &&
+       !(updateBannerDismissed && dismissedUpdateVersion === autoUpdateState.version) ? (
+        <div
+          className="auto-update-banner"
+          data-testid="auto-update-banner"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '12px',
+            padding: '6px 16px',
+            background: 'var(--color-accent, #6cf)',
+            color: '#000',
+            fontSize: '12px',
+            fontWeight: 500,
+          }}
+        >
+          <span>
+            {/* IMPORTANT: Always use toDisplayVersion() when showing versions to users —
+                the version from main process is already in display format */}
+            Update {autoUpdateState.version ?? ''} is ready to install.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              void handleAutoUpdateInstall();
+            }}
+            style={{
+              padding: '2px 10px',
+              borderRadius: '4px',
+              border: '1px solid rgba(0,0,0,0.3)',
+              background: 'rgba(0,0,0,0.15)',
+              color: '#000',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Restart &amp; Update
+          </button>
+          <button
+            type="button"
+            data-testid="auto-update-banner-dismiss"
+            onClick={() => {
+              setUpdateBannerDismissed(true);
+              setDismissedUpdateVersion(autoUpdateState.version);
+            }}
+            title="Dismiss"
+            style={{
+              position: 'absolute',
+              right: '8px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'none',
+              border: 'none',
+              color: '#000',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              padding: '2px 6px',
+              lineHeight: 1,
+              opacity: 0.7,
+            }}
+          >
+            &#x2715;
+          </button>
+        </div>
+      ) : null}
       <aside className="panel panel-left">
         <button
           type="button"
@@ -10307,55 +10458,84 @@ export function App(): JSX.Element {
             <button
               type="button"
               className="ghost"
-              onClick={async () => {
-                if (isCheckingForUpdates) return;
-                setIsCheckingForUpdates(true);
-                setCheckForUpdatesError(null);
-                try {
-                  await window.producerPlayer.autoUpdateCheck();
-                } catch (err) {
-                  setCheckForUpdatesError(
-                    err instanceof Error ? err.message : 'Could not check for updates.'
-                  );
-                } finally {
-                  setIsCheckingForUpdates(false);
-                }
+              onClick={() => {
+                void handleCheckForUpdates();
               }}
-              disabled={isCheckingForUpdates}
-              data-testid="support-feedback-check-update"
-              title={
-                isCheckingForUpdates
-                  ? 'Checking for updates…'
-                  : 'Check for available updates.'
-              }
-              style={{
-                marginTop: '8px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                opacity: isCheckingForUpdates ? 0.7 : 1,
-                cursor: isCheckingForUpdates ? 'progress' : 'pointer',
-              }}
+              data-testid="support-feedback-check-updates"
+              disabled={updateCheckStatus === 'checking'}
+              title="Check the update feed without downloading anything."
             >
-              {isCheckingForUpdates && (
-                <span
-                  className="agent-mic-spinner"
-                  data-testid="support-feedback-check-update-spinner"
-                  style={{ width: 12, height: 12, borderWidth: 2 }}
-                  aria-hidden="true"
-                />
-              )}
-              {isCheckingForUpdates ? 'Checking…' : 'Check for Updates'}
+              {updateCheckStatus === 'checking' ? 'Checking\u2026' : 'Check for Updates'}
             </button>
-            {checkForUpdatesError && (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                void handleDownloadAndInstallUpdate();
+              }}
+              data-testid="support-feedback-download-install-update"
+              disabled={
+                !canDownloadAndInstallUpdate || isDownloadingUpdate || isInstallingUpdate
+              }
+              title={
+                isInstallingUpdate
+                  ? 'Installing update \u2014 the app will restart momentarily.'
+                  : isDownloadingUpdate
+                    ? 'Download in progress \u2014 the update will install automatically when ready.'
+                    : canDownloadAndInstallUpdate
+                      ? 'Download the update and install it automatically (the app will restart).'
+                      : 'Click "Check for Updates" first. This enables when an update is available.'
+              }
+            >
+              {isInstallingUpdate
+                ? 'Installing\u2026'
+                : isDownloadingUpdate
+                  ? autoUpdateDownloadPercent !== null
+                    ? `Downloading\u2026 ${autoUpdateDownloadPercent}%`
+                    : 'Downloading\u2026'
+                  : 'Download and Install'}
+            </button>
+            {updateStatusText ? (
               <p
-                className="error"
-                style={{ fontSize: '0.85em', marginTop: '4px' }}
-                data-testid="support-feedback-check-update-error"
+                className={updateCheckResult?.status === 'error' ? 'error' : 'muted'}
+                data-testid="support-feedback-update-status"
               >
-                {checkForUpdatesError}
+                {updateStatusText}
               </p>
-            )}
+            ) : null}
+            {autoUpdateStatusText ? (
+              <p
+                className={autoUpdateState.status === 'error' ? 'error' : 'muted'}
+                data-testid="support-feedback-auto-update-status"
+              >
+                {autoUpdateStatusText}
+              </p>
+            ) : null}
+            {autoUpdateState.status === 'downloading' && autoUpdateDownloadPercent !== null ? (
+              <div
+                className="auto-update-progress"
+                data-testid="support-feedback-auto-update-progress"
+                style={{ marginTop: '4px' }}
+              >
+                <div
+                  style={{
+                    height: '3px',
+                    borderRadius: '1.5px',
+                    background: 'var(--color-border, #333)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${autoUpdateDownloadPercent}%`,
+                      height: '100%',
+                      background: 'var(--color-accent, #6cf)',
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+              </div>
+            ) : null}
             <label
               data-testid="support-feedback-auto-update-toggle"
               style={{

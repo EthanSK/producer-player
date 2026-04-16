@@ -6,6 +6,8 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type WheelEvent,
 } from 'react';
@@ -705,6 +707,23 @@ function clampTimestampSeconds(
 }
 
 const CHECKLIST_CAPTURE_LOOKBACK_SECONDS = 3;
+/**
+ * Mouse-wheel scroll adjust: each wheel tick = 0.1s. Scroll up (negative
+ * deltaY) = earlier, scroll down (positive deltaY) = later.
+ */
+const CHECKLIST_PREVIEW_WHEEL_STEP_SECONDS = 0.1;
+/**
+ * Drag-to-scrub: 1px of vertical movement = 0.1s. Drag up = later (lower y
+ * value → later time), drag down = earlier. Mirrors the scroll semantics so
+ * "moving toward the future" maps to "upward" consistently.
+ */
+const CHECKLIST_PREVIEW_DRAG_SECONDS_PER_PIXEL = 0.1;
+/**
+ * Click-vs-drag threshold. If the pointer moves less than this many pixels
+ * before pointerup, treat the interaction as a click (preserves the
+ * existing seek-on-click affordance).
+ */
+const CHECKLIST_PREVIEW_DRAG_THRESHOLD_PX = 3;
 const CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS = 1200;
 const CHECKLIST_HISTORY_LIMIT = 100;
 const PLAYER_DOCK_PREVIEW_VISUAL_WIDTH = 180;
@@ -1928,6 +1947,16 @@ export function App(): JSX.Element {
   const checklistSkipBackTenButtonRef = useRef<HTMLButtonElement | null>(null);
   const checklistSkipBackFiveButtonRef = useRef<HTMLButtonElement | null>(null);
   const lastFocusedChecklistTransportRef = useRef<HTMLButtonElement | null>(null);
+  const checklistPreviewDragStateRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startTimestamp: number;
+    latestTimestamp: number;
+    originalTimestamp: number;
+    originalMode: 'live' | 'frozen';
+    moved: boolean;
+  } | null>(null);
+  const checklistPreviewSuppressNextClickRef = useRef(false);
   const songChecklistsRef = useRef(songChecklists);
   const checklistUndoStackRef = useRef(checklistUndoStack);
   const checklistRedoStackRef = useRef(checklistRedoStack);
@@ -7179,6 +7208,142 @@ export function App(): JSX.Element {
     }
   }
 
+  function clampChecklistTimestampFractional(nextSeconds: number): number | null {
+    if (!Number.isFinite(nextSeconds)) {
+      return null;
+    }
+    const audio = audioRef.current;
+    const duration =
+      audio && Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : durationSecondsRef.current > 0
+          ? durationSecondsRef.current
+          : null;
+    const lowerBounded = Math.max(0, nextSeconds);
+    const clamped =
+      duration !== null ? Math.min(lowerBounded, duration) : lowerBounded;
+    // Quantize to 0.1s resolution so floating-point accumulation stays tidy.
+    return Math.round(clamped * 10) / 10;
+  }
+
+  function handleChecklistTimestampPreviewWheel(
+    event: WheelEvent<HTMLButtonElement>
+  ): void {
+    // Suppress page-scroll so the gesture only adjusts the timestamp.
+    event.preventDefault();
+
+    const direction = event.deltaY > 0 ? 1 : event.deltaY < 0 ? -1 : 0;
+    if (direction === 0) {
+      return;
+    }
+
+    const base = checklistCapturedTimestamp ?? captureCurrentPlaybackTimestamp() ?? 0;
+    const next = clampChecklistTimestampFractional(
+      base + direction * CHECKLIST_PREVIEW_WHEEL_STEP_SECONDS
+    );
+    if (next === null) {
+      return;
+    }
+
+    setChecklistTimestampMode('frozen');
+    setChecklistCapturedTimestamp(next);
+  }
+
+  function handleChecklistTimestampPreviewPointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>
+  ): void {
+    if (event.button !== 0) {
+      return;
+    }
+    const base = checklistCapturedTimestamp ?? captureCurrentPlaybackTimestamp() ?? 0;
+    checklistPreviewDragStateRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startTimestamp: base,
+      latestTimestamp: base,
+      originalTimestamp: base,
+      originalMode: checklistTimestampMode,
+      moved: false,
+    };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some environments/test shims don't implement pointer capture.
+    }
+  }
+
+  function handleChecklistTimestampPreviewPointerMove(
+    event: ReactPointerEvent<HTMLButtonElement>
+  ): void {
+    const drag = checklistPreviewDragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    const dy = event.clientY - drag.startY;
+    if (!drag.moved && Math.abs(dy) < CHECKLIST_PREVIEW_DRAG_THRESHOLD_PX) {
+      return;
+    }
+    drag.moved = true;
+    // Up = later (dy negative → add time), down = earlier (dy positive → subtract).
+    const delta = -dy * CHECKLIST_PREVIEW_DRAG_SECONDS_PER_PIXEL;
+    const next = clampChecklistTimestampFractional(drag.startTimestamp + delta);
+    if (next === null) {
+      return;
+    }
+    drag.latestTimestamp = next;
+    setChecklistTimestampMode('frozen');
+    setChecklistCapturedTimestamp(next);
+  }
+
+  function finishChecklistTimestampPreviewDrag(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    cancel: boolean
+  ): void {
+    const drag = checklistPreviewDragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    checklistPreviewDragStateRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore — capture may already have been lost.
+    }
+    if (cancel && drag.moved) {
+      setChecklistTimestampMode(drag.originalMode);
+      setChecklistCapturedTimestamp(drag.originalTimestamp);
+    }
+    // Only suppress the trailing click when the pointer actually moved —
+    // a click without drag should still fire the seek affordance.
+    if (drag.moved) {
+      checklistPreviewSuppressNextClickRef.current = true;
+    }
+  }
+
+  function handleChecklistTimestampPreviewPointerUp(
+    event: ReactPointerEvent<HTMLButtonElement>
+  ): void {
+    finishChecklistTimestampPreviewDrag(event, false);
+  }
+
+  function handleChecklistTimestampPreviewPointerCancel(
+    event: ReactPointerEvent<HTMLButtonElement>
+  ): void {
+    finishChecklistTimestampPreviewDrag(event, true);
+  }
+
+  function handleChecklistTimestampPreviewKeyDown(
+    event: ReactKeyboardEvent<HTMLButtonElement>
+  ): void {
+    if (event.key === 'Escape' && checklistPreviewDragStateRef.current) {
+      const drag = checklistPreviewDragStateRef.current;
+      checklistPreviewDragStateRef.current = null;
+      setChecklistTimestampMode(drag.originalMode);
+      setChecklistCapturedTimestamp(drag.originalTimestamp);
+      event.preventDefault();
+    }
+  }
+
   function handleOpenSongChecklist(songId: string): void {
     lastFocusedChecklistTransportRef.current = null;
     setChecklistModalSongId(songId);
@@ -10477,9 +10642,21 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="checklist-timestamp-badge checklist-input-timestamp-preview"
-                    title={`Seek to ${formatTime(checklistCapturedTimestamp)}`}
+                    title={`Seek to ${formatTime(checklistCapturedTimestamp)} — scroll or drag vertically to adjust`}
                     data-testid="song-checklist-input-timestamp-preview"
-                    onClick={() => handleChecklistTimestampClick(checklistCapturedTimestamp)}
+                    onClick={() => {
+                      if (checklistPreviewSuppressNextClickRef.current) {
+                        checklistPreviewSuppressNextClickRef.current = false;
+                        return;
+                      }
+                      handleChecklistTimestampClick(checklistCapturedTimestamp);
+                    }}
+                    onWheel={handleChecklistTimestampPreviewWheel}
+                    onPointerDown={handleChecklistTimestampPreviewPointerDown}
+                    onPointerMove={handleChecklistTimestampPreviewPointerMove}
+                    onPointerUp={handleChecklistTimestampPreviewPointerUp}
+                    onPointerCancel={handleChecklistTimestampPreviewPointerCancel}
+                    onKeyDown={handleChecklistTimestampPreviewKeyDown}
                   >
                     {formatTime(checklistCapturedTimestamp)}
                   </button>

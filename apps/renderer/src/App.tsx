@@ -6688,6 +6688,16 @@ export function App(): JSX.Element {
     setReferenceError(null);
 
     try {
+      // C4 note: Reference-track cache is keyed by bare filePath, unlike the
+      // mix-source cache which uses buildMasteringCacheKey(version) including
+      // sizeBytes and modifiedAtMs. Adding file stat data here would require
+      // either a new IPC call or extending ReferenceTrackSelection — neither is
+      // justified because: (a) this is an in-memory-only cache cleared every
+      // restart, (b) reference tracks are typically commercial masters that don't
+      // change, and (c) even if a file is re-exported to the same path mid-session,
+      // the user would need to re-pick it, at which point analyzeAudioFile runs
+      // fresh. Worst case: a re-exported reference at the same path with different
+      // content serves stale analysis until the next app restart or manual re-load.
       const cached = getCachedMasteringAnalysis(selection.filePath);
       const previewAnalysis =
         options.previewAnalysis ??

@@ -1352,11 +1352,14 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 .floating-ab-panel {
   position: fixed;
   /* Lifted above the floating mastering playback bar (`.mastering-playback-float`
-   * at `bottom: 24px`, content ~42px tall per `.analysis-overlay-transport`
-   * buttons at 30px + 12px padding). Offset = play-bar bottom (24) +
-   * play-bar height (~42) + ~12px gap + wrap buffer. */
-  bottom: 88px;
-  left: 24px;
+   * at `bottom: 24px`, measured height 44px). Offset = play-bar bottom (24) +
+   * play-bar height (44) + 4px gap = 72. The play-bar has flex-wrap but the
+   * Electron window min-width is 1100px, so content fits one row. */
+  bottom: 72px;
+  /* Left-align with the centered `.mastering-playback-float` whose width is
+   * `min(1200px, 80vw)` and is centered via `left:50%; translateX(-50%)`.
+   * min-width/max-width on the play-bar don't override at >=1100px viewport. */
+  left: calc((100vw - min(1200px, 80vw)) / 2);
   z-index: 12;
   display: flex;
   flex-direction: row;

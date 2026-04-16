@@ -1356,10 +1356,10 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
    * with the dialog is intentional. Stack offset preserved: play-bar bottom (0)
    * + play-bar height (44) + 4px gap = 48. */
   bottom: 48px;
-  /* Left-align with the centered `.mastering-playback-float` whose width is
-   * `min(1200px, 80vw)` and is centered via `left:50%; translateX(-50%)`.
-   * min-width/max-width on the play-bar don't override at >=1100px viewport. */
-  left: calc((100vw - min(1200px, 80vw)) / 2);
+  /* Reclaimed wasted left margin in fullscreen; stays flush with the
+   * `.mastering-playback-float` bar which also sits at left: 8px. Widths
+   * unchanged. */
+  left: 8px;
   z-index: 12;
   display: flex;
   flex-direction: row;
@@ -1412,8 +1412,10 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
    * space below the dialog card (dialog ends ~24px from window bottom).
    * Floating; mild overlap with the dialog bottom is intentional. */
   bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Reclaimed wasted left margin in fullscreen; pinned near the window's
+   * left edge instead of centered. Width (min(1200px,80vw)) unchanged;
+   * translateX centering removed so left:8px is honored. */
+  left: 8px;
   z-index: 12;
   display: flex;
   align-items: center;

@@ -5998,9 +5998,12 @@ export function App(): JSX.Element {
       snapshot.linkedFolders.find((folder) => folder.id === selectedFolderId) ?? null;
 
     const selectedSong = selectedSongId
-      ? songs.find((song) => song.id === selectedSongId) ?? null
+      ? albumSongs.find((song) => song.id === selectedSongId) ?? null
       : null;
 
+    // BUG FIX: Use albumSongs (the full folder-scoped list) instead of songs
+    // (which is search-filtered). Exporting with a search filter active should
+    // still export the complete album ordering, not just the visible matches.
     return {
       schema: 'producer-player.playlist-order',
       version: 1,
@@ -6017,11 +6020,11 @@ export function App(): JSX.Element {
         selectedPlaybackFileName: selectedPlaybackVersion?.fileName ?? null,
       },
       ordering: {
-        songIds: songs.map((song) => song.id),
-        normalizedTitles: songs.map((song) => song.normalizedTitle),
+        songIds: albumSongs.map((song) => song.id),
+        normalizedTitles: albumSongs.map((song) => song.normalizedTitle),
       },
       folders: snapshot.linkedFolders,
-      songs,
+      songs: albumSongs,
     };
   }
 

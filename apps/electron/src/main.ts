@@ -4513,11 +4513,18 @@ function registerIpcHandlers(service: FileLibraryService): void {
       if (existsSync(userStatePath)) {
         const raw = await fs.readFile(userStatePath, 'utf8');
         const parsed = JSON.parse(raw);
-        const validated = parseUserState(parsed);
 
-        if (typeof validated.schemaVersion !== 'number' || validated.schemaVersion < 1) {
+        // BUG FIX: Check the RAW schemaVersion before parseUserState defaults
+        // a missing value to the current version — otherwise the check below
+        // never rejects corrupt / non-ProducerPlayer JSON files.
+        if (
+          typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) ||
+          typeof parsed.schemaVersion !== 'number' || parsed.schemaVersion < 1
+        ) {
           return { success: false, error: 'Invalid state file: missing or invalid schemaVersion.' };
         }
+
+        const validated = parseUserState(parsed);
 
         // Preserve the current machine's window bounds across imports so a
         // state file from another Mac doesn't reposition this window.
@@ -4569,11 +4576,15 @@ function registerIpcHandlers(service: FileLibraryService): void {
       // the next debounced sync scrapes the stale values back into unified
       // state. Only UI-layout / non-per-song keys should be restored here.
       const PER_SONG_LS_PREFIXES = [
-        'producer-player-reference-track-',
+        'producer-player.reference-track.',
         'producer-player-eq-snapshots-',
-        'producer-player-eq-live-state-',
-        'producer-player-ai-eq-',
+        'producer-player.eq-live-state.',
+        'producer-player.ai-eq-recommendation.',
       ];
+      // Keep migration sentinels that share a per-song prefix but aren't per-song data.
+      const PER_SONG_LS_EXCEPTIONS = new Set([
+        'producer-player-eq-snapshots-global-migrated',
+      ]);
       const localStoragePath = join(importDir, 'local-storage.json');
       if (existsSync(localStoragePath) && mainWindow && !mainWindow.isDestroyed()) {
         try {
@@ -4584,7 +4595,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
             // these after import; letting them through would resurrect stale data.
             const filtered: Record<string, string> = {};
             for (const [key, value] of Object.entries(lsData)) {
-              if (!PER_SONG_LS_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+              if (PER_SONG_LS_EXCEPTIONS.has(key) || !PER_SONG_LS_PREFIXES.some((prefix) => key.startsWith(prefix))) {
                 filtered[key] = value;
               }
             }

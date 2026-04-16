@@ -858,6 +858,65 @@ let shouldAutoDownloadOnNextAvailable = false;
 // both actions from a single click.
 let installAfterDownload = false;
 
+/**
+ * Map raw electron-updater errors into short, friendly strings for the UI.
+ *
+ * electron-updater surfaces low-level HTTP/socket errors (including full
+ * stack traces + HTTP header dumps for 404s on `latest-mac.yml`). Those are
+ * useless to end users and look scary. We log the raw error elsewhere for
+ * debugging; this function only produces the user-facing sentence.
+ */
+function friendlyUpdateErrorMessage(error: unknown): string {
+  const raw =
+    error instanceof Error
+      ? `${error.message ?? ''}`
+      : typeof error === 'string'
+        ? error
+        : '';
+  const text = raw.toLowerCase();
+
+  // 404 / missing release asset. Happens when a release tag exists but the
+  // mac build hasn't been uploaded yet (e.g. notarization in progress or a
+  // partial publish). Also covers electron-updater's "Cannot find
+  // latest-mac.yml in the latest release artifacts" wording.
+  if (
+    text.includes('cannot find latest') ||
+    text.includes('latest-mac.yml') ||
+    text.includes('latest.yml') ||
+    text.includes('404') ||
+    text.includes('not found') ||
+    text.includes('notfound')
+  ) {
+    return 'A new version is being published. Please try again in a few minutes.';
+  }
+
+  // Rate limiting / auth-ish responses.
+  if (
+    text.includes('429') ||
+    text.includes('rate limit') ||
+    text.includes('rate-limit') ||
+    text.includes('403')
+  ) {
+    return 'Update check is rate-limited. Please try again in a few minutes.';
+  }
+
+  // Network connectivity issues.
+  if (
+    text.includes('enotfound') ||
+    text.includes('eai_again') ||
+    text.includes('etimedout') ||
+    text.includes('econnrefused') ||
+    text.includes('econnreset') ||
+    text.includes('network') ||
+    text.includes('getaddrinfo') ||
+    text.includes('offline')
+  ) {
+    return "Couldn't check for updates. Check your internet connection and try again.";
+  }
+
+  return "Couldn't check for updates right now. Please try again later.";
+}
+
 function emitAutoUpdateState(state: AutoUpdateState): void {
   currentAutoUpdateState = state;
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -994,8 +1053,11 @@ function configureAutoUpdater(): void {
   });
 
   autoUpdater.on('error', (error) => {
+    // Log the full raw error (stack + message) so we can still debug from
+    // the log file — but never surface this verbatim in the UI.
     log.warn('[producer-player:auto-update] error', {
-      message: error.message,
+      message: error?.message,
+      stack: error?.stack,
     });
     shouldAutoDownloadOnNextAvailable = false;
     installAfterDownload = false;
@@ -1003,7 +1065,7 @@ function configureAutoUpdater(): void {
       status: 'error',
       version: currentAutoUpdateState.version,
       progress: null,
-      error: error.message,
+      error: friendlyUpdateErrorMessage(error),
     });
   });
 }
@@ -1159,14 +1221,16 @@ async function checkForUpdatesInteractive(): Promise<void> {
         // automatically call `quitAndInstall`.
       } catch (error: unknown) {
         installAfterDownload = false;
-        const message = error instanceof Error ? error.message : String(error);
-        log.warn('[producer-player:auto-update] interactive download failed', { error: message });
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        log.warn('[producer-player:auto-update] interactive download failed', {
+          error: rawMessage,
+          stack: error instanceof Error ? error.stack : undefined,
+        });
         if (mainWindow && !mainWindow.isDestroyed()) {
           await dialog.showMessageBox(mainWindow, {
             type: 'error',
             title: 'Update Failed',
-            message: 'Could not download the update.',
-            detail: message,
+            message: friendlyUpdateErrorMessage(error),
             buttons: ['OK'],
           });
         }
@@ -1175,14 +1239,16 @@ async function checkForUpdatesInteractive(): Promise<void> {
       log.info('[producer-player:auto-update] user deferred interactive update');
     }
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    log.warn('[producer-player:auto-update] interactive check failed', { error: message });
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    log.warn('[producer-player:auto-update] interactive check failed', {
+      error: rawMessage,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     if (mainWindow && !mainWindow.isDestroyed()) {
       await dialog.showMessageBox(mainWindow, {
         type: 'error',
         title: 'Update Check Failed',
-        message: 'Could not check for updates.',
-        detail: message,
+        message: friendlyUpdateErrorMessage(error),
         buttons: ['OK'],
       });
     }

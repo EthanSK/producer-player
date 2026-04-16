@@ -256,6 +256,37 @@ button.help-tooltip-trigger {
   flex-shrink: 0;
 }
 
+button.technical-info-trigger {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin-left: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(156, 175, 196, 0.2);
+  background: transparent;
+  color: rgba(156, 175, 196, 0.5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  vertical-align: 1.5px;
+  flex-shrink: 0;
+  user-select: none;
+  cursor: pointer;
+}
+
+button.technical-info-trigger:hover {
+  color: #9cafc4;
+  border-color: rgba(156, 175, 196, 0.4);
+}
+
+.technical-info-trigger-icon {
+  display: block;
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+}
+
 button.drag-source,
 .main-list-row.drag-source {
   border-color: #ffca6b;

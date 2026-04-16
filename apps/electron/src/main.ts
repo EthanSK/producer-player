@@ -56,7 +56,7 @@ async function migrateEncToKey(baseName: string): Promise<void> {
 }
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, statSync, promises as fs, readFileSync } from 'node:fs';
-import { basename, dirname, extname, join, parse, resolve } from 'node:path';
+import { basename, dirname, extname, join, parse, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import log from 'electron-log/main';
 import { autoUpdater } from 'electron-updater';
@@ -219,14 +219,19 @@ async function saveAgentAttachment(
 
 async function clearAgentAttachments(paths: string[]): Promise<void> {
   if (!Array.isArray(paths) || paths.length === 0) return;
-  const dir = getAgentAttachmentDir();
+  const dir = resolve(getAgentAttachmentDir());
   await Promise.all(
     paths.map(async (candidate) => {
       if (typeof candidate !== 'string' || candidate.length === 0) return;
-      // Only unlink files that live inside our attachment staging directory.
-      if (!candidate.startsWith(dir)) return;
+      // Resolve to an absolute canonical path and verify it truly lives
+      // inside our attachment staging directory — not just a prefix match
+      // which could be fooled by a directory with the same prefix.
+      // (GPT-5 audit F5)
+      const resolved = resolve(candidate);
+      const rel = relative(dir, resolved);
+      if (!rel || rel.startsWith('..') || resolve(dir, rel) !== resolved) return;
       try {
-        await fs.unlink(candidate);
+        await fs.unlink(resolved);
       } catch {
         // already gone — fine
       }
@@ -345,6 +350,9 @@ let shouldAttemptSidecarOrderRestore = false;
 /** Remembers the last directory the user navigated to in any file/folder picker. */
 let lastFileDialogDirectory = '';
 let playbackProtocolRegistered = false;
+/** Paths that buildPlaybackUrl has issued URLs for; the protocol handler
+ *  rejects any path not in this set. (GPT-5 audit F4) */
+const playbackAllowedPaths = new Set<string>();
 const playbackTranscodeJobs = new Map<string, Promise<string>>();
 const linkedFolderSecurityBookmarks = new Map<string, string>();
 const linkedFolderSecurityAccessStops = new Map<string, () => void>();
@@ -3038,7 +3046,9 @@ function getPlaybackMimeType(filePath: string): string {
 }
 
 function buildPlaybackUrl(filePath: string): string {
-  const encodedPath = Buffer.from(filePath, 'utf8').toString('base64url');
+  const resolved = resolve(filePath);
+  playbackAllowedPaths.add(resolved);
+  const encodedPath = Buffer.from(resolved, 'utf8').toString('base64url');
   return `${PLAYBACK_PROTOCOL}://${PLAYBACK_PROTOCOL_HOST}/${encodedPath}`;
 }
 
@@ -3155,6 +3165,13 @@ async function registerPlaybackProtocol(): Promise<void> {
     }
 
     const resolvedPath = resolve(decodedPath);
+
+    // Only serve paths that were previously issued by buildPlaybackUrl.
+    // Without this check, a compromised renderer could construct a URL to
+    // read any local file. (GPT-5 audit F4)
+    if (!playbackAllowedPaths.has(resolvedPath)) {
+      return new Response('Forbidden', { status: 403 });
+    }
 
     let stats;
     try {
@@ -4327,13 +4344,17 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.SET_USER_STATE, async (_event, state: ProducerPlayerUserState) => {
     if (!userStateService) throw new Error('User state service not initialized');
-    // Window bounds are authoritatively owned by the main process — preserve
-    // whatever we already have on disk so a renderer sync can't clobber the
-    // latest bounds captured by move/resize listeners.
+    // Several fields are authoritatively owned by the main process and must
+    // not be overwritten by the renderer's debounced sync (the renderer sends
+    // placeholder values for these). Preserve whatever is already on disk.
     const existing = await userStateService.readUserState();
     const merged: ProducerPlayerUserState = {
       ...state,
       windowBounds: existing.windowBounds,
+      linkedFolders: existing.linkedFolders,
+      songOrder: existing.songOrder,
+      autoMoveOld: existing.autoMoveOld,
+      lastFileDialogDirectory: existing.lastFileDialogDirectory,
     };
     const updated = await userStateService.writeUserState(merged);
 

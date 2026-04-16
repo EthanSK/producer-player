@@ -368,6 +368,7 @@ export function AgentComposer({
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -426,13 +427,23 @@ export function AgentComposer({
     };
   }, [refreshVoiceSettings]);
 
-  // Clean up on unmount
+  // Clean up on unmount — stop MediaRecorder + MediaStream tracks so the
+  // microphone is released even if unmount happens mid-recording. (GPT-5 audit F6)
   useEffect(() => {
     return () => {
       if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
       if (errorFlashTimerRef.current) clearTimeout(errorFlashTimerRef.current);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try { mediaRecorderRef.current.stop(); } catch { /* ignore */ }
+        mediaRecorderRef.current = null;
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      }
       if (audioContextRef.current) {
         void audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
       }
     };
   }, []);
@@ -532,6 +543,7 @@ export function AgentComposer({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
 
       // Set up Web Audio API analyser for waveform
       const audioContext = new AudioContext();
@@ -565,6 +577,7 @@ export function AgentComposer({
 
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
         mediaRecorderRef.current = null;
         cleanupAudioContext();
         setMicState('processing');

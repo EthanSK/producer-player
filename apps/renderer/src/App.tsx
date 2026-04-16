@@ -3357,6 +3357,27 @@ export function App(): JSX.Element {
           : null;
       setActiveListeningDeviceId(incomingActiveId);
 
+      // Clear stale per-song localStorage keys BEFORE repopulating from the
+      // imported state. Without this, old keys survive import, get scraped by
+      // the next debounced unified-state sync, and silently resurrect data the
+      // import was meant to replace.  (GPT-5 audit F2)
+      const PER_SONG_PREFIXES = [
+        REFERENCE_TRACK_PER_SONG_KEY_PREFIX,
+        'producer-player-eq-snapshots-',
+        EQ_LIVE_STATE_PER_SONG_KEY_PREFIX,
+        AI_EQ_PER_SONG_KEY_PREFIX,
+      ];
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (key && PER_SONG_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+          keysToRemove.push(key);
+        }
+      }
+      for (const key of keysToRemove) {
+        window.localStorage.removeItem(key);
+      }
+
       // Sync per-song reference tracks into localStorage
       if (userState.perSongReferenceTracks) {
         for (const [songId, filePath] of Object.entries(userState.perSongReferenceTracks)) {

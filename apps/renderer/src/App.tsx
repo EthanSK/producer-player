@@ -1971,6 +1971,14 @@ export function App(): JSX.Element {
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedReferenceClickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sourceRequestIdRef = useRef(0);
+  // GPT-5 shadow-audit finding: `loadReferenceTrack()` had no cancellation
+  // token, so two reference loads fired close together (e.g. user clicks
+  // one saved reference then quickly clicks another, or a song-switch
+  // auto-load races a manual pick) could resolve out of order. The slower
+  // older request would then overwrite the newer reference track, feeding
+  // the wrong analysis into level match + platform normalization. Mirror
+  // the same pattern we already use for mix-source loads.
+  const referenceLoadRequestIdRef = useRef(0);
   const playbackSourceSupportRef = useRef<'unknown' | 'maybe' | 'probably' | 'no'>('unknown');
   const playbackSourceReadyRef = useRef(false);
   const lastLoadedSongIdRef = useRef<string | null>(null);
@@ -4736,17 +4744,28 @@ export function App(): JSX.Element {
   // Bug fix (2026-04): when Platform Normalization is ON *and* Level Match
   // is ON while listening to the reference, the old code added both gains
   // together. That double-corrected the reference and broke the A/B invariant.
-  // Repro (pre-fix): mix at -12 LUFS, ref at -8 LUFS, Spotify target -14 LUFS.
-  //   Mix: platformGain = -2 dB → plays at -14 LUFS.
-  //   Ref: platformGain = -6 dB + levelMatch (+(mix - ref) = -4 dB) = -10 dB
-  //        → ref plays at -18 LUFS, 4 dB quieter than the mix.
-  // Fix (see referenceLevelMatchGain.ts): when Platform Norm is on, it
-  // already equalizes both tracks to the platform target, so Level Match
-  // becomes redundant and is forced to 0. Level Match still works normally
-  // when Platform Norm is off.
+  // Fix v1 forced level match to 0 when preview was on, assuming both
+  // tracks always converged to the platform target.
+  // Fix v2 (GPT-5 shadow audit): down-only platforms (YouTube/Tidal/Amazon)
+  // and headroom-capped upward normalization don't actually equalize both
+  // sources when they're already at/below target or capped. We now pass the
+  // *projected* integrated LUFS (after platform norm) of both the mix and
+  // the reference, so the effective level match becomes the residual delta.
+  const mixNormalizationPreview = computePlatformNormalizationPreview(
+    measuredAnalysis ?? null,
+    selectedNormalizationPlatform
+  );
+  const referenceNormalizationPreview = referenceTrack
+    ? computePlatformNormalizationPreview(
+        referenceTrack.measuredAnalysis,
+        selectedNormalizationPlatform
+      )
+    : null;
   const effectiveReferenceLevelMatchGainDb = computeEffectiveReferenceLevelMatchGainDb({
     referenceLevelMatchGainDb,
     normalizationPreviewEnabled,
+    mixProjectedLufs: mixNormalizationPreview?.projectedIntegratedLufs ?? null,
+    referenceProjectedLufs: referenceNormalizationPreview?.projectedIntegratedLufs ?? null,
   });
 
   const appliedNormalizationGainDb =
@@ -6659,6 +6678,12 @@ export function App(): JSX.Element {
       measuredAnalysis?: AudioFileAnalysis;
     } = {}
   ): Promise<void> {
+    // GPT-5 shadow-audit fix: claim the next request id BEFORE any await so a
+    // slower earlier load can't overwrite a faster newer load.
+    const requestId = referenceLoadRequestIdRef.current + 1;
+    referenceLoadRequestIdRef.current = requestId;
+    const isStale = () => requestId !== referenceLoadRequestIdRef.current;
+
     setReferenceStatus('loading');
     setReferenceError(null);
 
@@ -6668,10 +6693,13 @@ export function App(): JSX.Element {
         options.previewAnalysis ??
         cached.previewAnalysis ??
         (await analyzeTrackFromUrl(selection.playbackSource.url));
+      if (isStale()) return;
+
       const nextMeasuredAnalysis =
         options.measuredAnalysis ??
         cached.measuredAnalysis ??
         (await window.producerPlayer.analyzeAudioFile(selection.filePath));
+      if (isStale()) return;
 
       cacheMasteringAnalysis(selection.filePath, previewAnalysis, nextMeasuredAnalysis);
 
@@ -6708,6 +6736,7 @@ export function App(): JSX.Element {
 
       setReferenceStatus('ready');
     } catch (cause: unknown) {
+      if (isStale()) return;
       setReferenceStatus('error');
       setReferenceError(
         cause instanceof Error ? cause.message : 'Could not load the reference track.'
@@ -6833,18 +6862,26 @@ export function App(): JSX.Element {
     }
   }
 
-  // Task 41: Auto-load persisted reference track when song changes
+  // Task 41: Auto-load persisted reference track when song changes.
+  // GPT-5 shadow-audit fix: the old guard bailed out entirely if ANY
+  // reference was loaded, so song B would keep using song A's reference
+  // after a switch. Now we compare the persisted path for the new song
+  // with the currently loaded reference path and reload when they differ.
   const autoLoadRefSongIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedSongId || selectedSongId === autoLoadRefSongIdRef.current) return;
     autoLoadRefSongIdRef.current = selectedSongId;
 
-    // Only auto-load if no reference is currently loaded
-    if (referenceTrack) return;
-
     const persistedPath = readReferenceTrackForSong(selectedSongId);
+
     if (persistedPath) {
-      void handleLoadReferenceByFilePath(persistedPath);
+      if (!referenceTrack || referenceTrack.filePath !== persistedPath) {
+        void handleLoadReferenceByFilePath(persistedPath);
+      }
+    } else if (referenceTrack) {
+      // New song has no persisted reference — leave the current one alone.
+      // Clearing would be surprising; if the user explicitly loaded a
+      // reference, they want it to carry over until they clear it.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSongId]);

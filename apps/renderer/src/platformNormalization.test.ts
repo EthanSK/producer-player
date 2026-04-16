@@ -261,13 +261,17 @@ describe('computePlatformNormalizationPreview', () => {
   });
 
   describe('missing true peak data on upward-normalizing platforms', () => {
-    it('still computes rawGainDb when truePeakDbfs is null', () => {
+    it('reports rawGainDb but nulls appliedGainDb when truePeakDbfs is missing (cannot verify headroom)', () => {
       const analysis = makeAnalysis({ integratedLufs: -20, truePeakDbfs: null });
       const result = computePlatformNormalizationPreview(analysis, getProfile('spotify'))!;
       expect(result.rawGainDb).toBe(6);
-      // Without true peak data, the code should still apply boost (no cap available)
+      // GPT-5 shadow-audit fix: without true peak data the headroom cap
+      // cannot be verified, so applied/projected are null to avoid
+      // overstating confidence.
       expect(result.headroomCapDb).toBeNull();
-      expect(result.appliedGainDb).toBe(6);
+      expect(result.appliedGainDb).toBeNull();
+      expect(result.projectedIntegratedLufs).toBeNull();
+      expect(result.limitedByHeadroom).toBe(false);
     });
   });
 

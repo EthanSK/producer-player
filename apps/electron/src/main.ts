@@ -962,6 +962,17 @@ let shouldAutoDownloadOnNextAvailable = false;
 // both actions from a single click.
 let installAfterDownload = false;
 
+// GPT-5 shadow-audit finding: `configureAutoUpdater()` was invoked once at
+// startup AND again every time the renderer toggled auto-updates, which
+// attached a fresh copy of every event listener without removing the old
+// ones. After a few toggles we would exceed the EventEmitter default max
+// (10) and two listeners for `update-downloaded` could race — the first
+// clearing `installAfterDownload` and emitting `installing`, the second
+// seeing the cleared flag and emitting `downloaded`, regressing the state
+// machine. Guard with a one-shot flag so listener wiring happens exactly
+// once per process.
+let autoUpdaterConfigured = false;
+
 /**
  * Map raw electron-updater errors into short, friendly strings for the UI.
  *
@@ -1029,6 +1040,11 @@ function emitAutoUpdateState(state: AutoUpdateState): void {
 }
 
 function configureAutoUpdater(): void {
+  // Listener wiring is a one-shot. Every call after the first only re-asserts
+  // the simple scalar config (autoDownload/autoInstallOnAppQuit/etc.). We
+  // intentionally do NOT re-attach `autoUpdater.on(...)` listeners because
+  // electron-updater's EventEmitter keeps old listeners forever; stacking
+  // them causes duplicate state transitions and exceeds the default max.
   autoUpdater.logger = log;
   // The background scheduler flips `shouldAutoDownloadOnNextAvailable` before
   // its check, so `update-available` kicks off `downloadUpdate()` itself in
@@ -1044,6 +1060,11 @@ function configureAutoUpdater(): void {
     owner: 'EthanSK',
     repo: 'producer-player',
   });
+
+  if (autoUpdaterConfigured) {
+    return;
+  }
+  autoUpdaterConfigured = true;
 
   autoUpdater.on('checking-for-update', () => {
     log.info('[producer-player:auto-update] checking for update');
@@ -1184,6 +1205,14 @@ function clearAutomaticUpdateChecks(): void {
     clearInterval(autoUpdateCheckInterval);
     autoUpdateCheckInterval = null;
   }
+
+  // GPT-5 shadow-audit finding: disabling auto-updates only cleared timers,
+  // leaving `shouldAutoDownloadOnNextAvailable` set from an in-flight
+  // scheduled check. When the response arrived the `update-available`
+  // handler would happily start `downloadUpdate()` despite the user having
+  // just turned auto-updates off. Reset the background-intent flags here so
+  // toggling auto-updates off is truly a stop.
+  shouldAutoDownloadOnNextAvailable = false;
 }
 
 function scheduleAutomaticUpdateChecks(): void {

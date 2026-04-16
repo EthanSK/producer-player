@@ -1,5 +1,22 @@
 # AGENTS.md — Producer Player Project Rules
 
+## Always push after making changes
+
+**Rule:** every agent (subagent or otherwise) that lands a commit in this
+repo MUST push to `origin/main` before declaring the work done. Local
+commits that never reach the remote are effectively invisible to other
+machines and to future sessions — Ethan specifically called this out as
+a recurring frustration. Sequence is: stage → commit → push → verify with
+`git log origin/main..HEAD --oneline` returning empty.
+
+If the pre-push hook demands a version bump, bump (via the repo's own
+`bump-version.mjs` + `version:sync` scripts), commit that as a separate
+`chore: bump version to X.Y.Z` commit, then push both commits in one go.
+This is REPO POLICY, not a voluntary release workflow trigger.
+
+If the push fails (non-fast-forward from concurrent work), rebase on
+origin and re-push — don't leave work stranded on a local branch.
+
 ## Screenshots & Video
 
 **After any UI changes:** Always retake screenshots and update the Remotion video with the latest app version before considering the work done.

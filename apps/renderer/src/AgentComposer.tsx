@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
+import type { AgentAttachment } from '@producer-player/contracts';
 import {
   AGENT_VOICE_SETTINGS_UPDATED_EVENT,
   readStoredAgentSttProvider,
@@ -16,6 +17,18 @@ interface AgentComposerProps {
   onInterrupt: () => void;
   isStreaming: boolean;
   disabled?: boolean;
+  attachments?: AgentAttachment[];
+  attachmentError?: string | null;
+  onRemoveAttachment?: (path: string) => void;
+  onClearAttachments?: () => void;
+  onDismissAttachmentError?: () => void;
+}
+
+function formatAttachmentSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 type MicState = 'idle' | 'recording' | 'processing' | 'error';
@@ -331,6 +344,11 @@ export function AgentComposer({
   onInterrupt,
   isStreaming,
   disabled = false,
+  attachments = [],
+  attachmentError = null,
+  onRemoveAttachment,
+  onClearAttachments,
+  onDismissAttachmentError,
 }: AgentComposerProps): JSX.Element {
   const [text, setText] = useState('');
   const [micState, setMicState] = useState<MicState>('idle');
@@ -423,12 +441,15 @@ export function AgentComposer({
     textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
   }, [text]);
 
+  const hasAttachments = attachments.length > 0;
+
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed || disabled) return;
+    if (disabled) return;
+    if (!trimmed && !hasAttachments) return;
     void onSend(trimmed);
     setText('');
-  }, [text, disabled, onSend]);
+  }, [text, disabled, hasAttachments, onSend]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -602,7 +623,7 @@ export function AgentComposer({
     sttProvider,
   ]);
 
-  const canSend = text.trim().length > 0 && !disabled;
+  const canSend = (text.trim().length > 0 || hasAttachments) && !disabled;
   const voiceSupported =
     typeof navigator !== 'undefined' &&
     typeof navigator.mediaDevices?.getUserMedia === 'function' &&
@@ -631,6 +652,82 @@ export function AgentComposer({
 
   return (
     <div className="agent-composer" data-testid="agent-composer">
+      {/* Attached-file chips (above the input) */}
+      {hasAttachments ? (
+        <div
+          className="agent-attachment-chips"
+          data-testid="agent-attachment-chips"
+          aria-label={`${attachments.length} attached file${attachments.length === 1 ? '' : 's'}`}
+        >
+          {attachments.map((attachment) => (
+            <div
+              key={attachment.path}
+              className="agent-attachment-chip"
+              data-testid="agent-attachment-chip"
+              title={`${attachment.name} — ${formatAttachmentSize(attachment.sizeBytes)}`}
+            >
+              <span className="agent-attachment-chip-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+              </span>
+              <span className="agent-attachment-chip-name">{attachment.name}</span>
+              <span className="agent-attachment-chip-size">
+                {formatAttachmentSize(attachment.sizeBytes)}
+              </span>
+              <button
+                type="button"
+                className="agent-attachment-chip-remove"
+                onClick={() => onRemoveAttachment?.(attachment.path)}
+                data-testid="agent-attachment-chip-remove"
+                title={`Remove ${attachment.name}`}
+                aria-label={`Remove ${attachment.name}`}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {attachments.length > 1 && onClearAttachments ? (
+            <button
+              type="button"
+              className="agent-attachment-clear-all"
+              onClick={onClearAttachments}
+              data-testid="agent-attachment-clear-all"
+              title="Remove all attachments"
+            >
+              Clear all
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {attachmentError ? (
+        <div
+          className="agent-attachment-error"
+          data-testid="agent-attachment-error"
+          role="alert"
+        >
+          <span>{attachmentError}</span>
+          <button
+            type="button"
+            className="agent-attachment-error-dismiss"
+            onClick={() => onDismissAttachmentError?.()}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+
       {/* Recording waveform overlay */}
       {isRecording ? (
         <RecordingWaveform
@@ -657,7 +754,9 @@ export function AgentComposer({
           placeholder={
             disabled
               ? 'Producey Boy is unavailable'
-              : 'Ask Producey Boy about your master...'
+              : hasAttachments
+                ? 'Add a note to send with your attachments (optional)...'
+                : 'Ask Producey Boy about your master — or drag a file here to attach it.'
           }
           disabled={disabled || isRecording || isProcessing}
           rows={MIN_ROWS}

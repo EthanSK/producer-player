@@ -1,10 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
+  type AgentAttachment,
   type AgentEvent,
   type AgentEventListener,
   type AgentProviderId,
   type AgentRespondApprovalPayload,
+  type AgentSaveAttachmentPayload,
   type AgentSendTurnPayload,
   type AgentStartSessionPayload,
   type AutoUpdateState,
@@ -209,6 +211,14 @@ const bridge: ProducerPlayerBridge = {
 
   async agentSendTurn(payload: AgentSendTurnPayload) {
     await ipcRenderer.invoke(IPC_CHANNELS.AGENT_SEND_TURN, payload);
+  },
+
+  async agentSaveAttachment(payload: AgentSaveAttachmentPayload): Promise<AgentAttachment> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AGENT_SAVE_ATTACHMENT, payload);
+  },
+
+  async agentClearAttachments(paths: string[]): Promise<void> {
+    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_CLEAR_ATTACHMENTS, paths);
   },
 
   async agentInterrupt() {

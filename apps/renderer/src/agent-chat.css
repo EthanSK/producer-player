@@ -1492,3 +1492,174 @@
 .agent-help-source-link:focus-visible {
   color: #9ec7ff;
 }
+
+/* ── Drag-and-drop file attachments ─────────────────────────── */
+
+.agent-chat-panel--drag-over {
+  /* Subtle elevation + accent border for the whole panel while dragging. */
+  box-shadow:
+    0 0 0 2px var(--accent, #4f8cff),
+    0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.agent-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: rgba(10, 16, 28, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  animation: agent-drop-overlay-fade 120ms ease-out;
+}
+
+@keyframes agent-drop-overlay-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.agent-drop-overlay-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 36px;
+  border-radius: 14px;
+  border: 2px dashed var(--accent, #4f8cff);
+  background: rgba(18, 26, 42, 0.72);
+  color: var(--text-main, #e6ebf5);
+  text-align: center;
+  max-width: 80%;
+}
+
+.agent-drop-overlay-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.agent-drop-overlay-hint {
+  font-size: 12px;
+  opacity: 0.8;
+  line-height: 1.4;
+}
+
+/* Empty-state tip line — sits under the setup-steps intro. */
+
+.agent-empty-state-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  opacity: 0.78;
+  line-height: 1.4;
+}
+
+/* Attached-file chips above the composer input. */
+
+.agent-attachment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 0 10px;
+}
+
+.agent-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 6px 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text-main, #e6ebf5);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.agent-attachment-chip-icon {
+  display: inline-flex;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.agent-attachment-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 130px;
+}
+
+.agent-attachment-chip-size {
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.agent-attachment-chip-remove {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  margin-left: 2px;
+}
+
+.agent-attachment-chip-remove:hover,
+.agent-attachment-chip-remove:focus-visible {
+  opacity: 1;
+  color: #ff8a8a;
+}
+
+.agent-attachment-clear-all {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-main, #e6ebf5);
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.agent-attachment-clear-all:hover,
+.agent-attachment-clear-all:focus-visible {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.agent-attachment-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 10px 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 90, 90, 0.12);
+  border: 1px solid rgba(255, 90, 90, 0.35);
+  color: #ffb3b3;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-attachment-error-dismiss {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  margin-left: auto;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+}

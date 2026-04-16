@@ -196,6 +196,8 @@ export const IPC_CHANNELS = {
   AUTO_UPDATE_STATE_CHANGED: 'producer-player:auto-update-state-changed',
   AGENT_START_SESSION: 'producer-player:agent-start-session',
   AGENT_SEND_TURN: 'producer-player:agent-send-turn',
+  AGENT_SAVE_ATTACHMENT: 'producer-player:agent-save-attachment',
+  AGENT_CLEAR_ATTACHMENTS: 'producer-player:agent-clear-attachments',
   AGENT_INTERRUPT: 'producer-player:agent-interrupt',
   AGENT_RESPOND_APPROVAL: 'producer-player:agent-respond-approval',
   AGENT_DESTROY_SESSION: 'producer-player:agent-destroy-session',
@@ -514,10 +516,29 @@ export interface AgentUiContext {
   domSnapshot: string | null;
 }
 
+export interface AgentAttachment {
+  /** Absolute path to the file on disk that the agent backend can read. */
+  path: string;
+  /** Original filename as shown to the user (for display in prompts/chips). */
+  name: string;
+  /** Size in bytes (for display). */
+  sizeBytes: number;
+  /** Best-effort MIME type. May be an empty string if unknown. */
+  mimeType: string;
+}
+
+export interface AgentSaveAttachmentPayload {
+  name: string;
+  /** Raw file contents as a Uint8Array / ArrayBuffer transferred over IPC. */
+  data: Uint8Array | ArrayBuffer;
+  mimeType?: string;
+}
+
 export interface AgentSendTurnPayload {
   message: string;
   context?: AgentContext | null;
   uiContext?: AgentUiContext | null;
+  attachments?: AgentAttachment[];
 }
 
 export interface AgentRespondApprovalPayload {
@@ -745,6 +766,8 @@ export interface ProducerPlayerBridge {
   onTransportCommand(listener: TransportCommandListener): () => void;
   agentStartSession(payload: AgentStartSessionPayload): Promise<void>;
   agentSendTurn(payload: AgentSendTurnPayload): Promise<void>;
+  agentSaveAttachment(payload: AgentSaveAttachmentPayload): Promise<AgentAttachment>;
+  agentClearAttachments(paths: string[]): Promise<void>;
   agentInterrupt(): Promise<void>;
   agentRespondApproval(payload: AgentRespondApprovalPayload): Promise<void>;
   agentDestroySession(): Promise<void>;

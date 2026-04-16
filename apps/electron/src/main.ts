@@ -61,8 +61,10 @@ import { Readable } from 'node:stream';
 import log from 'electron-log/main';
 import { autoUpdater } from 'electron-updater';
 import type {
+  AgentAttachment,
   AgentContext,
   AgentProviderId,
+  AgentSaveAttachmentPayload,
   AgentStartSessionPayload,
   AgentSendTurnPayload,
   AgentRespondApprovalPayload,
@@ -153,6 +155,108 @@ const UPDATE_CHECK_TIMEOUT_MS = 12_000;
 const AUTO_UPDATE_CHECK_DELAY_MS = 9_000;
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const AGENT_FEATURES_DISABLED_MESSAGE = 'Agent features are disabled by feature flag.';
+
+/**
+ * Subdirectory inside the OS temp dir used to stage agent-chat file attachments.
+ * Dropped files (images, audio, project files, etc.) are copied here so the
+ * Claude / Codex CLI subprocess can read them by absolute path.
+ *
+ * Housekeeping:
+ *   - Files are deleted best-effort after the turn they were attached to
+ *     completes.
+ *   - On each app launch, entries older than ATTACHMENT_MAX_AGE_MS are swept.
+ */
+const AGENT_ATTACHMENT_DIR_NAME = 'producer-player-agent-attachments';
+const AGENT_ATTACHMENT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const AGENT_ATTACHMENT_MAX_BYTES = 200 * 1024 * 1024; // 200 MB per file — generous; keep UI honest
+
+function getAgentAttachmentDir(): string {
+  return join(app.getPath('temp'), AGENT_ATTACHMENT_DIR_NAME);
+}
+
+function sanitizeAttachmentName(name: string): string {
+  const trimmed = (name ?? '').trim();
+  const basenameOnly = basename(trimmed || 'attachment');
+  // Strip characters that cause filesystem / shell trouble but keep the
+  // original extension so agents can infer file type.
+  return basenameOnly.replace(/[^A-Za-z0-9._\-]/g, '_').slice(0, 128) || 'attachment';
+}
+
+async function ensureAgentAttachmentDir(): Promise<string> {
+  const dir = getAgentAttachmentDir();
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
+}
+
+async function saveAgentAttachment(
+  payload: AgentSaveAttachmentPayload,
+): Promise<AgentAttachment> {
+  const dir = await ensureAgentAttachmentDir();
+  const buffer = payload.data instanceof ArrayBuffer
+    ? Buffer.from(new Uint8Array(payload.data))
+    : Buffer.from(payload.data);
+
+  if (buffer.byteLength > AGENT_ATTACHMENT_MAX_BYTES) {
+    throw new Error(
+      `Attachment "${payload.name}" exceeds the ${Math.round(AGENT_ATTACHMENT_MAX_BYTES / (1024 * 1024))} MB limit.`,
+    );
+  }
+
+  const safeName = sanitizeAttachmentName(payload.name);
+  const uniquePrefix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const fileName = `${uniquePrefix}-${safeName}`;
+  const filePath = join(dir, fileName);
+
+  await fs.writeFile(filePath, buffer);
+
+  return {
+    path: filePath,
+    name: safeName,
+    sizeBytes: buffer.byteLength,
+    mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : '',
+  };
+}
+
+async function clearAgentAttachments(paths: string[]): Promise<void> {
+  if (!Array.isArray(paths) || paths.length === 0) return;
+  const dir = getAgentAttachmentDir();
+  await Promise.all(
+    paths.map(async (candidate) => {
+      if (typeof candidate !== 'string' || candidate.length === 0) return;
+      // Only unlink files that live inside our attachment staging directory.
+      if (!candidate.startsWith(dir)) return;
+      try {
+        await fs.unlink(candidate);
+      } catch {
+        // already gone — fine
+      }
+    }),
+  );
+}
+
+async function sweepStaleAgentAttachments(): Promise<void> {
+  const dir = getAgentAttachmentDir();
+  let entries: string[] = [];
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - AGENT_ATTACHMENT_MAX_AGE_MS;
+  await Promise.all(
+    entries.map(async (entry) => {
+      const full = join(dir, entry);
+      try {
+        const stat = await fs.stat(full);
+        if (stat.mtimeMs < cutoff) {
+          await fs.unlink(full);
+        }
+      } catch {
+        // ignore
+      }
+    }),
+  );
+}
 
 /**
  * Trusted external URLs that may be opened from the renderer.
@@ -4389,6 +4493,14 @@ function registerIpcHandlers(service: FileLibraryService): void {
       throw new Error(AGENT_FEATURES_DISABLED_MESSAGE);
     });
 
+    ipcMain.handle(IPC_CHANNELS.AGENT_SAVE_ATTACHMENT, async () => {
+      throw new Error(AGENT_FEATURES_DISABLED_MESSAGE);
+    });
+
+    ipcMain.handle(IPC_CHANNELS.AGENT_CLEAR_ATTACHMENTS, async () => {
+      // No-op while the feature is disabled.
+    });
+
     ipcMain.handle(IPC_CHANNELS.AGENT_INTERRUPT, async () => {
       // No-op while the feature is disabled.
     });
@@ -4443,9 +4555,31 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_SEND_TURN,
     async (_event, payload: AgentSendTurnPayload) => {
-      agentService.sendTurn(payload.message, payload.context, payload.uiContext);
+      agentService.sendTurn(
+        payload.message,
+        payload.context,
+        payload.uiContext,
+        payload.attachments,
+      );
     }
   );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SAVE_ATTACHMENT,
+    async (_event, payload: AgentSaveAttachmentPayload): Promise<AgentAttachment> => {
+      return saveAgentAttachment(payload);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_CLEAR_ATTACHMENTS,
+    async (_event, paths: string[]) => {
+      await clearAgentAttachments(paths);
+    }
+  );
+
+  // Sweep stale agent attachment temp files in the background.
+  void sweepStaleAgentAttachments();
 
   ipcMain.handle(IPC_CHANNELS.AGENT_INTERRUPT, async () => {
     agentService.interrupt();

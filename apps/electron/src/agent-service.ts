@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 import {
   DEFAULT_AGENT_MODEL_BY_PROVIDER,
   DEFAULT_AGENT_THINKING_BY_PROVIDER,
+  type AgentAttachment,
   type AgentContext,
   type AgentConversationHistoryEntry,
   type AgentEvent,
@@ -195,11 +196,34 @@ function buildConversationHistory(history: AgentSessionState['history']): string
     .join('\n\n');
 }
 
+function formatAttachmentSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown size';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function buildAttachmentsSection(attachments: AgentAttachment[]): string {
+  const lines = attachments.map((attachment) => {
+    const mime = attachment.mimeType ? ` · ${attachment.mimeType}` : '';
+    return `- ${attachment.name} (${formatAttachmentSize(attachment.sizeBytes)}${mime})\n  path: ${attachment.path}`;
+  });
+
+  return [
+    '<attached-files>',
+    'The user attached the following files to this turn. The absolute path is on the local filesystem; read it with your file-read tool if it would help answer the question. Do NOT decode audio files — describe what you can from metadata or the producer-player analysis context instead.',
+    '',
+    ...lines,
+    '</attached-files>',
+  ].join('\n');
+}
+
 function buildTurnPrompt(
   session: AgentSessionState,
   message: string,
   context?: AgentContext | null,
   uiContext?: AgentUiContext | null,
+  attachments?: AgentAttachment[],
 ): string {
   const sections: string[] = [
     'Continue this in-app Producer Player conversation. Keep your response grounded in the supplied analysis context, UI context, and available source code when present.',
@@ -215,6 +239,10 @@ function buildTurnPrompt(
 
   if (uiContext) {
     sections.push(`<ui-context>\n${JSON.stringify(uiContext, null, 2)}\n</ui-context>`);
+  }
+
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    sections.push(buildAttachmentsSection(attachments));
   }
 
   if (session.history.length > 0) {
@@ -562,6 +590,7 @@ export function sendTurn(
   message: string,
   context?: AgentContext | null,
   uiContext?: AgentUiContext | null,
+  attachments?: AgentAttachment[],
 ): void {
   if (!currentSession?.alive) {
     emitEvent({
@@ -611,7 +640,13 @@ export function sendTurn(
     return;
   }
 
-  const prompt = buildTurnPrompt(session, trimmedMessage, context, uiContext);
+  const prompt = buildTurnPrompt(
+    session,
+    trimmedMessage,
+    context,
+    uiContext,
+    attachments,
+  );
   const child = spawn(cliPath, getSpawnArgs(session), {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {

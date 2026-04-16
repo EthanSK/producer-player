@@ -1,4 +1,4 @@
-import {
+import React, {
   useCallback,
   useEffect,
   useRef,
@@ -6,6 +6,7 @@ import {
   type CSSProperties,
 } from 'react';
 import type {
+  AgentAttachment,
   AgentContext,
   AgentConversationHistoryEntry,
   AgentEvent,
@@ -107,8 +108,31 @@ const AGENT_CHAT_PERSISTENCE_STORAGE_KEY = 'producer-player.agent-chat-persisten
 const AGENT_AUTO_OPEN_DELAY_DEFAULT_MS = 2 * 60 * 1000;
 const AGENT_AUTO_OPEN_DELAY_TEST_MS = 1200;
 const AGENT_CHAT_HISTORY_LIMIT = 20;
+const MAX_AGENT_ATTACHMENTS_PER_TURN = 10;
 
 export const OPEN_AGENT_SETTINGS_EVENT = 'producer-player:open-agent-settings';
+
+/**
+ * A DataTransfer drag is relevant to the file-drop overlay only when the drag
+ * contains at least one "Files" item. This lets us ignore purely text drags
+ * (e.g. dragging selected text inside the renderer for the panel-reorder
+ * handlers) so we don't flash the drop overlay during normal interactions.
+ */
+function eventHasFiles(event: React.DragEvent<HTMLElement>): boolean {
+  const types = event.dataTransfer?.types;
+  if (!types) return false;
+  for (let i = 0; i < types.length; i += 1) {
+    if (types[i] === 'Files') return true;
+  }
+  return false;
+}
+
+function formatAttachmentSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 let messageIdCounter = 0;
 function nextMessageId(): string {
@@ -556,6 +580,10 @@ export function AgentChatPanel({
     toolName: string;
     description: string;
   } | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<AgentAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragEnterCountRef = useRef(0);
 
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const userScrolledUpRef = useRef(false);
@@ -905,10 +933,124 @@ export function AgentChatPanel({
     };
   }, [handleOpenSettings]);
 
+  const handleRemoveAttachment = useCallback((path: string) => {
+    setPendingAttachments((prev) => prev.filter((entry) => entry.path !== path));
+    void window.producerPlayer.agentClearAttachments([path]).catch(() => {
+      // Best-effort cleanup; if it fails the periodic sweep will catch it.
+    });
+  }, []);
+
+  const handleClearAllAttachments = useCallback(() => {
+    const paths = pendingAttachments.map((entry) => entry.path);
+    setPendingAttachments([]);
+    if (paths.length > 0) {
+      void window.producerPlayer.agentClearAttachments(paths).catch(() => {});
+    }
+  }, [pendingAttachments]);
+
+  const handleFilesAttached = useCallback(
+    async (files: FileList | File[]) => {
+      const incoming = Array.from(files ?? []);
+      if (incoming.length === 0) return;
+
+      const remainingSlots = Math.max(
+        0,
+        MAX_AGENT_ATTACHMENTS_PER_TURN - pendingAttachments.length,
+      );
+
+      if (remainingSlots === 0) {
+        setAttachmentError(
+          `You can attach at most ${MAX_AGENT_ATTACHMENTS_PER_TURN} files per message.`,
+        );
+        return;
+      }
+
+      const filesToSave = incoming.slice(0, remainingSlots);
+      const overflow = incoming.length - filesToSave.length;
+
+      const saved: AgentAttachment[] = [];
+      const errors: string[] = [];
+
+      for (const file of filesToSave) {
+        try {
+          const buffer = await file.arrayBuffer();
+          const result = await window.producerPlayer.agentSaveAttachment({
+            name: file.name,
+            mimeType: file.type,
+            data: buffer,
+          });
+          saved.push(result);
+        } catch (error) {
+          errors.push(
+            `${file.name}: ${error instanceof Error ? error.message : 'failed to attach'}`,
+          );
+        }
+      }
+
+      if (saved.length > 0) {
+        setPendingAttachments((prev) => [...prev, ...saved]);
+      }
+
+      if (errors.length > 0) {
+        setAttachmentError(errors.join(' · '));
+      } else if (overflow > 0) {
+        setAttachmentError(
+          `Only the first ${filesToSave.length} file${filesToSave.length === 1 ? '' : 's'} attached — the ${MAX_AGENT_ATTACHMENTS_PER_TURN}-per-message cap was reached.`,
+        );
+      } else {
+        setAttachmentError(null);
+      }
+    },
+    [pendingAttachments.length],
+  );
+
+  const handlePanelDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!eventHasFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragEnterCountRef.current += 1;
+    setIsDragOver(true);
+  }, []);
+
+  const handlePanelDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!eventHasFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+  }, []);
+
+  const handlePanelDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!eventHasFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragEnterCountRef.current = Math.max(0, dragEnterCountRef.current - 1);
+    if (dragEnterCountRef.current === 0) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handlePanelDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!eventHasFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dragEnterCountRef.current = 0;
+      setIsDragOver(false);
+
+      const files = event.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+
+      void handleFilesAttached(files);
+    },
+    [handleFilesAttached],
+  );
+
   const handleSendMessage = useCallback(
     async (text: string, options?: { bypassHistoryGuard?: boolean }) => {
       const trimmedMessage = text.trim();
-      if (!trimmedMessage) return;
+      if (!trimmedMessage && pendingAttachments.length === 0) return;
       if (historyOpen && !options?.bypassHistoryGuard) return;
 
       if (isStreaming) {
@@ -950,10 +1092,22 @@ export function AgentChatPanel({
         setSessionActive(true);
       }
 
+      const attachmentsForTurn = pendingAttachments;
+      const attachmentSummary =
+        attachmentsForTurn.length > 0
+          ? attachmentsForTurn.map((a) => a.name).join(', ')
+          : '';
+      const displayContent =
+        attachmentsForTurn.length > 0
+          ? trimmedMessage.length > 0
+            ? `${trimmedMessage}\n\n[Attached: ${attachmentSummary}]`
+            : `[Attached: ${attachmentSummary}]`
+          : trimmedMessage;
+
       const userMsg: AgentChatMessage = {
         id: nextMessageId(),
         role: 'user',
-        content: trimmedMessage,
+        content: displayContent,
         timestamp: Date.now(),
         status: 'complete',
       };
@@ -974,14 +1128,41 @@ export function AgentChatPanel({
       setIsStreaming(true);
       userScrolledUpRef.current = false;
 
+      // Attachments travel with the turn; clear the pending list from the UI
+      // as soon as the turn is sent. The temp files are cleaned up after the
+      // agent's reply or by the periodic sweep.
+      setPendingAttachments([]);
+      setAttachmentError(null);
+
       const context = getAnalysisContext();
       const uiContext = captureAgentUiContext();
 
+      // If the user only attached files (no typed prompt), nudge the agent
+      // to react to them explicitly so the turn has a clear ask.
+      const messageForAgent =
+        trimmedMessage.length > 0
+          ? trimmedMessage
+          : attachmentsForTurn.length > 0
+            ? `I attached ${attachmentsForTurn.length} file${attachmentsForTurn.length === 1 ? '' : 's'} (${attachmentSummary}). Please take a look.`
+            : trimmedMessage;
+
       await window.producerPlayer.agentSendTurn({
-        message: trimmedMessage,
+        message: messageForAgent,
         context,
         uiContext,
+        ...(attachmentsForTurn.length > 0 ? { attachments: attachmentsForTurn } : {}),
       });
+
+      // Best-effort cleanup of the attachment temp files after the turn has
+      // been dispatched. The agent subprocess has already been handed the
+      // absolute paths and will read them itself before its first response.
+      if (attachmentsForTurn.length > 0) {
+        window.setTimeout(() => {
+          void window.producerPlayer
+            .agentClearAttachments(attachmentsForTurn.map((a) => a.path))
+            .catch(() => {});
+        }, 60_000);
+      }
     },
     [
       currentModel,
@@ -991,6 +1172,7 @@ export function AgentChatPanel({
       historyOpen,
       isStreaming,
       messages,
+      pendingAttachments,
       provider,
       sessionActive,
     ]
@@ -1144,10 +1326,44 @@ export function AgentChatPanel({
       </button>
 
       <div
-        className={`agent-chat-panel ${isOpen ? 'agent-chat-panel--open' : ''}`}
+        className={`agent-chat-panel ${isOpen ? 'agent-chat-panel--open' : ''} ${
+          isDragOver ? 'agent-chat-panel--drag-over' : ''
+        }`}
         style={panelStyle}
         data-testid="agent-chat-panel"
+        onDragEnter={handlePanelDragEnter}
+        onDragOver={handlePanelDragOver}
+        onDragLeave={handlePanelDragLeave}
+        onDrop={handlePanelDrop}
       >
+        {isDragOver && (
+          <div
+            className="agent-drop-overlay"
+            data-testid="agent-drop-overlay"
+            aria-hidden="true"
+          >
+            <div className="agent-drop-overlay-inner">
+              <svg
+                viewBox="0 0 24 24"
+                width="42"
+                height="42"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <div className="agent-drop-overlay-title">Drop files to attach</div>
+              <div className="agent-drop-overlay-hint">
+                Any file works — images, audio, project files, documents.
+              </div>
+            </div>
+          </div>
+        )}
         <div className="agent-panel-header">
           <div className="agent-panel-header-left">
             <div className="agent-panel-avatar" aria-hidden="true">
@@ -1465,6 +1681,12 @@ export function AgentChatPanel({
                   <p className="agent-empty-state-title">
                     Set up once, then use your CLI subscription directly from this panel.
                   </p>
+                  <p
+                    className="agent-empty-state-hint"
+                    data-testid="agent-empty-state-dnd-hint"
+                  >
+                    Tip: drag any file onto this panel to attach it to your next message.
+                  </p>
                   <ol className="agent-empty-state-steps" data-testid="agent-empty-state-steps">
                     {EMPTY_CHAT_SETUP_STEPS.map((step) => (
                       <li key={step}>{step}</li>
@@ -1566,6 +1788,11 @@ export function AgentChatPanel({
           onInterrupt={handleInterrupt}
           isStreaming={isStreaming}
           disabled={providerAvailable === false || historyOpen || helpDialogOpen}
+          attachments={pendingAttachments}
+          attachmentError={attachmentError}
+          onRemoveAttachment={handleRemoveAttachment}
+          onClearAttachments={handleClearAllAttachments}
+          onDismissAttachmentError={() => setAttachmentError(null)}
         />
 
       </div>

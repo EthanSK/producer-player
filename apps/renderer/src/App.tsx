@@ -8547,41 +8547,92 @@ export function App(): JSX.Element {
     return byVersionId;
   }, [inspectorVersionSampleRateByVersionId, inspectorVersions, masteringCacheByVersionId]);
   const checklistDraftIsEmpty = checklistDraftText.trim().length === 0;
-  const updateStatusText =
-    updateCheckStatus === 'checking'
-      ? 'Checking for updates\u2026'
-      : updateCheckResult?.message ?? null;
-  // The "Download and Install" button is enabled when we know an update is
-  // available (via a user check or a background auto-check). Clicking it
-  // kicks off the download; the main process auto-installs on completion.
+  // Derived update-UI helpers — single source of truth for every state.
   const canDownloadAndInstallUpdate = autoUpdateState.status === 'available';
   const isDownloadingUpdate = autoUpdateState.status === 'downloading';
   const isInstallingUpdate = autoUpdateState.status === 'installing';
+  const isUpdateDownloaded = autoUpdateState.status === 'downloaded';
   const autoUpdateDownloadPercent =
     autoUpdateState.status === 'downloading' && autoUpdateState.progress
       ? Math.round(autoUpdateState.progress.percent)
       : null;
-  const autoUpdateStatusText = (() => {
+
+  // Whether either the manual GitHub check OR the background auto-updater
+  // is currently in a "checking" state — used to disable the button.
+  const isCheckingForUpdate =
+    updateCheckStatus === 'checking' || autoUpdateState.status === 'checking';
+
+  // Unified status text — replaces the old duplicated `updateStatusText` and
+  // `autoUpdateStatusText` with a single message per state.  The second
+  // element tracks whether the message originates from an error path so
+  // we can style it correctly without relying on stale state.
+  const [unifiedUpdateStatusText, unifiedUpdateIsError] = ((): [string | null, boolean] => {
+    // Active auto-update states take unconditional priority — these are
+    // transient and always represent what the user should see right now.
     switch (autoUpdateState.status) {
       case 'checking':
-        return 'Checking for updates\u2026';
-      case 'available':
-        return `Update ${autoUpdateState.version ?? ''} available.`.trim();
+        return ['Checking for updates\u2026', false];
       case 'downloading':
-        return autoUpdateDownloadPercent !== null
-          ? `Downloading update\u2026 ${autoUpdateDownloadPercent}%`
-          : 'Downloading update\u2026';
+        return [
+          autoUpdateDownloadPercent !== null
+            ? `Downloading update\u2026 ${autoUpdateDownloadPercent}%`
+            : 'Downloading update\u2026',
+          false,
+        ];
       case 'downloaded':
-        return `Update ${autoUpdateState.version ?? ''} downloaded \u2014 restart to install.`.trim();
+        return [
+          `Update ${autoUpdateState.version ?? ''} downloaded \u2014 restart to install.`.trim(),
+          false,
+        ];
       case 'installing':
-        return `Installing update ${autoUpdateState.version ?? ''}\u2026`.trim();
-      case 'not-available':
-        return "You're on the latest version.";
-      case 'error':
-        return autoUpdateState.error ?? 'Auto-update failed.';
+        return [
+          `Installing update ${autoUpdateState.version ?? ''}\u2026`.trim(),
+          false,
+        ];
       default:
-        return null;
+        break;
     }
+
+    // --- Below here the auto-updater is idle, available, not-available, or errored. ---
+    // The GitHub-API manual check result takes precedence over a stale
+    // auto-updater error so that a successful "Check for Updates" click
+    // always shows the user something useful.
+
+    if (updateCheckStatus === 'checking') return ['Checking for updates\u2026', false];
+
+    // "available" from auto-updater takes priority — the user can act on it
+    // immediately via the "Download and Install" button, so the status text
+    // must match. This must come before the manual-error check so a stale
+    // GitHub API failure doesn't contradict a successful auto-updater result.
+    if (canDownloadAndInstallUpdate) {
+      return [`Update ${autoUpdateState.version ?? ''} available.`.trim(), false];
+    }
+
+    if (updateCheckStatus === 'error') {
+      return [updateCheckResult?.message ?? 'Could not check for updates.', true];
+    }
+
+    // GitHub-API says update available but auto-updater hasn't confirmed yet
+    // (e.g. auto-updater skipped or errored). Still show the message.
+    if (updateCheckStatus === 'update-available') {
+      return [updateCheckResult?.message ?? null, false];
+    }
+
+    // Up-to-date — show the GitHub-API message which includes the version
+    // number in parentheses, e.g. "You're already on the latest version (v2.101)."
+    if (updateCheckStatus === 'up-to-date') return [updateCheckResult?.message ?? null, false];
+
+    // "not-available" from the auto-updater with no manual check result
+    if (autoUpdateState.status === 'not-available' && !updateCheckResult) {
+      return ["You're on the latest version.", false];
+    }
+
+    // Auto-updater error with no manual check result — show the error.
+    if (autoUpdateState.status === 'error') {
+      return [autoUpdateState.error ?? 'Auto-update failed.', true];
+    }
+
+    return [null, false];
   })();
 
   transportActionRef.current = {
@@ -10448,63 +10499,57 @@ export function App(): JSX.Element {
                 Request a Feature
               </button>
             </div>
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => {
-                void handleCheckForUpdates();
-              }}
-              data-testid="support-feedback-check-updates"
-              disabled={updateCheckStatus === 'checking'}
-              title="Check the update feed without downloading anything."
-            >
-              {updateCheckStatus === 'checking' ? 'Checking\u2026' : 'Check for Updates'}
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => {
-                void handleDownloadAndInstallUpdate();
-              }}
-              data-testid="support-feedback-download-install-update"
-              disabled={
-                !canDownloadAndInstallUpdate || isDownloadingUpdate || isInstallingUpdate
-              }
-              title={
-                isInstallingUpdate
-                  ? 'Installing update \u2014 the app will restart momentarily.'
-                  : isDownloadingUpdate
-                    ? 'Download in progress \u2014 the update will install automatically when ready.'
-                    : canDownloadAndInstallUpdate
-                      ? 'Download the update and install it automatically (the app will restart).'
-                      : 'Click "Check for Updates" first. This enables when an update is available.'
-              }
-            >
-              {isInstallingUpdate
-                ? 'Installing\u2026'
-                : isDownloadingUpdate
-                  ? autoUpdateDownloadPercent !== null
-                    ? `Downloading\u2026 ${autoUpdateDownloadPercent}%`
-                    : 'Downloading\u2026'
-                  : 'Download and Install'}
-            </button>
-            {updateStatusText ? (
-              <p
-                className={updateCheckResult?.status === 'error' ? 'error' : 'muted'}
-                data-testid="support-feedback-update-status"
+            {/* --- Update section ------------------------------------------------ */}
+            {/* "Check for Updates" — always visible unless a download/install is
+                already in progress (where it would be redundant). */}
+            {!isDownloadingUpdate && !isInstallingUpdate && !isUpdateDownloaded ? (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  void handleCheckForUpdates();
+                }}
+                data-testid="support-feedback-check-updates"
+                disabled={isCheckingForUpdate}
+                title="Check the update feed without downloading anything."
               >
-                {updateStatusText}
-              </p>
+                {isCheckingForUpdate ? 'Checking\u2026' : 'Check for Updates'}
+              </button>
             ) : null}
-            {autoUpdateStatusText ? (
-              <p
-                className={autoUpdateState.status === 'error' ? 'error' : 'muted'}
-                data-testid="support-feedback-auto-update-status"
+
+            {/* "Download and Install" — only rendered when an update is actually
+                available. Never shown grayed-out in idle state. */}
+            {canDownloadAndInstallUpdate ? (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  void handleDownloadAndInstallUpdate();
+                }}
+                data-testid="support-feedback-download-install-update"
+                title="Download the update and install it automatically (the app will restart)."
               >
-                {autoUpdateStatusText}
-              </p>
+                Download and Install
+              </button>
             ) : null}
-            {autoUpdateState.status === 'downloading' && autoUpdateDownloadPercent !== null ? (
+
+            {/* "Restart & Update" — shown after the download has completed. */}
+            {isUpdateDownloaded ? (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  void handleAutoUpdateInstall();
+                }}
+                data-testid="support-feedback-restart-update"
+                title="Restart now to finish installing the update."
+              >
+                Restart &amp; Update
+              </button>
+            ) : null}
+
+            {/* Progress bar — only visible while downloading. */}
+            {isDownloadingUpdate && autoUpdateDownloadPercent !== null ? (
               <div
                 className="auto-update-progress"
                 data-testid="support-feedback-auto-update-progress"
@@ -10528,6 +10573,16 @@ export function App(): JSX.Element {
                   />
                 </div>
               </div>
+            ) : null}
+
+            {/* Single unified status line — no more duplicate text. */}
+            {unifiedUpdateStatusText ? (
+              <p
+                className={unifiedUpdateIsError ? 'error' : 'muted'}
+                data-testid="support-feedback-update-status"
+              >
+                {unifiedUpdateStatusText}
+              </p>
             ) : null}
             <label
               data-testid="support-feedback-auto-update-toggle"

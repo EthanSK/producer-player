@@ -1320,7 +1320,11 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 
 .floating-ab-panel {
   position: fixed;
-  bottom: 24px;
+  /* Lifted above the floating mastering playback bar (`.mastering-playback-float`
+   * at `bottom: 24px`, content ~42px tall per `.analysis-overlay-transport`
+   * buttons at 30px + 12px padding). Offset = play-bar bottom (24) +
+   * play-bar height (~42) + ~12px gap + wrap buffer. */
+  bottom: 88px;
   left: 24px;
   z-index: 12;
   display: flex;

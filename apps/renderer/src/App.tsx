@@ -1785,6 +1785,23 @@ export function App(): JSX.Element {
     | { type: 'version'; versionNumber: number }
     | null
   >(null);
+  // Vertical drag-to-scrub state for a checklist item's timestamp badge.
+  // Active while the user is holding the pointer down on a timestamp to adjust it.
+  // Moving up increases seconds; moving down decreases. Released commits the
+  // new timestamp; Escape/pointercancel reverts. Click-without-drag falls
+  // through to the normal seek-to-timestamp behavior via the moved flag.
+  const [timestampDragState, setTimestampDragState] = useState<
+    | {
+        songId: string;
+        itemId: string;
+        initialY: number;
+        initialSeconds: number;
+        previewSeconds: number;
+        moved: boolean;
+      }
+    | null
+  >(null);
+  const timestampDragStateRef = useRef(timestampDragState);
   const [resolvedAlbumDurationSecondsByVersionId, setResolvedAlbumDurationSecondsByVersionId] = useState<
     Record<string, number>
   >({});
@@ -2158,6 +2175,30 @@ export function App(): JSX.Element {
   useEffect(() => {
     checklistRedoStackRef.current = checklistRedoStack;
   }, [checklistRedoStack]);
+
+  // While a timestamp drag is active, mirror the ns-resize cursor at the
+  // document level so the user's visual feedback stays consistent even if
+  // the cursor strays outside the badge, and listen for Escape to revert.
+  useEffect(() => {
+    if (!timestampDragState) {
+      return;
+    }
+    const body = document.body;
+    body.classList.add('is-dragging-checklist-timestamp');
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        endChecklistTimestampDrag(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      body.classList.remove('is-dragging-checklist-timestamp');
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timestampDragState !== null]);
 
   useEffect(() => {
     checklistDraftTextRef.current = checklistDraftText;
@@ -7390,6 +7431,147 @@ export function App(): JSX.Element {
     }
   }
 
+  // Pixel-to-seconds ratio for drag-to-scrub on a checklist-item timestamp.
+  // 1 pixel = 0.1 seconds (i.e. 10 px per second). Chosen because:
+  //   - Typical track length is a few minutes; 10s of drag per 100px of
+  //     mouse travel feels neither too coarse nor too fussy.
+  //   - Stored timestamps are integer seconds (see clampTimestampSeconds),
+  //     so sub-integer accumulation lets the user slide smoothly past
+  //     integer boundaries instead of needing 10px of travel to move 1s.
+  const TIMESTAMP_DRAG_SECONDS_PER_PIXEL = 0.1;
+  // Pointer must move more than this before the gesture becomes a drag
+  // (otherwise it is treated as a plain click that seeks playback).
+  const TIMESTAMP_DRAG_THRESHOLD_PX = 4;
+
+  function clampDraggedTimestampSeconds(nextSeconds: number): number {
+    const duration = Number.isFinite(durationSeconds) ? durationSeconds : 0;
+    const max = duration > 0 ? Math.floor(duration) : Number.MAX_SAFE_INTEGER;
+    const floored = Math.floor(nextSeconds);
+    if (!Number.isFinite(floored)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(floored, max));
+  }
+
+  function handleChecklistTimestampPointerDown(
+    event: React.PointerEvent<HTMLButtonElement>,
+    songId: string,
+    itemId: string,
+    initialSeconds: number
+  ): void {
+    // Only react to primary (left) mouse / touch / pen. Do not block
+    // native context-menu behavior on right-click.
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some environments reject setPointerCapture; fall through — the
+      // document-level move listener below handles out-of-bounds drag.
+    }
+    const nextState = {
+      songId,
+      itemId,
+      initialY: event.clientY,
+      initialSeconds,
+      previewSeconds: initialSeconds,
+      moved: false,
+    };
+    timestampDragStateRef.current = nextState;
+    setTimestampDragState(nextState);
+  }
+
+  function handleChecklistTimestampPointerMove(
+    event: React.PointerEvent<HTMLButtonElement>
+  ): void {
+    const drag = timestampDragStateRef.current;
+    if (!drag) {
+      return;
+    }
+    const deltaY = drag.initialY - event.clientY; // up = positive
+    const movedFar = Math.abs(deltaY) >= TIMESTAMP_DRAG_THRESHOLD_PX;
+    const nextSeconds = clampDraggedTimestampSeconds(
+      drag.initialSeconds + deltaY * TIMESTAMP_DRAG_SECONDS_PER_PIXEL
+    );
+    if (
+      nextSeconds === drag.previewSeconds &&
+      movedFar === drag.moved
+    ) {
+      return;
+    }
+    const nextState = {
+      ...drag,
+      previewSeconds: nextSeconds,
+      moved: drag.moved || movedFar,
+    };
+    timestampDragStateRef.current = nextState;
+    setTimestampDragState(nextState);
+  }
+
+  function endChecklistTimestampDrag(commit: boolean): void {
+    const drag = timestampDragStateRef.current;
+    if (!drag) {
+      return;
+    }
+    timestampDragStateRef.current = null;
+    setTimestampDragState(null);
+
+    if (!commit || !drag.moved) {
+      return;
+    }
+
+    if (drag.previewSeconds === drag.initialSeconds) {
+      return;
+    }
+
+    updateSongChecklistItems(drag.songId, (items) =>
+      items.map((item) =>
+        item.id === drag.itemId
+          ? { ...item, timestampSeconds: drag.previewSeconds }
+          : item
+      )
+    );
+  }
+
+  function handleChecklistTimestampPointerUp(
+    event: React.PointerEvent<HTMLButtonElement>,
+    fallbackSeek: number
+  ): void {
+    const drag = timestampDragStateRef.current;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+
+    if (!drag) {
+      return;
+    }
+
+    if (!drag.moved) {
+      // Treat as a plain click — preserve the existing seek-to-timestamp
+      // behavior so this drag feature does not regress that affordance.
+      endChecklistTimestampDrag(false);
+      handleChecklistTimestampClick(fallbackSeek);
+      return;
+    }
+
+    endChecklistTimestampDrag(true);
+  }
+
+  function handleChecklistTimestampPointerCancel(
+    event: React.PointerEvent<HTMLButtonElement>
+  ): void {
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    endChecklistTimestampDrag(false);
+  }
+
   function handleChecklistInputFocus(): void {
     checklistInputFocusedRef.current = true;
   }
@@ -10092,18 +10274,43 @@ export function App(): JSX.Element {
                       </label>
                       {hasItemMetadata ? (
                         <div className="checklist-item-meta">
-                          {item.timestampSeconds !== null ? (
-                            <button
-                              type="button"
-                              className="checklist-timestamp-badge"
-                              onClick={() => handleChecklistTimestampClick(item.timestampSeconds!)}
-                              data-testid="song-checklist-item-timestamp"
-                              title={`Jump to ${formatTime(item.timestampSeconds)}`}
-                              aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
-                            >
-                              {formatTime(item.timestampSeconds)}
-                            </button>
-                          ) : null}
+                          {item.timestampSeconds !== null ? (() => {
+                            const isDraggingThis =
+                              timestampDragState !== null &&
+                              timestampDragState.itemId === item.id &&
+                              timestampDragState.songId === checklistModalSong.id;
+                            const displaySeconds = isDraggingThis
+                              ? timestampDragState!.previewSeconds
+                              : item.timestampSeconds!;
+                            return (
+                              <button
+                                type="button"
+                                className={`checklist-timestamp-badge${
+                                  isDraggingThis && timestampDragState!.moved
+                                    ? ' is-dragging'
+                                    : ''
+                                }`}
+                                onPointerDown={(event) =>
+                                  handleChecklistTimestampPointerDown(
+                                    event,
+                                    checklistModalSong.id,
+                                    item.id,
+                                    item.timestampSeconds!
+                                  )
+                                }
+                                onPointerMove={handleChecklistTimestampPointerMove}
+                                onPointerUp={(event) =>
+                                  handleChecklistTimestampPointerUp(event, item.timestampSeconds!)
+                                }
+                                onPointerCancel={handleChecklistTimestampPointerCancel}
+                                data-testid="song-checklist-item-timestamp"
+                                title={`Drag up/down to adjust, click to jump to ${formatTime(item.timestampSeconds)}`}
+                                aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
+                              >
+                                {formatTime(displaySeconds)}
+                              </button>
+                            );
+                          })() : null}
                           {item.versionNumber !== null ? (
                             <span
                               className="checklist-version-badge"

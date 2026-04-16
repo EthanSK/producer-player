@@ -2501,6 +2501,123 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
+  cursor: default;
+}
+
+/* Listening-device feature ------------------------------------------------ */
+
+.listening-device-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.listening-device-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 12px;
+}
+
+.listening-device-input::placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.listening-device-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.listening-device-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.listening-device-chip.is-active {
+  box-shadow: 0 0 0 1px currentColor inset;
+}
+
+.listening-device-chip-label {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 1px 2px;
+  cursor: pointer;
+}
+
+.listening-device-chip-delete {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  opacity: 0;
+  padding: 0 4px;
+  margin-left: 2px;
+  cursor: pointer;
+  line-height: 1;
+  transition: opacity 0.15s ease;
+}
+
+.listening-device-chip:hover .listening-device-chip-delete,
+.listening-device-chip:focus-within .listening-device-chip-delete {
+  opacity: 0.8;
+}
+
+.listening-device-chip-delete:hover {
+  opacity: 1;
+}
+
+.checklist-listening-device-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(170, 170, 170, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: default;
+  transition: box-shadow 0.15s ease;
+}
+
+.checklist-listening-device-badge.is-deleted {
+  font-style: italic;
+  opacity: 0.65;
+}
+
+/* Subtle outline on every row sharing the hovered tag. The border color is
+   supplied inline via the `--group-highlight-color` custom property so the
+   listening-device highlight matches its chip palette, while the version tag
+   falls back to a neutral grey. */
+.checklist-item-row.is-group-highlighted {
+  box-shadow: 0 0 0 2px var(--group-highlight-color, rgba(255, 255, 255, 0.45));
 }
 
 .checklist-remove-button {

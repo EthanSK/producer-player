@@ -16,6 +16,7 @@ import type {
   ICloudAvailabilityResult,
   ICloudBackupData,
   LibrarySnapshot,
+  ListeningDevice,
   PersistedEqLiveState,
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
@@ -1033,6 +1034,58 @@ function createChecklistItemId(): string {
   return `checklist-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
 }
 
+function createListeningDeviceId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `listening-device-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
+}
+
+// Deterministic palette of pleasant, distinguishable hues for listening-device
+// chips. Each device id hashes to exactly one entry so the same device always
+// looks the same across sessions even though only the id is persisted.
+const LISTENING_DEVICE_PALETTE: ReadonlyArray<{ fg: string; bg: string; border: string }> = [
+  { fg: '#ffc8c8', bg: 'rgba(255, 94, 94, 0.18)', border: 'rgba(255, 94, 94, 0.55)' },   // red
+  { fg: '#ffd7b0', bg: 'rgba(255, 150, 60, 0.18)', border: 'rgba(255, 150, 60, 0.55)' }, // orange
+  { fg: '#ffeeaa', bg: 'rgba(240, 200, 70, 0.18)', border: 'rgba(240, 200, 70, 0.6)' },  // yellow
+  { fg: '#bff0c2', bg: 'rgba(90, 210, 120, 0.18)', border: 'rgba(90, 210, 120, 0.55)' }, // green
+  { fg: '#a8ecd8', bg: 'rgba(70, 210, 180, 0.18)', border: 'rgba(70, 210, 180, 0.55)' }, // teal
+  { fg: '#b8daff', bg: 'rgba(92, 167, 255, 0.18)', border: 'rgba(92, 167, 255, 0.55)' }, // blue
+  { fg: '#ccb8ff', bg: 'rgba(150, 120, 255, 0.20)', border: 'rgba(150, 120, 255, 0.55)' },// purple
+  { fg: '#f7bce8', bg: 'rgba(235, 120, 200, 0.18)', border: 'rgba(235, 120, 200, 0.55)' },// pink
+  { fg: '#e6d3b3', bg: 'rgba(200, 160, 100, 0.18)', border: 'rgba(200, 160, 100, 0.55)' },// tan
+  { fg: '#c5d9b6', bg: 'rgba(160, 195, 120, 0.18)', border: 'rgba(160, 195, 120, 0.55)' },// olive
+];
+
+function hashListeningDeviceId(id: string): number {
+  let hash = 5381;
+  for (let i = 0; i < id.length; i += 1) {
+    hash = ((hash << 5) + hash + id.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function getListeningDeviceColor(id: string): { fg: string; bg: string; border: string } {
+  const index = hashListeningDeviceId(id) % LISTENING_DEVICE_PALETTE.length;
+  return LISTENING_DEVICE_PALETTE[index];
+}
+
+function sanitizeListeningDevices(value: unknown): ListeningDevice[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const result: ListeningDevice[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const candidate = entry as Partial<ListeningDevice>;
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    if (id.length === 0 || name.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    result.push({ id, name });
+  }
+  return result;
+}
+
 function readStoredSongChecklists(): Record<string, SongChecklistItem[]> {
   if (typeof window === 'undefined') {
     return {};
@@ -1720,6 +1773,18 @@ export function App(): JSX.Element {
   const [activeChecklistTimestampIds, setActiveChecklistTimestampIds] = useState<string[]>([]);
   const [checklistUndoStack, setChecklistUndoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
   const [checklistRedoStack, setChecklistRedoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
+  // Listening-device tags (persistent) + which one is currently active for new items.
+  // Also the in-flight name the user is typing in the dialog's device input.
+  const [listeningDevices, setListeningDevices] = useState<ListeningDevice[]>([]);
+  const [activeListeningDeviceId, setActiveListeningDeviceId] = useState<string | null>(null);
+  const [listeningDeviceDraftName, setListeningDeviceDraftName] = useState('');
+  // Tracks which tag the cursor is over, used to outline sibling checklist items
+  // that share the same tag (listening-device OR version). Cleared on mouseleave.
+  const [hoveredChecklistTag, setHoveredChecklistTag] = useState<
+    | { type: 'listening-device'; id: string }
+    | { type: 'version'; versionNumber: number }
+    | null
+  >(null);
   const [resolvedAlbumDurationSecondsByVersionId, setResolvedAlbumDurationSecondsByVersionId] = useState<
     Record<string, number>
   >({});
@@ -2920,6 +2985,17 @@ export function App(): JSX.Element {
           setAutoUpdateEnabled(userState.autoUpdateEnabled);
         }
 
+        const loadedDevices = sanitizeListeningDevices(userState.listeningDevices);
+        if (loadedDevices.length > 0) {
+          setListeningDevices(loadedDevices);
+          const activeId =
+            typeof userState.activeListeningDeviceId === 'string' &&
+            loadedDevices.some((device) => device.id === userState.activeListeningDeviceId)
+              ? userState.activeListeningDeviceId
+              : null;
+          setActiveListeningDeviceId(activeId);
+        }
+
         // Populate localStorage from unified state for EQ data (localStorage = fast cache)
         if (userState.eqSnapshots && Object.keys(userState.eqSnapshots).length > 0) {
           for (const [songKey, snaps] of Object.entries(userState.eqSnapshots)) {
@@ -3062,6 +3138,8 @@ export function App(): JSX.Element {
         agentThinking: {},
         agentSystemPrompt: '',
         agentSttProvider: '',
+        listeningDevices,
+        activeListeningDeviceId,
         referenceLevelMatchEnabled,
         iCloudBackupEnabled,
         autoUpdateEnabled,
@@ -3128,6 +3206,8 @@ export function App(): JSX.Element {
     referenceLevelMatchEnabled,
     iCloudBackupEnabled,
     autoUpdateEnabled,
+    listeningDevices,
+    activeListeningDeviceId,
   ]);
 
   // -----------------------------------------------------------------------
@@ -3189,6 +3269,15 @@ export function App(): JSX.Element {
         setAutoUpdateEnabled(userState.autoUpdateEnabled);
         window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, userState.autoUpdateEnabled ? 'true' : 'false');
       }
+
+      const incomingDevices = sanitizeListeningDevices(userState.listeningDevices);
+      setListeningDevices(incomingDevices);
+      const incomingActiveId =
+        typeof userState.activeListeningDeviceId === 'string' &&
+        incomingDevices.some((device) => device.id === userState.activeListeningDeviceId)
+          ? userState.activeListeningDeviceId
+          : null;
+      setActiveListeningDeviceId(incomingActiveId);
 
       // Sync per-song reference tracks into localStorage
       if (userState.perSongReferenceTracks) {
@@ -7381,6 +7470,7 @@ export function App(): JSX.Element {
       ? getVersionNumberFromFileName(capturedVersion.fileName)
       : null;
 
+    const capturedListeningDeviceId = activeListeningDeviceId;
     updateSongChecklistItems(songId, (items) => [
       {
         id: createChecklistItemId(),
@@ -7388,6 +7478,7 @@ export function App(): JSX.Element {
         completed: false,
         timestampSeconds: checklistCapturedTimestamp,
         versionNumber: capturedVersionNumber,
+        listeningDeviceId: capturedListeningDeviceId,
       },
       ...items,
     ]);
@@ -7397,6 +7488,44 @@ export function App(): JSX.Element {
     if (options.source === 'enter') {
       scrollChecklistToBottomAfterEnterAdd();
     }
+  }
+
+  function handleSubmitListeningDevice(): void {
+    const trimmed = listeningDeviceDraftName.trim();
+    if (trimmed.length === 0) {
+      return;
+    }
+    // Case-insensitive match against existing devices — reuse that id instead
+    // of creating a duplicate tag for "AirPods" vs "airpods".
+    const normalized = trimmed.toLowerCase();
+    const existing = listeningDevices.find(
+      (device) => device.name.trim().toLowerCase() === normalized
+    );
+    if (existing) {
+      setActiveListeningDeviceId(existing.id);
+      setListeningDeviceDraftName('');
+      return;
+    }
+    const newDevice: ListeningDevice = {
+      id: createListeningDeviceId(),
+      name: trimmed,
+    };
+    setListeningDevices((prev) => [...prev, newDevice]);
+    setActiveListeningDeviceId(newDevice.id);
+    setListeningDeviceDraftName('');
+  }
+
+  function handleSelectListeningDevice(deviceId: string): void {
+    // Clicking the already-active chip clears the selection so new items are
+    // added without a device tag.
+    setActiveListeningDeviceId((current) => (current === deviceId ? null : deviceId));
+  }
+
+  function handleDeleteListeningDevice(deviceId: string): void {
+    setListeningDevices((prev) => prev.filter((device) => device.id !== deviceId));
+    setActiveListeningDeviceId((current) => (current === deviceId ? null : current));
+    // Historic checklist items that reference this id are left intact —
+    // rendering treats a missing id as a greyed-out "deleted device" chip.
   }
 
   function handleToggleChecklistItem(songId: string, itemId: string, completed: boolean): void {
@@ -7589,6 +7718,7 @@ export function App(): JSX.Element {
           completed: item.completed,
           timestampSeconds: item.timestampSeconds,
           versionNumber: item.versionNumber,
+          listeningDeviceId: null,
         }));
 
         next[entry.matchedSongId] = [...newItems, ...existingItems];
@@ -7622,6 +7752,13 @@ export function App(): JSX.Element {
   const checklistModalCanOpenMastering = checklistModalSong
     ? getPreferredPlaybackVersionId(checklistModalSong) !== null
     : false;
+  const listeningDevicesById = useMemo(() => {
+    const map = new Map<string, ListeningDevice>();
+    for (const device of listeningDevices) {
+      map.set(device.id, device);
+    }
+    return map;
+  }, [listeningDevices]);
 
   useEffect(() => {
     if (
@@ -9827,6 +9964,63 @@ export function App(): JSX.Element {
               </button>
             </div>
 
+            <div className="listening-device-strip" data-testid="listening-device-strip">
+              <input
+                type="text"
+                className="listening-device-input"
+                placeholder="listening device"
+                value={listeningDeviceDraftName}
+                onChange={(event) => setListeningDeviceDraftName(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleSubmitListeningDevice();
+                  }
+                }}
+                aria-label="Add or select listening device"
+                data-testid="listening-device-input"
+                title="Type a device name and press Enter to save it. New items you add will be tagged with the selected device."
+              />
+              {listeningDevices.length > 0 ? (
+                <div className="listening-device-chip-row" data-testid="listening-device-chip-row">
+                  {listeningDevices.map((device) => {
+                    const color = getListeningDeviceColor(device.id);
+                    const isActive = device.id === activeListeningDeviceId;
+                    return (
+                      <span
+                        key={device.id}
+                        className={`listening-device-chip${isActive ? ' is-active' : ''}`}
+                        style={{
+                          color: color.fg,
+                          borderColor: color.border,
+                          background: isActive ? color.bg : 'transparent',
+                        }}
+                        data-testid={`listening-device-chip-${device.id}`}
+                      >
+                        <button
+                          type="button"
+                          className="listening-device-chip-label"
+                          onClick={() => handleSelectListeningDevice(device.id)}
+                          title={isActive ? `Clear "${device.name}" selection` : `Tag new items with "${device.name}"`}
+                        >
+                          {device.name}
+                        </button>
+                        <button
+                          type="button"
+                          className="listening-device-chip-delete"
+                          onClick={() => handleDeleteListeningDevice(device.id)}
+                          title={`Remove "${device.name}" from saved devices`}
+                          aria-label={`Remove ${device.name}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+
             <div
               ref={checklistItemScrollRegionRef}
               className="checklist-item-scroll-region"
@@ -9835,15 +10029,53 @@ export function App(): JSX.Element {
               {checklistModalItemsChronological.length > 0 ? (
                 <ul className="checklist-item-list" data-testid="song-checklist-items">
                   {checklistModalItemsChronological.map((item) => {
+                    const deviceRef = item.listeningDeviceId
+                      ? listeningDevicesById.get(item.listeningDeviceId) ?? null
+                      : null;
+                    const deviceLabel = deviceRef
+                      ? deviceRef.name
+                      : item.listeningDeviceId
+                        ? 'deleted device'
+                        : null;
+                    const deviceColor = item.listeningDeviceId
+                      ? getListeningDeviceColor(item.listeningDeviceId)
+                      : null;
                     const hasItemMetadata =
-                      item.timestampSeconds !== null || item.versionNumber !== null;
+                      item.timestampSeconds !== null ||
+                      item.versionNumber !== null ||
+                      item.listeningDeviceId !== null;
+                    // Hover-highlight: this row should glow whenever another
+                    // row's shared tag is being hovered. The hovered tag
+                    // itself also glows so it's obvious which group it belongs
+                    // to.
+                    const isGroupedHighlight =
+                      hoveredChecklistTag !== null &&
+                      ((hoveredChecklistTag.type === 'listening-device' &&
+                        item.listeningDeviceId !== null &&
+                        hoveredChecklistTag.id === item.listeningDeviceId) ||
+                        (hoveredChecklistTag.type === 'version' &&
+                          item.versionNumber !== null &&
+                          hoveredChecklistTag.versionNumber === item.versionNumber));
+                    const groupHighlightColor =
+                      isGroupedHighlight && hoveredChecklistTag?.type === 'listening-device'
+                        ? getListeningDeviceColor(hoveredChecklistTag.id).border
+                        : isGroupedHighlight
+                          ? 'rgba(170, 170, 170, 0.55)'
+                          : null;
 
                     return (
                     <li
                       key={item.id}
                       className={`checklist-item-row${
                         hasItemMetadata ? ' has-metadata' : ''
-                      }${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}`}
+                      }${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}${
+                        isGroupedHighlight ? ' is-group-highlighted' : ''
+                      }`}
+                      style={
+                        groupHighlightColor
+                          ? ({ '--group-highlight-color': groupHighlightColor } as CSSProperties)
+                          : undefined
+                      }
                     >
                       <label className="checklist-item-toggle">
                         <input
@@ -9873,8 +10105,51 @@ export function App(): JSX.Element {
                             </button>
                           ) : null}
                           {item.versionNumber !== null ? (
-                            <span className="checklist-version-badge" data-testid="song-checklist-item-version">
+                            <span
+                              className="checklist-version-badge"
+                              data-testid="song-checklist-item-version"
+                              onMouseEnter={() =>
+                                setHoveredChecklistTag({
+                                  type: 'version',
+                                  versionNumber: item.versionNumber!,
+                                })
+                              }
+                              onMouseLeave={() => setHoveredChecklistTag(null)}
+                            >
                               v{item.versionNumber}
+                            </span>
+                          ) : null}
+                          {deviceLabel !== null ? (
+                            <span
+                              className={`checklist-listening-device-badge${
+                                deviceRef === null ? ' is-deleted' : ''
+                              }`}
+                              data-testid="song-checklist-item-listening-device"
+                              title={
+                                deviceRef
+                                  ? `Listening device: ${deviceRef.name}`
+                                  : 'This device has been removed from your saved list'
+                              }
+                              style={
+                                deviceColor
+                                  ? {
+                                      color: deviceColor.fg,
+                                      borderColor: deviceColor.border,
+                                      background: deviceColor.bg,
+                                    }
+                                  : undefined
+                              }
+                              onMouseEnter={() => {
+                                if (item.listeningDeviceId) {
+                                  setHoveredChecklistTag({
+                                    type: 'listening-device',
+                                    id: item.listeningDeviceId,
+                                  });
+                                }
+                              }}
+                              onMouseLeave={() => setHoveredChecklistTag(null)}
+                            >
+                              {deviceLabel}
                             </span>
                           ) : null}
                         </div>

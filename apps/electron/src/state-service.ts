@@ -11,6 +11,7 @@ import log from 'electron-log/main';
 import type {
   AlbumChecklistItem,
   EqSnapshot,
+  ListeningDevice,
   PersistedEqLiveState,
   ProducerPlayerUserState,
   SavedReferenceTrack,
@@ -68,7 +69,31 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       typeof c.versionNumber === 'number' && Number.isFinite(c.versionNumber) && c.versionNumber >= 1
         ? Math.trunc(c.versionNumber)
         : null;
-    return [{ id: c.id, text: c.text, completed: c.completed, timestampSeconds, versionNumber }];
+    const listeningDeviceId =
+      typeof c.listeningDeviceId === 'string' && c.listeningDeviceId.trim().length > 0
+        ? c.listeningDeviceId
+        : null;
+    return [{
+      id: c.id,
+      text: c.text,
+      completed: c.completed,
+      timestampSeconds,
+      versionNumber,
+      listeningDeviceId,
+    }];
+  });
+}
+
+function parseListeningDevices(value: unknown): ListeningDevice[] {
+  if (!Array.isArray(value)) return [];
+  const seenIds = new Set<string>();
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+    if (id.length === 0 || name.length === 0 || seenIds.has(id)) return [];
+    seenIds.add(id);
+    return [{ id, name }];
   });
 }
 
@@ -246,6 +271,8 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     agentThinking: {},
     agentSystemPrompt: '',
     agentSttProvider: '',
+    listeningDevices: [],
+    activeListeningDeviceId: null,
     referenceLevelMatchEnabled: true,
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
@@ -292,6 +319,11 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     agentThinking: parseStringMapRecord(raw.agentThinking),
     agentSystemPrompt: typeof raw.agentSystemPrompt === 'string' ? raw.agentSystemPrompt : '',
     agentSttProvider: typeof raw.agentSttProvider === 'string' ? raw.agentSttProvider : '',
+    listeningDevices: parseListeningDevices(raw.listeningDevices),
+    activeListeningDeviceId:
+      typeof raw.activeListeningDeviceId === 'string' && raw.activeListeningDeviceId.trim().length > 0
+        ? raw.activeListeningDeviceId
+        : null,
     referenceLevelMatchEnabled:
       typeof raw.referenceLevelMatchEnabled === 'boolean' ? raw.referenceLevelMatchEnabled : fallback.referenceLevelMatchEnabled,
     iCloudBackupEnabled:

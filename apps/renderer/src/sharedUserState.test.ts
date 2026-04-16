@@ -58,6 +58,7 @@ describe('shared user state sanitizers', () => {
           completed: false,
           timestampSeconds: 12.34,
           versionNumber: 4,
+          listeningDeviceId: null,
         },
         {
           id: 'item-2',
@@ -65,6 +66,51 @@ describe('shared user state sanitizers', () => {
           completed: true,
           timestampSeconds: null,
           versionNumber: null,
+          listeningDeviceId: null,
+        },
+      ],
+    });
+  });
+
+  it('preserves listeningDeviceId when valid and drops empty strings', () => {
+    expect(
+      sanitizeSongChecklists({
+        songA: [
+          {
+            id: 'item-with-device',
+            text: 'Check low end on Kali',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: 'device-abc-123',
+          },
+          {
+            id: 'item-empty-device',
+            text: 'Empty device id becomes null',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: '   ',
+          },
+        ],
+      })
+    ).toEqual({
+      songA: [
+        {
+          id: 'item-with-device',
+          text: 'Check low end on Kali',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: 'device-abc-123',
+        },
+        {
+          id: 'item-empty-device',
+          text: 'Empty device id becomes null',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
         },
       ],
     });
@@ -98,6 +144,7 @@ describe('mergeLegacyAndSharedUserState', () => {
               completed: false,
               timestampSeconds: 30,
               versionNumber: 5,
+              listeningDeviceId: null,
             },
           ],
         },
@@ -115,6 +162,7 @@ describe('mergeLegacyAndSharedUserState', () => {
               completed: false,
               timestampSeconds: 10,
               versionNumber: 4,
+              listeningDeviceId: null,
             },
           ],
           songB: [
@@ -124,6 +172,7 @@ describe('mergeLegacyAndSharedUserState', () => {
               completed: true,
               timestampSeconds: null,
               versionNumber: null,
+              listeningDeviceId: null,
             },
           ],
         },
@@ -147,6 +196,7 @@ describe('mergeLegacyAndSharedUserState', () => {
             completed: false,
             timestampSeconds: 30,
             versionNumber: 5,
+            listeningDeviceId: null,
           },
         ],
         songB: [
@@ -156,6 +206,7 @@ describe('mergeLegacyAndSharedUserState', () => {
             completed: true,
             timestampSeconds: null,
             versionNumber: null,
+            listeningDeviceId: null,
           },
         ],
       },

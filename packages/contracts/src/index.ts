@@ -227,6 +227,27 @@ export interface SongChecklistItem {
   completed: boolean;
   timestampSeconds: number | null;
   versionNumber: number | null;
+  /**
+   * Optional reference to a ListeningDevice by id. When present, the
+   * checklist item was captured while the user was listening on that device
+   * (e.g. "AirPods Pro", "Kali LP-6"). The device name/color are looked up
+   * from `ProducerPlayerUserState.listeningDevices` at render time, so
+   * renaming or deleting a device does not mutate historic items.
+   */
+  listeningDeviceId: string | null;
+}
+
+/**
+ * Persistent tag for a physical listening device (headphones, monitors, car
+ * stereo, etc.) that the user can attach to individual checklist items so
+ * they can remember what they were listening on when they jotted the note.
+ *
+ * The chip color is DERIVED from the id via a deterministic hash — it is not
+ * stored here. See `getListeningDeviceColor` in the renderer.
+ */
+export interface ListeningDevice {
+  id: string;
+  name: string;
 }
 
 export interface AlbumChecklistItem {
@@ -298,6 +319,12 @@ export interface ProducerPlayerUserState {
   agentThinking: Record<string, string>;
   agentSystemPrompt: string;
   agentSttProvider: string;
+
+  // Listening devices — per-checklist-item "what was I hearing it on" tags.
+  // The list is the user's saved tag palette; activeListeningDeviceId is the
+  // tag that new checklist items will be auto-stamped with until cleared.
+  listeningDevices: ListeningDevice[];
+  activeListeningDeviceId: string | null;
 
   // Preferences
   referenceLevelMatchEnabled: boolean;

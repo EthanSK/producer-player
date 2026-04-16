@@ -1450,6 +1450,11 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       candidate.versionNumber >= 1
         ? Math.trunc(candidate.versionNumber)
         : null;
+    const listeningDeviceId =
+      typeof candidate.listeningDeviceId === 'string' &&
+      candidate.listeningDeviceId.trim().length > 0
+        ? candidate.listeningDeviceId
+        : null;
 
     return [
       {
@@ -1458,6 +1463,7 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
         completed: candidate.completed,
         timestampSeconds,
         versionNumber,
+        listeningDeviceId,
       },
     ];
   });

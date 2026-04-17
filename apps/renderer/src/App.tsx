@@ -7741,6 +7741,51 @@ export function App(): JSX.Element {
       return;
     }
 
+    // Bug fix (2026-04-17): if the open checklist belongs to a different song
+    // than what is currently playing, clicking a timestamp used to seek on the
+    // playing song (wrong song, right time). The timestamp belongs to the
+    // checklist's song, so we must switch the global playback selection to
+    // that song first, then seek. Mirrors the invariant enforced by
+    // handleQuickSwitcherSelect and syncChecklistModalToQueueMoveTarget: the
+    // checklist's song and the globally-selected song must stay in sync when
+    // the user acts inside the checklist.
+    const modalSongId = checklistModalSongIdRef.current;
+    if (
+      modalSongId !== null &&
+      modalSongId !== selectedPlaybackSongIdRef.current
+    ) {
+      const modalSong = snapshot.songs.find((song) => song.id === modalSongId) ?? null;
+      const nextPlaybackVersionId = modalSong
+        ? getPreferredPlaybackVersionId(modalSong)
+        : null;
+
+      if (!modalSong || !nextPlaybackVersionId) {
+        return;
+      }
+
+      rememberCurrentSongPlayhead();
+
+      // Pre-seed the remembered playhead for the target song so the load
+      // path restores it to the clicked timestamp instead of position 0.
+      // This is the same mechanism the source-switch effect uses to restore
+      // a song's last playhead on re-selection (see line ~5471).
+      playbackPositionBySongIdRef.current.set(modalSongId, Math.max(0, seconds));
+
+      setPlaybackError(null);
+      setSelectedSongId(modalSongId);
+      setSelectedPlaybackVersionId(nextPlaybackVersionId);
+
+      // Match the same-song branch below: after a click, playback should be
+      // running at the clicked position — either it was already playing
+      // (stayed playing through the seek) or it was paused (seek + play).
+      // In the cross-song case, the source is being replaced, so arm
+      // play-on-load unconditionally to preserve the "click a timestamp →
+      // it plays from there" affordance.
+      playOnNextLoadRef.current = true;
+      schedulePlaybackLoadTimeout('checklist-timestamp-cross-song');
+      return;
+    }
+
     handleSeek(seconds);
 
     if (audio.paused) {

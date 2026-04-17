@@ -11332,12 +11332,12 @@ export function App(): JSX.Element {
               <button
                 type="button"
                 className="ghost"
-                onClick={handleOpenMasteringFromChecklist}
-                disabled={!checklistModalCanOpenMastering}
-                data-testid="song-checklist-open-mastering"
-                title="Open this song in full-screen mastering."
+                onClick={() => handleClearCompletedChecklistItems(checklistModalSong.id)}
+                disabled={checklistCompletedCount === 0}
+                data-testid="song-checklist-clear-completed"
+                title="Remove all completed checklist items."
               >
-                Mastering <span aria-hidden="true">⤢</span>
+                Clear Completed
               </button>
               <span className="checklist-transport-hint" data-testid="song-checklist-shift-tab-hint">
                 Shift+Tab toggles input ↔ time jumping controls
@@ -11345,12 +11345,12 @@ export function App(): JSX.Element {
               <button
                 type="button"
                 className="ghost"
-                onClick={() => handleClearCompletedChecklistItems(checklistModalSong.id)}
-                disabled={checklistCompletedCount === 0}
-                data-testid="song-checklist-clear-completed"
-                title="Remove all completed checklist items."
+                onClick={handleOpenMasteringFromChecklist}
+                disabled={!checklistModalCanOpenMastering}
+                data-testid="song-checklist-open-mastering"
+                title="Open this song in full-screen mastering."
               >
-                Clear Completed
+                Mastering <span aria-hidden="true">⤢</span>
               </button>
             </div>
           </div>

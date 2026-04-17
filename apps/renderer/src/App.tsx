@@ -7624,6 +7624,20 @@ export function App(): JSX.Element {
       setSelectedPlaybackVersionId(nextPlaybackVersionId);
     }
 
+    // Keep any open song-checklist modal (including its full-screen view) in
+    // sync with the quick-switcher's new current song. The quick switcher is
+    // an explicit "change the current song globally" control, so every view
+    // that tracks the current song — mastering fullscreen (via
+    // selectedPlaybackSongId) and the checklist overlay (via
+    // checklistModalSongId) — must follow. Prev/Next transport controls apply
+    // the same invariant via syncChecklistModalToQueueMoveTarget.
+    // Bug fix (2026-04-17): without this sync, Checklist Full Screen stayed
+    // pinned to the old song while Mastering Full Screen correctly updated.
+    if (checklistModalSongIdRef.current !== null) {
+      setChecklistModalSongId(songId);
+      resetChecklistComposer(0);
+    }
+
     // Panel stays open — user closes via toggle button, backdrop click, or Escape.
 
     if (!nextPlaybackVersionId) return;

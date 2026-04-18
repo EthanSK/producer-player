@@ -381,6 +381,11 @@ const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
 const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const ALBUM_CHECKLIST_STORAGE_KEY = 'producer-player.album-checklist.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
+// v3.20: the inspector side-pane collapses into a right-edge drawer whenever the
+// viewport is narrower than this threshold. Kept in sync with the matching
+// `@media` query in styles.css (`.inspector-toggle-button`, `.app-shell`).
+const INSPECTOR_DRAWER_BREAKPOINT_PX = 1120;
+const INSPECTOR_DRAWER_OPEN_KEY = 'producer-player.inspector-drawer-open.v1';
 const COMPACT_MASTERING_PANEL_LAYOUT_KEY = 'producer-player.mastering-layout.compact.v1';
 const REFERENCE_LEVEL_MATCH_KEY = 'producer-player.reference-level-match.v1';
 const AUTO_UPDATE_ENABLED_KEY = 'producer-player.auto-update-enabled.v1';
@@ -1981,6 +1986,17 @@ export function App(): JSX.Element {
   const inspectorVersionSampleRatePendingVersionIdsRef = useRef<Set<string>>(new Set());
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+  // Inspector drawer (v3.20). At narrow viewport widths the right-hand
+  // inspector pane collapses into a slide-in drawer triggered from a toolbar
+  // button next to the Agent Chat Trigger. Open-state persists across reloads.
+  const [inspectorDrawerOpen, setInspectorDrawerOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(INSPECTOR_DRAWER_OPEN_KEY) === 'true';
+  });
+  const [isNarrowViewport, setIsNarrowViewport] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth <= INSPECTOR_DRAWER_BREAKPOINT_PX;
+  });
   const [mixRefShortcut, setMixRefShortcut] = useState<StoredShortcut>(readStoredShortcut);
   const [shortcutRecording, setShortcutRecording] = useState(false);
   const [shortcutSectionExpanded, setShortcutSectionExpanded] = useState(false);
@@ -2566,6 +2582,47 @@ export function App(): JSX.Element {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [analysisExpanded, quickSwitcherOpen]);
+
+  // Track viewport width so the inspector collapses into a drawer at narrow
+  // widths. The threshold matches the matching CSS media query in styles.css.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      setIsNarrowViewport(window.innerWidth <= INSPECTOR_DRAWER_BREAKPOINT_PX);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  // Persist the drawer open-state across reloads. Drawer only has an effect
+  // at narrow widths (above the threshold the inspector renders inline), but
+  // we persist the boolean regardless so reopening a narrow window restores it.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        INSPECTOR_DRAWER_OPEN_KEY,
+        inspectorDrawerOpen ? 'true' : 'false'
+      );
+    } catch {
+      /* ignore quota errors */
+    }
+  }, [inspectorDrawerOpen]);
+
+  // Close the drawer on Escape when it's open.
+  useEffect(() => {
+    if (!inspectorDrawerOpen || !isNarrowViewport) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setInspectorDrawerOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [inspectorDrawerOpen, isNarrowViewport]);
 
   // Customizable keyboard shortcut to toggle Mix/Reference playback (global — works in any view).
   // Default: Cmd+R (macOS) / Ctrl+R (Windows/Linux). User can rebind via the Shortcut section.
@@ -11238,9 +11295,33 @@ export function App(): JSX.Element {
         )}
       </main>
 
-      <aside className="panel panel-right">
+      {/* v3.20: Inspector pane. At wide viewport widths it renders inline as the
+          right-hand column of the app-shell grid. At narrow widths it collapses
+          into a right-edge slide-in drawer toggled by `inspector-toggle` near
+          the Agent Chat Trigger. CSS media queries drive the visual mode; the
+          `inspector-drawer-open` class controls the slide state. The backdrop
+          catches outside clicks so the drawer doesn't trap the user. Setting
+          `inert` when the drawer is visually closed at narrow widths removes
+          the off-screen content from tab-order and the accessibility tree so
+          keyboard/screen-reader users can't focus invisible controls. */}
+      <aside
+        id="inspector-drawer"
+        className={`panel panel-right inspector-drawer${
+          inspectorDrawerOpen ? ' inspector-drawer-open' : ''
+        }`}
+        role="complementary"
+        aria-labelledby="inspector-drawer-heading"
+        data-testid="inspector-drawer"
+        data-inspector-drawer-open={inspectorDrawerOpen ? 'true' : 'false'}
+        // When narrow + closed, the drawer is off-screen via transform; mark
+        // it inert so keyboard/assistive-tech can't focus invisible controls.
+        // (React 18 doesn't type `inert`; pass through via string prop.)
+        {...(isNarrowViewport && !inspectorDrawerOpen
+          ? ({ inert: '', 'aria-hidden': true } as Record<string, unknown>)
+          : {})}
+      >
         <header className="panel-header">
-          <h2>Inspector</h2>
+          <h2 id="inspector-drawer-heading">Inspector</h2>
         </header>
 
         <div
@@ -14180,6 +14261,49 @@ export function App(): JSX.Element {
         <AgentChatPanel
           getAnalysisContext={getAnalysisContext}
           promptRequest={agentChatPromptRequest}
+        />
+      ) : null}
+
+      {/* v3.20: Inspector drawer toggle. Sits adjacent to the Agent Chat
+          Trigger (floating bottom-right). Only visible at narrow viewports —
+          above the breakpoint the inspector is already shown inline and the
+          toggle is hidden via CSS. */}
+      <button
+        type="button"
+        className={`inspector-toggle-button${inspectorDrawerOpen ? ' inspector-toggle-button--active' : ''}`}
+        onClick={() => setInspectorDrawerOpen((previous) => !previous)}
+        data-testid="inspector-toggle"
+        title={inspectorDrawerOpen ? 'Close inspector' : 'Open inspector'}
+        aria-label="Toggle inspector"
+        aria-expanded={inspectorDrawerOpen}
+        aria-controls="inspector-drawer"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="20"
+          height="20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <line x1="15" y1="4" x2="15" y2="20" />
+        </svg>
+      </button>
+
+      {/* Backdrop: a click outside the drawer closes it. Only rendered when the
+          drawer is actually showing (narrow viewport + open). Pointer events
+          are enabled via CSS only in that mode; transparent so the underlying
+          UI remains visible. */}
+      {inspectorDrawerOpen && isNarrowViewport ? (
+        <div
+          className="inspector-drawer-backdrop"
+          data-testid="inspector-drawer-backdrop"
+          onClick={() => setInspectorDrawerOpen(false)}
+          aria-hidden="true"
         />
       ) : null}
 

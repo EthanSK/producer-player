@@ -3538,7 +3538,11 @@ function buildEnvironmentInfo(): ProducerPlayerEnvironment {
 
 const DEFAULT_MAIN_WINDOW_WIDTH = 1380;
 const DEFAULT_MAIN_WINDOW_HEIGHT = 940;
-const MIN_MAIN_WINDOW_WIDTH = 1100;
+// Lowered from 1100 → 720 in v3.20 so the app fits onto narrower laptop panes
+// and side-by-side layouts. The right-hand inspector collapses into a
+// slide-out drawer below the INSPECTOR_DRAWER_BREAKPOINT_PX threshold
+// (see apps/renderer/src/styles.css).
+const MIN_MAIN_WINDOW_WIDTH = 720;
 const MIN_MAIN_WINDOW_HEIGHT = 780;
 const WINDOW_BOUNDS_SAVE_DEBOUNCE_MS = 400;
 // An on-screen region must be at least this many pixels wide/tall for the

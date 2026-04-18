@@ -10175,10 +10175,13 @@ export function App(): JSX.Element {
 
               <div className="analysis-stat-grid compact">
                 <div
-                  className="analysis-stat-card"
+                  className="analysis-stat-card loudness-metric--primary"
                   data-testid="analysis-integrated-stat"
+                  data-emphasized="true"
+                  aria-label="Integrated LUFS — primary loudness measurement"
                   title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file."
                 >
+                  <span className="loudness-metric-eyebrow" aria-hidden="true">Integrated</span>
                   <span className="analysis-stat-label">Integrated LUFS{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_INTEGRATED_LUFS} /></span>
                   <strong>{measuredIntegratedText}</strong>
                 </div>
@@ -13256,7 +13259,14 @@ export function App(): JSX.Element {
                     {renderMasteringPanelDragHandle('fullscreen', 'loudness-peaks')}
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide analysis-overlay-loudness-peaks-grid">
-                    <div className="analysis-stat-card" title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file.">
+                    <div
+                      className="analysis-stat-card loudness-metric--primary"
+                      data-testid="analysis-overlay-integrated-stat"
+                      data-emphasized="true"
+                      aria-label="Integrated LUFS — primary loudness measurement"
+                      title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file."
+                    >
+                      <span className="loudness-metric-eyebrow" aria-hidden="true">Integrated</span>
                       <span className="analysis-stat-label">Integrated LUFS{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_INTEGRATED_LUFS} /></span>
                       <strong>{measuredIntegratedText}</strong>
                     </div>

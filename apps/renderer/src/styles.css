@@ -742,6 +742,36 @@ input[type='range'] {
   min-height: 0;
 }
 
+/*
+ * loudness-metric--primary: emphasis modifier for the Integrated LUFS row in
+ * the Loudness & Peaks section. Integrated LUFS is the headline streaming-
+ * normalization measurement; the rest of the metrics read as supporting
+ * context. Applied to the Integrated LUFS .analysis-stat-card in both the
+ * compact side panel and the fullscreen mastering overlay.
+ */
+.analysis-stat-card.loudness-metric--primary {
+  border: 1.5px solid var(--accent);
+  background: rgba(92, 167, 255, 0.08);
+  box-shadow: 0 0 0 1px rgba(92, 167, 255, 0.12) inset;
+}
+
+.analysis-stat-card.loudness-metric--primary .loudness-metric-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.analysis-stat-card.loudness-metric--primary strong {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
 .analysis-empty-card {
   grid-column: 1 / -1;
 }

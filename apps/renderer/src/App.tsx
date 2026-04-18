@@ -2547,6 +2547,10 @@ export function App(): JSX.Element {
   }, [referenceTrack, playbackPreviewMode, eqEnabled, eqBandGains, mixRefShortcut]);
 
   // Shortcut recording: listen for the next keypress combo and save it
+  const shortcutRecordingRef = useRef(shortcutRecording);
+  useEffect(() => {
+    shortcutRecordingRef.current = shortcutRecording;
+  }, [shortcutRecording]);
   useEffect(() => {
     if (!shortcutRecording) return;
 
@@ -5950,19 +5954,40 @@ export function App(): JSX.Element {
         return;
       }
 
-      if (active instanceof HTMLButtonElement || textEntryFocused) {
+      // Shortcut-recording mode: the user is about to bind a key combo
+      // (possibly Space itself). Defer to the shortcut recorder's own
+      // capture-phase listener — don't toggle playback here.
+      if (shortcutRecordingRef.current) {
         return;
       }
 
-      // For everything else — range sliders, buttons, divs, timeline,
-      // the body, or any non-text-entry element — always toggle play/pause.
+      // Text inputs / textareas / contentEditable MUST still accept
+      // Space as a literal character. Everything else — buttons,
+      // sliders, divs, the body, the floating mastering mix/reference
+      // widget, etc. — routes Space to play/pause.
+      //
+      // Bug fix 2026-04-18: previously a focused <button> was excluded
+      // here, which meant the browser's default "Space activates the
+      // focused button" fired instead of toggling playback. Space must
+      // ALWAYS toggle play/pause regardless of which button is focused.
+      // See apps/e2e/src/space-always-plays.spec.ts for the regression
+      // coverage.
+      if (textEntryFocused) {
+        return;
+      }
+
       event.preventDefault();
+      event.stopPropagation();
       transportActionRef.current.toggle();
     };
 
-    window.addEventListener('keydown', onKeyDown);
+    // Capture phase so we win against any bubble-phase React onKeyDown
+    // on intermediate elements and, more importantly, so we call
+    // preventDefault() before the browser synthesizes a `click` from
+    // Space on a focused button.
+    window.addEventListener('keydown', onKeyDown, true);
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown, true);
     };
   }, []);
 

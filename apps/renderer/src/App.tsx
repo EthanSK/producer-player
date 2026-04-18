@@ -8417,8 +8417,11 @@ export function App(): JSX.Element {
 
   function handleChecklistDawOffsetMinutesChange(raw: string): void {
     // Allow empty string while editing (treat as 0); otherwise clamp
-    // to 0..99 and truncate to 2 digits (per-task spec).
-    const digitsOnly = raw.replace(/\D+/g, '').slice(0, 2);
+    // to 0..99 and keep the most-recent 2 digits. Using slice(-2)
+    // (rather than slice(0, 2)) lets typing a digit "append" onto the
+    // zero-padded controlled value — e.g. typing "2" into "01" yields
+    // "12", which also satisfies the 2-digit auto-advance trigger.
+    const digitsOnly = raw.replace(/\D+/g, '').slice(-2);
     const minutes = digitsOnly === '' ? 0 : Math.max(0, Math.min(99, Number.parseInt(digitsOnly, 10)));
     writeChecklistDawOffset(
       minutes * 60 + checklistDawOffsetSecondsPart,
@@ -8445,7 +8448,9 @@ export function App(): JSX.Element {
   }
 
   function handleChecklistDawOffsetSecondsChange(raw: string): void {
-    const digitsOnly = raw.replace(/\D+/g, '').slice(0, 2);
+    // See comment on handleChecklistDawOffsetMinutesChange for why we
+    // use slice(-2) instead of slice(0, 2).
+    const digitsOnly = raw.replace(/\D+/g, '').slice(-2);
     const seconds = digitsOnly === '' ? 0 : Math.max(0, Math.min(59, Number.parseInt(digitsOnly, 10)));
     writeChecklistDawOffset(
       checklistDawOffsetMinutes * 60 + seconds,
@@ -10952,7 +10957,6 @@ export function App(): JSX.Element {
                     onPaste={handleChecklistDawOffsetPaste}
                     aria-label="DAW offset minutes"
                     data-testid="checklist-daw-offset-minutes"
-                    maxLength={2}
                   />
                   <span className="checklist-daw-offset-colon">:</span>
                   <input
@@ -10969,7 +10973,6 @@ export function App(): JSX.Element {
                     onPaste={handleChecklistDawOffsetPaste}
                     aria-label="DAW offset seconds"
                     data-testid="checklist-daw-offset-seconds"
-                    maxLength={2}
                   />
                 </div>
                 <label className="checklist-daw-offset-toggle" title={checklistDawOffsetEnabled ? 'Disable DAW offset' : 'Enable DAW offset'}>

@@ -4,8 +4,27 @@
  * Reads/writes `producer-player-user-state.json` as the single source of truth
  * for all user-authored data. Provides migration from the old split format
  * (electron-state.json + shared-user-state.json + renderer localStorage keys).
+ *
+ * v3.29 MVP split layout (behind a `.migrated` sentinel):
+ *   state/global.json        — all non-per-track fields
+ *   state/tracks/<songId>.json — one file per track
+ *   state/.migrated          — sentinel (empty file) flagging "migration done"
+ *
+ * The original monolithic `producer-player-user-state.json` is preserved for
+ * backwards compatibility, and a one-shot timestamped backup
+ * (`*.bak-pre-split-<ts>`) is written next to it.
  */
-import { existsSync, promises as fs } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+  copyFileSync,
+  promises as fs,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import log from 'electron-log/main';
 import type {
@@ -25,6 +44,35 @@ import type {
 
 export const UNIFIED_STATE_FILE_NAME = 'producer-player-user-state.json';
 const CURRENT_SCHEMA_VERSION = 1;
+
+// v3.29 split layout
+export const STATE_SUBDIR = 'state';
+export const TRACKS_SUBDIR = 'tracks';
+export const GLOBAL_STATE_FILE = 'global.json';
+export const MIGRATED_SENTINEL = '.migrated';
+
+/**
+ * Keys in `ProducerPlayerUserState` that are keyed by songId. These get
+ * hoisted into per-track files under `state/tracks/<songId>.json`.
+ *
+ * Kept explicit (not inferred from the type) so adding a new top-level field
+ * to `ProducerPlayerUserState` is a deliberate decision about whether it's
+ * global or per-track — silent misclassification of a new field would be a
+ * state-corruption bug.
+ */
+export const PER_TRACK_KEYS = [
+  'songRatings',
+  'songChecklists',
+  'songProjectFilePaths',
+  'perSongReferenceTracks',
+  'perSongRestoreReferenceEnabled',
+  'eqSnapshots',
+  'eqLiveStates',
+  'aiEqRecommendations',
+  'songDawOffsets',
+] as const satisfies readonly (keyof ProducerPlayerUserState)[];
+
+export type PerTrackKey = (typeof PER_TRACK_KEYS)[number];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -420,7 +468,7 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
 }
 
 // ---------------------------------------------------------------------------
-// Atomic write helper
+// Atomic write helpers
 // ---------------------------------------------------------------------------
 
 async function writeJsonAtomic(filePath: string, payload: unknown): Promise<void> {
@@ -443,6 +491,193 @@ async function writeJsonAtomic(filePath: string, payload: unknown): Promise<void
   }
 }
 
+/**
+ * Synchronous atomic JSON writer — used by the one-shot migration path
+ * which MUST complete before the app finishes startup.
+ */
+function writeJsonAtomicSync(filePath: string, payload: unknown): void {
+  mkdirSync(dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const serialized = `${JSON.stringify(payload, null, 2)}\n`;
+  writeFileSync(tempPath, serialized, 'utf8');
+  try {
+    renameSync(tempPath, filePath);
+  } catch (error: unknown) {
+    const code =
+      typeof error === 'object' && error && 'code' in error
+        ? String((error as { code?: unknown }).code)
+        : null;
+    if (code !== 'EEXIST' && code !== 'EPERM') throw error;
+    try {
+      unlinkSync(filePath);
+    } catch { /* ignore */ }
+    renameSync(tempPath, filePath);
+  } finally {
+    try {
+      unlinkSync(tempPath);
+    } catch { /* tmp already renamed/gone — fine */ }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v3.29 MVP split: monolithic → per-track files + global file
+// ---------------------------------------------------------------------------
+
+interface SplitLayoutPaths {
+  stateDir: string;
+  tracksDir: string;
+  globalFile: string;
+  sentinel: string;
+  monolithic: string;
+}
+
+function getSplitLayoutPaths(userDataDir: string): SplitLayoutPaths {
+  const stateDir = join(userDataDir, STATE_SUBDIR);
+  return {
+    stateDir,
+    tracksDir: join(stateDir, TRACKS_SUBDIR),
+    globalFile: join(stateDir, GLOBAL_STATE_FILE),
+    sentinel: join(stateDir, MIGRATED_SENTINEL),
+    monolithic: join(userDataDir, UNIFIED_STATE_FILE_NAME),
+  };
+}
+
+/**
+ * Split a parsed monolithic state into a (globalFields, trackBuckets) pair,
+ * hoisting every songId-keyed sub-map under PER_TRACK_KEYS into its own
+ * per-track bucket. Pure / synchronous — safe to unit test without disk I/O.
+ */
+export function splitStateForDisk(
+  state: ProducerPlayerUserState,
+): { globalFields: Record<string, unknown>; trackBuckets: Map<string, Record<string, unknown>> } {
+  const globalFields: Record<string, unknown> = { ...(state as unknown as Record<string, unknown>) };
+  const trackBuckets = new Map<string, Record<string, unknown>>();
+
+  for (const key of PER_TRACK_KEYS) {
+    const map = (state as unknown as Record<string, unknown>)[key];
+    delete globalFields[key];
+    if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
+    for (const [songId, val] of Object.entries(map as Record<string, unknown>)) {
+      if (!songId) continue;
+      let bucket = trackBuckets.get(songId);
+      if (!bucket) {
+        bucket = {};
+        trackBuckets.set(songId, bucket);
+      }
+      bucket[key] = val;
+    }
+  }
+
+  return { globalFields, trackBuckets };
+}
+
+/**
+ * Reverse of `splitStateForDisk`: rebuild a single
+ * Record<perTrackKey, Record<songId, val>> shape from
+ * (global + per-track files), then re-run it through `parseUserState` so
+ * any field drift is corrected.
+ */
+function reassembleSplitState(
+  globalFields: Record<string, unknown>,
+  trackFiles: { songId: string; data: Record<string, unknown> }[],
+): ProducerPlayerUserState {
+  const reconstructed: Record<string, unknown> = { ...globalFields };
+
+  for (const key of PER_TRACK_KEYS) {
+    // Seed with an empty object so `parseUserState` sees the key.
+    if (!reconstructed[key] || typeof reconstructed[key] !== 'object' || Array.isArray(reconstructed[key])) {
+      reconstructed[key] = {};
+    }
+  }
+
+  for (const { songId, data } of trackFiles) {
+    for (const key of PER_TRACK_KEYS) {
+      if (!(key in data)) continue;
+      const bucket = reconstructed[key] as Record<string, unknown>;
+      bucket[songId] = data[key];
+    }
+  }
+
+  return parseUserState(reconstructed);
+}
+
+/**
+ * One-shot migration: if `state/.migrated` is absent, split the monolithic
+ * `producer-player-user-state.json` into `state/global.json` +
+ * `state/tracks/<songId>.json`. Safe to call unconditionally on every
+ * startup — idempotent once the sentinel exists.
+ *
+ * Leaves the original monolithic file in place for backwards compatibility
+ * and writes a permanent `*.bak-pre-split-<ts>` copy next to it before
+ * touching anything.
+ */
+export function migrateStateIfNeeded(userDataDir: string): void {
+  const paths = getSplitLayoutPaths(userDataDir);
+
+  if (existsSync(paths.sentinel)) return; // already done
+
+  if (!existsSync(paths.monolithic)) {
+    // First-time install: initialize the new layout empty and mark migrated.
+    mkdirSync(paths.tracksDir, { recursive: true });
+    writeJsonAtomicSync(paths.globalFile, {});
+    writeFileSync(paths.sentinel, '');
+    log.info('[state-service] Fresh install — initialized empty split state layout');
+    return;
+  }
+
+  log.info('[state-service] Migrating monolithic state → split layout (v3.29 MVP)');
+
+  // 1. Permanent backup of the monolithic file.
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = `${paths.monolithic}.bak-pre-split-${ts}`;
+  copyFileSync(paths.monolithic, backupPath);
+  log.info(`[state-service] Wrote pre-split backup: ${backupPath}`);
+
+  // 2. Parse monolithic through the validator so we split clean data.
+  const raw = readFileSync(paths.monolithic, 'utf8');
+  const parsed = parseUserState(JSON.parse(raw));
+
+  // 3. Split.
+  const { globalFields, trackBuckets } = splitStateForDisk(parsed);
+
+  // 4. Write (atomic temp+rename per file).
+  mkdirSync(paths.tracksDir, { recursive: true });
+  for (const [songId, trackData] of trackBuckets) {
+    writeJsonAtomicSync(join(paths.tracksDir, `${encodeSongIdForFilename(songId)}.json`), trackData);
+  }
+  writeJsonAtomicSync(paths.globalFile, globalFields);
+
+  // 5. Sentinel last — so a crash mid-migration leaves the monolithic
+  // readable and re-running the migration is safe.
+  writeFileSync(paths.sentinel, '');
+  log.info(
+    `[state-service] Split migration complete: ${trackBuckets.size} per-track files + global.json`,
+  );
+}
+
+/**
+ * songIds come from the app's library scanner (and user-imported state) and
+ * can contain arbitrary characters including slashes, `*`, `.`, and other
+ * tokens that are unsafe as filenames on macOS/Linux/Windows. Encode every
+ * id with base64url of its UTF-8 bytes so the mapping is injective (no
+ * collisions) and the resulting filename is valid across all platforms.
+ *
+ * Codex 2026-04-18: base64url replaces an earlier percent-encoding scheme
+ * that collided on ids like `.foo` vs `_.foo` and left `*` unescaped
+ * (invalid on Windows).
+ */
+function encodeSongIdForFilename(songId: string): string {
+  return Buffer.from(songId, 'utf8').toString('base64url');
+}
+
+function decodeSongIdFromFilename(baseName: string): string {
+  try {
+    return Buffer.from(baseName, 'base64url').toString('utf8');
+  } catch {
+    return baseName;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // State Service
 // ---------------------------------------------------------------------------
@@ -459,16 +694,29 @@ export class UserStateService {
     return join(this.stateDirectoryPath, UNIFIED_STATE_FILE_NAME);
   }
 
+  private getSplitPaths(): SplitLayoutPaths {
+    return getSplitLayoutPaths(this.stateDirectoryPath);
+  }
+
+  /** Whether the v3.29 split layout is active (sentinel present). */
+  isSplitLayout(): boolean {
+    return existsSync(this.getSplitPaths().sentinel);
+  }
+
   /** Read the unified state from disk (cached after first read). */
   async readUserState(): Promise<ProducerPlayerUserState> {
     if (this.cachedState) return this.cachedState;
 
-    const filePath = this.getFilePath();
-    try {
-      const raw = await fs.readFile(filePath, 'utf8');
-      this.cachedState = parseUserState(JSON.parse(raw));
-    } catch {
-      this.cachedState = createDefaultUserState();
+    if (this.isSplitLayout()) {
+      this.cachedState = await this.readSplitState();
+    } else {
+      const filePath = this.getFilePath();
+      try {
+        const raw = await fs.readFile(filePath, 'utf8');
+        this.cachedState = parseUserState(JSON.parse(raw));
+      } catch {
+        this.cachedState = createDefaultUserState();
+      }
     }
 
     return this.cachedState;
@@ -478,7 +726,13 @@ export class UserStateService {
   async writeUserState(state: ProducerPlayerUserState): Promise<ProducerPlayerUserState> {
     const validated = parseUserState(state);
     validated.updatedAt = new Date().toISOString();
-    await writeJsonAtomic(this.getFilePath(), validated);
+
+    if (this.isSplitLayout()) {
+      await this.writeSplitState(validated);
+    } else {
+      await writeJsonAtomic(this.getFilePath(), validated);
+    }
+
     this.cachedState = validated;
     return validated;
   }
@@ -497,7 +751,90 @@ export class UserStateService {
 
   /** Whether the unified state file exists on disk. */
   fileExists(): boolean {
-    return existsSync(this.getFilePath());
+    return existsSync(this.getFilePath()) || this.isSplitLayout();
+  }
+
+  // -----------------------------------------------------------------------
+  // Split layout read / write (v3.29 MVP)
+  // -----------------------------------------------------------------------
+
+  private async readSplitState(): Promise<ProducerPlayerUserState> {
+    const paths = this.getSplitPaths();
+
+    let globalFields: Record<string, unknown> = {};
+    try {
+      const raw = await fs.readFile(paths.globalFile, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        globalFields = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Missing/corrupt global.json — fall back to an empty global slice so
+      // per-track data still loads. Phase 1.5 will add corrupt-recovery.
+    }
+
+    const trackFiles: { songId: string; data: Record<string, unknown> }[] = [];
+    try {
+      const entries = await fs.readdir(paths.tracksDir);
+      await Promise.all(
+        entries
+          .filter((name) => name.endsWith('.json'))
+          .map(async (name) => {
+            try {
+              const raw = await fs.readFile(join(paths.tracksDir, name), 'utf8');
+              const parsed = JSON.parse(raw);
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const songId = decodeSongIdFromFilename(name.slice(0, -'.json'.length));
+                trackFiles.push({ songId, data: parsed as Record<string, unknown> });
+              }
+            } catch {
+              // Skip corrupt/unreadable per-track file; Phase 1.5 adds recovery.
+              log.warn(`[state-service] Skipped unreadable track file: ${name}`);
+            }
+          }),
+      );
+    } catch {
+      // tracksDir missing — treat as no tracks.
+    }
+
+    return reassembleSplitState(globalFields, trackFiles);
+  }
+
+  private async writeSplitState(state: ProducerPlayerUserState): Promise<void> {
+    const paths = this.getSplitPaths();
+    const { globalFields, trackBuckets } = splitStateForDisk(state);
+
+    await fs.mkdir(paths.tracksDir, { recursive: true });
+
+    // Write global + per-track files. Use the existing async atomic helper
+    // so each file flips from old→new in one rename.
+    await writeJsonAtomic(paths.globalFile, globalFields);
+
+    const wantedFilenames = new Set<string>();
+    for (const [songId, trackData] of trackBuckets) {
+      const filename = `${encodeSongIdForFilename(songId)}.json`;
+      wantedFilenames.add(filename);
+      await writeJsonAtomic(join(paths.tracksDir, filename), trackData);
+    }
+
+    // Prune per-track files for songs that are no longer present. We never
+    // touch `.migrated` or anything that doesn't end in .json.
+    try {
+      const existing = await fs.readdir(paths.tracksDir);
+      for (const name of existing) {
+        if (!name.endsWith('.json')) continue;
+        if (wantedFilenames.has(name)) continue;
+        await fs.unlink(join(paths.tracksDir, name)).catch(() => undefined);
+      }
+    } catch {
+      // tracksDir read error — non-fatal for this write.
+    }
+
+    // v3.29 MVP: also mirror the full state to the monolithic file. The
+    // split layout is authoritative on read, but several surfaces (E2E
+    // tests, ad-hoc inspection, iCloud backup) still read the monolithic
+    // path directly. Phase 1.5 will decide whether to retire the mirror.
+    await writeJsonAtomic(paths.monolithic, state);
   }
 
   // -----------------------------------------------------------------------

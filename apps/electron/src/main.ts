@@ -99,7 +99,13 @@ import {
 } from '@producer-player/contracts';
 import { FileLibraryService } from '@producer-player/domain';
 import * as agentService from './agent-service';
-import { UserStateService, parseUserState, createDefaultUserState, UNIFIED_STATE_FILE_NAME } from './state-service';
+import {
+  UserStateService,
+  parseUserState,
+  createDefaultUserState,
+  UNIFIED_STATE_FILE_NAME,
+  migrateStateIfNeeded,
+} from './state-service';
 
 declare const __PRODUCER_PLAYER_APP_VERSION__: string;
 declare const __PRODUCER_PLAYER_BUILD_NUMBER__: string;
@@ -5132,8 +5138,12 @@ app.whenReady().then(async () => {
   // Initialize the unified user state service
   userStateService = new UserStateService(getStateDirectoryPath());
 
-  // Migrate from old split format if the unified state file doesn't exist yet
-  if (!userStateService.fileExists()) {
+  // Legacy migration first: if we have neither the monolithic file nor the
+  // v3.29 split layout yet, but DO have the pre-2.45 split files
+  // (electron-state + shared-user-state), produce a monolithic file so the
+  // v3.29 split-migration below has something to split.
+  const monolithicPath = join(getStateDirectoryPath(), UNIFIED_STATE_FILE_NAME);
+  if (!existsSync(monolithicPath) && !userStateService.isSplitLayout()) {
     const oldElectronStatePath = getStateFilePath();
     const oldSharedStatePath = getSharedUserStateFilePath();
     const hasOldFiles = existsSync(oldElectronStatePath) || existsSync(oldSharedStatePath);
@@ -5148,6 +5158,21 @@ app.whenReady().then(async () => {
         {},
       );
     }
+  }
+
+  // v3.29 MVP: split the monolithic state into per-track + global files
+  // on first launch after the upgrade. Runs before any readUserState() call
+  // so the cached state is populated from the new layout. Idempotent —
+  // a `state/.migrated` sentinel short-circuits re-entry.
+  try {
+    migrateStateIfNeeded(getStateDirectoryPath());
+    // After the split flips the layout, the cached state (populated by the
+    // legacy migration above via writeUserState → monolithic) no longer
+    // matches what's on disk in the split files. Invalidate so the next
+    // readUserState() re-parses from the split layout.
+    userStateService.invalidateCache();
+  } catch (error: unknown) {
+    log.warn('[producer-player] v3.29 state split migration failed — continuing with monolithic layout', error);
   }
 
   // Restore last-used file dialog directory from persisted state

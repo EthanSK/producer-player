@@ -2391,6 +2391,25 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   font-weight: 600;
 }
 
+/* Help icon sits immediately to the left of the DAW offset label. The shared
+ * help-tooltip-trigger button has margin-left: 4px by default (used in inline
+ * heading contexts); zero it out here so the container gap: 8px is the sole
+ * spacing between the icon and the label. */
+.checklist-daw-offset-help {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+.checklist-daw-offset-help .help-tooltip-trigger {
+  margin-left: 0;
+}
+
+.checklist-daw-offset-control.is-active .checklist-daw-offset-help .help-tooltip-trigger {
+  border-color: rgba(95, 210, 143, 0.45);
+  color: var(--success);
+}
+
 .checklist-daw-offset-inputs {
   display: inline-flex;
   align-items: center;

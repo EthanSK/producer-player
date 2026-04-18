@@ -10838,6 +10838,14 @@ export function App(): JSX.Element {
                 data-testid="checklist-daw-offset-control"
                 title="Add a DAW time offset so timestamps displayed here line up with your digital audio workstation arrangement position. Does not change where clicks seek to."
               >
+                <span
+                  className="checklist-daw-offset-help"
+                  data-testid="checklist-daw-offset-help"
+                >
+                  <HelpTooltip
+                    text={"DAW offset shifts every displayed checklist timestamp by a fixed minutes:seconds amount so the numbers line up with your DAW's arrangement timeline.\n\nUse it when your song in the DAW starts partway in (say, at 0:42) but the exported slice you imported into Producer Player starts at 0:00 — set the offset to 0:42 and the timestamps will match what you see in the DAW.\n\nClicking a timestamp still seeks the correct audio position; the offset only changes the displayed numbers. When enabled, offset timestamps render green as a visual reminder that they're shifted."}
+                  />
+                </span>
                 <span className="checklist-daw-offset-label">DAW offset</span>
                 <div className="checklist-daw-offset-inputs">
                   <input

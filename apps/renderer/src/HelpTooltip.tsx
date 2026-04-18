@@ -151,13 +151,18 @@ function HelpModal({
   links: HelpTooltipLink[];
   onClose: () => void;
 }): JSX.Element {
-  // Close on Escape key
+  // Close on Escape key. Capture-phase + stopPropagation so the Escape doesn't
+  // also collapse a parent modal that has its own top-level Escape handler
+  // (e.g. the full-screen checklist).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => window.removeEventListener('keydown', handler, { capture: true });
   }, [onClose]);
 
   const tutorialLinks = links;

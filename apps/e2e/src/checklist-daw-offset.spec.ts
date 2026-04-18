@@ -179,6 +179,59 @@ test.describe('Checklist DAW time offset', () => {
     }
   });
 
+  test('DAW offset help icon opens a dialog explaining the feature and closes on Escape', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-daw-offset-help-icon'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await seedChecklistWithTimestamp(page);
+      await page.reload();
+      await page.waitForSelector('[data-testid="app-shell"]');
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await openChecklist(page);
+
+      // Help icon sits inside the DAW offset control, immediately LEFT of the label.
+      const helpWrapper = page.getByTestId('checklist-daw-offset-help');
+      await expect(helpWrapper).toBeVisible();
+
+      // Order check — help icon precedes the label text visually.
+      const helpAndLabelOrder = await page.evaluate(() => {
+        const help = document.querySelector('[data-testid="checklist-daw-offset-help"]');
+        const label = document.querySelector('.checklist-daw-offset-label');
+        if (!help || !label) return null;
+        return help.getBoundingClientRect().left < label.getBoundingClientRect().left;
+      });
+      expect(helpAndLabelOrder).toBe(true);
+
+      // Click the icon — the portalled dialog should appear. Filter by the
+      // help copy since the parent checklist modal is also role=dialog.
+      await helpWrapper.getByRole('button', { name: /help/i }).click();
+      const helpDialog = page
+        .getByRole('dialog')
+        .filter({ hasText: /DAW offset shifts every displayed checklist timestamp/i });
+      await expect(helpDialog).toBeVisible();
+      await expect(helpDialog).toContainText(/exported slice/i);
+      await saveScreenshot(page, 'offset-help-dialog.png');
+
+      // Escape closes the help dialog (not the underlying checklist modal).
+      await page.keyboard.press('Escape');
+      await expect(helpDialog).toBeHidden();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('DAW offset + toggle state persist across relaunches via unified user state', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-daw-offset-persist'

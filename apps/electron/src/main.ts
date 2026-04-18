@@ -152,8 +152,19 @@ const PUBLIC_RELEASES_LATEST_DOWNLOAD_BASE_URL =
   `${PUBLIC_REPOSITORY_ORIGIN}${PUBLIC_REPOSITORY_PATH}/releases/latest/download`;
 const GITHUB_RELEASES_LATEST_API_URL = 'https://api.github.com/repos/EthanSK/producer-player/releases/latest';
 const UPDATE_CHECK_TIMEOUT_MS = 12_000;
-const AUTO_UPDATE_CHECK_DELAY_MS = 9_000;
-const AUTO_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Delay the first update check ~3s after window create so the UI is visible
+// before any banner can appear. (Prior 9s was chosen to debounce renderer
+// state churn; the debounce is now handled by a latch — see
+// `autoUpdateInitialCheckArmed` — so the user-facing delay can shrink.)
+const AUTO_UPDATE_CHECK_DELAY_MS = 3_000;
+// Re-check every 30 minutes while the app is open. Previously 6h which
+// meant a long-running session would only check twice a day; users who
+// quit+relaunch rarely (e.g. via Dock) could miss updates for days.
+const AUTO_UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+// Exponential backoff schedule for transient `checkForUpdates` failures.
+// Each entry is delay-ms for the NEXT attempt (attempt 1 fires immediately,
+// then if it fails we schedule attempt 2 after the first delay, etc.).
+const AUTO_UPDATE_RETRY_DELAYS_MS = [10_000, 30_000, 60_000] as const;
 const AGENT_FEATURES_DISABLED_MESSAGE = 'Agent features are disabled by feature flag.';
 
 /**
@@ -340,6 +351,54 @@ log.errorHandler.startCatching({
 function getLogDirectoryPath(): string {
   const logFilePath = log.transports.file.getFile().path;
   return dirname(logFilePath);
+}
+
+/**
+ * Log the developer-id / hardened-runtime signature of the installed .app.
+ * electron-updater rejects an incoming update whose signing identity differs
+ * from the installed copy; this line lets us diagnose that without needing
+ * to run codesign manually.
+ *
+ * Best-effort — if `codesign` is unavailable (Linux runners, MAS sandbox)
+ * or the app path can't be resolved, we log what we know and move on.
+ */
+async function logMacCodeSigningIdentity(): Promise<void> {
+  try {
+    // `app.getPath('exe')` is .../Contents/MacOS/Producer Player. We want
+    // the .app bundle path so `codesign -dv` reports the bundle signature.
+    const exePath = app.getPath('exe');
+    const appBundle = exePath.replace(/\/Contents\/MacOS\/[^/]+$/, '');
+    const output = await new Promise<string>((resolve) => {
+      const proc = spawn('codesign', ['-dv', '--verbose=2', appBundle], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let combined = '';
+      proc.stdout.on('data', (chunk) => {
+        combined += String(chunk);
+      });
+      proc.stderr.on('data', (chunk) => {
+        combined += String(chunk);
+      });
+      proc.on('error', () => resolve(''));
+      proc.on('close', () => resolve(combined));
+    });
+    if (!output) {
+      log.info('[producer-player:auto-update] codesign output empty (not signed or tool missing)');
+      return;
+    }
+    const authorityMatch = output.match(/Authority=([^\n]+)/);
+    const teamMatch = output.match(/TeamIdentifier=([^\n]+)/);
+    const identifierMatch = output.match(/Identifier=([^\n]+)/);
+    log.info('[producer-player:auto-update] code-signing identity', {
+      authority: authorityMatch ? authorityMatch[1].trim() : null,
+      teamIdentifier: teamMatch ? teamMatch[1].trim() : null,
+      identifier: identifierMatch ? identifierMatch[1].trim() : null,
+    });
+  } catch (error) {
+    log.info('[producer-player:auto-update] codesign probe failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -954,7 +1013,35 @@ let currentAutoUpdateState: AutoUpdateState = {
   version: null,
   progress: null,
   error: null,
+  lastCheckedAt: null,
+  lastKnownLatestVersion: null,
+  nextRetryInMs: null,
+  disabledReason: null,
 };
+
+// Outstanding retry timer so we don't stack multiple retries. Cleared on any
+// successful check, on disable, on manual-check, and on app quit.
+let autoUpdateRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+let autoUpdateRetryAttempt = 0;
+
+function clearAutoUpdateRetry(): void {
+  if (autoUpdateRetryTimeout) {
+    clearTimeout(autoUpdateRetryTimeout);
+    autoUpdateRetryTimeout = null;
+  }
+  autoUpdateRetryAttempt = 0;
+}
+
+/**
+ * Reason the auto-updater can't run in this environment. Surfaced in the
+ * persistent Settings footer so silent "no update ever" states are visible.
+ */
+function getAutoUpdateDisabledReason(): AutoUpdateState['disabledReason'] {
+  if (IS_MAC_APP_STORE_SANDBOX) return 'mac-app-store';
+  if (IS_TEST_MODE) return 'test-mode';
+  if (!app.isPackaged) return 'not-packaged';
+  return null;
+}
 
 // When true, the next `update-available` event should immediately trigger a
 // download. ONLY the background scheduler flips this on — renderer-initiated
@@ -1036,9 +1123,21 @@ function friendlyUpdateErrorMessage(error: unknown): string {
 }
 
 function emitAutoUpdateState(state: AutoUpdateState): void {
-  currentAutoUpdateState = state;
+  // Merge "sticky" fields so transient 'checking' / 'idle' transitions don't
+  // wipe the persistent footer line ("Installed vX · Latest vY · Last
+  // checked HH:MM:SS"). Callers that want to update these pass them
+  // explicitly; everyone else inherits the previous value.
+  const merged: AutoUpdateState = {
+    ...state,
+    lastCheckedAt: state.lastCheckedAt ?? currentAutoUpdateState.lastCheckedAt ?? null,
+    lastKnownLatestVersion:
+      state.lastKnownLatestVersion ?? currentAutoUpdateState.lastKnownLatestVersion ?? null,
+    nextRetryInMs: state.nextRetryInMs ?? null,
+    disabledReason: state.disabledReason ?? getAutoUpdateDisabledReason(),
+  };
+  currentAutoUpdateState = merged;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(IPC_CHANNELS.AUTO_UPDATE_STATE_CHANGED, state);
+    mainWindow.webContents.send(IPC_CHANNELS.AUTO_UPDATE_STATE_CHANGED, merged);
   }
 }
 
@@ -1081,12 +1180,17 @@ function configureAutoUpdater(): void {
 
   autoUpdater.on('update-available', (info) => {
     log.info('[producer-player:auto-update] update available', { version: info.version });
+    // Successful check — cancel any pending retry and reset attempt counter.
+    clearAutoUpdateRetry();
+    const displayVersion = info.version ? toDisplayVersion(info.version) : null;
     // IMPORTANT: Always use toDisplayVersion() when showing versions to users
     emitAutoUpdateState({
       status: 'available',
-      version: info.version ? toDisplayVersion(info.version) : null,
+      version: displayVersion,
       progress: null,
       error: null,
+      lastCheckedAt: new Date().toISOString(),
+      lastKnownLatestVersion: displayVersion,
     });
 
     // The background scheduler flips `shouldAutoDownloadOnNextAvailable`
@@ -1106,12 +1210,17 @@ function configureAutoUpdater(): void {
   autoUpdater.on('update-not-available', (info) => {
     log.info('[producer-player:auto-update] no update available', { version: info.version });
     shouldAutoDownloadOnNextAvailable = false;
+    // Successful check — cancel any pending retry and reset attempt counter.
+    clearAutoUpdateRetry();
+    const displayVersion = info.version ? toDisplayVersion(info.version) : null;
     // IMPORTANT: Always use toDisplayVersion() when showing versions to users
     emitAutoUpdateState({
       status: 'not-available',
-      version: info.version ? toDisplayVersion(info.version) : null,
+      version: displayVersion,
       progress: null,
       error: null,
+      lastCheckedAt: new Date().toISOString(),
+      lastKnownLatestVersion: displayVersion,
     });
   });
 
@@ -1181,21 +1290,80 @@ function configureAutoUpdater(): void {
   });
 
   autoUpdater.on('error', (error) => {
-    // Log the full raw error (stack + message) so we can still debug from
-    // the log file — but never surface this verbatim in the UI.
-    log.warn('[producer-player:auto-update] error', {
-      message: error?.message,
-      stack: error?.stack,
+    // Log the full raw error (stack + message + errno/code if present) so we
+    // can still debug from the log file — but never surface this verbatim
+    // in the UI.
+    const errorRecord = error as Error & { code?: string; errno?: number };
+    log.error('[producer-player:auto-update] error', {
+      message: errorRecord?.message,
+      code: errorRecord?.code ?? null,
+      errno: errorRecord?.errno ?? null,
+      stack: errorRecord?.stack,
     });
     shouldAutoDownloadOnNextAvailable = false;
     installAfterDownload = false;
+
+    // Schedule a retry with exponential backoff (10s / 30s / 60s). After
+    // three failures we stop retrying automatically — the user can still
+    // hit "Check for Updates" manually, which resets the attempt counter.
+    const nextRetryInMs = scheduleAutoUpdateRetry();
+
     emitAutoUpdateState({
       status: 'error',
       version: currentAutoUpdateState.version,
       progress: null,
       error: friendlyUpdateErrorMessage(error),
+      lastCheckedAt: new Date().toISOString(),
+      nextRetryInMs,
     });
   });
+}
+
+/**
+ * Schedule a retry of `autoUpdater.checkForUpdates()` using the exponential
+ * backoff table. Returns the delay until the next attempt in ms, or null if
+ * we've exhausted retries for this cycle.
+ *
+ * The retry counter is reset by (a) any successful check and (b) any
+ * manual/IPC "Check for Updates" action, so users can always recover from
+ * a transient network burp.
+ */
+function scheduleAutoUpdateRetry(): number | null {
+  if (!app.isPackaged || IS_TEST_MODE || IS_MAC_APP_STORE_SANDBOX) {
+    return null;
+  }
+  if (autoUpdateRetryAttempt >= AUTO_UPDATE_RETRY_DELAYS_MS.length) {
+    log.warn(
+      '[producer-player:auto-update] retry budget exhausted — giving up until next scheduled check',
+    );
+    clearAutoUpdateRetry();
+    return null;
+  }
+  const delayMs = AUTO_UPDATE_RETRY_DELAYS_MS[autoUpdateRetryAttempt];
+  autoUpdateRetryAttempt += 1;
+  if (autoUpdateRetryTimeout) {
+    clearTimeout(autoUpdateRetryTimeout);
+  }
+  log.info('[producer-player:auto-update] scheduling retry', {
+    attempt: autoUpdateRetryAttempt,
+    delayMs,
+  });
+  autoUpdateRetryTimeout = setTimeout(() => {
+    autoUpdateRetryTimeout = null;
+    log.info('[producer-player:auto-update] retry fired', {
+      attempt: autoUpdateRetryAttempt,
+    });
+    void autoUpdater.checkForUpdates().catch((retryError: unknown) => {
+      log.warn('[producer-player:auto-update] retry threw', {
+        error: retryError instanceof Error ? retryError.message : String(retryError),
+      });
+      // electron-updater fires the 'error' event for most failures, but a
+      // synchronous throw from checkForUpdates itself wouldn't — make
+      // sure we still schedule the next retry in that case.
+      scheduleAutoUpdateRetry();
+    });
+  }, delayMs);
+  return delayMs;
 }
 
 function clearAutomaticUpdateChecks(): void {
@@ -1213,35 +1381,96 @@ function clearAutomaticUpdateChecks(): void {
   // download flag — an already-dispatched check would still trigger downloadUpdate().
   // Found by GPT-5.4 shadow audit, 2026-04-16.
   shouldAutoDownloadOnNextAvailable = false;
+  clearAutoUpdateRetry();
+  // Disabling fully resets the latch so a later re-enable within the same
+  // session gets a fresh initial check (rather than having to wait for the
+  // first 30-minute periodic tick).
+  autoUpdateInitialCheckArmed = false;
 }
 
+// Guards the "on launch" check from being reset by renderer-state churn.
+// Without this latch, the renderer's debounced state sync could fire
+// `AUTO_UPDATE_SET_ENABLED(true)` multiple times within a few seconds of
+// launch, and each call re-scheduled the startup timer — pushing the real
+// first check past the window where the user inspects the app. With the
+// latch, the first scheduled check fires exactly once per launch.
+// BUG FIX (2026-04-18): diagnosed from production logs that showed dozens
+// of `[producer-player:auto-update] set enabled` lines but ZERO `checking
+// for update` lines between app launch and quit, because the startup
+// timer was being cleared and re-armed faster than it could fire.
+let autoUpdateInitialCheckArmed = false;
+
 function scheduleAutomaticUpdateChecks(): void {
-  if (!app.isPackaged || IS_TEST_MODE) {
+  const disabledReason = getAutoUpdateDisabledReason();
+  if (disabledReason) {
+    // Loud diagnostic so "why isn't my app updating?" isn't silent. Shows
+    // up in ~/Library/Logs/Producer Player/main.log so `tail -f` pinpoints
+    // the gate instantly.
+    log.info(
+      '[producer-player:auto-update] schedule skipped — auto-updater disabled in this environment',
+      {
+        disabledReason,
+        isPackaged: app.isPackaged,
+        isTestMode: IS_TEST_MODE,
+        isMacAppStoreSandbox: IS_MAC_APP_STORE_SANDBOX,
+      },
+    );
+    // Surface it to the renderer too, so the Settings footer says something
+    // honest instead of looking like a silent "everything's fine" state.
+    emitAutoUpdateState({
+      status: 'idle',
+      version: null,
+      progress: null,
+      error: null,
+      disabledReason,
+    });
     return;
   }
 
-  clearAutomaticUpdateChecks();
   configureAutoUpdater();
 
-  autoUpdateCheckStartupTimeout = setTimeout(() => {
-    shouldAutoDownloadOnNextAvailable = true;
-    void autoUpdater.checkForUpdates().catch((error: unknown) => {
-      shouldAutoDownloadOnNextAvailable = false;
-      log.warn('[producer-player:auto-update] scheduled check failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+  // Initial-check latch: only arm the startup timer once per launch. Later
+  // calls to this function (e.g. from the renderer's `setAutoUpdateEnabled`
+  // IPC re-firing as userState hydrates) fall through to the interval
+  // setup without resetting the startup timer.
+  if (!autoUpdateCheckStartupTimeout && !autoUpdateInitialCheckArmed) {
+    autoUpdateInitialCheckArmed = true;
+    log.info('[producer-player:auto-update] scheduling initial check', {
+      delayMs: AUTO_UPDATE_CHECK_DELAY_MS,
     });
-
-    autoUpdateCheckInterval = setInterval(() => {
+    autoUpdateCheckStartupTimeout = setTimeout(() => {
+      autoUpdateCheckStartupTimeout = null;
+      log.info('[producer-player:auto-update] running initial scheduled check');
       shouldAutoDownloadOnNextAvailable = true;
       void autoUpdater.checkForUpdates().catch((error: unknown) => {
         shouldAutoDownloadOnNextAvailable = false;
-        log.warn('[producer-player:auto-update] periodic check failed', {
+        log.warn('[producer-player:auto-update] scheduled check threw', {
           error: error instanceof Error ? error.message : String(error),
         });
+        // Throws here don't always fire the 'error' event (e.g. synchronous
+        // config validation failures) — schedule a retry explicitly.
+        scheduleAutoUpdateRetry();
+      });
+    }, AUTO_UPDATE_CHECK_DELAY_MS);
+  }
+
+  // Ensure exactly one interval is running.
+  if (!autoUpdateCheckInterval) {
+    log.info('[producer-player:auto-update] arming periodic checks', {
+      intervalMs: AUTO_UPDATE_CHECK_INTERVAL_MS,
+    });
+    autoUpdateCheckInterval = setInterval(() => {
+      log.info('[producer-player:auto-update] running periodic scheduled check');
+      shouldAutoDownloadOnNextAvailable = true;
+      void autoUpdater.checkForUpdates().catch((error: unknown) => {
+        shouldAutoDownloadOnNextAvailable = false;
+        log.warn('[producer-player:auto-update] periodic check threw', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        scheduleAutoUpdateRetry();
       });
     }, AUTO_UPDATE_CHECK_INTERVAL_MS);
-  }, AUTO_UPDATE_CHECK_DELAY_MS);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1253,18 +1482,27 @@ function scheduleAutomaticUpdateChecks(): void {
  * for a standard macOS-style update experience.
  */
 async function checkForUpdatesInteractive(): Promise<void> {
-  if (!app.isPackaged || IS_TEST_MODE) {
-    log.info('[producer-player:auto-update] interactive check skipped (not packaged or test mode)');
+  const disabledReason = getAutoUpdateDisabledReason();
+  if (disabledReason) {
+    log.info('[producer-player:auto-update] interactive check skipped', { disabledReason });
     if (mainWindow && !mainWindow.isDestroyed()) {
       await dialog.showMessageBox(mainWindow, {
         type: 'info',
         title: 'Updates Unavailable',
-        message: 'Updates are not available in development mode.',
+        message:
+          disabledReason === 'mac-app-store'
+            ? 'Producer Player was installed from the Mac App Store — updates come through the App Store app.'
+            : disabledReason === 'not-packaged'
+              ? 'Updates require a packaged build. This copy is a development/dev-unpacked run.'
+              : 'Updates are not available in test mode.',
         buttons: ['OK'],
       });
     }
     return;
   }
+
+  // Reset retry budget — the user explicitly asked for a check.
+  clearAutoUpdateRetry();
 
   // Show a "checking" dialog isn't needed — the check is fast. Just run it.
   try {
@@ -4305,10 +4543,27 @@ function registerIpcHandlers(service: FileLibraryService): void {
   // so renderer `await` resolved immediately with undefined — UI never showed update states.
   // Restored direct return so the renderer can drive the in-app update flow.
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_CHECK, async () => {
-    if (!app.isPackaged || IS_TEST_MODE) {
-      log.info('[producer-player:auto-update] skipping check (not packaged or test mode)');
+    const disabledReason = getAutoUpdateDisabledReason();
+    if (disabledReason) {
+      log.info('[producer-player:auto-update] skipping IPC check', { disabledReason });
+      emitAutoUpdateState({
+        status: 'idle',
+        version: null,
+        progress: null,
+        error: null,
+        disabledReason,
+      });
       return;
     }
+    // Reset the retry budget so a manual check after three automatic
+    // failures gets a fresh 3 attempts at exponential backoff.
+    clearAutoUpdateRetry();
+    // Ensure the event listeners are wired before firing the check — if
+    // this IPC is the first thing to touch the updater (e.g. auto-updates
+    // are disabled but the user clicks "Check Now"), `configureAutoUpdater`
+    // wouldn't otherwise have run.
+    configureAutoUpdater();
+    log.info('[producer-player:auto-update] running manual check (IPC)');
     // Renderer-initiated checks do NOT auto-download. They only report status
     // via the AUTO_UPDATE_STATE_CHANGED events so the UI can surface "Update
     // available" and enable the "Download and Install" button. The user then
@@ -4845,8 +5100,22 @@ app.whenReady().then(async () => {
     nodeVersion: process.versions.node,
     sandboxed: IS_MAC_APP_STORE_SANDBOX,
     testMode: IS_TEST_MODE,
+    // Auto-updater diagnostics — surfaced here so "why isn't my app
+    // updating?" has an immediate answer from the log without having to
+    // grep for later events.
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    autoUpdateDisabledReason: getAutoUpdateDisabledReason(),
     logPath: log.transports.file.getFile().path,
   });
+
+  // Log the embedded code-signing metadata on macOS so an update-reject
+  // "signing identity mismatch" can be diagnosed by comparing this line
+  // across the INSTALLED app vs the incoming update. This is best-effort:
+  // if codesign is missing (Linux/CI/dev) we silently skip.
+  if (process.platform === 'darwin' && app.isPackaged) {
+    void logMacCodeSigningIdentity();
+  }
 
   await registerPlaybackProtocol();
 

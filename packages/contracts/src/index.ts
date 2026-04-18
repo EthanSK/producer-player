@@ -460,6 +460,30 @@ export interface AutoUpdateState {
   version: string | null;
   progress: AutoUpdateProgress | null;
   error: string | null;
+  /**
+   * ISO timestamp of the most recent completed check (success or error).
+   * null before the first check has run.
+   */
+  lastCheckedAt?: string | null;
+  /**
+   * Latest version known from the most recent successful check, even if the
+   * current `status` transitioned back to 'idle' (the user closed a banner,
+   * for example). Used by the Settings footer line "Installed vX · Latest
+   * vY · Last checked HH:MM:SS".
+   */
+  lastKnownLatestVersion?: string | null;
+  /**
+   * When `status === 'error'`, the next scheduled retry in ms from now.
+   * null when no retry is pending. Used to render "retrying in Ns" hints.
+   */
+  nextRetryInMs?: number | null;
+  /**
+   * True while an auto-update prerequisite ruled out any check (not
+   * packaged, sandboxed Mac App Store, test mode). When true the UI should
+   * render a dim "Updates managed by the Mac App Store" / "Dev build —
+   * updates disabled" note so silent no-ops are visible.
+   */
+  disabledReason?: 'not-packaged' | 'mac-app-store' | 'test-mode' | null;
 }
 
 export type AutoUpdateStateListener = (state: AutoUpdateState) => void;

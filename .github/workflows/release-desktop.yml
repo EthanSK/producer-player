@@ -314,6 +314,27 @@ jobs:
       - name: Show assets
         run: ls -lah release-assets
 
+      # Guard against electron-builder regressions that produce a malformed
+      # `latest-mac.yml` (missing sha512 / size / path) — if that ships,
+      # existing macOS installs silently get "You're up to date" forever
+      # because electron-updater rejects the feed.
+      # See scripts/check-latest-mac-yml.mjs for the checks performed.
+      - name: Validate latest-*.yml feed files
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.compute-version.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          ymls=(release-assets/latest*.yml)
+          if [ ${#ymls[@]} -eq 0 ]; then
+            echo "::warning title=No latest-*.yml published::electron-updater clients will not discover this release. Verify the electron-builder publish step ran."
+            exit 0
+          fi
+          for f in "${ymls[@]}"; do
+            node scripts/check-latest-mac-yml.mjs "$f"
+          done
+
       - name: Generate changelog from commits
         id: changelog
         shell: bash

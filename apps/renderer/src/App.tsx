@@ -307,6 +307,42 @@ const EMPTY_ENVIRONMENT: ProducerPlayerEnvironment = {
   },
 };
 
+/**
+ * Render the persistent "updater status" footer line in the Settings panel.
+ * Format: "Installed vX.Y · Latest vZ.W · Last checked HH:MM:SS" so a silent
+ * "no update ever" state is visible at a glance.
+ *
+ * Priority:
+ * 1. disabledReason takes precedence — explain why updates are gated.
+ * 2. Otherwise show installed + (latest || "…") + (last-checked || "never").
+ */
+function renderUpdateFooterLine(args: {
+  installedVersion: string;
+  latestKnown: string | null;
+  lastCheckedAt: string | null;
+  disabledReason: 'not-packaged' | 'mac-app-store' | 'test-mode' | null;
+}): string {
+  if (args.disabledReason === 'mac-app-store') {
+    return `Installed v${args.installedVersion} · Updates come through the Mac App Store.`;
+  }
+  if (args.disabledReason === 'not-packaged') {
+    return `Installed v${args.installedVersion} · Auto-updates disabled (dev build).`;
+  }
+  if (args.disabledReason === 'test-mode') {
+    return `Installed v${args.installedVersion} · Auto-updates disabled (test mode).`;
+  }
+
+  const latest = args.latestKnown ? `v${args.latestKnown}` : 'fetching…';
+  let lastCheckedText = 'never';
+  if (args.lastCheckedAt) {
+    const date = new Date(args.lastCheckedAt);
+    if (!Number.isNaN(date.getTime())) {
+      lastCheckedText = date.toLocaleTimeString();
+    }
+  }
+  return `Installed v${args.installedVersion} · Latest ${latest} · Last checked ${lastCheckedText}`;
+}
+
 function fileManagerLabel(platform: string): string {
   if (platform === 'win32') return 'Explorer';
   if (platform === 'linux') return 'File Manager';
@@ -1810,6 +1846,10 @@ export function App(): JSX.Element {
     version: null,
     progress: null,
     error: null,
+    lastCheckedAt: null,
+    lastKnownLatestVersion: null,
+    nextRetryInMs: null,
+    disabledReason: null,
   });
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(() => {
     const stored = window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY);
@@ -10880,6 +10920,23 @@ export function App(): JSX.Element {
                 {unifiedUpdateStatusText}
               </p>
             ) : null}
+            {/* Persistent "what is the updater actually doing" footer line.
+                Always present (even in idle) so silent-no-update states are
+                visible at a glance. "Installed vX · Latest vY · Last checked
+                HH:MM:SS" mirrors the electron-log `[producer-player:auto-update]`
+                trail in the main log file. */}
+            <p
+              className="muted"
+              data-testid="support-feedback-update-footer"
+              style={{ fontSize: '11px', marginTop: '4px' }}
+            >
+              {renderUpdateFooterLine({
+                installedVersion: environment.appVersion.displayVersion,
+                latestKnown: autoUpdateState.lastKnownLatestVersion ?? null,
+                lastCheckedAt: autoUpdateState.lastCheckedAt ?? null,
+                disabledReason: autoUpdateState.disabledReason ?? null,
+              })}
+            </p>
             <label
               data-testid="support-feedback-auto-update-toggle"
               style={{

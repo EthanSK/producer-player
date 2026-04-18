@@ -146,8 +146,17 @@ test('v3.26 — mastering checklist rows promote into song checklist items with 
     // preview and measured analyses are ready.
     const checklistPanel = page.getByTestId('analysis-mastering-checklist');
     await expect(checklistPanel).toBeVisible({ timeout: 20_000 });
+    // v3.27.0 — the panel now renders 4 skeleton rows immediately. Wait
+    // for the LOADED state (either a pass/warn/fail class is present)
+    // before asserting the real row count, so we don't race the
+    // skeleton.
+    await expect(checklistPanel).toHaveAttribute('data-checklist-state', 'ready', {
+      timeout: 20_000,
+    });
     await expect(
-      checklistPanel.locator('.mastering-checklist-row'),
+      checklistPanel.locator(
+        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail',
+      ),
     ).toHaveCount(4, { timeout: 20_000 });
 
     // -----------------------------------------------------------------
@@ -243,8 +252,17 @@ test('v3.26 — mastering checklist rows promote into song checklist items with 
     await page.getByTestId('analysis-expand-button').click();
     await expect(page.getByTestId('analysis-modal')).toBeVisible();
     await expect(checklistPanel).toBeVisible();
+    // v3.27.0 — the panel now renders 4 skeleton rows immediately. Wait
+    // for the LOADED state (either a pass/warn/fail class is present)
+    // before asserting the real row count, so we don't race the
+    // skeleton.
+    await expect(checklistPanel).toHaveAttribute('data-checklist-state', 'ready', {
+      timeout: 20_000,
+    });
     await expect(
-      checklistPanel.locator('.mastering-checklist-row'),
+      checklistPanel.locator(
+        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail',
+      ),
     ).toHaveCount(4, { timeout: 20_000 });
 
     await page.getByTestId('mastering-checklist-add-true-peak').click();

@@ -14239,13 +14239,23 @@ export function App(): JSX.Element {
                   </div>
                 </section>
 
-                {/* Pro Indicators: Dynamic Range */}
-                {activePreviewAnalysisStatus === 'ready' && activeCrestFactorDb !== null ? (
+                {/* Pro Indicators: Dynamic Range
+                 *
+                 * v3.27.0 — skeleton placeholder while pending, same
+                 * rationale as the Mastering Checklist panel: hiding the
+                 * whole section until analysis was ready caused a layout
+                 * shift when it later appeared. Panel only contains a
+                 * single indicator row, so the skeleton is one row tall. */}
+                {(() => {
+                  const isProIndicatorsReady =
+                    activePreviewAnalysisStatus === 'ready' && activeCrestFactorDb !== null;
+                  return (
                   <section
                     className={`analysis-overlay-section${
                       fullscreenMasteringDropTargetPanelId === 'pro-indicators' ? ' drop-target' : ''
                     }`}
                     data-testid="analysis-pro-indicators"
+                    data-pro-indicators-state={isProIndicatorsReady ? 'ready' : 'pending'}
                     style={getFullscreenMasteringPanelStyle('pro-indicators')}
                     onDragOver={(event) =>
                       handleFullscreenMasteringPanelDragOver(event, 'pro-indicators')
@@ -14260,24 +14270,39 @@ export function App(): JSX.Element {
                       {renderMasteringPanelDragHandle('fullscreen', 'pro-indicators')}
                     </div>
                     <div className="analysis-pro-indicators">
-                      <div className={`analysis-pro-indicator ${
-                        activeCrestFactorDb > 10 ? 'pass' : activeCrestFactorDb >= 6 ? 'warn' : 'fail'
-                      }`} data-testid="analysis-dynamic-range-indicator">
-                        <span className="indicator-icon">{activeCrestFactorDb > 10 ? '\u2728' : activeCrestFactorDb >= 6 ? '\u26a0\ufe0f' : '\u26d4'}</span>
-                        <div className="indicator-content">
-                          <span className="indicator-label">Dynamic Range</span>
-                          <span className="indicator-value">
-                            {activeCrestFactorDb > 10
-                              ? `High DR (${activeCrestFactorDb.toFixed(1)} dB)`
-                              : activeCrestFactorDb >= 6
-                                ? `Medium DR (${activeCrestFactorDb.toFixed(1)} dB)`
-                                : `Low DR (${activeCrestFactorDb.toFixed(1)} dB)`}
-                          </span>
+                      {isProIndicatorsReady && activeCrestFactorDb !== null ? (
+                        <div className={`analysis-pro-indicator ${
+                          activeCrestFactorDb > 10 ? 'pass' : activeCrestFactorDb >= 6 ? 'warn' : 'fail'
+                        }`} data-testid="analysis-dynamic-range-indicator">
+                          <span className="indicator-icon">{activeCrestFactorDb > 10 ? '\u2728' : activeCrestFactorDb >= 6 ? '\u26a0\ufe0f' : '\u26d4'}</span>
+                          <div className="indicator-content">
+                            <span className="indicator-label">Dynamic Range</span>
+                            <span className="indicator-value">
+                              {activeCrestFactorDb > 10
+                                ? `High DR (${activeCrestFactorDb.toFixed(1)} dB)`
+                                : activeCrestFactorDb >= 6
+                                  ? `Medium DR (${activeCrestFactorDb.toFixed(1)} dB)`
+                                  : `Low DR (${activeCrestFactorDb.toFixed(1)} dB)`}
+                            </span>
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div
+                          className="analysis-pro-indicator analysis-pro-indicator--skeleton"
+                          data-testid="analysis-dynamic-range-indicator-skeleton"
+                          aria-busy="true"
+                        >
+                          <span className="indicator-icon" aria-hidden="true">{'\u2026'}</span>
+                          <div className="indicator-content">
+                            <span className="indicator-label">Dynamic Range</span>
+                            <span className="indicator-value">{'Measuring\u2026'}</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </section>
-                ) : null}
+                  );
+                })()}
 
                 {/* Mastering Checklist Summary.
                  *
@@ -14286,17 +14311,25 @@ export function App(): JSX.Element {
                  * checklist matches what the user is hearing + the
                  * amber "Using Reference" suffix in the header. This
                  * mirrors how the Loudness & Peaks panel sources its
-                 * metrics from activePreviewAnalysis / activeMeasuredAnalysis. */}
+                 * metrics from activePreviewAnalysis / activeMeasuredAnalysis.
+                 *
+                 * v3.27.0 — render 4 skeleton placeholder rows while the
+                 * analysis is still pending/loading instead of hiding the
+                 * panel entirely. Previously this panel returned null until
+                 * analysis became 'ready', which caused a visible layout
+                 * shift when the (~180-220px) panel suddenly appeared and
+                 * pushed everything below it down. The skeleton preserves
+                 * the final height so the bottom of the viewport never
+                 * jumps. Ethan, voice note: "while the mastering checklist
+                 * is loading, the whole panel doesn't show, and then once
+                 * it's loaded everything shifts because of the height." */}
                 {(() => {
                   const checklistAnalysis = isRefMode ? activePreviewAnalysis : analysis;
                   const checklistMeasured = isRefMode ? activeMeasuredAnalysis : measuredAnalysis;
-                  if (
-                    activePreviewAnalysisStatus !== 'ready' ||
-                    !checklistAnalysis ||
-                    !checklistMeasured
-                  ) {
-                    return null;
-                  }
+                  const isChecklistReady =
+                    activePreviewAnalysisStatus === 'ready' &&
+                    !!checklistAnalysis &&
+                    !!checklistMeasured;
                   return (
                   <section
                     className={`analysis-overlay-section${
@@ -14305,6 +14338,7 @@ export function App(): JSX.Element {
                         : ''
                     }`}
                     data-testid="analysis-mastering-checklist"
+                    data-checklist-state={isChecklistReady ? 'ready' : 'pending'}
                     style={getFullscreenMasteringPanelStyle('mastering-checklist')}
                     onDragOver={(event) =>
                       handleFullscreenMasteringPanelDragOver(event, 'mastering-checklist')
@@ -14322,18 +14356,74 @@ export function App(): JSX.Element {
                     </div>
                     <div className="mastering-checklist-summary">
                       {/*
-                       * v3.26.0 — each row exposes an "+ Add to checklist"
-                       * affordance on the right. The button is HIDDEN in
-                       * reference preview mode (isRefMode === true) because
-                       * reference tracks don't have checklist items — same
-                       * rationale as the "Using Reference" eyebrow that
-                       * already appears in this panel's header. Click
-                       * builds a timeless checklist item, tags it with the
-                       * currently-playing mix version, and marks it with
-                       * fromMastering so the list renders the FROM
-                       * MASTERING eyebrow. (Ethan voices 4786-4788.)
+                       * v3.27.0 — skeleton placeholder branch. Keeps the
+                       * same 4-row structure as the loaded state so the
+                       * panel height is stable (~180-220px) and nothing
+                       * below shifts when real values arrive.
+                       *
+                       * v3.26.0 — each row (when ready) exposes an
+                       * "+ Add to checklist" affordance on the right. The
+                       * button is HIDDEN in reference preview mode
+                       * (isRefMode === true) because reference tracks don't
+                       * have checklist items — same rationale as the
+                       * "Using Reference" eyebrow that already appears in
+                       * this panel's header. Click builds a timeless
+                       * checklist item, tags it with the currently-playing
+                       * mix version, and marks it with fromMastering so the
+                       * list renders the FROM MASTERING eyebrow. (Ethan
+                       * voices 4786-4788.)
                        */}
-                      {(() => {
+                      {!isChecklistReady || !checklistAnalysis || !checklistMeasured ? (
+                        <>
+                          {(
+                            [
+                              { label: 'LUFS', slug: 'lufs' },
+                              { label: 'True Peak', slug: 'true-peak' },
+                              { label: 'DC Offset', slug: 'dc-offset' },
+                              { label: 'Clipping', slug: 'clipping' },
+                            ] as const
+                          ).map(({ label, slug }) => (
+                            <div
+                              key={slug}
+                              className="mastering-checklist-row mastering-checklist-row--skeleton"
+                              data-testid={`mastering-checklist-row-skeleton-${slug}`}
+                              aria-busy="true"
+                            >
+                              <span className="checklist-icon" aria-hidden="true">
+                                {'\u2026'}
+                              </span>
+                              <span className="checklist-label">{label}</span>
+                              <span className="checklist-value">
+                                {'Measuring\u2026'}
+                              </span>
+                              {/*
+                               * v3.27.0 — Codex review follow-up: the
+                               * loaded rows render `+ Add to checklist`
+                               * on the right (except in reference
+                               * preview mode). That button has its own
+                               * padding + `margin-left: auto`, so if we
+                               * omit it from the skeleton the row
+                               * height/width differs from the loaded
+                               * state — i.e. the layout shift we are
+                               * trying to eliminate still occurs in
+                               * normal mix mode. Render a matching
+                               * invisible placeholder that reserves
+                               * the exact same box, hidden from
+                               * assistive tech and non-interactive.
+                               */}
+                              {!isRefMode ? (
+                                <span
+                                  aria-hidden="true"
+                                  className="mastering-checklist-row-add-button mastering-checklist-row-add-button--placeholder"
+                                >
+                                  <span aria-hidden="true" className="mastering-checklist-row-add-icon">+</span>
+                                  <span className="mastering-checklist-row-add-label">Add to checklist</span>
+                                </span>
+                              ) : null}
+                            </div>
+                          ))}
+                        </>
+                      ) : (() => {
                         const masteringInputs: MasteringChecklistRowInputs = {
                           integratedLufs: checklistMeasured.integratedLufs,
                           truePeakDbfs: checklistMeasured.truePeakDbfs,

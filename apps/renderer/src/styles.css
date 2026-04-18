@@ -4175,6 +4175,65 @@ button.checklist-play-toggle[data-playing='true'] {
 }
 
 /*
+ * v3.27.0 — Skeleton placeholder variant for the Mastering Checklist and
+ * Pro Indicators panels. Keeps the same row geometry as the loaded state
+ * so the fullscreen mastering overlay doesn't visibly "jump" once the
+ * analysis finishes. Ethan, voice note: "while the mastering checklist
+ * is loading, the whole panel doesn't show, and then once it's loaded
+ * everything shifts because of the height."
+ *
+ * Strategy: render 4 rows up-front with muted chrome and an em-space
+ * value label, then cross-fade the real values in when analysis is
+ * ready. We pulse opacity gently (respecting prefers-reduced-motion)
+ * so it's clearly pending without being visually noisy.
+ */
+.mastering-checklist-row--skeleton {
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+/*
+ * v3.27.0 — invisible placeholder that occupies the exact box of the
+ * real `+ Add to checklist` button. This keeps the row width/height
+ * stable between the skeleton and the loaded state so the whole
+ * panel's bounding box (and everything below it in the overlay) does
+ * not move when analysis finishes. `visibility: hidden` keeps the
+ * element in the layout flow while hiding it visually; `pointer-
+ * events: none` ensures no accidental click targets.
+ */
+.mastering-checklist-row-add-button--placeholder {
+  visibility: hidden;
+  pointer-events: none;
+  /* Match the non-hover border of the real button exactly so the
+   * placeholder occupies the same box even if CSS evolves. */
+  border: 1px solid transparent;
+}
+.mastering-checklist-row--skeleton .checklist-icon,
+.mastering-checklist-row--skeleton .checklist-value,
+.mastering-checklist-row--skeleton .checklist-label {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.analysis-pro-indicator--skeleton .indicator-icon,
+.analysis-pro-indicator--skeleton .indicator-label,
+.analysis-pro-indicator--skeleton .indicator-value {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mastering-checklist-row--skeleton,
+  .analysis-pro-indicator--skeleton {
+    animation: masteringSkeletonPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes masteringSkeletonPulse {
+    0%, 100% { opacity: 0.95; }
+    50% { opacity: 0.55; }
+  }
+}
+
+/*
  * v3.26.0 — "FROM MASTERING" eyebrow badge on checklist items that were
  * promoted from the Mastering Checklist. Small, uppercase, letter-spaced
  * to stay out of the way while still providing provenance at a glance.

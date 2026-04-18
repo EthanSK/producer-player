@@ -12800,6 +12800,31 @@ export function App(): JSX.Element {
                       Clear Reference
                     </button>
                   </div>
+                  {/*
+                    v3.19.0 — mirror of the compact reference panel's
+                    restore-toggle (v3.16). Originally shipped in
+                    b7f8182 but only wired into the compact panel, so
+                    fullscreen-overlay users couldn't see or flip the
+                    opt-in. Same state handler, distinct data-testid so
+                    E2E specs can target the fullscreen instance.
+                  */}
+                  {selectedSongId ? (
+                    <label
+                      className="analysis-reference-restore-toggle analysis-reference-restore-toggle--fullscreen muted"
+                      data-testid="analysis-reference-restore-toggle-fullscreen"
+                      title="When ON, opening this track auto-loads its saved reference. When OFF (default), the currently loaded reference is kept across track switches. References are always saved when you pick them, regardless of this toggle."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={restoreReferenceEnabled}
+                        onChange={(event) =>
+                          handleToggleRestoreReferenceForCurrentSong(event.target.checked)
+                        }
+                        data-testid="analysis-reference-restore-toggle-input-fullscreen"
+                      />
+                      <span>Restore this reference when I open this track</span>
+                    </label>
+                  ) : null}
 
                   <div className="analysis-ab-row">
                   <div className="analysis-ab-toggle">

@@ -644,6 +644,18 @@ input[type='range'] {
   cursor: pointer;
 }
 
+/*
+ * v3.19.0 — fullscreen mastering overlay variant. The overlay's
+ * reference-panel-controls column is wider and uses slightly larger
+ * type than the compact panel, so the toggle gets bumped up to 12px
+ * with a small extra top margin for breathing room under the
+ * Choose / Use Current / Clear button row.
+ */
+.analysis-reference-restore-toggle--fullscreen {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
 .analysis-track-label {
   font-size: 12px;
   font-weight: 600;

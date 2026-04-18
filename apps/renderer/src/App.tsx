@@ -1824,8 +1824,20 @@ export function App(): JSX.Element {
   // so they match the user's DAW arrangement position (when the exported song
   // starts past 0:00 in the DAW). Does NOT remap the underlying audio seek
   // target; clicking a badge still seeks to the raw stored timestamp.
-  const [checklistDawOffsetSeconds, setChecklistDawOffsetSeconds] = useState<number>(0);
-  const [checklistDawOffsetEnabled, setChecklistDawOffsetEnabled] = useState<boolean>(false);
+  //
+  // Per-song storage (refactored v3.9+): `songDawOffsets` is the authoritative
+  // source, keyed by songId. Different DAW projects have different arrangement
+  // starts, so each song remembers its own offset. `dawOffsetDefault` is the
+  // last-used value, used to seed a song that has never had an offset saved
+  // so the user doesn't have to retype 0:42 for every track from the same DAW
+  // project. Both persist to the unified user-state file.
+  const [songDawOffsets, setSongDawOffsets] = useState<
+    Record<string, { seconds: number; enabled: boolean }>
+  >({});
+  const [dawOffsetDefault, setDawOffsetDefault] = useState<{
+    seconds: number;
+    enabled: boolean;
+  }>({ seconds: 0, enabled: false });
   const [activeChecklistTimestampIds, setActiveChecklistTimestampIds] = useState<string[]>([]);
   const [checklistUndoStack, setChecklistUndoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
   const [checklistRedoStack, setChecklistRedoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
@@ -3096,16 +3108,34 @@ export function App(): JSX.Element {
           setAutoUpdateEnabled(userState.autoUpdateEnabled);
         }
 
-        if (
-          typeof userState.checklistDawOffsetSeconds === 'number' &&
-          Number.isFinite(userState.checklistDawOffsetSeconds) &&
-          userState.checklistDawOffsetSeconds >= 0
-        ) {
-          setChecklistDawOffsetSeconds(Math.floor(userState.checklistDawOffsetSeconds));
+        if (userState.songDawOffsets && typeof userState.songDawOffsets === 'object') {
+          const sanitized: Record<string, { seconds: number; enabled: boolean }> = {};
+          for (const [songId, entry] of Object.entries(userState.songDawOffsets)) {
+            if (!songId || !entry || typeof entry !== 'object') continue;
+            const sec = (entry as { seconds?: unknown }).seconds;
+            const en = (entry as { enabled?: unknown }).enabled;
+            if (
+              typeof sec === 'number' &&
+              Number.isFinite(sec) &&
+              sec >= 0 &&
+              typeof en === 'boolean'
+            ) {
+              sanitized[songId] = { seconds: Math.floor(sec), enabled: en };
+            }
+          }
+          setSongDawOffsets(sanitized);
         }
-        if (typeof userState.checklistDawOffsetEnabled === 'boolean') {
-          setChecklistDawOffsetEnabled(userState.checklistDawOffsetEnabled);
-        }
+        const defaultSeconds =
+          typeof userState.checklistDawOffsetDefaultSeconds === 'number' &&
+          Number.isFinite(userState.checklistDawOffsetDefaultSeconds) &&
+          userState.checklistDawOffsetDefaultSeconds >= 0
+            ? Math.floor(userState.checklistDawOffsetDefaultSeconds)
+            : 0;
+        const defaultEnabled =
+          typeof userState.checklistDawOffsetDefaultEnabled === 'boolean'
+            ? userState.checklistDawOffsetDefaultEnabled
+            : false;
+        setDawOffsetDefault({ seconds: defaultSeconds, enabled: defaultEnabled });
 
         const loadedDevices = sanitizeListeningDevices(userState.listeningDevices);
         if (loadedDevices.length > 0) {
@@ -3265,8 +3295,9 @@ export function App(): JSX.Element {
         referenceLevelMatchEnabled,
         iCloudBackupEnabled,
         autoUpdateEnabled,
-        checklistDawOffsetSeconds,
-        checklistDawOffsetEnabled,
+        songDawOffsets,
+        checklistDawOffsetDefaultSeconds: dawOffsetDefault.seconds,
+        checklistDawOffsetDefaultEnabled: dawOffsetDefault.enabled,
         lastFileDialogDirectory: '', // managed by main process
         windowBounds: null, // managed by main process — ignored on write
       };
@@ -3330,8 +3361,8 @@ export function App(): JSX.Element {
     referenceLevelMatchEnabled,
     iCloudBackupEnabled,
     autoUpdateEnabled,
-    checklistDawOffsetSeconds,
-    checklistDawOffsetEnabled,
+    songDawOffsets,
+    dawOffsetDefault,
     listeningDevices,
     activeListeningDeviceId,
   ]);
@@ -3396,16 +3427,34 @@ export function App(): JSX.Element {
         window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, userState.autoUpdateEnabled ? 'true' : 'false');
       }
 
-      if (
-        typeof userState.checklistDawOffsetSeconds === 'number' &&
-        Number.isFinite(userState.checklistDawOffsetSeconds) &&
-        userState.checklistDawOffsetSeconds >= 0
-      ) {
-        setChecklistDawOffsetSeconds(Math.floor(userState.checklistDawOffsetSeconds));
+      if (userState.songDawOffsets && typeof userState.songDawOffsets === 'object') {
+        const sanitized: Record<string, { seconds: number; enabled: boolean }> = {};
+        for (const [songId, entry] of Object.entries(userState.songDawOffsets)) {
+          if (!songId || !entry || typeof entry !== 'object') continue;
+          const sec = (entry as { seconds?: unknown }).seconds;
+          const en = (entry as { enabled?: unknown }).enabled;
+          if (
+            typeof sec === 'number' &&
+            Number.isFinite(sec) &&
+            sec >= 0 &&
+            typeof en === 'boolean'
+          ) {
+            sanitized[songId] = { seconds: Math.floor(sec), enabled: en };
+          }
+        }
+        setSongDawOffsets(sanitized);
       }
-      if (typeof userState.checklistDawOffsetEnabled === 'boolean') {
-        setChecklistDawOffsetEnabled(userState.checklistDawOffsetEnabled);
-      }
+      const nextDefaultSeconds =
+        typeof userState.checklistDawOffsetDefaultSeconds === 'number' &&
+        Number.isFinite(userState.checklistDawOffsetDefaultSeconds) &&
+        userState.checklistDawOffsetDefaultSeconds >= 0
+          ? Math.floor(userState.checklistDawOffsetDefaultSeconds)
+          : 0;
+      const nextDefaultEnabled =
+        typeof userState.checklistDawOffsetDefaultEnabled === 'boolean'
+          ? userState.checklistDawOffsetDefaultEnabled
+          : false;
+      setDawOffsetDefault({ seconds: nextDefaultSeconds, enabled: nextDefaultEnabled });
 
       const incomingDevices = sanitizeListeningDevices(userState.listeningDevices);
       setListeningDevices(incomingDevices);
@@ -8326,26 +8375,62 @@ export function App(): JSX.Element {
     () => [...checklistModalItems].reverse(),
     [checklistModalItems]
   );
-  // DAW offset split into minute/second parts for the header widget.
-  // Stored as a single integer `checklistDawOffsetSeconds`; we derive
-  // MM / SS for the two input fields and recombine on change.
+  // DAW offset — per-song. Reads the currently-open checklist song's entry
+  // from `songDawOffsets`; if absent, falls back to `dawOffsetDefault` (the
+  // last-used value) so the user doesn't start at 0:00/disabled for a fresh
+  // song from the same DAW project. Writes always go back to the specific
+  // song AND update `dawOffsetDefault` so the NEXT un-seeded song inherits
+  // the most recent choice.
+  const currentChecklistDawOffset = (() => {
+    if (checklistModalSongId && songDawOffsets[checklistModalSongId]) {
+      return songDawOffsets[checklistModalSongId];
+    }
+    return dawOffsetDefault;
+  })();
+  const checklistDawOffsetSeconds = currentChecklistDawOffset.seconds;
+  const checklistDawOffsetEnabled = currentChecklistDawOffset.enabled;
+
+  // Split into minute/second parts for the header widget.
   const checklistDawOffsetMinutes = Math.floor(
     Math.max(0, checklistDawOffsetSeconds) / 60
   );
   const checklistDawOffsetSecondsPart = Math.max(0, checklistDawOffsetSeconds) % 60;
+
+  function writeChecklistDawOffset(nextSeconds: number, nextEnabled: boolean): void {
+    const songId = checklistModalSongId;
+    // Always update the last-used default so the next un-seeded song picks
+    // up the same values. This is the "0:42 sticks across tracks from the
+    // same DAW project" QoL behavior.
+    setDawOffsetDefault({ seconds: nextSeconds, enabled: nextEnabled });
+    if (!songId) return;
+    setSongDawOffsets((prev) => ({
+      ...prev,
+      [songId]: { seconds: nextSeconds, enabled: nextEnabled },
+    }));
+  }
 
   function handleChecklistDawOffsetMinutesChange(raw: string): void {
     // Allow empty string while editing (treat as 0); otherwise clamp
     // to 0..99 and truncate to 2 digits (per-task spec).
     const digitsOnly = raw.replace(/\D+/g, '').slice(0, 2);
     const minutes = digitsOnly === '' ? 0 : Math.max(0, Math.min(99, Number.parseInt(digitsOnly, 10)));
-    setChecklistDawOffsetSeconds(minutes * 60 + checklistDawOffsetSecondsPart);
+    writeChecklistDawOffset(
+      minutes * 60 + checklistDawOffsetSecondsPart,
+      checklistDawOffsetEnabled,
+    );
   }
 
   function handleChecklistDawOffsetSecondsChange(raw: string): void {
     const digitsOnly = raw.replace(/\D+/g, '').slice(0, 2);
     const seconds = digitsOnly === '' ? 0 : Math.max(0, Math.min(59, Number.parseInt(digitsOnly, 10)));
-    setChecklistDawOffsetSeconds(checklistDawOffsetMinutes * 60 + seconds);
+    writeChecklistDawOffset(
+      checklistDawOffsetMinutes * 60 + seconds,
+      checklistDawOffsetEnabled,
+    );
+  }
+
+  function handleChecklistDawOffsetEnabledChange(nextEnabled: boolean): void {
+    writeChecklistDawOffset(checklistDawOffsetSeconds, nextEnabled);
   }
   const checklistCompletedCount = checklistModalItems.filter((item) => item.completed).length;
   const checklistModalCanOpenMastering = checklistModalSong
@@ -10787,7 +10872,7 @@ export function App(): JSX.Element {
                   <input
                     type="checkbox"
                     checked={checklistDawOffsetEnabled}
-                    onChange={(event) => setChecklistDawOffsetEnabled(event.currentTarget.checked)}
+                    onChange={(event) => handleChecklistDawOffsetEnabledChange(event.currentTarget.checked)}
                     aria-label="Enable DAW offset"
                     data-testid="checklist-daw-offset-toggle"
                   />

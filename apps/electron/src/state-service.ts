@@ -244,6 +244,29 @@ function parseStringMapRecord(value: unknown): Record<string, string> {
   return Object.fromEntries(entries);
 }
 
+function parseSongDawOffsets(
+  value: unknown,
+): Record<string, { seconds: number; enabled: boolean }> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, { seconds: number; enabled: boolean }> = {};
+  for (const [songId, entry] of Object.entries(value)) {
+    if (!songId || songId.length === 0) continue;
+    if (!isRecord(entry)) continue;
+    const secondsRaw = entry.seconds;
+    const enabledRaw = entry.enabled;
+    const seconds =
+      typeof secondsRaw === 'number' &&
+      Number.isFinite(secondsRaw) &&
+      secondsRaw >= 0
+        ? Math.floor(secondsRaw)
+        : null;
+    const enabled = typeof enabledRaw === 'boolean' ? enabledRaw : null;
+    if (seconds === null || enabled === null) continue;
+    result[songId] = { seconds, enabled };
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Default state
 // ---------------------------------------------------------------------------
@@ -276,8 +299,9 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     referenceLevelMatchEnabled: true,
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
-    checklistDawOffsetSeconds: 0,
-    checklistDawOffsetEnabled: false,
+    songDawOffsets: {},
+    checklistDawOffsetDefaultSeconds: 0,
+    checklistDawOffsetDefaultEnabled: false,
     lastFileDialogDirectory: '',
     windowBounds: null,
   };
@@ -332,16 +356,37 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.iCloudBackupEnabled === 'boolean' ? raw.iCloudBackupEnabled : fallback.iCloudBackupEnabled,
     autoUpdateEnabled:
       typeof raw.autoUpdateEnabled === 'boolean' ? raw.autoUpdateEnabled : fallback.autoUpdateEnabled,
-    checklistDawOffsetSeconds:
-      typeof raw.checklistDawOffsetSeconds === 'number' &&
-      Number.isFinite(raw.checklistDawOffsetSeconds) &&
-      raw.checklistDawOffsetSeconds >= 0
-        ? Math.floor(raw.checklistDawOffsetSeconds)
-        : fallback.checklistDawOffsetSeconds,
-    checklistDawOffsetEnabled:
-      typeof raw.checklistDawOffsetEnabled === 'boolean'
-        ? raw.checklistDawOffsetEnabled
-        : fallback.checklistDawOffsetEnabled,
+    songDawOffsets: parseSongDawOffsets(raw.songDawOffsets),
+    // Migration: if the new "default" fields are missing but the legacy
+    // app-global `checklistDawOffsetSeconds`/`checklistDawOffsetEnabled`
+    // fields exist (v3.8.0 and earlier), copy them into the default so the
+    // user's prior offset isn't dropped on upgrade.
+    checklistDawOffsetDefaultSeconds: (() => {
+      if (
+        typeof raw.checklistDawOffsetDefaultSeconds === 'number' &&
+        Number.isFinite(raw.checklistDawOffsetDefaultSeconds) &&
+        raw.checklistDawOffsetDefaultSeconds >= 0
+      ) {
+        return Math.floor(raw.checklistDawOffsetDefaultSeconds);
+      }
+      if (
+        typeof raw.checklistDawOffsetSeconds === 'number' &&
+        Number.isFinite(raw.checklistDawOffsetSeconds) &&
+        raw.checklistDawOffsetSeconds >= 0
+      ) {
+        return Math.floor(raw.checklistDawOffsetSeconds);
+      }
+      return fallback.checklistDawOffsetDefaultSeconds;
+    })(),
+    checklistDawOffsetDefaultEnabled: (() => {
+      if (typeof raw.checklistDawOffsetDefaultEnabled === 'boolean') {
+        return raw.checklistDawOffsetDefaultEnabled;
+      }
+      if (typeof raw.checklistDawOffsetEnabled === 'boolean') {
+        return raw.checklistDawOffsetEnabled;
+      }
+      return fallback.checklistDawOffsetDefaultEnabled;
+    })(),
     lastFileDialogDirectory:
       typeof raw.lastFileDialogDirectory === 'string' ? raw.lastFileDialogDirectory : '',
     windowBounds: parseWindowBounds(raw.windowBounds),

@@ -334,13 +334,28 @@ export interface ProducerPlayerUserState {
   autoUpdateEnabled: boolean;
 
   // Checklist DAW offset — when enabled, checklist timestamps are rendered
-  // with `checklistDawOffsetSeconds` added to their raw stored value so the
+  // with a per-song offset added to their raw stored value so the
   // displayed time lines up with the user's digital audio workstation
   // arrangement (useful when the exported song starts past 0:00 in the DAW).
   // NOTE: the seek target stays the raw stored timestamp — this is a pure
   // display transform, not a remap of the underlying audio position.
-  checklistDawOffsetSeconds: number;
-  checklistDawOffsetEnabled: boolean;
+  //
+  // Storage model (refactored from app-global to per-song in v3.9+):
+  // - `songDawOffsets` holds the authoritative per-song offset/toggle values,
+  //   keyed by songId. Different DAW projects have different arrangement
+  //   starts, so each song remembers its own offset.
+  // - `checklistDawOffsetDefaultSeconds` / `checklistDawOffsetDefaultEnabled`
+  //   track the last-used values across the app. When a song has no saved
+  //   offset yet, the UI seeds from these defaults instead of starting at
+  //   0:00/disabled — saves retyping 0:42 for every track from the same DAW
+  //   project.
+  // - Migration: on load, if only the legacy `checklistDawOffsetSeconds` /
+  //   `checklistDawOffsetEnabled` fields exist (from v3.8.0 or earlier),
+  //   their values are copied into the new "default" fields so prior user
+  //   settings aren't dropped.
+  songDawOffsets: Record<string, { seconds: number; enabled: boolean }>;
+  checklistDawOffsetDefaultSeconds: number;
+  checklistDawOffsetDefaultEnabled: boolean;
 
   // File dialog
   lastFileDialogDirectory: string; // Remembers last-used directory across all file pickers

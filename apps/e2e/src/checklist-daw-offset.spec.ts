@@ -64,6 +64,56 @@ async function openChecklist(page: Page): Promise<void> {
   await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 }
 
+async function openChecklistForRowIndex(page: Page, rowIndex: number): Promise<void> {
+  const row = page.getByTestId('main-list-row').nth(rowIndex);
+  await row.getByTestId('song-checklist-button').click();
+  await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+}
+
+async function closeChecklist(page: Page): Promise<void> {
+  await page
+    .getByTestId('song-checklist-modal')
+    .getByRole('button', { name: 'Done' })
+    .click();
+  await expect(page.getByTestId('song-checklist-modal')).toHaveCount(0);
+}
+
+async function seedChecklistsForAllRows(page: Page): Promise<void> {
+  // Attach one checklist item at 0:45 ("Fix the kick") to EVERY currently-
+  // listed song so the per-song offset test can toggle between them without
+  // caring which row is which.
+  await page.evaluate(() => {
+    const rows = document.querySelectorAll('[data-song-id]');
+    const checklists: Record<
+      string,
+      Array<{
+        id: string;
+        text: string;
+        completed: boolean;
+        timestampSeconds: number;
+        versionNumber: number;
+      }>
+    > = {};
+    rows.forEach((row, index) => {
+      const songId = row.getAttribute('data-song-id');
+      if (!songId) return;
+      checklists[songId] = [
+        {
+          id: `daw-offset-item-${index}`,
+          text: 'Fix the kick',
+          completed: false,
+          timestampSeconds: 45,
+          versionNumber: 1,
+        },
+      ];
+    });
+    window.localStorage.setItem(
+      'producer-player.song-checklists.v1',
+      JSON.stringify(checklists),
+    );
+  });
+}
+
 test.describe('Checklist DAW time offset', () => {
   test('enabled toggle + 1:30 offset shifts displayed timestamps to green without changing seek target', async () => {
     const directories = await createE2ETestDirectories(
@@ -179,6 +229,226 @@ test.describe('Checklist DAW time offset', () => {
         await electronApp.close();
         await cleanupE2ETestDirectories(directories);
       }
+    }
+  });
+
+  // Per-song DAW offset behavior (refactor from app-global → per-song).
+  // Each song owns its own offset + enabled flag. Changing song A's
+  // settings must not leak into song B. When a song has no saved offset,
+  // it seeds from the last-used default so users don't re-type 0:42 for
+  // every track from the same DAW project.
+  test('DAW offset is per-song and does not leak between songs, with last-used default seeding', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-daw-offset-per-song',
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+      { relativePath: 'Track B v1.wav', modifiedAtMs: Date.parse('2026-01-02T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (
+          window as typeof window & {
+            producerPlayer: { linkFolder: (path: string) => Promise<unknown> };
+          }
+        ).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+      await seedChecklistsForAllRows(page);
+      await page.reload();
+      await page.waitForSelector('[data-testid="app-shell"]');
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      // --- Song A: set offset to 00:42 enabled ---
+      await openChecklistForRowIndex(page, 0);
+      await expect(page.getByTestId('checklist-daw-offset-minutes')).toHaveValue('00');
+      await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('00');
+      await expect(page.getByTestId('checklist-daw-offset-toggle')).not.toBeChecked();
+
+      await page.getByTestId('checklist-daw-offset-minutes').fill('00');
+      await page.getByTestId('checklist-daw-offset-seconds').fill('42');
+      await page.getByTestId('checklist-daw-offset-toggle').check();
+
+      const badgeA = page.getByTestId('song-checklist-item-timestamp');
+      await expect(badgeA).toHaveText('1:27'); // 0:45 + 0:42
+      await expect(badgeA).toHaveClass(/is-daw-offset/);
+      await saveScreenshot(page, 'per-song-A-0-42.png');
+      await closeChecklist(page);
+
+      // --- Song B: opens seeded from last-used default (0:42 enabled).
+      //     Per task spec option, we seed both seconds AND enabled from last-
+      //     used to match the "saves retyping" QoL behavior.
+      await openChecklistForRowIndex(page, 1);
+      await expect(page.getByTestId('checklist-daw-offset-minutes')).toHaveValue('00');
+      await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('42');
+      await expect(page.getByTestId('checklist-daw-offset-toggle')).toBeChecked();
+
+      // Now change song B to 01:30 enabled.
+      await page.getByTestId('checklist-daw-offset-minutes').fill('01');
+      await page.getByTestId('checklist-daw-offset-seconds').fill('30');
+      const badgeB = page.getByTestId('song-checklist-item-timestamp');
+      await expect(badgeB).toHaveText('2:15'); // 0:45 + 1:30
+      await saveScreenshot(page, 'per-song-B-1-30.png');
+      await closeChecklist(page);
+
+      // --- Back to Song A: still 0:42 (NOT 1:30) ---
+      await openChecklistForRowIndex(page, 0);
+      await expect(page.getByTestId('checklist-daw-offset-minutes')).toHaveValue('00');
+      await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('42');
+      await expect(page.getByTestId('checklist-daw-offset-toggle')).toBeChecked();
+      await expect(page.getByTestId('song-checklist-item-timestamp')).toHaveText('1:27');
+      await saveScreenshot(page, 'per-song-A-preserved.png');
+      await closeChecklist(page);
+
+      // --- And Song B preserves its own 1:30 ---
+      await openChecklistForRowIndex(page, 1);
+      await expect(page.getByTestId('checklist-daw-offset-minutes')).toHaveValue('01');
+      await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('30');
+      await expect(page.getByTestId('song-checklist-item-timestamp')).toHaveText('2:15');
+      await closeChecklist(page);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('per-song DAW offsets survive app reload independently', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-daw-offset-per-song-persist',
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+      { relativePath: 'Track B v1.wav', modifiedAtMs: Date.parse('2026-01-02T00:00:10.000Z') },
+    ]);
+
+    // Launch #1: set different offsets for song A (0:42 enabled) and song B (1:30 enabled).
+    {
+      const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+      try {
+        await page.evaluate(async (folderPath) => {
+          await (
+            window as typeof window & {
+              producerPlayer: { linkFolder: (path: string) => Promise<unknown> };
+            }
+          ).producerPlayer.linkFolder(folderPath);
+        }, directories.fixtureDirectory);
+
+        await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+        await seedChecklistsForAllRows(page);
+        await page.reload();
+        await page.waitForSelector('[data-testid="app-shell"]');
+        await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+        await openChecklistForRowIndex(page, 0);
+        await page.getByTestId('checklist-daw-offset-minutes').fill('00');
+        await page.getByTestId('checklist-daw-offset-seconds').fill('42');
+        await page.getByTestId('checklist-daw-offset-toggle').check();
+        await closeChecklist(page);
+
+        await openChecklistForRowIndex(page, 1);
+        await page.getByTestId('checklist-daw-offset-minutes').fill('01');
+        await page.getByTestId('checklist-daw-offset-seconds').fill('30');
+        // toggle already seeded ON from last-used default
+        await closeChecklist(page);
+
+        await page.waitForTimeout(1200); // let debounced sync flush
+      } finally {
+        await electronApp.close();
+      }
+    }
+
+    // Launch #2: verify each song reloads with its own offset.
+    {
+      const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+      try {
+        await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+        await openChecklistForRowIndex(page, 0);
+        await expect(page.getByTestId('checklist-daw-offset-minutes')).toHaveValue('00');
+        await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('42');
+        await expect(page.getByTestId('checklist-daw-offset-toggle')).toBeChecked();
+        await closeChecklist(page);
+
+        await openChecklistForRowIndex(page, 1);
+        await expect(page.getByTestId('checklist-daw-offset-minutes')).toHaveValue('01');
+        await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('30');
+        await expect(page.getByTestId('checklist-daw-offset-toggle')).toBeChecked();
+        await closeChecklist(page);
+      } finally {
+        await electronApp.close();
+        await cleanupE2ETestDirectories(directories);
+      }
+    }
+  });
+
+  test('legacy app-global offset from v3.8.0 state file migrates to last-used default', async () => {
+    // Simulate an existing v3.8.0 user whose unified state JSON only carries
+    // the old app-global `checklistDawOffsetSeconds` / `checklistDawOffsetEnabled`
+    // fields. On first load after upgrade, those values must be preserved as
+    // the new `checklistDawOffsetDefault*` so the user's prior setting isn't
+    // dropped and it seeds the first unseeded song.
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-daw-offset-migration',
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    // Launch #1: let the app link the folder + boot normally so the library
+    // scans and recognizes the song. Close cleanly.
+    {
+      const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+      try {
+        await linkFixtureFolder(page, directories.fixtureDirectory);
+        await seedChecklistWithTimestamp(page);
+        await page.waitForTimeout(1200); // flush debounced sync
+      } finally {
+        await electronApp.close();
+      }
+    }
+
+    // Now rewrite the unified state file to look like a v3.8.0 blob: strip
+    // the new fields, inject legacy `checklistDawOffsetSeconds` /
+    // `checklistDawOffsetEnabled`. Preserve everything else (linkedFolders,
+    // songChecklists, etc.) so the next launch finds the library intact.
+    const statePath = path.join(
+      directories.userDataDirectory,
+      'producer-player-user-state.json',
+    );
+    const raw = await fs.readFile(statePath, 'utf8');
+    const existing = JSON.parse(raw) as Record<string, unknown>;
+    delete existing.songDawOffsets;
+    delete existing.checklistDawOffsetDefaultSeconds;
+    delete existing.checklistDawOffsetDefaultEnabled;
+    existing.checklistDawOffsetSeconds = 27;
+    existing.checklistDawOffsetEnabled = true;
+    await fs.writeFile(statePath, JSON.stringify(existing, null, 2), 'utf8');
+
+    // Launch #2: fresh Electron process reads the legacy-shaped file.
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+    try {
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      // Open the song's checklist. It has no per-song offset yet, so it must
+      // seed from the migrated default: 27 seconds enabled.
+      await openChecklistForRowIndex(page, 0);
+      await expect(page.getByTestId('checklist-daw-offset-minutes')).toHaveValue('00');
+      await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('27');
+      await expect(page.getByTestId('checklist-daw-offset-toggle')).toBeChecked();
+
+      // Item at 0:45 + 0:27 offset → 1:12 displayed.
+      await expect(page.getByTestId('song-checklist-item-timestamp')).toHaveText('1:12');
+      await saveScreenshot(page, 'migration-legacy-default.png');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
     }
   });
 });

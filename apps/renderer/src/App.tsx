@@ -1976,6 +1976,12 @@ export function App(): JSX.Element {
   const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrackEntry[]>(() =>
     readSavedReferenceTracks()
   );
+  // Monotonic counter bumped whenever we prune a per-song reference track
+  // pointer from localStorage. Included in the unified-state sync deps so
+  // a prune always triggers a fresh re-read of the `producer-player.reference-track.*`
+  // keys, even if `savedReferenceTracks` didn't change. See the silent-missing
+  // branch in `loadReferenceTrack` and the 2026-04-18 codex review notes.
+  const [perSongReferencePrunedSignal, setPerSongReferencePrunedSignal] = useState(0);
   const [referenceTrack, setReferenceTrack] = useState<LoadedReferenceTrack | null>(null);
   const [referenceStatus, setReferenceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle'
@@ -3404,6 +3410,7 @@ export function App(): JSX.Element {
     albumArt,
     albumChecklists,
     savedReferenceTracks,
+    perSongReferencePrunedSignal,
     referenceLevelMatchEnabled,
     iCloudBackupEnabled,
     autoUpdateEnabled,
@@ -6853,6 +6860,12 @@ export function App(): JSX.Element {
     options: {
       previewAnalysis?: TrackAnalysisResult;
       measuredAnalysis?: AudioFileAnalysis;
+      /**
+       * When true, the caller is auto-restoring a persisted reference at
+       * startup / song-switch. We must NOT surface an error banner in that
+       * case — the user didn't just try to load anything. Default false.
+       */
+      silentOnMissing?: boolean;
     } = {}
   ): Promise<void> {
     // GPT-5 shadow-audit fix: claim the next request id BEFORE any await so a
@@ -6860,6 +6873,68 @@ export function App(): JSX.Element {
     const requestId = referenceLoadRequestIdRef.current + 1;
     referenceLoadRequestIdRef.current = requestId;
     const isStale = () => requestId !== referenceLoadRequestIdRef.current;
+
+    // BUG FIX (2026-04-18): when the app auto-loaded a persisted reference
+    // whose underlying file had been moved / deleted / unmounted,
+    // analyzeTrackFromUrl's fetch() hit the producer-media:// protocol
+    // which returned 404, throwing "Failed to fetch analysis source (404)."
+    // That error ended up in `referenceError` and surfaced as a red banner
+    // in the reference-track area on fresh launch — even though the user
+    // hadn't explicitly loaded anything. For missing files we now bail to
+    // idle empty-state and, when silent, also prune the stale per-song
+    // pointer and saved-list entry so the error doesn't re-trigger next
+    // launch.
+    //
+    // Codex review follow-up (2026-04-18):
+    // (a) Also clear the previously loaded reference on silent-missing, so
+    //     the prior song's reference doesn't visually carry over when the
+    //     new song's persisted reference is stale.
+    // (b) Push the pruning to the unified user-state too — localStorage
+    //     alone isn't enough because `producer-player-user-state.json`
+    //     re-seeds the stale entry back into localStorage on next launch
+    //     via the perSongReferenceTracks migration block.
+    if (selection.playbackSource.exists === false) {
+      setReferenceStatus('idle');
+      setReferenceError(null);
+      if (options.silentOnMissing) {
+        // (a) wipe any previously loaded reference so we land in the
+        // proper empty state rather than showing the old song's ref.
+        setReferenceTrack(null);
+
+        if (selectedSongId) {
+          try {
+            window.localStorage.removeItem(
+              `${REFERENCE_TRACK_PER_SONG_KEY_PREFIX}${selectedSongId}`
+            );
+          } catch {
+            /* localStorage may be unavailable — harmless */
+          }
+        }
+        setSavedReferenceTracks((current) => {
+          const next = current.filter((entry) => entry.filePath !== selection.filePath);
+          if (next.length !== current.length) {
+            persistSavedReferenceTracks(next);
+          }
+          return next;
+        });
+
+        // (b) Bump the prune signal so the debounced unified-state sync
+        // re-reads localStorage and writes the pruned `perSongReferenceTracks`
+        // map to `producer-player-user-state.json`. Doing this via the normal
+        // sync path (instead of a direct read-modify-write here) avoids racing
+        // with other renderer-owned state updates — codex review, 2026-04-18.
+        setPerSongReferencePrunedSignal((n) => n + 1);
+      } else {
+        // User explicitly picked / clicked something that has since gone
+        // missing: give them a one-line, human-readable message instead of
+        // the raw fetch error.
+        setReferenceError(
+          `Reference file could not be found: ${selection.fileName}`
+        );
+        setReferenceStatus('error');
+      }
+      return;
+    }
 
     setReferenceStatus('loading');
     setReferenceError(null);
@@ -6924,6 +6999,16 @@ export function App(): JSX.Element {
       setReferenceStatus('ready');
     } catch (cause: unknown) {
       if (isStale()) return;
+      // Auto-restore paths (startup / song switch) must never show a red
+      // error banner for a failing reference the user didn't just ask for.
+      // Reset to the idle empty state instead, and wipe any stale
+      // previously-loaded reference so we don't keep showing the wrong one.
+      if (options.silentOnMissing) {
+        setReferenceStatus('idle');
+        setReferenceError(null);
+        setReferenceTrack(null);
+        return;
+      }
       setReferenceStatus('error');
       setReferenceError(
         cause instanceof Error ? cause.message : 'Could not load the reference track.'
@@ -6974,7 +7059,8 @@ export function App(): JSX.Element {
   }
 
   async function handleLoadSavedReferenceTrack(
-    savedReference: SavedReferenceTrackEntry
+    savedReference: SavedReferenceTrackEntry,
+    options: { silentOnMissing?: boolean } = {}
   ): Promise<void> {
     setReferenceError(null);
 
@@ -6982,12 +7068,16 @@ export function App(): JSX.Element {
       savedReference.filePath
     );
 
-    await loadReferenceTrack('external-file', {
-      filePath: savedReference.filePath,
-      fileName: savedReference.fileName,
-      subtitle: 'Saved reference file',
-      playbackSource: resolvedPlaybackSource,
-    });
+    await loadReferenceTrack(
+      'external-file',
+      {
+        filePath: savedReference.filePath,
+        fileName: savedReference.fileName,
+        subtitle: 'Saved reference file',
+        playbackSource: resolvedPlaybackSource,
+      },
+      { silentOnMissing: options.silentOnMissing }
+    );
   }
 
   function clearPendingSavedReferenceClick(): void {
@@ -7027,23 +7117,31 @@ export function App(): JSX.Element {
     setReferenceError(null);
   }
 
-  /** Load a reference track by file path (looks it up in saved references). */
+  /**
+   * Load a reference track by file path (looks it up in saved references).
+   * This is the auto-restore path (startup, song switch): if the file is
+   * missing, we must bail silently instead of flashing a red error banner.
+   */
   async function handleLoadReferenceByFilePath(filePath: string): Promise<void> {
     const saved = savedReferenceTracks.find((r) => r.filePath === filePath);
     if (saved) {
-      await handleLoadSavedReferenceTrack(saved);
+      await handleLoadSavedReferenceTrack(saved, { silentOnMissing: true });
       return;
     }
     // Fallback: resolve and load directly
     try {
       const resolvedPlaybackSource = await window.producerPlayer.resolvePlaybackSource(filePath);
       const fileName = filePath.split('/').pop() ?? filePath;
-      await loadReferenceTrack('external-file', {
-        filePath,
-        fileName,
-        subtitle: 'Auto-loaded reference',
-        playbackSource: resolvedPlaybackSource,
-      });
+      await loadReferenceTrack(
+        'external-file',
+        {
+          filePath,
+          fileName,
+          subtitle: 'Auto-loaded reference',
+          playbackSource: resolvedPlaybackSource,
+        },
+        { silentOnMissing: true }
+      );
     } catch {
       // Silently ignore — the file may no longer exist
     }

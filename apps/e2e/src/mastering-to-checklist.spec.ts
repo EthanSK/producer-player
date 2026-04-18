@@ -153,11 +153,21 @@ test('v3.26 — mastering checklist rows promote into song checklist items with 
     await expect(checklistPanel).toHaveAttribute('data-checklist-state', 'ready', {
       timeout: 20_000,
     });
+    // v3.28.0 — the checklist expanded from 4 rows to the full rule set
+    // (~16 rows). Assert "at least 4" rather than exactly 4 so the legacy
+    // promotion flow still has a floor, but future rule additions don't
+    // break this spec.
     await expect(
       checklistPanel.locator(
-        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail',
-      ),
-    ).toHaveCount(4, { timeout: 20_000 });
+        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail, .mastering-checklist-row.unavailable',
+      ).first(),
+    ).toBeVisible({ timeout: 20_000 });
+    const rowCount = await checklistPanel
+      .locator(
+        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail, .mastering-checklist-row.unavailable',
+      )
+      .count();
+    expect(rowCount).toBeGreaterThanOrEqual(4);
 
     // -----------------------------------------------------------------
     // Scenario A — promote an LUFS row (mix mode) and verify.
@@ -259,11 +269,21 @@ test('v3.26 — mastering checklist rows promote into song checklist items with 
     await expect(checklistPanel).toHaveAttribute('data-checklist-state', 'ready', {
       timeout: 20_000,
     });
+    // v3.28.0 — the checklist expanded from 4 rows to the full rule set
+    // (~16 rows). Assert "at least 4" rather than exactly 4 so the legacy
+    // promotion flow still has a floor, but future rule additions don't
+    // break this spec.
     await expect(
       checklistPanel.locator(
-        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail',
-      ),
-    ).toHaveCount(4, { timeout: 20_000 });
+        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail, .mastering-checklist-row.unavailable',
+      ).first(),
+    ).toBeVisible({ timeout: 20_000 });
+    const rowCountV2 = await checklistPanel
+      .locator(
+        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail, .mastering-checklist-row.unavailable',
+      )
+      .count();
+    expect(rowCountV2).toBeGreaterThanOrEqual(4);
 
     await page.getByTestId('mastering-checklist-add-true-peak').click();
 

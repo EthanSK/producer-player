@@ -4116,6 +4116,18 @@ button.checklist-play-toggle[data-playing='true'] {
 
 .mastering-checklist-row .checklist-value {
   color: var(--text-primary, #e4ecf5);
+  /*
+   * v3.28.0 — keep rows to a single line to preserve the
+   * layout-shift invariant. The rule-module-generated messages can
+   * run long; without truncation they wrap and the pending→ready
+   * transition shifts the panel by ~30px per wrapped row. Cap at
+   * one line so skeleton and loaded rows match exactly.
+   */
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mastering-checklist-row.pass {
@@ -4131,6 +4143,45 @@ button.checklist-play-toggle[data-playing='true'] {
 .mastering-checklist-row.fail {
   border-color: rgba(248, 113, 113, 0.25);
   background: rgba(248, 113, 113, 0.04);
+}
+
+/*
+ * v3.28.0 — unavailable state for rule rows whose data source isn't
+ * populated yet (e.g. ffmpeg analysis not available). Keeps the row
+ * visible so users see "this check exists but didn't run" rather than
+ * silently hiding it, but uses a neutral border/background so the
+ * pass/warn/fail accents still draw the eye first.
+ */
+.mastering-checklist-row.unavailable {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.015);
+  opacity: 0.7;
+}
+
+/*
+ * v3.28.0 — category grouping for the expanded mastering checklist.
+ * The rules are grouped into 6 categories (Loudness, Peaks, Dynamics,
+ * Stereo, Spectrum, Housekeeping). Each category gets a small uppercase
+ * label above its rows so the checklist stays scannable as the rule
+ * count grows from 4 to ~16.
+ */
+.mastering-checklist-category {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mastering-checklist-category + .mastering-checklist-category {
+  margin-top: 10px;
+}
+
+.mastering-checklist-category-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b8199);
+  padding: 0 4px;
 }
 
 /*

@@ -20,8 +20,9 @@
  * must be small (≤ 2 px of float-rounding noise).
  *
  * If this spec fails, the layout shift has regressed — check that:
- *   - `data-checklist-state="pending"` still renders 4 skeleton rows
- *     (same count as the loaded state)
+ *   - `data-checklist-state="pending"` renders the SAME number of rows
+ *     as the ready state (both derive from the rule registry as of
+ *     v3.28.0; prior to v3.28 the count was hard-coded at 4)
  *   - the skeleton row styles in styles.css haven't diverged from the
  *     loaded row in height (padding / font-size / border)
  *   - no other panel between the checklist and `crest-factor-history`
@@ -133,11 +134,15 @@ test('v3.27 — mastering checklist skeleton eliminates layout shift on load', a
     await expect(checklistPanel).toHaveAttribute('data-checklist-state', 'ready', {
       timeout: 20_000,
     });
-    await expect(
-      checklistPanel.locator(
-        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail',
-      ),
-    ).toHaveCount(4, { timeout: 20_000 });
+    // v3.28.0 — the rule set expanded from 4 to ~15 rows. Assert "at
+    // least 4" so future rule additions don't break the layout-shift
+    // invariant, which doesn't depend on the exact count anyway.
+    const readyRowCount = await checklistPanel
+      .locator(
+        '.mastering-checklist-row.pass, .mastering-checklist-row.warn, .mastering-checklist-row.fail, .mastering-checklist-row.unavailable',
+      )
+      .count();
+    expect(readyRowCount).toBeGreaterThanOrEqual(4);
 
     const yAfter = await getCrestY();
 
@@ -174,14 +179,16 @@ test('v3.27 — mastering checklist skeleton eliminates layout shift on load', a
   }
 });
 
-test('v3.27 — mastering checklist renders 4 skeleton rows when analysis is pending', async () => {
+test('v3.27 — mastering checklist renders skeleton rows when analysis is pending', async () => {
   // Deterministic pending-state assertion. This test is the
   // unit-ish fallback to the timing-sensitive layout-shift test
   // above — it loads a song, opens fullscreen mastering, and
-  // immediately asserts that the panel is in pending state with
-  // exactly 4 skeleton rows BEFORE waiting for analysis to
-  // complete. Uses a longer (10-second) sine wave to widen the
-  // window between render and analysis completion.
+  // asserts that the panel is in pending state with skeleton rows
+  // BEFORE waiting for analysis to complete, then confirms the
+  // row count is preserved in the ready state (v3.28+ mirrors the
+  // rule registry rather than hard-coding 4). Uses a longer
+  // (10-second) sine wave to widen the window between render and
+  // analysis completion.
   const dirs = await createE2ETestDirectories('mastering-panels-skeleton-rows');
 
   const songPath = path.join(dirs.fixtureDirectory, 'Long Track v1.wav');
@@ -214,19 +221,24 @@ test('v3.27 — mastering checklist renders 4 skeleton rows when analysis is pen
     const checklistPanel = page.getByTestId('analysis-mastering-checklist');
     await expect(checklistPanel).toBeVisible();
 
-    // The panel MUST render 4 rows (skeleton OR loaded). This is the
-    // core "no layout shift" invariant — the row count is stable
-    // across the pending→ready transition.
-    await expect(checklistPanel.locator('.mastering-checklist-row')).toHaveCount(4, {
+    // v3.28.0 — the panel MUST render the SAME row count in pending vs
+    // ready states (skeleton mirrors the rule registry exactly), which
+    // is the core "no layout shift" invariant. Capture the pending
+    // count first, then assert the ready count equals it.
+    await expect(checklistPanel.locator('.mastering-checklist-row').first()).toBeVisible({
       timeout: 10_000,
     });
+    const pendingRowCount = await checklistPanel
+      .locator('.mastering-checklist-row')
+      .count();
+    expect(pendingRowCount).toBeGreaterThanOrEqual(4);
 
     // Eventually it reaches ready and the skeleton disappears.
     await expect(checklistPanel).toHaveAttribute('data-checklist-state', 'ready', {
       timeout: 30_000,
     });
     await expect(checklistPanel.locator('.mastering-checklist-row--skeleton')).toHaveCount(0);
-    await expect(checklistPanel.locator('.mastering-checklist-row')).toHaveCount(4);
+    await expect(checklistPanel.locator('.mastering-checklist-row')).toHaveCount(pendingRowCount);
   } finally {
     await electronApp.close();
     await cleanupE2ETestDirectories(dirs);

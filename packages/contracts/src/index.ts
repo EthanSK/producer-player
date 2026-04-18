@@ -311,6 +311,15 @@ export interface ProducerPlayerUserState {
   // toggle is ON for that song. When OFF, the currently-loaded global
   // reference is preserved across song switches instead of being replaced.
   perSongRestoreReferenceEnabled: Record<string, boolean>; // songId -> enabled
+  // v3.22.0: the "last globally-picked reference" — file path of the most
+  // recent reference the user picked via a MANUAL action (choose file,
+  // use current as reference, click a saved-reference card). Used as the
+  // fallback when switching to a song whose per-song restore toggle is
+  // OFF, so the UI returns to the user's last explicit global pick
+  // instead of stickily keeping whatever an earlier restore=ON track
+  // auto-loaded. Empty string means "no global pick has been made / the
+  // user explicitly cleared the reference".
+  globalReferenceFilePath: string;
 
   // EQ snapshots (per-song)
   eqSnapshots: Record<string, EqSnapshot[]>;

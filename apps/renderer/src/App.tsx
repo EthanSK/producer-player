@@ -375,6 +375,16 @@ const REFERENCE_TRACK_PER_SONG_KEY_PREFIX = 'producer-player.reference-track.';
 // user was currently A/B'ing against). The save behavior for references is
 // unchanged (still always-on); only the restore-on-switch behavior is gated.
 const RESTORE_REFERENCE_PER_SONG_KEY_PREFIX = 'producer-player.restore-reference.';
+// v3.22.0: the "last globally-picked reference" — the most recent reference
+// the user picked via a MANUAL action (handleChooseReferenceTrack,
+// handleUseCurrentTrackAsReference, or clicking a saved reference card).
+// NOT written by the auto-restore path. When the user switches to a song
+// whose per-song restore toggle is OFF, the app falls back to this global
+// pick instead of stickily keeping whatever reference an earlier
+// restore=ON track just loaded. Storing as an absolute file path string
+// (mirrors `producer-player.reference-track.<songId>`), with `.v1`
+// suffix to keep it out of the per-song scan loops.
+const REFERENCE_TRACK_GLOBAL_KEY = 'producer-player.reference-track-global.v1';
 const COMPACT_REFERENCE_QUICK_PICKS_COUNT = 3;
 const SAVED_REFERENCE_SINGLE_CLICK_DELAY_MS = 300;
 const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
@@ -1446,6 +1456,36 @@ function readRestoreReferenceForSong(songId: string): boolean {
     `${RESTORE_REFERENCE_PER_SONG_KEY_PREFIX}${songId}`,
   );
   return raw === '1';
+}
+
+/**
+ * v3.22.0: persist the "last globally-picked reference" file path. Called
+ * only from MANUAL pick handlers so the auto-restore path (a song with
+ * restore=ON being switched to) never overwrites it. Pass an empty
+ * string to clear. Mirrors `persistReferenceTrackForSong`.
+ */
+function persistGlobalReference(filePath: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!filePath || filePath.length === 0) {
+      window.localStorage.removeItem(REFERENCE_TRACK_GLOBAL_KEY);
+    } else {
+      window.localStorage.setItem(REFERENCE_TRACK_GLOBAL_KEY, filePath);
+    }
+  } catch {
+    /* localStorage may be unavailable */
+  }
+}
+
+/** v3.22.0: read the "last globally-picked reference" file path. Null if unset. */
+function readGlobalReference(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(REFERENCE_TRACK_GLOBAL_KEY);
+    return raw && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Persist AI-recommended EQ gains for a song. */
@@ -3362,6 +3402,18 @@ export function App(): JSX.Element {
           }
         }
 
+        // v3.22.0: hydrate the last globally-picked reference pointer so
+        // the restore=OFF fallback on first song-select reads the right
+        // value. Absent / empty string means "no global pick".
+        if (
+          typeof userState.globalReferenceFilePath === 'string' &&
+          userState.globalReferenceFilePath.length > 0
+        ) {
+          persistGlobalReference(userState.globalReferenceFilePath);
+        } else {
+          persistGlobalReference(null);
+        }
+
         setUnifiedStateReady(true);
       })
       .catch(() => {
@@ -3435,6 +3487,9 @@ export function App(): JSX.Element {
           }
           return result;
         })(),
+        // v3.22.0: the last MANUALLY-picked global reference (file path)
+        // used by the restore=OFF fallback. Empty string = no global pick.
+        globalReferenceFilePath: readGlobalReference() ?? '',
         eqSnapshots: (() => {
           // Collect per-song EQ snapshots from localStorage
           const result: Record<string, { id: string; gains: number[]; timestamp: number }[]> = {};
@@ -3714,6 +3769,18 @@ export function App(): JSX.Element {
           userState.perSongRestoreReferenceEnabled,
         )) {
           persistRestoreReferenceForSong(songId, enabled);
+        }
+      }
+
+      // v3.22.0: import may carry a new "last globally-picked reference".
+      // Mirror into localStorage so the next restore=OFF song switch uses
+      // the imported value. Empty string means "no global pick" — clear
+      // any local value so the in-memory state matches.
+      if (typeof userState.globalReferenceFilePath === 'string') {
+        if (userState.globalReferenceFilePath.length > 0) {
+          persistGlobalReference(userState.globalReferenceFilePath);
+        } else {
+          persistGlobalReference(null);
         }
       }
       // v3.16.0 codex follow-up: the two effects below key off this
@@ -7115,6 +7182,25 @@ export function App(): JSX.Element {
        * case — the user didn't just try to load anything. Default false.
        */
       silentOnMissing?: boolean;
+      /**
+       * v3.22.0: when true, this load is a MANUAL user pick (choose file,
+       * use current as reference, click saved-reference card) and should
+       * update the "last globally-picked reference" pointer used by the
+       * restore=OFF fallback. The auto-restore path leaves this false so
+       * switching to a restore=ON track doesn't clobber the user's last
+       * explicit global choice.
+       */
+      markAsGlobalReference?: boolean;
+      /**
+       * v3.22.0: when true, a silent-missing failure should wipe the
+       * GLOBAL-reference pointer (`producer-player.reference-track-global.v1`)
+       * instead of the selected song's per-song reference entry. Used by
+       * the restore=OFF fallback path: if the global pick file no longer
+       * exists, we must not delete the currently-selected song's own
+       * saved reference (which is unrelated to the missing global file).
+       * Codex review 2026-04-18 (v3.22.0).
+       */
+      silentMissingTargetsGlobal?: boolean;
     } = {}
   ): Promise<void> {
     // GPT-5 shadow-audit fix: claim the next request id BEFORE any await so a
@@ -7150,7 +7236,15 @@ export function App(): JSX.Element {
         // proper empty state rather than showing the old song's ref.
         setReferenceTrack(null);
 
-        if (selectedSongId) {
+        if (options.silentMissingTargetsGlobal) {
+          // v3.22.0: the missing file is the GLOBAL-reference fallback,
+          // not the currently-selected song's own saved reference. Wipe
+          // the global pointer instead of stomping on the per-song key
+          // (which might point at a completely different, perfectly
+          // valid file). Codex review finding #1 (2026-04-18, v3.22.0).
+          persistGlobalReference(null);
+          setRestoreReferenceToggleSignal((n) => n + 1);
+        } else if (selectedSongId) {
           try {
             window.localStorage.removeItem(
               `${REFERENCE_TRACK_PER_SONG_KEY_PREFIX}${selectedSongId}`
@@ -7253,6 +7347,17 @@ export function App(): JSX.Element {
         persistReferenceTrackForSong(selectedSongId, selection.filePath);
       }
 
+      // v3.22.0: record the user's latest MANUAL reference pick so a
+      // subsequent switch to a restore=OFF song falls back to this
+      // instead of stickily keeping whatever the prior restore=ON song
+      // auto-loaded. Only manual callers set `markAsGlobalReference`.
+      // Bump the sync signal so the debounced unified-state writer picks
+      // up the new global-reference localStorage value.
+      if (options.markAsGlobalReference) {
+        persistGlobalReference(selection.filePath);
+        setRestoreReferenceToggleSignal((n) => n + 1);
+      }
+
       setReferenceStatus('ready');
     } catch (cause: unknown) {
       if (isStale()) return;
@@ -7278,10 +7383,26 @@ export function App(): JSX.Element {
       return;
     }
 
+    // v3.22.0 codex follow-up #4: claim a new request id BEFORE the
+    // (potentially slow) resolvePlaybackSource await — same stale-
+    // cancellation pattern as the auto-restore wrappers. Without this,
+    // a user triggering "use current as reference" on a slow-to-transcode
+    // source, then quickly switching songs / clearing / picking another
+    // reference, could have this older load resolve and overwrite the
+    // newer state.
+    referenceLoadRequestIdRef.current += 1;
+    const entryRequestId = referenceLoadRequestIdRef.current;
+
     const currentTrackPlaybackSource =
       mixPlaybackSource && mixPlaybackSource.filePath === selectedPlaybackVersion.filePath
         ? mixPlaybackSource
         : await window.producerPlayer.resolvePlaybackSource(selectedPlaybackVersion.filePath);
+
+    if (referenceLoadRequestIdRef.current !== entryRequestId) {
+      // A newer song-switch / clear / reference-load happened while we
+      // were resolving. Drop this on the floor.
+      return;
+    }
 
     await loadReferenceTrack(
       'linked-track',
@@ -7294,6 +7415,8 @@ export function App(): JSX.Element {
       {
         previewAnalysis: analysis,
         measuredAnalysis,
+        // v3.22.0: manual action — update the global-reference pointer.
+        markAsGlobalReference: true,
       }
     );
   }
@@ -7307,23 +7430,54 @@ export function App(): JSX.Element {
       return;
     }
 
-    await loadReferenceTrack('external-file', {
-      filePath: pickedReference.filePath,
-      fileName: pickedReference.fileName,
-      subtitle: 'External reference file',
-      playbackSource: pickedReference.playbackSource,
-    });
+    await loadReferenceTrack(
+      'external-file',
+      {
+        filePath: pickedReference.filePath,
+        fileName: pickedReference.fileName,
+        subtitle: 'External reference file',
+        playbackSource: pickedReference.playbackSource,
+      },
+      {
+        // v3.22.0: manual action — update the global-reference pointer.
+        markAsGlobalReference: true,
+      },
+    );
   }
 
   async function handleLoadSavedReferenceTrack(
     savedReference: SavedReferenceTrackEntry,
-    options: { silentOnMissing?: boolean } = {}
+    options: {
+      silentOnMissing?: boolean;
+      /**
+       * v3.22.0: when true, a silent-missing failure should wipe the
+       * GLOBAL-reference pointer instead of the selected song's
+       * per-song reference. Only set by the restore=OFF fallback path.
+       */
+      silentMissingTargetsGlobal?: boolean;
+    } = {},
   ): Promise<void> {
     setReferenceError(null);
+
+    // v3.22.0 codex follow-up: CLAIM (not just read) a new request id
+    // BEFORE the pre-`loadReferenceTrack` await (resolvePlaybackSource
+    // can block on transcoding for AIFF etc.). Two rapid wrapper loads
+    // (A and B) must not share the same captured id — otherwise A's
+    // resolve can win over B. We bump here so the newer wrapper entry
+    // invalidates the older wrapper's pre-`loadReferenceTrack` stage.
+    referenceLoadRequestIdRef.current += 1;
+    const entryRequestId = referenceLoadRequestIdRef.current;
 
     const resolvedPlaybackSource = await window.producerPlayer.resolvePlaybackSource(
       savedReference.filePath
     );
+
+    if (referenceLoadRequestIdRef.current !== entryRequestId) {
+      // A newer song-switch / clear / wrapper-load happened while we
+      // were resolving. Drop this load on the floor — the newer path
+      // is authoritative.
+      return;
+    }
 
     await loadReferenceTrack(
       'external-file',
@@ -7333,7 +7487,15 @@ export function App(): JSX.Element {
         subtitle: 'Saved reference file',
         playbackSource: resolvedPlaybackSource,
       },
-      { silentOnMissing: options.silentOnMissing }
+      {
+        silentOnMissing: options.silentOnMissing,
+        silentMissingTargetsGlobal: options.silentMissingTargetsGlobal,
+        // v3.22.0: clicking a saved-reference card is a manual user
+        // action and must update the global-reference pointer — UNLESS
+        // this call came from the silent auto-restore path (which also
+        // routes through here via `handleLoadReferenceByFilePath`).
+        markAsGlobalReference: options.silentOnMissing ? false : true,
+      }
     );
   }
 
@@ -7369,9 +7531,21 @@ export function App(): JSX.Element {
   }
 
   function handleClearReferenceTrack(): void {
+    // v3.22.0: bump the reference-load request id so any in-flight
+    // auto-restore load (from a fast-switch across songs with pending
+    // ffmpeg analysis) becomes stale and can't stomp on this cleared
+    // state when it resolves. Codex review finding #2, 2026-04-18.
+    referenceLoadRequestIdRef.current += 1;
     setReferenceTrack(null);
     setReferenceStatus('idle');
     setReferenceError(null);
+    // v3.22.0: clearing the reference is a manual user action expressing
+    // "I don't want a reference right now", so the global-reference
+    // fallback must be cleared too. Otherwise the next switch to a
+    // restore=OFF track would resurrect the last global pick, which
+    // contradicts the user's most recent explicit intent.
+    persistGlobalReference(null);
+    setRestoreReferenceToggleSignal((n) => n + 1);
   }
 
   /**
@@ -7392,16 +7566,40 @@ export function App(): JSX.Element {
    * Load a reference track by file path (looks it up in saved references).
    * This is the auto-restore path (startup, song switch): if the file is
    * missing, we must bail silently instead of flashing a red error banner.
+   *
+   * v3.22.0: `isGlobalFallback` tags a load coming from the restore=OFF
+   * fallback path. When the file is missing, the silent-missing branch
+   * wipes the GLOBAL pointer instead of the currently-selected song's
+   * per-song key (codex review finding #1). Default false = legacy
+   * per-song auto-restore behavior.
    */
-  async function handleLoadReferenceByFilePath(filePath: string): Promise<void> {
+  async function handleLoadReferenceByFilePath(
+    filePath: string,
+    options: { isGlobalFallback?: boolean } = {},
+  ): Promise<void> {
     const saved = savedReferenceTracks.find((r) => r.filePath === filePath);
     if (saved) {
-      await handleLoadSavedReferenceTrack(saved, { silentOnMissing: true });
+      // handleLoadSavedReferenceTrack claims its own wrapper id.
+      await handleLoadSavedReferenceTrack(saved, {
+        silentOnMissing: true,
+        silentMissingTargetsGlobal: options.isGlobalFallback,
+      });
       return;
     }
-    // Fallback: resolve and load directly
+    // Fallback: resolve and load directly. v3.22.0 codex follow-up:
+    // CLAIM a new request id BEFORE the resolvePlaybackSource await so
+    // concurrent wrapper invocations can't both pass the pre-await
+    // staleness check with the same captured id.
+    referenceLoadRequestIdRef.current += 1;
+    const entryRequestId = referenceLoadRequestIdRef.current;
+
     try {
       const resolvedPlaybackSource = await window.producerPlayer.resolvePlaybackSource(filePath);
+      if (referenceLoadRequestIdRef.current !== entryRequestId) {
+        // A newer song-switch / clear / wrapper-load happened while we
+        // were resolving. Drop this load on the floor.
+        return;
+      }
       const fileName = filePath.split('/').pop() ?? filePath;
       await loadReferenceTrack(
         'external-file',
@@ -7411,7 +7609,10 @@ export function App(): JSX.Element {
           subtitle: 'Auto-loaded reference',
           playbackSource: resolvedPlaybackSource,
         },
-        { silentOnMissing: true }
+        {
+          silentOnMissing: true,
+          silentMissingTargetsGlobal: options.isGlobalFallback,
+        }
       );
     } catch {
       // Silently ignore — the file may no longer exist
@@ -7446,7 +7647,17 @@ export function App(): JSX.Element {
       return;
     }
     setRestoreReferenceEnabled(readRestoreReferenceForSong(selectedSongId));
-  }, [selectedSongId, unifiedStateReady, restoreReferenceImportSignal]);
+    // v3.22.0 — Bug 1: the fullscreen mastering overlay mounts/unmounts
+    // when `analysisExpanded` flips. Without it in this dep array, the
+    // checkbox inside the fullscreen overlay could display a STALE
+    // React-state value that disagrees with localStorage (e.g. user
+    // toggles in compact, opens fullscreen — compact's setRestoreReferenceEnabled
+    // already ran, but if selectedSongId didn't change, the fullscreen
+    // mount reads React state which may not reflect a mid-session
+    // localStorage nudge). Adding `analysisExpanded` re-fires the
+    // hydration on every overlay open so the fullscreen checkbox is
+    // always keyed off fresh localStorage.
+  }, [selectedSongId, unifiedStateReady, restoreReferenceImportSignal, analysisExpanded]);
 
   const autoLoadRefSongIdRef = useRef<string | null>(null);
   const autoLoadRefImportSignalRef = useRef<number>(0);
@@ -7482,10 +7693,59 @@ export function App(): JSX.Element {
 
     const restoreEnabled = readRestoreReferenceForSong(selectedSongId);
     if (!restoreEnabled) {
-      // Opt-in toggle is OFF for this song (default). Keep whatever is
-      // currently loaded globally; do not touch `referenceTrack`.
+      // v3.22.0: OFF path — fall back to the last MANUALLY-picked global
+      // reference instead of stickily keeping whatever an earlier
+      // restore=ON track just auto-loaded. Ethan's voice note 4759:
+      //   "When I go back to a track that has restore OFF, it should go
+      //    back to whatever the last globally set reference track was —
+      //    instead of staying on the one set by the previous track that
+      //    had restore ON."
+      //
+      // Codex review finding #2 (follow-up, 2026-04-18 v3.22.0):
+      // invalidate any in-flight reference load from a PRIOR restore=ON
+      // song switch UNCONDITIONALLY when entering this branch, before
+      // any no-op decision. Otherwise: fast-switch ON→OFF while ON's
+      // analyzeAudioFile is still awaiting can let ON's load complete
+      // and stomp on whatever state the OFF branch then decides — even
+      // when OFF sees "global is already displayed" and does no-op.
+      // Bumping the request id here makes every OFF outcome (no-op,
+      // new global load, or clear) cancel prior loads.
+      referenceLoadRequestIdRef.current += 1;
+
+      const globalPath = readGlobalReference();
+      if (globalPath) {
+        if (!referenceTrack || referenceTrack.filePath !== globalPath) {
+          // Tag the load as a global-fallback so a missing file wipes
+          // the GLOBAL pointer, NOT the current song's per-song
+          // reference (which may be perfectly valid and unrelated).
+          // Codex review finding #1, 2026-04-18 v3.22.0.
+          void handleLoadReferenceByFilePath(globalPath, {
+            isGlobalFallback: true,
+          });
+        }
+        // else: the currently-loaded reference IS the global pick —
+        // nothing to do (the unconditional id bump above still
+        // invalidated any prior in-flight load).
+      } else if (referenceTrack) {
+        // No global pick has ever been made (or it was cleared). The
+        // previous track may have auto-loaded its saved reference; that
+        // reference belonged to that track's restore=ON intent, not the
+        // user's global intent. Clear it so we land in the proper empty
+        // state for the restore=OFF song.
+        setReferenceTrack(null);
+        setReferenceStatus('idle');
+        setReferenceError(null);
+      }
       return;
     }
+
+    // v3.22.0 codex follow-up #4: bump the reference-load request id
+    // UNCONDITIONALLY at the top of the restore=ON branch too, before
+    // any no-op decision. Otherwise a fast switch ON→ON where the new
+    // song's persisted path matches the already-displayed reference
+    // would skip bumping, letting a prior (still-resolving) in-flight
+    // load complete and overwrite the newer song's state.
+    referenceLoadRequestIdRef.current += 1;
 
     const persistedPath = readReferenceTrackForSong(selectedSongId);
     if (persistedPath) {

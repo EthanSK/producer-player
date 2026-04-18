@@ -298,6 +298,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     savedReferenceTracks: [],
     perSongReferenceTracks: {},
     perSongRestoreReferenceEnabled: {},
+    globalReferenceFilePath: '',
     eqSnapshots: {},
     eqLiveStates: {},
     aiEqRecommendations: {},
@@ -350,6 +351,11 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     savedReferenceTracks: parseSavedReferenceTracks(raw.savedReferenceTracks),
     perSongReferenceTracks: parsePerSongReferenceTracks(raw.perSongReferenceTracks),
     perSongRestoreReferenceEnabled: parsePerSongRestoreReferenceEnabled(raw.perSongRestoreReferenceEnabled),
+    // v3.22.0: last globally-picked reference. Fall back to empty string
+    // if missing or not a string so the renderer's narrow `typeof ... === 'string'`
+    // hydration check still works on old state files.
+    globalReferenceFilePath:
+      typeof raw.globalReferenceFilePath === 'string' ? raw.globalReferenceFilePath : '',
     eqSnapshots: parseEqSnapshots(raw.eqSnapshots),
     eqLiveStates: parseEqLiveStates(raw.eqLiveStates),
     aiEqRecommendations: parseAiEqRecommendations(raw.aiEqRecommendations),
@@ -623,9 +629,18 @@ export class UserStateService {
       }
     } catch { /* ignore */ }
 
-    // Per-song reference tracks (dynamic keys)
+    // Per-song reference tracks (dynamic keys).
+    // v3.22.0: the new globally-picked reference lives at
+    // `producer-player.reference-track-global.v1` — NOT a per-song entry.
+    // Treat it specially and skip so the global pick doesn't get stored
+    // under a fake "-global.v1" songId.
+    const globalRefKey = 'producer-player.reference-track-global.v1';
     const refPrefix = 'producer-player.reference-track.';
     for (const [key, value] of Object.entries(data)) {
+      if (key === globalRefKey) {
+        if (value.length > 0) state.globalReferenceFilePath = value;
+        continue;
+      }
       if (key.startsWith(refPrefix) && value.length > 0) {
         const songId = key.slice(refPrefix.length);
         if (songId.length > 0) {

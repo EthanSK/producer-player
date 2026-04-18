@@ -67,6 +67,41 @@
   overflow: hidden;
 }
 
+/* When user has positioned/resized the panel explicitly (v3.25+),
+ * the panel uses top/left/width/height and loses bottom/right anchoring.
+ * Keep the bottom border rounded + visible so the panel looks like a
+ * floating window rather than a docked-to-edge drawer. */
+.agent-chat-panel--positioned {
+  bottom: auto;
+  right: auto;
+  max-width: 100vw;
+  max-height: 100vh;
+  border-bottom: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+/* Disable transition mid drag/resize so the panel tracks the cursor tightly. */
+.agent-chat-panel--dragging,
+.agent-chat-panel--resizing {
+  transition: none;
+  user-select: none;
+}
+
+/* While dragging/resizing, suppress other hover effects on the page. */
+body.agent-chat-panel-dragging,
+body.agent-chat-panel-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* Reduced motion: honor system setting and remove transitions. */
+@media (prefers-reduced-motion: reduce) {
+  .agent-chat-panel {
+    transition: none;
+  }
+}
+
 /* Panel header */
 .agent-panel-header {
   display: flex;
@@ -75,6 +110,158 @@
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  /* Only show grab cursor when not hovering a button inside the header. */
+  cursor: grab;
+  touch-action: none;
+}
+
+.agent-panel-header:active {
+  cursor: grabbing;
+}
+
+/* Buttons inside the header keep their pointer cursor + stop drag. */
+.agent-panel-header .agent-header-button {
+  cursor: pointer;
+}
+
+/* Resize handles — invisible overlays with cursor + pointer targets. */
+.agent-resize-handle {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+  /* The handles live on top of the header/body; by default they only
+   * intercept mouse events on the handle itself. */
+}
+
+.agent-resize-handle--top {
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.agent-resize-handle--bottom {
+  bottom: 0;
+  left: 14px;
+  right: 14px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.agent-resize-handle--left {
+  top: 14px;
+  bottom: 14px;
+  left: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.agent-resize-handle--right {
+  top: 14px;
+  bottom: 14px;
+  right: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.agent-resize-handle--top-left {
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+.agent-resize-handle--top-right {
+  top: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+
+.agent-resize-handle--bottom-left {
+  bottom: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+
+.agent-resize-handle--bottom-right {
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+/* Subtle two-diagonal-line indicator on the top-left corner to hint at drag.
+ * Only visible when the panel is open, fades in on hover.
+ * Drawn with CSS gradients so no extra DOM / image assets needed. */
+.agent-resize-handle--top-left::before,
+.agent-resize-handle--top-left::after,
+.agent-resize-handle--bottom-right::before,
+.agent-resize-handle--bottom-right::after {
+  content: '';
+  position: absolute;
+  background: var(--text-muted);
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.agent-resize-handle--top-left::before {
+  top: 3px;
+  left: 3px;
+  width: 9px;
+  height: 1px;
+  transform: rotate(45deg);
+  transform-origin: 0 0;
+}
+
+.agent-resize-handle--top-left::after {
+  top: 6px;
+  left: 3px;
+  width: 6px;
+  height: 1px;
+  transform: rotate(45deg);
+  transform-origin: 0 0;
+}
+
+.agent-resize-handle--bottom-right::before {
+  bottom: 3px;
+  right: 3px;
+  width: 9px;
+  height: 1px;
+  transform: rotate(45deg);
+  transform-origin: 100% 100%;
+}
+
+.agent-resize-handle--bottom-right::after {
+  bottom: 6px;
+  right: 3px;
+  width: 6px;
+  height: 1px;
+  transform: rotate(45deg);
+  transform-origin: 100% 100%;
+}
+
+.agent-chat-panel:hover .agent-resize-handle--top-left::before,
+.agent-chat-panel:hover .agent-resize-handle--top-left::after,
+.agent-chat-panel:hover .agent-resize-handle--bottom-right::before,
+.agent-chat-panel:hover .agent-resize-handle--bottom-right::after {
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-resize-handle--top-left::before,
+  .agent-resize-handle--top-left::after,
+  .agent-resize-handle--bottom-right::before,
+  .agent-resize-handle--bottom-right::after {
+    transition: none;
+  }
 }
 
 .agent-panel-header-left {

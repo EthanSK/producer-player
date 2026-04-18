@@ -1820,6 +1820,12 @@ export function App(): JSX.Element {
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
   const [checklistTimestampMode, setChecklistTimestampMode] = useState<'live' | 'frozen'>('live');
+  // DAW time offset — pure display transform applied to checklist timestamps
+  // so they match the user's DAW arrangement position (when the exported song
+  // starts past 0:00 in the DAW). Does NOT remap the underlying audio seek
+  // target; clicking a badge still seeks to the raw stored timestamp.
+  const [checklistDawOffsetSeconds, setChecklistDawOffsetSeconds] = useState<number>(0);
+  const [checklistDawOffsetEnabled, setChecklistDawOffsetEnabled] = useState<boolean>(false);
   const [activeChecklistTimestampIds, setActiveChecklistTimestampIds] = useState<string[]>([]);
   const [checklistUndoStack, setChecklistUndoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
   const [checklistRedoStack, setChecklistRedoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
@@ -3090,6 +3096,17 @@ export function App(): JSX.Element {
           setAutoUpdateEnabled(userState.autoUpdateEnabled);
         }
 
+        if (
+          typeof userState.checklistDawOffsetSeconds === 'number' &&
+          Number.isFinite(userState.checklistDawOffsetSeconds) &&
+          userState.checklistDawOffsetSeconds >= 0
+        ) {
+          setChecklistDawOffsetSeconds(Math.floor(userState.checklistDawOffsetSeconds));
+        }
+        if (typeof userState.checklistDawOffsetEnabled === 'boolean') {
+          setChecklistDawOffsetEnabled(userState.checklistDawOffsetEnabled);
+        }
+
         const loadedDevices = sanitizeListeningDevices(userState.listeningDevices);
         if (loadedDevices.length > 0) {
           setListeningDevices(loadedDevices);
@@ -3248,6 +3265,8 @@ export function App(): JSX.Element {
         referenceLevelMatchEnabled,
         iCloudBackupEnabled,
         autoUpdateEnabled,
+        checklistDawOffsetSeconds,
+        checklistDawOffsetEnabled,
         lastFileDialogDirectory: '', // managed by main process
         windowBounds: null, // managed by main process — ignored on write
       };
@@ -3311,6 +3330,8 @@ export function App(): JSX.Element {
     referenceLevelMatchEnabled,
     iCloudBackupEnabled,
     autoUpdateEnabled,
+    checklistDawOffsetSeconds,
+    checklistDawOffsetEnabled,
     listeningDevices,
     activeListeningDeviceId,
   ]);
@@ -3373,6 +3394,17 @@ export function App(): JSX.Element {
       if (typeof userState.autoUpdateEnabled === 'boolean') {
         setAutoUpdateEnabled(userState.autoUpdateEnabled);
         window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, userState.autoUpdateEnabled ? 'true' : 'false');
+      }
+
+      if (
+        typeof userState.checklistDawOffsetSeconds === 'number' &&
+        Number.isFinite(userState.checklistDawOffsetSeconds) &&
+        userState.checklistDawOffsetSeconds >= 0
+      ) {
+        setChecklistDawOffsetSeconds(Math.floor(userState.checklistDawOffsetSeconds));
+      }
+      if (typeof userState.checklistDawOffsetEnabled === 'boolean') {
+        setChecklistDawOffsetEnabled(userState.checklistDawOffsetEnabled);
       }
 
       const incomingDevices = sanitizeListeningDevices(userState.listeningDevices);
@@ -8294,6 +8326,27 @@ export function App(): JSX.Element {
     () => [...checklistModalItems].reverse(),
     [checklistModalItems]
   );
+  // DAW offset split into minute/second parts for the header widget.
+  // Stored as a single integer `checklistDawOffsetSeconds`; we derive
+  // MM / SS for the two input fields and recombine on change.
+  const checklistDawOffsetMinutes = Math.floor(
+    Math.max(0, checklistDawOffsetSeconds) / 60
+  );
+  const checklistDawOffsetSecondsPart = Math.max(0, checklistDawOffsetSeconds) % 60;
+
+  function handleChecklistDawOffsetMinutesChange(raw: string): void {
+    // Allow empty string while editing (treat as 0); otherwise clamp
+    // to 0..99 and truncate to 2 digits (per-task spec).
+    const digitsOnly = raw.replace(/\D+/g, '').slice(0, 2);
+    const minutes = digitsOnly === '' ? 0 : Math.max(0, Math.min(99, Number.parseInt(digitsOnly, 10)));
+    setChecklistDawOffsetSeconds(minutes * 60 + checklistDawOffsetSecondsPart);
+  }
+
+  function handleChecklistDawOffsetSecondsChange(raw: string): void {
+    const digitsOnly = raw.replace(/\D+/g, '').slice(0, 2);
+    const seconds = digitsOnly === '' ? 0 : Math.max(0, Math.min(59, Number.parseInt(digitsOnly, 10)));
+    setChecklistDawOffsetSeconds(checklistDawOffsetMinutes * 60 + seconds);
+  }
   const checklistCompletedCount = checklistModalItems.filter((item) => item.completed).length;
   const checklistModalCanOpenMastering = checklistModalSong
     ? getPreferredPlaybackVersionId(checklistModalSong) !== null
@@ -10695,6 +10748,52 @@ export function App(): JSX.Element {
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
               </div>
+              <div
+                className={`checklist-daw-offset-control${checklistDawOffsetEnabled ? ' is-active' : ''}`}
+                data-testid="checklist-daw-offset-control"
+                title="Add a DAW time offset so timestamps displayed here line up with your digital audio workstation arrangement position. Does not change where clicks seek to."
+              >
+                <span className="checklist-daw-offset-label">DAW offset</span>
+                <div className="checklist-daw-offset-inputs">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="checklist-daw-offset-input"
+                    value={String(checklistDawOffsetMinutes).padStart(2, '0')}
+                    onChange={(event) =>
+                      handleChecklistDawOffsetMinutesChange(event.currentTarget.value)
+                    }
+                    onFocus={(event) => event.currentTarget.select()}
+                    aria-label="DAW offset minutes"
+                    data-testid="checklist-daw-offset-minutes"
+                    maxLength={2}
+                  />
+                  <span className="checklist-daw-offset-colon">:</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="checklist-daw-offset-input"
+                    value={String(checklistDawOffsetSecondsPart).padStart(2, '0')}
+                    onChange={(event) =>
+                      handleChecklistDawOffsetSecondsChange(event.currentTarget.value)
+                    }
+                    onFocus={(event) => event.currentTarget.select()}
+                    aria-label="DAW offset seconds"
+                    data-testid="checklist-daw-offset-seconds"
+                    maxLength={2}
+                  />
+                </div>
+                <label className="checklist-daw-offset-toggle" title={checklistDawOffsetEnabled ? 'Disable DAW offset' : 'Enable DAW offset'}>
+                  <input
+                    type="checkbox"
+                    checked={checklistDawOffsetEnabled}
+                    onChange={(event) => setChecklistDawOffsetEnabled(event.currentTarget.checked)}
+                    aria-label="Enable DAW offset"
+                    data-testid="checklist-daw-offset-toggle"
+                  />
+                  <span aria-hidden="true" className="checklist-daw-offset-toggle-dot" />
+                </label>
+              </div>
               <button type="button" className="checklist-header-done-button" onClick={handleCloseSongChecklist} title="Close checklist." data-testid="song-checklist-done-header">
                 Done
               </button>
@@ -10833,9 +10932,17 @@ export function App(): JSX.Element {
                               timestampDragState !== null &&
                               timestampDragState.itemId === item.id &&
                               timestampDragState.songId === checklistModalSong.id;
-                            const displaySeconds = isDraggingThis
+                            const baseDisplaySeconds = isDraggingThis
                               ? timestampDragState!.previewSeconds
                               : item.timestampSeconds!;
+                            // DAW offset is a pure display transform — the click
+                            // handler still seeks to item.timestampSeconds (the
+                            // raw stored value), NOT baseDisplaySeconds + offset.
+                            const dawOffsetActive = checklistDawOffsetEnabled;
+                            const displaySeconds = dawOffsetActive
+                              ? baseDisplaySeconds + checklistDawOffsetSeconds
+                              : baseDisplaySeconds;
+                            const seekTargetRaw = item.timestampSeconds!;
                             return (
                               <button
                                 type="button"
@@ -10843,23 +10950,27 @@ export function App(): JSX.Element {
                                   isDraggingThis && timestampDragState!.moved
                                     ? ' is-dragging'
                                     : ''
-                                }`}
+                                }${dawOffsetActive ? ' is-daw-offset' : ''}`}
                                 onPointerDown={(event) =>
                                   handleChecklistTimestampPointerDown(
                                     event,
                                     checklistModalSong.id,
                                     item.id,
-                                    item.timestampSeconds!
+                                    seekTargetRaw
                                   )
                                 }
                                 onPointerMove={handleChecklistTimestampPointerMove}
                                 onPointerUp={(event) =>
-                                  handleChecklistTimestampPointerUp(event, item.timestampSeconds!)
+                                  handleChecklistTimestampPointerUp(event, seekTargetRaw)
                                 }
                                 onPointerCancel={handleChecklistTimestampPointerCancel}
                                 data-testid="song-checklist-item-timestamp"
-                                title={`Drag up/down to adjust, click to jump to ${formatTime(item.timestampSeconds)}`}
-                                aria-label={`Seek to ${formatTime(item.timestampSeconds)}`}
+                                title={
+                                  dawOffsetActive
+                                    ? `DAW offset active (+${formatTime(checklistDawOffsetSeconds)}). Displayed: ${formatTime(displaySeconds)}. Click seeks to raw ${formatTime(seekTargetRaw)}.`
+                                    : `Drag up/down to adjust, click to jump to ${formatTime(seekTargetRaw)}`
+                                }
+                                aria-label={`Seek to ${formatTime(seekTargetRaw)}`}
                               >
                                 {formatTime(displaySeconds)}
                               </button>

@@ -2358,6 +2358,151 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   font-weight: 600;
 }
 
+/* DAW offset header widget — sits between the title and the Done button.
+ * When the toggle is OFF, the numeric inputs stay visible but dim so the
+ * user's last-typed offset value is still visible. */
+.checklist-daw-offset-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: auto;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.75;
+  transition: opacity 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.checklist-daw-offset-control.is-active {
+  opacity: 1;
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.checklist-daw-offset-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.checklist-daw-offset-inputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+}
+
+.checklist-daw-offset-input {
+  width: 28px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-0, rgba(0, 0, 0, 0.35));
+  color: inherit;
+  font: inherit;
+  text-align: center;
+}
+
+.checklist-daw-offset-control.is-active .checklist-daw-offset-input {
+  border-color: rgba(95, 210, 143, 0.45);
+  color: var(--success);
+}
+
+.checklist-daw-offset-input:focus {
+  outline: none;
+  border-color: var(--success);
+}
+
+.checklist-daw-offset-colon {
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+.checklist-daw-offset-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 28px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.checklist-daw-offset-toggle input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.checklist-daw-offset-toggle-dot {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 0.15s ease, border-color 0.15s ease;
+  pointer-events: none;
+}
+
+.checklist-daw-offset-toggle-dot::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.checklist-daw-offset-toggle input:checked + .checklist-daw-offset-toggle-dot {
+  border-color: var(--success);
+  background: rgba(95, 210, 143, 0.25);
+}
+
+.checklist-daw-offset-toggle input:checked + .checklist-daw-offset-toggle-dot::after {
+  transform: translateX(12px);
+  background: var(--success);
+}
+
+.checklist-daw-offset-toggle input:focus-visible + .checklist-daw-offset-toggle-dot {
+  box-shadow: 0 0 0 2px rgba(95, 210, 143, 0.35);
+}
+
+/* Offset-active visual cue for timestamp badges — overrides the default
+ * blue palette with the --success green so the user immediately sees that
+ * the displayed timestamps are shifted for DAW alignment. */
+.checklist-timestamp-badge.is-daw-offset {
+  border-color: rgba(95, 210, 143, 0.45);
+  background: rgba(95, 210, 143, 0.12);
+  color: var(--success);
+}
+
+.checklist-timestamp-badge.is-daw-offset:hover {
+  border-color: rgba(95, 210, 143, 0.7);
+  background: rgba(95, 210, 143, 0.22);
+  color: #a9e9c3;
+}
+
+.checklist-timestamp-badge.is-daw-offset:active,
+.checklist-timestamp-badge.is-daw-offset.is-dragging {
+  background: rgba(95, 210, 143, 0.32);
+  border-color: rgba(95, 210, 143, 0.85);
+  color: #d6f4e3;
+}
+
 .checklist-item-scroll-region {
   flex: 1;
   min-height: 140px;

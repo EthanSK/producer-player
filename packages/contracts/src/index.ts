@@ -333,6 +333,15 @@ export interface ProducerPlayerUserState {
   iCloudBackupEnabled: boolean;
   autoUpdateEnabled: boolean;
 
+  // Checklist DAW offset — when enabled, checklist timestamps are rendered
+  // with `checklistDawOffsetSeconds` added to their raw stored value so the
+  // displayed time lines up with the user's digital audio workstation
+  // arrangement (useful when the exported song starts past 0:00 in the DAW).
+  // NOTE: the seek target stays the raw stored timestamp — this is a pure
+  // display transform, not a remap of the underlying audio position.
+  checklistDawOffsetSeconds: number;
+  checklistDawOffsetEnabled: boolean;
+
   // File dialog
   lastFileDialogDirectory: string; // Remembers last-used directory across all file pickers
 

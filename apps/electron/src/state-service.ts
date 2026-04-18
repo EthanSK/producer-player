@@ -276,6 +276,8 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     referenceLevelMatchEnabled: true,
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
+    checklistDawOffsetSeconds: 0,
+    checklistDawOffsetEnabled: false,
     lastFileDialogDirectory: '',
     windowBounds: null,
   };
@@ -330,6 +332,16 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.iCloudBackupEnabled === 'boolean' ? raw.iCloudBackupEnabled : fallback.iCloudBackupEnabled,
     autoUpdateEnabled:
       typeof raw.autoUpdateEnabled === 'boolean' ? raw.autoUpdateEnabled : fallback.autoUpdateEnabled,
+    checklistDawOffsetSeconds:
+      typeof raw.checklistDawOffsetSeconds === 'number' &&
+      Number.isFinite(raw.checklistDawOffsetSeconds) &&
+      raw.checklistDawOffsetSeconds >= 0
+        ? Math.floor(raw.checklistDawOffsetSeconds)
+        : fallback.checklistDawOffsetSeconds,
+    checklistDawOffsetEnabled:
+      typeof raw.checklistDawOffsetEnabled === 'boolean'
+        ? raw.checklistDawOffsetEnabled
+        : fallback.checklistDawOffsetEnabled,
     lastFileDialogDirectory:
       typeof raw.lastFileDialogDirectory === 'string' ? raw.lastFileDialogDirectory : '',
     windowBounds: parseWindowBounds(raw.windowBounds),

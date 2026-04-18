@@ -2026,6 +2026,11 @@ export function App(): JSX.Element {
   const inspectorVersionSampleRatePendingVersionIdsRef = useRef<Set<string>>(new Set());
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+  // v3.24: floating per-version switcher. Mirrors the song switcher but lists
+  // the versions of the currently-playing/selected song instead of songs. Only
+  // rendered when the current song has 2+ versions; otherwise there is nothing
+  // to switch between and the trigger just creates visual noise.
+  const [versionSwitcherOpen, setVersionSwitcherOpen] = useState(false);
   // Inspector drawer (v3.20). At narrow viewport widths the right-hand
   // inspector pane collapses into a slide-in drawer triggered from a toolbar
   // button next to the Agent Chat Trigger. Open-state persists across reloads.
@@ -2600,16 +2605,19 @@ export function App(): JSX.Element {
   }, [selectedPlaybackVersionId]);
 
   useEffect(() => {
-    // Escape closes the quick switcher first (if open), then the mastering
-    // overlay. Runs globally because the quick switcher is now available from
-    // any view, not just the mastering fullscreen.
-    if (!analysisExpanded && !quickSwitcherOpen) {
+    // Escape closes the floating switchers first (if open), then the mastering
+    // overlay. Runs globally because the switchers are available from any
+    // view, not just the mastering fullscreen. Order: version switcher
+    // (innermost control) → song/quick switcher → mastering overlay.
+    if (!analysisExpanded && !quickSwitcherOpen && !versionSwitcherOpen) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (quickSwitcherOpen) {
+        if (versionSwitcherOpen) {
+          setVersionSwitcherOpen(false);
+        } else if (quickSwitcherOpen) {
           setQuickSwitcherOpen(false);
         } else if (analysisExpanded) {
           setAnalysisExpanded(false);
@@ -2621,7 +2629,7 @@ export function App(): JSX.Element {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [analysisExpanded, quickSwitcherOpen]);
+  }, [analysisExpanded, quickSwitcherOpen, versionSwitcherOpen]);
 
   // Track viewport width so the inspector collapses into a drawer at narrow
   // widths. The threshold matches the matching CSS media query in styles.css.
@@ -4916,6 +4924,67 @@ export function App(): JSX.Element {
   const selectedPlaybackFilePath = selectedPlaybackVersion?.filePath ?? null;
   const selectedPlaybackSongId = selectedPlaybackVersion?.songId ?? null;
   selectedPlaybackSongIdRef.current = selectedPlaybackSongId;
+
+  // v3.24: floating version switcher source of truth. We prefer the song that
+  // is actually loaded into the player (selectedPlaybackSongId) so the panel
+  // always reflects "the song you can hear". When nothing is loaded we fall
+  // back to the UI-selected song (selectedSongId) so the user can pre-choose a
+  // version before pressing play.
+  const versionSwitcherSong = useMemo<SongWithVersions | null>(() => {
+    if (selectedPlaybackSongId) {
+      const byPlayback = snapshot.songs.find((song) => song.id === selectedPlaybackSongId);
+      if (byPlayback) return byPlayback;
+    }
+    if (selectedSongId) {
+      const bySelected = snapshot.songs.find((song) => song.id === selectedSongId);
+      if (bySelected) return bySelected;
+    }
+    return null;
+  }, [selectedPlaybackSongId, selectedSongId, snapshot.songs]);
+  // Newest-first order mirrors the inspector's Version History list. Hidden
+  // entirely when there is 0 or 1 version — there's nothing to switch between.
+  const versionSwitcherVersions = useMemo(
+    () => (versionSwitcherSong ? sortVersions(versionSwitcherSong.versions) : []),
+    [versionSwitcherSong]
+  );
+  const versionSwitcherAvailable = versionSwitcherVersions.length >= 2;
+
+  // Auto-close the version switcher if the current song loses its multi-
+  // version status (e.g. user switches to a single-version song while it's
+  // open). Prevents a stale floating panel hanging around with no button
+  // visible to dismiss it.
+  useEffect(() => {
+    if (!versionSwitcherAvailable && versionSwitcherOpen) {
+      setVersionSwitcherOpen(false);
+    }
+  }, [versionSwitcherAvailable, versionSwitcherOpen]);
+
+  // v3.24: which version number matches what's audible right now. Used by the
+  // checklist to put a subtle accent outline on items tagged with that same
+  // number (via the existing v1/v2 suffix parser). Returns null when:
+  //   - there is no playback version (nothing loaded)
+  //   - the filename has no parseable version suffix
+  //   - reference preview mode is active (the mix version is SELECTED but not
+  //     AUDIBLE — the reference track is — so the "now playing" semantic does
+  //     not apply to the mix version)
+  // Callers MUST also verify the checklist's song matches the playback song
+  // before applying the highlight (otherwise opening song B's checklist while
+  // song A v2 is playing would wrongly highlight B's v2 items). (Codex
+  // review iterations 1 + 2, 2026-04-18.)
+  const currentPlaybackVersionNumber = useMemo<number | null>(() => {
+    if (!selectedPlaybackVersion) return null;
+    if (playbackPreviewMode === 'reference') return null;
+    return getVersionNumberFromFileName(selectedPlaybackVersion.fileName);
+  }, [selectedPlaybackVersion, playbackPreviewMode]);
+
+  // v3.24: which version id is truly "now playing" for the floating version
+  // switcher panel. In reference preview mode the mix version is selected but
+  // not audible, so nothing is "now playing" as far as the panel's user-
+  // visible semantics go — we render no active row and no "now playing" dot.
+  // Clicking a row will still work: handleVersionSwitcherSelect flips the
+  // preview mode back to 'mix' as part of the switch. (Codex review, 2026-04-18.)
+  const nowPlayingVersionId: string | null =
+    playbackPreviewMode === 'reference' ? null : selectedPlaybackVersionId;
 
   useEffect(() => {
     if (!selectedFolderId || albumActiveVersions.length === 0) {
@@ -8499,6 +8568,39 @@ export function App(): JSX.Element {
     schedulePlaybackLoadTimeout('quick-switcher');
   }
 
+  // v3.24: version switcher selection. Mirrors the inspector "Cue" button
+  // so the exact same load-then-autoplay-if-playing semantics apply regardless
+  // of whether the user reaches for the inspector or the floating switcher.
+  function handleVersionSwitcherSelect(versionId: string): void {
+    // No-op when the user clicks the already-active row AND we're already
+    // hearing the mix. When reference playback mode is on, we still fall
+    // through so the user ends up on the mix version they just asked for.
+    if (
+      versionId === selectedPlaybackVersionId &&
+      playbackPreviewMode !== 'reference'
+    ) {
+      setVersionSwitcherOpen(false);
+      return;
+    }
+    // If the user was auditioning the reference track when they clicked a
+    // version row, flip back to mix mode so the chosen version actually
+    // becomes audible. Without this, desiredPlaybackSource stays on the
+    // reference and the switcher silently "selects" the version without
+    // changing what is playing. (Codex review, 2026-04-18.)
+    if (playbackPreviewMode === 'reference') {
+      setPlaybackPreviewMode('mix');
+    }
+    if (shouldAutoplayOnTransport()) {
+      playOnNextLoadRef.current = true;
+      schedulePlaybackLoadTimeout('version-switcher-autoplay');
+    }
+    setSelectedPlaybackVersionId(versionId);
+    // Close the panel on a successful switch. Users who want to audition
+    // several versions in a row can re-open it; keeping it open otherwise
+    // obscures the transport controls they're likely about to use.
+    setVersionSwitcherOpen(false);
+  }
+
   function handleChecklistOverlayWheel(event: WheelEvent<HTMLDivElement>): void {
     const checklistModalCardNode = checklistModalCardRef.current;
     const eventTarget = event.target instanceof Node ? event.target : null;
@@ -12040,6 +12142,23 @@ export function App(): JSX.Element {
                       aria-describedby={undefined}
                       data-testid="song-checklist-item-row"
                       data-item-id={item.id}
+                      data-item-version-number={item.versionNumber ?? ''}
+                      data-current-version={
+                        // Highlight requires: item has a version tag, we know
+                        // what version is playing, the numbers match, AND the
+                        // checklist modal is showing the SAME song as is
+                        // playing. Otherwise opening song B's checklist while
+                        // song A v2 is playing would wrongly highlight B's v2
+                        // items — they'd share the number but not the song.
+                        // (Codex review, 2026-04-18.)
+                        item.versionNumber !== null &&
+                        currentPlaybackVersionNumber !== null &&
+                        item.versionNumber === currentPlaybackVersionNumber &&
+                        selectedPlaybackSongId !== null &&
+                        checklistModalSong.id === selectedPlaybackSongId
+                          ? 'true'
+                          : 'false'
+                      }
                       onDragStart={(event) => {
                         // Cancel drag that starts from interactive descendants
                         // (textarea selection / input / button) — those need
@@ -12129,7 +12248,22 @@ export function App(): JSX.Element {
                         isGroupedHighlight ? ' is-group-highlighted' : ''
                       }${isDraggingThisRow ? ' is-drag-source' : ''}${
                         showDropBefore ? ' drop-preview-before' : ''
-                      }${showDropAfter ? ' drop-preview-after' : ''}`}
+                      }${showDropAfter ? ' drop-preview-after' : ''}${
+                        // v3.24: "now-playing" highlight. Subtle accent border
+                        // when the checklist item's v1/v2/… tag matches the
+                        // version currently loaded in the player AND the
+                        // checklist modal is showing that same song. All four
+                        // conditions are needed — skipping the song check
+                        // leaks highlights across songs with overlapping
+                        // version numbers. (Codex review, 2026-04-18.)
+                        item.versionNumber !== null &&
+                        currentPlaybackVersionNumber !== null &&
+                        item.versionNumber === currentPlaybackVersionNumber &&
+                        selectedPlaybackSongId !== null &&
+                        checklistModalSong.id === selectedPlaybackSongId
+                          ? ' checklist-item--current-version'
+                          : ''
+                      }`}
                       style={
                         groupHighlightColor
                           ? ({ '--group-highlight-color': groupHighlightColor } as CSSProperties)
@@ -14725,6 +14859,106 @@ export function App(): JSX.Element {
             ) : null}
           </div>
         </div>
+      ) : null}
+
+      {/*
+        v3.24 — App-wide version switcher. Mirrors the song switcher above but
+        switches versions within the currently-playing song. Hidden entirely
+        when the current song has fewer than 2 versions (nothing to switch
+        between). Placement: right:172px — the next slot to the left of the
+        song switcher (68) and agent chat trigger (16) floating toolbar row.
+      */}
+      {versionSwitcherAvailable ? (
+        <>
+          <button
+            type="button"
+            className={`version-switcher-trigger${versionSwitcherOpen ? ' active' : ''}`}
+            onClick={() => setVersionSwitcherOpen((v) => !v)}
+            data-testid="version-switcher-trigger"
+            title={versionSwitcherOpen ? 'Close version switcher' : 'Switch version'}
+            aria-label={versionSwitcherOpen ? 'Close version switcher' : 'Switch version'}
+          >
+            {/* Stack-of-layers glyph — the intuitive "pick one of several
+                versions of the same thing" icon. Matches the Lucide "layers"
+                silhouette so it reads immediately. */}
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polygon points="12 2 2 7 12 12 22 7 12 2" />
+              <polyline points="2 17 12 22 22 17" />
+              <polyline points="2 12 12 17 22 12" />
+            </svg>
+          </button>
+          {versionSwitcherOpen ? (
+            <div
+              className="version-switcher-panel"
+              role="listbox"
+              aria-label="Version switcher"
+              data-testid="version-switcher-panel"
+            >
+              <div className="version-switcher-header">
+                <h4>Versions{versionSwitcherSong ? ` — ${getSongDisplayTitle(versionSwitcherSong)}` : ''}</h4>
+                <button
+                  type="button"
+                  className="version-switcher-close"
+                  onClick={() => setVersionSwitcherOpen(false)}
+                  aria-label="Close version switcher"
+                  title="Close"
+                >
+                  &times;
+                </button>
+              </div>
+              <div className="version-switcher-list">
+                {versionSwitcherVersions.map((version) => {
+                  // isActive drives the visible "now playing" affordances
+                  // (accent row + dot). Using nowPlayingVersionId (which is
+                  // null in reference mode) so the panel stays truthful about
+                  // what is actually audible. (Codex review, 2026-04-18.)
+                  const isActive = version.id === nowPlayingVersionId;
+                  const durationMs = version.durationMs;
+                  const durationLabel =
+                    typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0
+                      ? formatTime(durationMs / 1000)
+                      : version.extension.toUpperCase();
+                  return (
+                    <button
+                      key={version.id}
+                      type="button"
+                      role="option"
+                      aria-selected={isActive}
+                      className={`version-switcher-item${isActive ? ' version-switcher-item--active' : ''}`}
+                      onClick={() => handleVersionSwitcherSelect(version.id)}
+                      data-testid={`version-switcher-item-${version.id}`}
+                      title={version.fileName}
+                    >
+                      <span className="version-switcher-item-title">
+                        {version.fileName}
+                      </span>
+                      <span className="version-switcher-item-meta">
+                        {isActive ? (
+                          <span
+                            className="version-switcher-now-playing-dot"
+                            aria-label="Now playing"
+                            title="Now playing"
+                          />
+                        ) : null}
+                        {durationLabel}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       {/* Album art fullscreen lightbox */}

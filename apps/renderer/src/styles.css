@@ -1702,6 +1702,201 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   text-align: center;
 }
 
+/* ── v3.24 Floating Version Switcher ──
+   Mirrors .quick-switcher-toggle / .quick-switcher-panel visually but slots
+   to the LEFT of the song switcher so all three floating controls (agent
+   chat trigger @ 16, song switcher @ 68, version switcher @ 172 — with the
+   inspector drawer toggle @ 120 between them when visible) line up as a
+   horizontal floating toolbar along the bottom edge. Behaviour mirrors the
+   song switcher: non-modal, no backdrop, close via Escape / close button /
+   trigger-click-again. */
+
+.version-switcher-trigger {
+  position: fixed;
+  bottom: 16px;
+  /* Slots to the left of the inspector toggle (120) — the next free slot.
+     Uses the same 52px rhythm (16 → 68 → 120 → 172) so if the inspector
+     toggle is hidden (wider viewports) the gap is just visual whitespace
+     rather than a jarring overlap. */
+  right: 172px;
+  z-index: 900;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-1);
+  color: var(--accent);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.version-switcher-trigger:hover {
+  background: var(--bg-2);
+  transform: scale(1.05);
+}
+
+.version-switcher-trigger.active {
+  background: var(--accent);
+  color: var(--bg-0, #0e1621);
+}
+
+.version-switcher-panel {
+  position: fixed;
+  bottom: 68px;
+  right: 172px;
+  width: 320px;
+  max-height: 420px;
+  z-index: 950;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.version-switcher-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.version-switcher-header h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--fg, #ccd6e0);
+  /* The header may include the song title — clamp to keep the close button
+     aligned regardless of title length. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.version-switcher-close {
+  background: none;
+  border: none;
+  color: var(--fg, #ccd6e0);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.version-switcher-close:hover {
+  opacity: 1;
+}
+
+.version-switcher-list {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  padding: 4px 0;
+}
+
+.version-switcher-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--fg, #ccd6e0);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.version-switcher-item:hover {
+  background: rgba(92, 167, 255, 0.08);
+}
+
+.version-switcher-item--active {
+  background: rgba(92, 167, 255, 0.14);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.version-switcher-item--active:hover {
+  background: rgba(92, 167, 255, 0.2);
+}
+
+.version-switcher-item-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-switcher-item-meta {
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.version-switcher-now-playing-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(92, 167, 255, 0.6);
+  flex-shrink: 0;
+}
+
+/* ── v3.24 Checklist "now-playing" version highlight ──
+   Subtle 1.5px accent outline + tint so checklist items tagged with the
+   version currently loaded in the player stand out without shouting. Uses
+   the existing --accent token so it retheme-s automatically. The CSS is
+   intentionally scoped to the has-metadata variant since the versionNumber
+   badge is only ever rendered on those rows. */
+
+.checklist-item-row.checklist-item--current-version {
+  border: 1.5px solid var(--accent);
+  background: rgba(92, 167, 255, 0.06);
+  /* position:relative anchors the ::after "now playing" dot. The base
+     .checklist-item-row rule doesn't set a position so we scope it to this
+     variant to avoid disturbing the base layout. */
+  position: relative;
+  /* The tint keeps the accent recognisable but doesn't fight the existing
+     is-active (timestamp-hit) or is-group-highlighted hover states, which
+     are both stronger and take over when they apply. */
+}
+
+.checklist-item-row.checklist-item--current-version::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 4px rgba(92, 167, 255, 0.7);
+  pointer-events: none;
+}
+
 .analysis-reference-slots {
   display: grid;
   gap: 12px;

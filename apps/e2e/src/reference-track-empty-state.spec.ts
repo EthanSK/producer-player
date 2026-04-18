@@ -64,6 +64,14 @@ test('missing persisted reference track falls through to empty state, no error b
     //    that both point at a path that does NOT exist on disk. This is the
     //    exact state a user would land in after deleting / moving an
     //    external reference file between sessions.
+    //
+    //    v3.16.0: also flip the per-song "restore reference on open" toggle
+    //    ON, because the restore-on-switch path is now opt-in and this
+    //    regression test exists precisely to cover the restore-then-prune
+    //    flow. Without this flag the restore pipeline never runs, no 404 is
+    //    hit, no pruning happens — and the test would spuriously "pass"
+    //    (stale pointer would still be on disk, but nothing would trigger
+    //    the banner we're guarding against either).
     await page.evaluate(
       (args) => {
         const { songId, bogusPath } = args;
@@ -81,6 +89,11 @@ test('missing persisted reference track falls through to empty state, no error b
         window.localStorage.setItem(
           `producer-player.reference-track.${songId}`,
           bogusPath
+        );
+        // v3.16.0 opt-in for auto-restore on song switch.
+        window.localStorage.setItem(
+          `producer-player.restore-reference.${songId}`,
+          '1'
         );
       },
       { songId: songId as string, bogusPath: bogusReferencePath }

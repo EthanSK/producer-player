@@ -369,6 +369,12 @@ const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
 const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
 const REFERENCE_TRACK_PER_SONG_KEY_PREFIX = 'producer-player.reference-track.';
+// v3.16.0: per-song opt-in to auto-restore the saved reference when the song
+// is opened/switched to. Default OFF — previously the app always restored
+// the song's saved reference (and clobbered whatever global reference the
+// user was currently A/B'ing against). The save behavior for references is
+// unchanged (still always-on); only the restore-on-switch behavior is gated.
+const RESTORE_REFERENCE_PER_SONG_KEY_PREFIX = 'producer-player.restore-reference.';
 const COMPACT_REFERENCE_QUICK_PICKS_COUNT = 3;
 const SAVED_REFERENCE_SINGLE_CLICK_DELAY_MS = 300;
 const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
@@ -1413,6 +1419,30 @@ function readReferenceTrackForSong(songId: string): string | null {
   return window.localStorage.getItem(`${REFERENCE_TRACK_PER_SONG_KEY_PREFIX}${songId}`) ?? null;
 }
 
+/**
+ * Persist the per-song "restore saved reference on open" toggle.
+ * Stored as '1' or '0'. See RESTORE_REFERENCE_PER_SONG_KEY_PREFIX for
+ * the behavior contract.
+ */
+function persistRestoreReferenceForSong(songId: string, enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      `${RESTORE_REFERENCE_PER_SONG_KEY_PREFIX}${songId}`,
+      enabled ? '1' : '0',
+    );
+  } catch { /* localStorage may be unavailable */ }
+}
+
+/** Read the per-song "restore saved reference on open" toggle. Default OFF. */
+function readRestoreReferenceForSong(songId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  const raw = window.localStorage.getItem(
+    `${RESTORE_REFERENCE_PER_SONG_KEY_PREFIX}${songId}`,
+  );
+  return raw === '1';
+}
+
 /** Persist AI-recommended EQ gains for a song. */
 function persistAiEqForSong(songId: string, gains: number[]): void {
   if (typeof window === 'undefined') return;
@@ -1992,6 +2022,23 @@ export function App(): JSX.Element {
   // keys, even if `savedReferenceTracks` didn't change. See the silent-missing
   // branch in `loadReferenceTrack` and the 2026-04-18 codex review notes.
   const [perSongReferencePrunedSignal, setPerSongReferencePrunedSignal] = useState(0);
+  // v3.16.0: per-song "restore reference on open" toggle. Mirrors the
+  // localStorage value for the currently selected song. Rehydrated in a
+  // useEffect keyed on `selectedSongId`. Default OFF for every song.
+  const [restoreReferenceEnabled, setRestoreReferenceEnabled] = useState(false);
+  // Bumped whenever the user flips the toggle, so the unified-state sync
+  // picks up the change even though the localStorage key isn't a React
+  // dependency on its own.
+  const [restoreReferenceToggleSignal, setRestoreReferenceToggleSignal] =
+    useState(0);
+  // v3.16.0 codex follow-up: bumped whenever an import / push from main
+  // (onUserStateChanged) overwrites the per-song restore keys in
+  // localStorage. Both the checkbox rehydrate and auto-restore effects
+  // depend on this so the current song re-evaluates after an import
+  // flips its flag from false → true (otherwise the `autoLoadRefSongIdRef`
+  // guard would suppress the retry for the same selected song).
+  const [restoreReferenceImportSignal, setRestoreReferenceImportSignal] =
+    useState(0);
   const [referenceTrack, setReferenceTrack] = useState<LoadedReferenceTrack | null>(null);
   const [referenceStatus, setReferenceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle'
@@ -3243,6 +3290,21 @@ export function App(): JSX.Element {
           }
         }
 
+        // v3.16.0: hydrate per-song "restore reference on open" toggles into
+        // localStorage cache so `readRestoreReferenceForSong` has the right
+        // values ready before the auto-restore useEffect fires on first
+        // song select. Absent entries stay absent (= default OFF).
+        if (
+          userState.perSongRestoreReferenceEnabled &&
+          Object.keys(userState.perSongRestoreReferenceEnabled).length > 0
+        ) {
+          for (const [songId, enabled] of Object.entries(
+            userState.perSongRestoreReferenceEnabled,
+          )) {
+            persistRestoreReferenceForSong(songId, enabled);
+          }
+        }
+
         setUnifiedStateReady(true);
       })
       .catch(() => {
@@ -3291,6 +3353,26 @@ export function App(): JSX.Element {
               const val = window.localStorage.getItem(key);
               if (songId.length > 0 && val && val.length > 0) {
                 result[songId] = val;
+              }
+            }
+          }
+          return result;
+        })(),
+        perSongRestoreReferenceEnabled: (() => {
+          // v3.16.0: collect per-song "restore reference on open" toggles.
+          // Stored as '1' / '0' strings; keys without a matching prefix
+          // (or with any other value) default to OFF and are simply
+          // omitted from the serialized map.
+          const result: Record<string, boolean> = {};
+          for (let i = 0; i < window.localStorage.length; i++) {
+            const key = window.localStorage.key(i);
+            if (key && key.startsWith(RESTORE_REFERENCE_PER_SONG_KEY_PREFIX)) {
+              const songId = key.slice(
+                RESTORE_REFERENCE_PER_SONG_KEY_PREFIX.length,
+              );
+              const val = window.localStorage.getItem(key);
+              if (songId.length > 0 && (val === '1' || val === '0')) {
+                result[songId] = val === '1';
               }
             }
           }
@@ -3431,6 +3513,7 @@ export function App(): JSX.Element {
     albumChecklists,
     savedReferenceTracks,
     perSongReferencePrunedSignal,
+    restoreReferenceToggleSignal,
     referenceLevelMatchEnabled,
     iCloudBackupEnabled,
     autoUpdateEnabled,
@@ -3543,6 +3626,7 @@ export function App(): JSX.Element {
       // Found by GPT-5.4 full-codebase audit, 2026-04-16.
       const PER_SONG_PREFIXES = [
         REFERENCE_TRACK_PER_SONG_KEY_PREFIX,
+        RESTORE_REFERENCE_PER_SONG_KEY_PREFIX,
         'producer-player-eq-snapshots-',
         EQ_LIVE_STATE_PER_SONG_KEY_PREFIX,
         AI_EQ_PER_SONG_KEY_PREFIX,
@@ -3564,6 +3648,24 @@ export function App(): JSX.Element {
           persistReferenceTrackForSong(songId, filePath);
         }
       }
+
+      // v3.16.0: sync per-song "restore reference on open" toggles into
+      // localStorage. Absent entries mean default OFF, which the helper
+      // already handles (no need to write '0' for missing keys).
+      if (userState.perSongRestoreReferenceEnabled) {
+        for (const [songId, enabled] of Object.entries(
+          userState.perSongRestoreReferenceEnabled,
+        )) {
+          persistRestoreReferenceForSong(songId, enabled);
+        }
+      }
+      // v3.16.0 codex follow-up: the two effects below key off this
+      // signal so an import that flips the currently-selected song's
+      // toggle from false → true actually updates the checkbox AND
+      // triggers the restore load. Without this bump, the effects'
+      // other deps (`selectedSongId`, `unifiedStateReady`) haven't
+      // changed so neither effect re-runs.
+      setRestoreReferenceImportSignal((n) => n + 1);
 
       // Sync EQ data into localStorage cache
       if (userState.eqSnapshots) {
@@ -7167,6 +7269,20 @@ export function App(): JSX.Element {
   }
 
   /**
+   * v3.16.0: flip the per-song "restore reference on open" toggle.
+   * Purely writes-through — does NOT auto-load the saved reference when
+   * toggled ON mid-session (that only happens on the next song switch).
+   * Does NOT affect the save path either; picking a reference continues
+   * to persist per-song regardless of this toggle.
+   */
+  function handleToggleRestoreReferenceForCurrentSong(enabled: boolean): void {
+    if (!selectedSongId) return;
+    persistRestoreReferenceForSong(selectedSongId, enabled);
+    setRestoreReferenceEnabled(enabled);
+    setRestoreReferenceToggleSignal((n) => n + 1);
+  }
+
+  /**
    * Load a reference track by file path (looks it up in saved references).
    * This is the auto-restore path (startup, song switch): if the file is
    * missing, we must bail silently instead of flashing a red error banner.
@@ -7199,24 +7315,83 @@ export function App(): JSX.Element {
   // BUG FIX (2026-04-16, a992797): auto-load bailed if ANY reference was loaded, so song B kept
   // song A's reference. Now compares persisted path with loaded path and reloads when they differ.
   // Found by GPT-5.4 shadow audit, 2026-04-16.
-  const autoLoadRefSongIdRef = useRef<string | null>(null);
+  //
+  // FEATURE (2026-04-18, v3.16.0): auto-restore is now opt-in per song.
+  // Previously we always restored the song's saved reference, which clobbered
+  // whatever global reference the user had loaded. The SAVE path is still
+  // always-on (see loadReferenceTrack → persistReferenceTrackForSong), but
+  // the RESTORE-on-switch path below only fires when the per-song toggle is
+  // ON. When the toggle is OFF (default), we do nothing: keep the currently
+  // loaded global reference, do NOT clear it, do NOT load the song's saved
+  // reference. This matches Ethan's ask verbatim.
+  // Rehydrate the UI toggle state from localStorage whenever the active
+  // song changes. Independent of the auto-restore effect below so the
+  // checkbox reflects the correct per-song value even when the toggle is
+  // OFF (and we therefore skip the restore path entirely).
+  //
+  // Codex review (2026-04-18, v3.16.0): also rehydrate when
+  // `unifiedStateReady` flips so a fresh-profile / iCloud-restore /
+  // import that populates `perSongRestoreReferenceEnabled` via
+  // `producer-player-user-state.json` (before localStorage has caught up)
+  // still reflects the correct checkbox for the currently selected song.
   useEffect(() => {
-    if (!selectedSongId || selectedSongId === autoLoadRefSongIdRef.current) return;
-    autoLoadRefSongIdRef.current = selectedSongId;
+    if (!selectedSongId) {
+      setRestoreReferenceEnabled(false);
+      return;
+    }
+    setRestoreReferenceEnabled(readRestoreReferenceForSong(selectedSongId));
+  }, [selectedSongId, unifiedStateReady, restoreReferenceImportSignal]);
+
+  const autoLoadRefSongIdRef = useRef<string | null>(null);
+  const autoLoadRefImportSignalRef = useRef<number>(0);
+  useEffect(() => {
+    if (!selectedSongId) return;
+    // v3.16.0 codex review: the previous guard fired once per (songId),
+    // which meant a library snapshot that selected the first song BEFORE
+    // `unifiedStateReady` flipped would silently cache the "no restore"
+    // outcome — even though the unified-state hydration below was about to
+    // populate `producer-player.restore-reference.<songId>` in localStorage.
+    // Now the guard also keys on readiness: while the unified state is
+    // still hydrating, we let the effect re-run for the same song so the
+    // restore decision is made against the fully hydrated localStorage.
+    //
+    // Import signal (2026-04-18 follow-up): when `onUserStateChanged`
+    // fires (import / push from main), we bump `restoreReferenceImportSignal`
+    // and must re-evaluate even if the selected song hasn't changed. We
+    // detect "new import" by comparing against the last import-signal we
+    // saw in this ref; if it changed, we bypass the same-song guard.
+    const importBumped =
+      autoLoadRefImportSignalRef.current !== restoreReferenceImportSignal;
+    if (
+      unifiedStateReady &&
+      !importBumped &&
+      selectedSongId === autoLoadRefSongIdRef.current
+    ) {
+      return;
+    }
+    if (unifiedStateReady) {
+      autoLoadRefSongIdRef.current = selectedSongId;
+      autoLoadRefImportSignalRef.current = restoreReferenceImportSignal;
+    }
+
+    const restoreEnabled = readRestoreReferenceForSong(selectedSongId);
+    if (!restoreEnabled) {
+      // Opt-in toggle is OFF for this song (default). Keep whatever is
+      // currently loaded globally; do not touch `referenceTrack`.
+      return;
+    }
 
     const persistedPath = readReferenceTrackForSong(selectedSongId);
-
     if (persistedPath) {
       if (!referenceTrack || referenceTrack.filePath !== persistedPath) {
         void handleLoadReferenceByFilePath(persistedPath);
       }
     } else if (referenceTrack) {
-      // New song has no persisted reference — leave the current one alone.
-      // Clearing would be surprising; if the user explicitly loaded a
-      // reference, they want it to carry over until they clear it.
+      // Toggle ON but no persisted reference yet for this song — leave the
+      // current one alone (same historical behavior as before the toggle).
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSongId]);
+  }, [selectedSongId, unifiedStateReady, restoreReferenceImportSignal]);
 
   // Restore per-song AI EQ recommendation when song changes
   const autoLoadAiEqSongIdRef = useRef<string | null>(null);
@@ -10204,6 +10379,23 @@ export function App(): JSX.Element {
                         </button>
                       </div>
                     </div>
+                    {selectedSongId ? (
+                      <label
+                        className="analysis-reference-restore-toggle muted"
+                        data-testid="analysis-reference-restore-toggle"
+                        title="When ON, opening this track auto-loads its saved reference. When OFF (default), the currently loaded reference is kept across track switches. References are always saved when you pick them, regardless of this toggle."
+                      >
+                        <input
+                          type="checkbox"
+                          checked={restoreReferenceEnabled}
+                          onChange={(event) =>
+                            handleToggleRestoreReferenceForCurrentSong(event.target.checked)
+                          }
+                          data-testid="analysis-reference-restore-toggle-input"
+                        />
+                        <span>Restore this reference when I open this track</span>
+                      </label>
+                    ) : null}
                   </div>
 
               <div className="analysis-ab-toggle" data-testid="analysis-ab-toggle">

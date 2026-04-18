@@ -160,6 +160,17 @@ function parsePerSongReferenceTracks(value: unknown): Record<string, string> {
   return Object.fromEntries(entries);
 }
 
+function parsePerSongRestoreReferenceEnabled(
+  value: unknown,
+): Record<string, boolean> {
+  if (!isRecord(value)) return {};
+  const entries = Object.entries(value).flatMap(([songId, enabled]) => {
+    if (songId.length === 0 || typeof enabled !== 'boolean') return [];
+    return [[songId, enabled] as const];
+  });
+  return Object.fromEntries(entries);
+}
+
 function parseEqSnapshots(value: unknown): Record<string, EqSnapshot[]> {
   if (!isRecord(value)) return {};
   const result: Record<string, EqSnapshot[]> = {};
@@ -286,6 +297,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     albumChecklists: {},
     savedReferenceTracks: [],
     perSongReferenceTracks: {},
+    perSongRestoreReferenceEnabled: {},
     eqSnapshots: {},
     eqLiveStates: {},
     aiEqRecommendations: {},
@@ -337,6 +349,7 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     albumChecklists: parseAlbumChecklists(raw.albumChecklists),
     savedReferenceTracks: parseSavedReferenceTracks(raw.savedReferenceTracks),
     perSongReferenceTracks: parsePerSongReferenceTracks(raw.perSongReferenceTracks),
+    perSongRestoreReferenceEnabled: parsePerSongRestoreReferenceEnabled(raw.perSongRestoreReferenceEnabled),
     eqSnapshots: parseEqSnapshots(raw.eqSnapshots),
     eqLiveStates: parseEqLiveStates(raw.eqLiveStates),
     aiEqRecommendations: parseAiEqRecommendations(raw.aiEqRecommendations),
@@ -617,6 +630,18 @@ export class UserStateService {
         const songId = key.slice(refPrefix.length);
         if (songId.length > 0) {
           state.perSongReferenceTracks[songId] = value;
+        }
+      }
+    }
+
+    // Per-song "restore reference on open" toggle (dynamic keys, v3.16.0+).
+    // Stored as '1' / '0' strings. Absent = default OFF.
+    const restorePrefix = 'producer-player.restore-reference.';
+    for (const [key, value] of Object.entries(data)) {
+      if (key.startsWith(restorePrefix) && value.length > 0) {
+        const songId = key.slice(restorePrefix.length);
+        if (songId.length > 0) {
+          state.perSongRestoreReferenceEnabled[songId] = value === '1';
         }
       }
     }

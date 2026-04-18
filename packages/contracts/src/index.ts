@@ -305,6 +305,12 @@ export interface ProducerPlayerUserState {
   // Reference tracks
   savedReferenceTracks: SavedReferenceTrack[];
   perSongReferenceTracks: Record<string, string>; // songId -> filePath
+  // Per-song opt-in for auto-restoring the saved reference when a track is
+  // opened/switched to. Default OFF (v3.16.0): the saved reference still
+  // PERSISTS on pick, but is only auto-loaded on track switch when this
+  // toggle is ON for that song. When OFF, the currently-loaded global
+  // reference is preserved across song switches instead of being replaced.
+  perSongRestoreReferenceEnabled: Record<string, boolean>; // songId -> enabled
 
   // EQ snapshots (per-song)
   eqSnapshots: Record<string, EqSnapshot[]>;

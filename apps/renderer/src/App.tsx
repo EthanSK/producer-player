@@ -6109,6 +6109,55 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  // Global Enter-to-blur handler (v3.18).
+  //
+  // UX rule: pressing Enter in a text-ish <input> should blur the input
+  // so its existing onBlur save handler commits the value. Textareas
+  // are deliberately excluded — Enter must still insert a newline
+  // there. If an input already handles Enter itself (e.g.
+  // listening-device-input, album-title-input, the checklist composer
+  // textarea) it will either call `event.preventDefault()` or swap the
+  // element out, so this listener skips any event where
+  // `defaultPrevented` is already true.
+  //
+  // Bubble phase (not capture) — we deliberately run AFTER React's
+  // synthetic onKeyDown on the input so per-input handlers get first
+  // crack at the event and can opt out via preventDefault().
+  // See apps/e2e/src/enter-blurs-inputs.spec.ts for the regression coverage.
+  useEffect(() => {
+    const BLURRABLE_INPUT_TYPES = new Set([
+      'text',
+      'search',
+      'email',
+      'password',
+      'url',
+      'tel',
+      'number',
+    ]);
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter') return;
+      if (event.defaultPrevented) return;
+      if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.isComposing) return; // IME composition — let it land the character.
+
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+
+      const type = target.type.toLowerCase();
+      if (!BLURRABLE_INPUT_TYPES.has(type)) return;
+
+      // Blur triggers the input's own onBlur save handler (that's the
+      // existing pattern across the app). No explicit save here.
+      target.blur();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
+
   useEffect(() => {
     if (!canReorderSongs) {
       clearDragState();

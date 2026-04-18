@@ -1882,6 +1882,16 @@ export function App(): JSX.Element {
   const [activeChecklistTimestampIds, setActiveChecklistTimestampIds] = useState<string[]>([]);
   const [checklistUndoStack, setChecklistUndoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
   const [checklistRedoStack, setChecklistRedoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
+  // Drag-and-drop reorder state for checklist items. Native HTML5 DnD (no
+  // external library) to keep the bundle lean and match the existing
+  // song-row reorder implementation. Dragged item's id lives in
+  // draggingChecklistItemId; the current drop-preview target + position
+  // (before/after) live in the other two pieces. Position uses the rendered
+  // chronological order (top = oldest, bottom = newest) — the reorder logic
+  // reverses back to the storage order when writing.
+  const [draggingChecklistItemId, setDraggingChecklistItemId] = useState<string | null>(null);
+  const [checklistDragOverItemId, setChecklistDragOverItemId] = useState<string | null>(null);
+  const [checklistDragOverPosition, setChecklistDragOverPosition] = useState<'before' | 'after'>('before');
   // Listening-device tags (persistent) + which one is currently active for new items.
   // Also the in-flight name the user is typing in the dialog's device input.
   const [listeningDevices, setListeningDevices] = useState<ListeningDevice[]>([]);
@@ -2037,6 +2047,12 @@ export function App(): JSX.Element {
   const checklistOverlayRef = useRef<HTMLDivElement | null>(null);
   const checklistModalCardRef = useRef<HTMLDivElement | null>(null);
   const checklistItemScrollRegionRef = useRef<HTMLDivElement | null>(null);
+  // Flag set by handleAddChecklistItem to request a scroll-to-bottom after
+  // the new item has been rendered. An effect watching the displayed list
+  // length performs the scroll once React has flushed — doing it inline in
+  // the handler races the render and either no-ops (the new <li> doesn't
+  // exist yet) or scrolls to the wrong (old) scrollHeight. Fixed 2026-04-18.
+  const checklistPendingScrollToBottomRef = useRef<boolean>(false);
   const checklistUnderlyingAnalysisPaneRef = useRef<HTMLElement | null>(null);
   const checklistUnderlyingSidePaneScrollRef = useRef<HTMLDivElement | null>(null);
   const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -6952,9 +6968,17 @@ export function App(): JSX.Element {
       } else {
         // User explicitly picked / clicked something that has since gone
         // missing: give them a one-line, human-readable message instead of
-        // the raw fetch error.
+        // the raw fetch error. We show the ABSOLUTE PATH (or the playback URL
+        // if no file path is known — e.g. a producer-media:// URL) rather
+        // than just the filename so Ethan can see exactly where the app
+        // expected to find the file on disk. Fixed 2026-04-18 (per-path
+        // diagnostic messaging).
+        const locationForMissingRef =
+          (selection.filePath && selection.filePath.length > 0
+            ? selection.filePath
+            : selection.playbackSource?.url) ?? selection.fileName;
         setReferenceError(
-          `Reference file could not be found: ${selection.fileName}`
+          `Reference file could not be found: ${locationForMissingRef}`
         );
         setReferenceStatus('error');
       }
@@ -8234,17 +8258,12 @@ export function App(): JSX.Element {
     checklistHighlightTimeoutsRef.current.set(itemId, timeout);
   }
 
+  // Deprecated — retained for backwards compatibility in case future callers
+  // need an imperative scroll, but handleAddChecklistItem now just sets the
+  // pending flag and a useEffect does the actual scroll once React has
+  // rendered the new <li>. See checklistPendingScrollToBottomRef.
   function scrollChecklistToBottomAfterEnterAdd(): void {
-    const scrollRegion = checklistItemScrollRegionRef.current;
-    if (!scrollRegion) {
-      return;
-    }
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        scrollRegion.scrollTop = scrollRegion.scrollHeight;
-      });
-    });
+    checklistPendingScrollToBottomRef.current = true;
   }
 
   function handleAddChecklistItem(options: { source: 'enter' | 'button' } = { source: 'button' }): void {
@@ -8281,9 +8300,101 @@ export function App(): JSX.Element {
 
     resetChecklistComposer(captureCurrentPlaybackTimestamp());
 
-    if (options.source === 'enter') {
-      scrollChecklistToBottomAfterEnterAdd();
+    // Always scroll to the bottom after adding a new item so the newly-added
+    // (and often still-being-edited) row is in view. Used to only fire on
+    // Enter-add; Ethan reported the button-add path also needs it. The scroll
+    // is performed by an effect watching the chronological list length so it
+    // runs AFTER React has rendered the new <li> — previously this was called
+    // synchronously which raced the render and either no-op'd or scrolled to
+    // the pre-insert scrollHeight.
+    checklistPendingScrollToBottomRef.current = true;
+    void options; // source kept on the signature for future callers.
+  }
+
+  // -----------------------------------------------------------------------
+  // Checklist drag-and-drop reordering (Task 2, 2026-04-18)
+  // -----------------------------------------------------------------------
+  // Items are stored newest-first in `songChecklists[songId]` (new items are
+  // prepended). They're rendered in CHRONOLOGICAL order (oldest at top,
+  // newest at bottom) via [...items].reverse(). The drop-target computation
+  // works in the rendered (chronological) order, but the storage writer
+  // re-reverses after the reorder so we keep the storage invariant intact.
+  function clearChecklistDragState(): void {
+    setDraggingChecklistItemId(null);
+    setChecklistDragOverItemId(null);
+    setChecklistDragOverPosition('before');
+  }
+
+  function deriveChecklistDragOverPosition(
+    event: DragEvent<HTMLElement>,
+  ): 'before' | 'after' {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+    return event.clientY < midpoint ? 'before' : 'after';
+  }
+
+  function reorderChecklistItemsChronological(
+    chronological: SongChecklistItem[],
+    draggedItemId: string,
+    targetItemId: string,
+    position: 'before' | 'after',
+  ): SongChecklistItem[] {
+    if (draggedItemId === targetItemId) {
+      return chronological;
     }
+    const fromIndex = chronological.findIndex((it) => it.id === draggedItemId);
+    const targetIndex = chronological.findIndex((it) => it.id === targetItemId);
+    if (fromIndex === -1 || targetIndex === -1) {
+      return chronological;
+    }
+    const without = chronological.filter((_, i) => i !== fromIndex);
+    const adjustedTargetIndex = targetIndex > fromIndex ? targetIndex - 1 : targetIndex;
+    const insertIndex = position === 'before' ? adjustedTargetIndex : adjustedTargetIndex + 1;
+    const next = [...without];
+    next.splice(insertIndex, 0, chronological[fromIndex]!);
+    return next;
+  }
+
+  function applyChecklistReorder(
+    songId: string,
+    draggedItemId: string,
+    targetItemId: string,
+    position: 'before' | 'after',
+  ): void {
+    updateSongChecklistItems(songId, (storedItems) => {
+      // Storage is newest-first; convert to rendered chronological, reorder,
+      // then reverse back before committing.
+      const chronological = [...storedItems].reverse();
+      const reordered = reorderChecklistItemsChronological(
+        chronological,
+        draggedItemId,
+        targetItemId,
+        position,
+      );
+      if (reordered === chronological) return storedItems;
+      return [...reordered].reverse();
+    });
+  }
+
+  // Move a checklist item up or down by one position in the rendered
+  // (chronological) order. Used by keyboard reorder (Alt+Arrow) so the
+  // feature is accessible without a mouse.
+  function moveChecklistItemInChronological(
+    songId: string,
+    itemId: string,
+    direction: -1 | 1,
+  ): void {
+    updateSongChecklistItems(songId, (storedItems) => {
+      const chronological = [...storedItems].reverse();
+      const index = chronological.findIndex((it) => it.id === itemId);
+      if (index === -1) return storedItems;
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= chronological.length) return storedItems;
+      const next = [...chronological];
+      const [moved] = next.splice(index, 1);
+      next.splice(nextIndex, 0, moved!);
+      return [...next].reverse();
+    });
   }
 
   function handleSubmitListeningDevice(): void {
@@ -8544,6 +8655,33 @@ export function App(): JSX.Element {
     () => [...checklistModalItems].reverse(),
     [checklistModalItems]
   );
+
+  // Scroll-to-bottom after an item is added. Watches the rendered list length
+  // rather than running synchronously inside handleAddChecklistItem so the
+  // scroll happens AFTER React has committed the new <li> — otherwise
+  // scrollHeight still reflects the pre-insert layout and the new row stays
+  // below the viewport. Only fires when the pending flag is set (cleared
+  // immediately) so toggling completed / deleting items / reopening the
+  // modal with an existing checklist doesn't also jump the scroll.
+  useEffect(() => {
+    if (!checklistPendingScrollToBottomRef.current) {
+      return;
+    }
+    const scrollRegion = checklistItemScrollRegionRef.current;
+    if (!scrollRegion) {
+      checklistPendingScrollToBottomRef.current = false;
+      return;
+    }
+    checklistPendingScrollToBottomRef.current = false;
+    // Double RAF: first frame lets React finish layout after the commit,
+    // second frame gives the browser a chance to update scrollHeight with
+    // any auto-sized textarea row the new item might have.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollRegion.scrollTop = scrollRegion.scrollHeight;
+      });
+    });
+  }, [checklistModalItemsChronological.length]);
   // DAW offset — per-song. Reads the currently-open checklist song's entry
   // from `songDawOffsets`; if absent, falls back to `dawOffsetDefault` (the
   // last-used value) so the user doesn't start at 0:00/disabled for a fresh
@@ -11270,14 +11408,123 @@ export function App(): JSX.Element {
                           ? 'rgba(170, 170, 170, 0.55)'
                           : null;
 
+                    const isDraggingThisRow = draggingChecklistItemId === item.id;
+                    const showDropBefore =
+                      draggingChecklistItemId !== null &&
+                      draggingChecklistItemId !== item.id &&
+                      checklistDragOverItemId === item.id &&
+                      checklistDragOverPosition === 'before';
+                    const showDropAfter =
+                      draggingChecklistItemId !== null &&
+                      draggingChecklistItemId !== item.id &&
+                      checklistDragOverItemId === item.id &&
+                      checklistDragOverPosition === 'after';
                     return (
                     <li
                       key={item.id}
+                      // Native HTML5 drag-and-drop for reordering checklist
+                      // items. draggable=true on the <li> means clicking +
+                      // dragging anywhere on the row background initiates a
+                      // drag — interactive children (checkbox, textarea,
+                      // remove button) are marked draggable={false} so they
+                      // don't hijack the drag, and their click handlers run
+                      // normally. See Task 2 (2026-04-18).
+                      draggable
+                      tabIndex={0}
+                      aria-grabbed={isDraggingThisRow}
+                      aria-describedby={undefined}
+                      data-testid="song-checklist-item-row"
+                      data-item-id={item.id}
+                      onDragStart={(event) => {
+                        // Cancel drag that starts from interactive descendants
+                        // (textarea selection / input / button) — those need
+                        // the browser's native behaviour (text caret / click).
+                        const target = event.target as HTMLElement | null;
+                        if (
+                          target &&
+                          target.closest(
+                            'textarea, input, button, select, a, [data-no-drag]',
+                          )
+                        ) {
+                          event.preventDefault();
+                          return;
+                        }
+                        setDraggingChecklistItemId(item.id);
+                        setChecklistDragOverItemId(null);
+                        setChecklistDragOverPosition('before');
+                        event.dataTransfer.effectAllowed = 'move';
+                        try {
+                          event.dataTransfer.setData('text/plain', item.id);
+                        } catch {
+                          // Some browsers throw on setData inside tests —
+                          // harmless; the state-based drag tracking handles it.
+                        }
+                      }}
+                      onDragOver={(event) => {
+                        if (!draggingChecklistItemId || draggingChecklistItemId === item.id) {
+                          return;
+                        }
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                        const nextPosition = deriveChecklistDragOverPosition(event);
+                        if (checklistDragOverItemId !== item.id) {
+                          setChecklistDragOverItemId(item.id);
+                        }
+                        if (checklistDragOverPosition !== nextPosition) {
+                          setChecklistDragOverPosition(nextPosition);
+                        }
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const draggedId = draggingChecklistItemId;
+                        if (!draggedId || draggedId === item.id) {
+                          clearChecklistDragState();
+                          return;
+                        }
+                        const position = deriveChecklistDragOverPosition(event);
+                        applyChecklistReorder(
+                          checklistModalSong.id,
+                          draggedId,
+                          item.id,
+                          position,
+                        );
+                        clearChecklistDragState();
+                      }}
+                      onDragEnd={() => {
+                        clearChecklistDragState();
+                      }}
+                      onKeyDown={(event) => {
+                        // Keyboard reorder: Alt+Arrow up/down when the row is
+                        // focused. Accessibility affordance so the feature
+                        // doesn't require a mouse. Avoids bare arrow keys
+                        // because those are already used inside the <textarea>
+                        // for caret movement and the timestamp badge for drag.
+                        if (!event.altKey) return;
+                        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                        // Don't interfere if focus is inside an input/textarea.
+                        const target = event.target as HTMLElement | null;
+                        if (
+                          target &&
+                          target !== event.currentTarget &&
+                          target.closest('textarea, input, button')
+                        ) {
+                          return;
+                        }
+                        event.preventDefault();
+                        moveChecklistItemInChronological(
+                          checklistModalSong.id,
+                          item.id,
+                          event.key === 'ArrowUp' ? -1 : 1,
+                        );
+                      }}
                       className={`checklist-item-row${
                         hasItemMetadata ? ' has-metadata' : ''
                       }${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}${
                         isGroupedHighlight ? ' is-group-highlighted' : ''
-                      }`}
+                      }${isDraggingThisRow ? ' is-drag-source' : ''}${
+                        showDropBefore ? ' drop-preview-before' : ''
+                      }${showDropAfter ? ' drop-preview-after' : ''}`}
                       style={
                         groupHighlightColor
                           ? ({ '--group-highlight-color': groupHighlightColor } as CSSProperties)
@@ -11402,6 +11649,14 @@ export function App(): JSX.Element {
                         className={`checklist-item-text${item.completed ? ' completed' : ''}`}
                         value={item.text}
                         rows={1}
+                        // draggable=false so dragging from inside the textarea
+                        // doesn't start a native text-selection drag; the
+                        // <li> takes the drag instead (pointerdown inside an
+                        // un-selected, un-focused textarea still fires the
+                        // <li>'s onDragStart since the <li> is draggable).
+                        // Click+focus still works for editing. See Task 2
+                        // (2026-04-18).
+                        draggable={false}
                         onChange={(event) => {
                           autosizeChecklistTextarea(event.currentTarget);
                           handleChecklistItemTextChange(

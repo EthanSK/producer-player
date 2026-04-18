@@ -2611,6 +2611,65 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+  /* Drag-and-drop reorder: subtle grab cursor on the row so it's obvious the
+     row can be picked up. Interactive descendants (textarea, buttons,
+     checkbox) restore their own cursors so they don't feel grabbable. */
+  cursor: grab;
+  position: relative;
+}
+
+.checklist-item-row:active {
+  cursor: grabbing;
+}
+
+.checklist-item-row .checklist-item-text,
+.checklist-item-row .checklist-item-toggle,
+.checklist-item-row .checklist-item-meta,
+.checklist-item-row .checklist-remove-button,
+.checklist-item-row .checklist-timestamp-badge {
+  cursor: auto;
+}
+
+.checklist-item-row .checklist-item-text {
+  cursor: text;
+}
+
+.checklist-item-row .checklist-item-toggle,
+.checklist-item-row .checklist-item-toggle input,
+.checklist-item-row .checklist-remove-button,
+.checklist-item-row .checklist-timestamp-badge {
+  cursor: pointer;
+}
+
+.checklist-item-row.is-drag-source {
+  opacity: 0.45;
+}
+
+.checklist-item-row.drop-preview-before::before,
+.checklist-item-row.drop-preview-after::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(61, 141, 255, 0.25);
+  pointer-events: none;
+}
+
+.checklist-item-row.drop-preview-before::before {
+  top: -2px;
+}
+
+.checklist-item-row.drop-preview-after::after {
+  bottom: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .checklist-item-row {
+    transition: none;
+  }
 }
 
 .checklist-item-row.is-active {

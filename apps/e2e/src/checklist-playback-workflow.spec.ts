@@ -323,9 +323,15 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
-  test('adding checklist items does not auto-scroll the checklist dialog', async () => {
+  // Behaviour change (2026-04-18, Task 4): adding a checklist item now scrolls
+  // the scroll region to the bottom so the newly-added (and typically still
+  // being edited) row is in view. The old test asserted the pre-fix
+  // "scroll-position-stays-put" contract; this assertion has been flipped
+  // to match the new contract. The dedicated spec that covers this in
+  // isolation lives in `checklist-scrolls-to-bottom-on-add.spec.ts`.
+  test('adding checklist items scrolls the checklist dialog to the bottom', async () => {
     const directories = await createE2ETestDirectories(
-      'producer-player-checklist-no-auto-scroll-on-add'
+      'producer-player-checklist-scrolls-to-bottom-on-add-inline'
     );
     await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
       durationMs: 8_000,
@@ -345,29 +351,57 @@ test.describe('checklist playback workflow', () => {
       const input = page.getByTestId('song-checklist-input');
       const addButton = page.getByTestId('song-checklist-add');
       for (let index = 1; index <= 24; index += 1) {
-        await input.fill(`Auto-scroll baseline ${index}`);
+        await input.fill(`Scroll baseline ${index}`);
         await addButton.click();
       }
 
       const scrollRegion = page.getByTestId('song-checklist-scroll-region');
+      // Force the scroll region to the top so we can observe the new
+      // scroll-to-bottom behaviour (otherwise it may already be at the bottom).
       await scrollRegion.evaluate((node) => {
-        (node as HTMLDivElement).scrollTop = 120;
+        (node as HTMLDivElement).scrollTop = 0;
       });
-
       const scrollTopBeforeAdd = await scrollRegion.evaluate(
         (node) => (node as HTMLDivElement).scrollTop
       );
+      expect(scrollTopBeforeAdd).toBe(0);
 
-      await input.fill('Auto-scroll should stay put');
+      await input.fill('New row should be scrolled into view');
       await addButton.click();
 
-      await expect
-        .poll(async () => scrollRegion.evaluate((node) => (node as HTMLDivElement).scrollTop))
-        .toBeLessThan(scrollTopBeforeAdd + 30);
+      // Allow the double-rAF scroll effect to settle (see the effect keyed
+      // on checklistModalItemsChronological.length in App.tsx).
+      await page.waitForTimeout(300);
 
+      // After the add, the scroll region should have moved away from the top
+      // and the last row's bottom should be within the visible area.
       await expect
-        .poll(async () => scrollRegion.evaluate((node) => (node as HTMLDivElement).scrollTop))
-        .toBeGreaterThan(scrollTopBeforeAdd - 30);
+        .poll(async () =>
+          scrollRegion.evaluate((node) => (node as HTMLDivElement).scrollTop)
+        )
+        .toBeGreaterThan(scrollTopBeforeAdd + 30);
+
+      const measurement = await scrollRegion.evaluate((node) => {
+        const region = node as HTMLDivElement;
+        const rect = region.getBoundingClientRect();
+        const rows = region.querySelectorAll<HTMLElement>(
+          '[data-testid="song-checklist-item-row"]'
+        );
+        const lastRow = rows[rows.length - 1];
+        if (!lastRow) return null;
+        const lastRect = lastRow.getBoundingClientRect();
+        return {
+          rowBottom: lastRect.bottom,
+          rowTop: lastRect.top,
+          regionBottom: rect.bottom,
+          regionTop: rect.top,
+        };
+      });
+      expect(measurement).not.toBeNull();
+      if (!measurement) throw new Error('No row measurement');
+      expect(measurement.rowTop).toBeLessThanOrEqual(measurement.regionBottom);
+      // Allow <=2px of sub-pixel / scrollbar overlap.
+      expect(measurement.rowBottom - measurement.regionBottom).toBeLessThanOrEqual(2);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

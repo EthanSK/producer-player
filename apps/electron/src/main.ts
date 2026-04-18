@@ -1668,8 +1668,14 @@ function buildApplicationMenu(): void {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
+        // Cmd+R / Cmd+Shift+R reload accelerators are intentionally
+        // omitted. Cmd+R is reserved in the renderer as the
+        // Mix/Reference A/B toggle (customizable global shortcut —
+        // see handleReferenceShortcut in App.tsx). A full page reload
+        // would blow away playback, analysis, and unsaved UI state,
+        // which was the 2026-04-18 bug report. DevTools (Cmd+Alt+I)
+        // still works for developer refreshes, and the main process
+        // auto-reloads on dev-mode rebuilds.
         { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },

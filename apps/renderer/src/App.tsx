@@ -5066,6 +5066,16 @@ export function App(): JSX.Element {
   const normalizationSourceAnalysis = isRefMode
     ? referenceTrack?.measuredAnalysis ?? null
     : measuredAnalysis;
+  // v3.23 — normalization readouts + controls should key off the
+  // ACTIVE source's status, not the mix's. Without this, the fullscreen
+  // header reads "Platform normalization preview (Using Reference)"
+  // and the big applied-reduction readout shows a valid gain, yet
+  // the surrounding Preview toggle stays disabled and the summary
+  // text says "Analysing…" because the mix `analysisStatus` is still
+  // 'loading'. Codex review #2 (2026-04-18).
+  const normalizationSourceStatus: 'idle' | 'loading' | 'ready' | 'error' = isRefMode
+    ? referenceStatus
+    : analysisStatus;
   const normalizationPreview = computePlatformNormalizationPreview(
     normalizationSourceAnalysis,
     selectedNormalizationPlatform
@@ -9601,7 +9611,7 @@ export function App(): JSX.Element {
           error: 'Error',
         });
   const normalizationChangeText = buildAnalysisValue(
-    analysisStatus,
+    normalizationSourceStatus,
     formatSignedLevel(normalizationPreview?.appliedGainDb),
     {
       loading: 'Loading…',
@@ -9610,7 +9620,7 @@ export function App(): JSX.Element {
     }
   );
   const normalizationAppliedMainText = buildAnalysisValue(
-    analysisStatus,
+    normalizationSourceStatus,
     formatAppliedChangeMainText(normalizationPreview?.appliedGainDb),
     {
       loading: 'Loading…',
@@ -9619,7 +9629,7 @@ export function App(): JSX.Element {
     }
   );
   const normalizationProjectedText = buildAnalysisValue(
-    analysisStatus,
+    normalizationSourceStatus,
     formatMeasuredStat(normalizationPreview?.projectedIntegratedLufs, 'LUFS'),
     {
       loading: 'Loading…',
@@ -9628,19 +9638,19 @@ export function App(): JSX.Element {
     }
   );
   const normalizationCapText =
-    analysisStatus === 'ready' && normalizationPreview
+    normalizationSourceStatus === 'ready' && normalizationPreview
       ? normalizationPreview.headroomCapDb === null
         ? 'No true peak data available'
         : `${normalizationPreview.headroomCapDb >= 0 ? '+' : ''}${normalizationPreview.headroomCapDb.toFixed(1)} dB before ${selectedNormalizationPlatform.truePeakCeilingDbtp.toFixed(0)} dBTP`
-      : buildAnalysisValue(analysisStatus, '—', {
+      : buildAnalysisValue(normalizationSourceStatus, '—', {
           loading: 'Loading…',
           error: 'Error',
           empty: '—',
         });
   const normalizationSummaryText =
-    analysisStatus === 'loading'
+    normalizationSourceStatus === 'loading'
       ? 'Analysing…'
-      : analysisStatus === 'error'
+      : normalizationSourceStatus === 'error'
         ? 'Could not analyse this track.'
         : normalizationPreview
           ? `${selectedNormalizationPlatform.label} · ${
@@ -10534,7 +10544,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row analysis-normalization-header-row-compact">
                     <div className="analysis-panel-header-title-block">
-                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Compare against Spotify at 100% volume. Use the desktop or mobile app (the Web Player and most Spotify Connect / 3rd-party devices don't normalize). In Settings → Playback, confirm Normalize Volume is ON and Volume Level is Normal (-14 LUFS; Loud/Quiet will mismatch your -14 LUFS preview). With Platform Preview on and Spotify at 100% app volume, both sources target -14 LUFS — if one is noticeably louder, something else is in the chain."} links={PLATFORM_NORMALIZATION_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PLATFORM_NORMALIZATION} /></strong>
+                      <strong>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Compare against Spotify at 100% volume. Use the desktop or mobile app (the Web Player and most Spotify Connect / 3rd-party devices don't normalize). In Settings → Playback, confirm Normalize Volume is ON and Volume Level is Normal (-14 LUFS; Loud/Quiet will mismatch your -14 LUFS preview). With Platform Preview on and Spotify at 100% app volume, both sources target -14 LUFS — if one is noticeably louder, something else is in the chain."} links={PLATFORM_NORMALIZATION_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PLATFORM_NORMALIZATION} />{referenceModeSuffixNode}</strong>
                       <p className="muted" data-testid="analysis-normalization-summary">
                         {normalizationSummaryText}
                       </p>
@@ -10545,7 +10555,7 @@ export function App(): JSX.Element {
                         className={normalizationPreviewEnabled ? '' : 'ghost'}
                         onClick={() => setNormalizationPreviewEnabled((current) => !current)}
                         data-testid="analysis-normalization-toggle"
-                        disabled={analysisStatus !== 'ready' || !normalizationPreview}
+                        disabled={normalizationSourceStatus !== 'ready' || !normalizationPreview}
                         title="Apply this platform's loudness adjustment to your playback."
                       >
                         Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
@@ -10558,7 +10568,7 @@ export function App(): JSX.Element {
                   {NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
                     const platformPreview = normalizationPreviewByPlatformId.get(platform.id) ?? null;
                     const platformAppliedMainText = buildAnalysisValue(
-                      analysisStatus,
+                      normalizationSourceStatus,
                       formatAppliedChangeMainText(platformPreview?.appliedGainDb),
                       {
                         loading: 'Loading…',
@@ -11895,25 +11905,31 @@ export function App(): JSX.Element {
             </div>
 
             <div className="listening-device-strip" data-testid="listening-device-strip">
-              <input
-                type="text"
-                className="listening-device-input"
-                placeholder="listening device"
-                value={listeningDeviceDraftName}
-                onChange={(event) => setListeningDeviceDraftName(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    handleSubmitListeningDevice();
-                  }
-                }}
-                aria-label="Add or select listening device"
-                data-testid="listening-device-input"
-                title="Type a device name and press Enter to save it. New items you add will be tagged with the selected device."
-              />
-              {listeningDevices.length > 0 ? (
-                <div className="listening-device-chip-row" data-testid="listening-device-chip-row">
-                  {listeningDevices.map((device) => {
+              <div className="listening-device-input-wrap">
+                <input
+                  type="text"
+                  className="listening-device-input"
+                  placeholder="Add listening device — type + Enter"
+                  value={listeningDeviceDraftName}
+                  onChange={(event) => setListeningDeviceDraftName(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleSubmitListeningDevice();
+                    }
+                  }}
+                  aria-label="Add or select listening device"
+                  data-testid="listening-device-input"
+                  title="Type a device name and press Enter to save it. New items you add will be tagged with the selected device."
+                />
+              </div>
+              <div
+                className="listening-device-chip-row"
+                data-testid="listening-device-chip-row"
+                aria-label="Saved listening devices"
+              >
+                {listeningDevices.length > 0 ? (
+                  listeningDevices.map((device) => {
                     const color = getListeningDeviceColor(device.id);
                     const isActive = device.id === activeListeningDeviceId;
                     return (
@@ -11946,9 +11962,13 @@ export function App(): JSX.Element {
                         </button>
                       </span>
                     );
-                  })}
-                </div>
-              ) : null}
+                  })
+                ) : (
+                  <span className="listening-device-chip-row-empty" aria-hidden="true">
+                    Saved devices appear here
+                  </span>
+                )}
+              </div>
             </div>
 
             <div
@@ -13600,7 +13620,7 @@ export function App(): JSX.Element {
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'normalization')}
                 >
                   <div className="analysis-panel-header-row">
-                    <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Compare against Spotify at 100% volume. Use the desktop or mobile app (the Web Player and most Spotify Connect / 3rd-party devices don't normalize). In Settings → Playback, confirm Normalize Volume is ON and Volume Level is Normal (-14 LUFS; Loud/Quiet will mismatch your -14 LUFS preview). With Platform Preview on and Spotify at 100% app volume, both sources target -14 LUFS — if one is noticeably louder, something else is in the chain."} links={PLATFORM_NORMALIZATION_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PLATFORM_NORMALIZATION} /></h3>
+                    <h3>Platform normalization preview <HelpTooltip text={"Streaming platforms adjust your track's volume so every song plays at a similar loudness. Each platform has a target LUFS and a true peak ceiling.\n\n'Applied change' = the gain (in dB) the platform will add or remove. 'Projected loudness' = your track's LUFS after that adjustment. 'Headroom cap' = the maximum boost allowed before true peaks would clip.\n\nSpotify (-14 LUFS, -1 dBTP): Turns loud tracks down AND boosts quiet tracks up, but caps the boost so peaks stay under -1 dBTP. Apple Music (-16 LUFS, -1 dBTP): Same up-and-down approach but targets -16 LUFS, preserving more dynamics. YouTube (-14 LUFS, -1 dBTP): Only turns loud tracks down. If your track is quieter than -14, YouTube leaves it alone. Tidal (-14 LUFS, -1 dBTP): Same as YouTube, turns down only. Amazon Music (-14 LUFS, -2 dBTP): Turns down only, with a stricter -2 dBTP peak ceiling.\n\nToggle 'Preview' to hear exactly how your track will sound on the selected platform.\n\n\uD83D\uDCA1 Tip — Compare against Spotify at 100% volume. Use the desktop or mobile app (the Web Player and most Spotify Connect / 3rd-party devices don't normalize). In Settings → Playback, confirm Normalize Volume is ON and Volume Level is Normal (-14 LUFS; Loud/Quiet will mismatch your -14 LUFS preview). With Platform Preview on and Spotify at 100% app volume, both sources target -14 LUFS — if one is noticeably louder, something else is in the chain."} links={PLATFORM_NORMALIZATION_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PLATFORM_NORMALIZATION} />{referenceModeSuffixNode}</h3>
                     {renderMasteringPanelDragHandle('fullscreen', 'normalization')}
                   </div>
                   <div className="analysis-normalization-header">
@@ -13618,7 +13638,7 @@ export function App(): JSX.Element {
                       className={normalizationPreviewEnabled ? '' : 'ghost'}
                       onClick={() => setNormalizationPreviewEnabled((current) => !current)}
                       data-testid="analysis-overlay-normalization-toggle"
-                      disabled={analysisStatus !== 'ready' || !normalizationPreview}
+                      disabled={normalizationSourceStatus !== 'ready' || !normalizationPreview}
                       title="Apply this platform's loudness adjustment to your playback."
                     >
                       Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
@@ -13633,7 +13653,7 @@ export function App(): JSX.Element {
                     {NORMALIZATION_PLATFORM_PROFILES.map((platform) => {
                       const platformPreview = normalizationPreviewByPlatformId.get(platform.id) ?? null;
                       const platformAppliedMainText = buildAnalysisValue(
-                        analysisStatus,
+                        normalizationSourceStatus,
                         formatAppliedChangeMainText(platformPreview?.appliedGainDb),
                         {
                           loading: 'Loading…',
@@ -13641,12 +13661,36 @@ export function App(): JSX.Element {
                           empty: 'Applied change —',
                         }
                       );
+                      // v3.23 — big trendy applied-change readout in the
+                      // dead space on the right of each fullscreen bubble.
+                      // Compact view still uses the inline platformAppliedMainText
+                      // string; fullscreen gets the big number + small label.
+                      //
+                      // Codex review #1 (2026-04-18): don't gate on the
+                      // mix `analysisStatus`. In reference mode the preview
+                      // is computed from `referenceTrack.measuredAnalysis`
+                      // (see `normalizationSourceAnalysis`), so a mix still
+                      // analyzing shouldn't hide a valid reference gain —
+                      // trust the finite-number check on the gain itself.
+                      const platformGainDb = platformPreview?.appliedGainDb ?? null;
+                      const platformHasGain =
+                        platformGainDb !== null && Number.isFinite(platformGainDb);
+                      const platformBigReadout = platformHasGain
+                        ? `${platformGainDb! >= 0 ? '+' : ''}${platformGainDb!.toFixed(1)}`
+                        : '—';
+                      const platformBigLabel = !platformHasGain
+                        ? 'No preview'
+                        : platformGainDb! < 0
+                          ? 'dB reduction'
+                          : platformGainDb! > 0
+                            ? 'dB boost'
+                            : 'dB (no change)';
 
                       return (
                         <button
                           key={`overlay-${platform.id}`}
                           type="button"
-                          className={`analysis-platform-button${
+                          className={`analysis-platform-button analysis-platform-button-overlay${
                             selectedNormalizationPlatformId === platform.id ? ' selected' : ''
                           }`}
                           onClick={() => setSelectedNormalizationPlatformId(platform.id)}
@@ -13654,23 +13698,34 @@ export function App(): JSX.Element {
                           title={platform.description}
                           aria-pressed={selectedNormalizationPlatformId === platform.id}
                         >
-                          <span className="analysis-platform-header-row">
-                            <span
-                              className="analysis-platform-icon"
-                              style={{ '--platform-accent': platform.accentColor } as CSSProperties}
-                            >
-                              <PlatformIcon platformId={platform.id} />
+                          <span className="analysis-platform-overlay-left">
+                            <span className="analysis-platform-header-row">
+                              <span
+                                className="analysis-platform-icon"
+                                style={{ '--platform-accent': platform.accentColor } as CSSProperties}
+                              >
+                                <PlatformIcon platformId={platform.id} />
+                              </span>
+                              <span className="analysis-platform-title">{platform.label}</span>
                             </span>
-                            <span className="analysis-platform-title">{platform.label}</span>
+                            <span className="analysis-platform-copy">
+                              <span className="analysis-platform-target">
+                                {platform.targetLufs.toFixed(0)} LUFS target
+                              </span>
+                              <span className="analysis-platform-change">{platformAppliedMainText}</span>
+                              <span className="muted">
+                                {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                              </span>
+                            </span>
                           </span>
-                          <span className="analysis-platform-copy">
-                            <span className="analysis-platform-target">
-                              {platform.targetLufs.toFixed(0)} LUFS target
-                            </span>
-                            <span className="analysis-platform-change">{platformAppliedMainText}</span>
-                            <span className="muted">
-                              {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
-                            </span>
+                          <span
+                            className="analysis-platform-big-readout"
+                            data-testid={`analysis-overlay-platform-${platform.id}-big-readout`}
+                            style={{ '--platform-accent': platform.accentColor } as CSSProperties}
+                            aria-hidden="true"
+                          >
+                            <span className="analysis-platform-big-value">{platformBigReadout}</span>
+                            <span className="analysis-platform-big-label">{platformBigLabel}</span>
                           </span>
                         </button>
                       );
@@ -13950,8 +14005,25 @@ export function App(): JSX.Element {
                   </section>
                 ) : null}
 
-                {/* Mastering Checklist Summary */}
-                {analysisStatus === 'ready' && analysis && measuredAnalysis ? (
+                {/* Mastering Checklist Summary.
+                 *
+                 * v3.23 — when reference mode is active, evaluate the
+                 * reference track's analysis (not the mix's) so the
+                 * checklist matches what the user is hearing + the
+                 * amber "Using Reference" suffix in the header. This
+                 * mirrors how the Loudness & Peaks panel sources its
+                 * metrics from activePreviewAnalysis / activeMeasuredAnalysis. */}
+                {(() => {
+                  const checklistAnalysis = isRefMode ? activePreviewAnalysis : analysis;
+                  const checklistMeasured = isRefMode ? activeMeasuredAnalysis : measuredAnalysis;
+                  if (
+                    activePreviewAnalysisStatus !== 'ready' ||
+                    !checklistAnalysis ||
+                    !checklistMeasured
+                  ) {
+                    return null;
+                  }
+                  return (
                   <section
                     className={`analysis-overlay-section${
                       fullscreenMasteringDropTargetPanelId === 'mastering-checklist'
@@ -13969,59 +14041,60 @@ export function App(): JSX.Element {
                   >
                     <div className="analysis-panel-header-row">
                       <div className="analysis-section-header">
-                      <h4>Mastering Checklist <HelpTooltip text={"What this measures: An automated technical health check of your master across four critical areas. (1) LUFS: passes if integrated loudness is between -16 and -6 LUFS (the typical streaming range), warns otherwise. (2) True Peak: passes if below -1 dBTP, warns if between -1 and 0 dBTP, fails if at or above 0 dBTP. (3) DC Offset: passes if the mean sample value is 0.001 or less (0.1%), warns if higher. (4) Clipping: passes if zero clipped samples, fails if any samples hit the digital ceiling.\n\nGood values: All four checks showing a pass (checkmark). This means your master is technically clean and ready for distribution.\n\nIf it's wrong: LUFS warning — adjust your overall loudness to match platform targets. True Peak warning — lower your limiter ceiling to -1 dBTP or use a true peak limiter. DC Offset warning — apply a high-pass filter at 10-20 Hz or use DC offset removal. Clipping failure — reduce gain into your final limiter or lower the output ceiling."} links={MASTERING_CHECKLIST_LINKS} /><TechnicalInfoPopover text={TECH_INFO_MASTERING_CHECKLIST} /></h4>
+                      <h4>Mastering Checklist <HelpTooltip text={"What this measures: An automated technical health check of your master across four critical areas. (1) LUFS: passes if integrated loudness is between -16 and -6 LUFS (the typical streaming range), warns otherwise. (2) True Peak: passes if below -1 dBTP, warns if between -1 and 0 dBTP, fails if at or above 0 dBTP. (3) DC Offset: passes if the mean sample value is 0.001 or less (0.1%), warns if higher. (4) Clipping: passes if zero clipped samples, fails if any samples hit the digital ceiling.\n\nGood values: All four checks showing a pass (checkmark). This means your master is technically clean and ready for distribution.\n\nIf it's wrong: LUFS warning — adjust your overall loudness to match platform targets. True Peak warning — lower your limiter ceiling to -1 dBTP or use a true peak limiter. DC Offset warning — apply a high-pass filter at 10-20 Hz or use DC offset removal. Clipping failure — reduce gain into your final limiter or lower the output ceiling."} links={MASTERING_CHECKLIST_LINKS} /><TechnicalInfoPopover text={TECH_INFO_MASTERING_CHECKLIST} />{referenceModeSuffixNode}</h4>
                       <p className="analysis-section-subtitle">Auto-generated summary of your master&apos;s technical health</p>
                       </div>
                       {renderMasteringPanelDragHandle('fullscreen', 'mastering-checklist')}
                     </div>
                     <div className="mastering-checklist-summary">
                       <div className={`mastering-checklist-row ${
-                        measuredAnalysis.integratedLufs !== null && measuredAnalysis.integratedLufs >= -16 && measuredAnalysis.integratedLufs <= -6 ? 'pass' : 'warn'
+                        checklistMeasured.integratedLufs !== null && checklistMeasured.integratedLufs >= -16 && checklistMeasured.integratedLufs <= -6 ? 'pass' : 'warn'
                       }`}>
-                        <span className="checklist-icon">{measuredAnalysis.integratedLufs !== null && measuredAnalysis.integratedLufs >= -16 && measuredAnalysis.integratedLufs <= -6 ? '\u2713' : '\u26a0'}</span>
+                        <span className="checklist-icon">{checklistMeasured.integratedLufs !== null && checklistMeasured.integratedLufs >= -16 && checklistMeasured.integratedLufs <= -6 ? '\u2713' : '\u26a0'}</span>
                         <span className="checklist-label">LUFS</span>
                         <span className="checklist-value">
-                          {measuredAnalysis.integratedLufs !== null
-                            ? `${measuredAnalysis.integratedLufs.toFixed(1)} LUFS${measuredAnalysis.integratedLufs >= -16 && measuredAnalysis.integratedLufs <= -6 ? ' \u2014 within streaming range' : ' \u2014 outside typical range (-16 to -6)'}`
+                          {checklistMeasured.integratedLufs !== null
+                            ? `${checklistMeasured.integratedLufs.toFixed(1)} LUFS${checklistMeasured.integratedLufs >= -16 && checklistMeasured.integratedLufs <= -6 ? ' \u2014 within streaming range' : ' \u2014 outside typical range (-16 to -6)'}`
                             : 'Not measured'}
                         </span>
                       </div>
                       <div className={`mastering-checklist-row ${
-                        measuredAnalysis.truePeakDbfs !== null && measuredAnalysis.truePeakDbfs < -1 ? 'pass' : measuredAnalysis.truePeakDbfs !== null && measuredAnalysis.truePeakDbfs < 0 ? 'warn' : 'fail'
+                        checklistMeasured.truePeakDbfs !== null && checklistMeasured.truePeakDbfs < -1 ? 'pass' : checklistMeasured.truePeakDbfs !== null && checklistMeasured.truePeakDbfs < 0 ? 'warn' : 'fail'
                       }`}>
-                        <span className="checklist-icon">{measuredAnalysis.truePeakDbfs !== null && measuredAnalysis.truePeakDbfs < -1 ? '\u2713' : '\u26a0'}</span>
+                        <span className="checklist-icon">{checklistMeasured.truePeakDbfs !== null && checklistMeasured.truePeakDbfs < -1 ? '\u2713' : '\u26a0'}</span>
                         <span className="checklist-label">True Peak</span>
                         <span className="checklist-value">
-                          {measuredAnalysis.truePeakDbfs !== null
-                            ? `${measuredAnalysis.truePeakDbfs.toFixed(1)} dBTP${measuredAnalysis.truePeakDbfs < -1 ? ' \u2014 below -1 dBTP ceiling' : ' \u2014 above -1 dBTP, may clip on playback'}`
+                          {checklistMeasured.truePeakDbfs !== null
+                            ? `${checklistMeasured.truePeakDbfs.toFixed(1)} dBTP${checklistMeasured.truePeakDbfs < -1 ? ' \u2014 below -1 dBTP ceiling' : ' \u2014 above -1 dBTP, may clip on playback'}`
                             : 'Not measured'}
                         </span>
                       </div>
                       <div className={`mastering-checklist-row ${
-                        Math.abs(analysis.dcOffset) <= 0.001 ? 'pass' : 'warn'
+                        Math.abs(checklistAnalysis.dcOffset) <= 0.001 ? 'pass' : 'warn'
                       }`}>
-                        <span className="checklist-icon">{Math.abs(analysis.dcOffset) <= 0.001 ? '\u2713' : '\u26a0'}</span>
+                        <span className="checklist-icon">{Math.abs(checklistAnalysis.dcOffset) <= 0.001 ? '\u2713' : '\u26a0'}</span>
                         <span className="checklist-label">DC Offset</span>
                         <span className="checklist-value">
-                          {Math.abs(analysis.dcOffset) <= 0.001
+                          {Math.abs(checklistAnalysis.dcOffset) <= 0.001
                             ? 'None detected'
-                            : `${(analysis.dcOffset * 100).toFixed(3)}% \u2014 wastes headroom, consider removing`}
+                            : `${(checklistAnalysis.dcOffset * 100).toFixed(3)}% \u2014 wastes headroom, consider removing`}
                         </span>
                       </div>
                       <div className={`mastering-checklist-row ${
-                        analysis.clipCount === 0 ? 'pass' : 'fail'
+                        checklistAnalysis.clipCount === 0 ? 'pass' : 'fail'
                       }`}>
-                        <span className="checklist-icon">{analysis.clipCount === 0 ? '\u2713' : '\u26a0'}</span>
+                        <span className="checklist-icon">{checklistAnalysis.clipCount === 0 ? '\u2713' : '\u26a0'}</span>
                         <span className="checklist-label">Clipping</span>
                         <span className="checklist-value">
-                          {analysis.clipCount === 0
+                          {checklistAnalysis.clipCount === 0
                             ? 'No clipped samples detected'
-                            : `${analysis.clipCount} clipped sample${analysis.clipCount === 1 ? '' : 's'} \u2014 reduce gain to avoid distortion`}
+                            : `${checklistAnalysis.clipCount} clipped sample${checklistAnalysis.clipCount === 1 ? '' : 's'} \u2014 reduce gain to avoid distortion`}
                         </span>
                       </div>
                     </div>
                   </section>
-                ) : null}
+                  );
+                })()}
 
                 {/* Dynamic Range / Crest Factor Meter */}
                 <section

@@ -4,6 +4,16 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.23] - 2026-04-18
+
+### Polish
+- Platform Normalization Preview: large applied-reduction readout in fullscreen bubbles
+- Platform Normalization + Mastering Checklist: amber "Using Reference" indicator in reference mode
+- Listening-device strip: full-width split (input | saved tags), single-row by default, flex-wrap
+- Cmd+R reserved for Mix/Reference toggle — no longer reloads the Electron window
+- Checklist row hover outline no longer clips on the left edge of the scroll region
+- Site: Windows download help note explaining SmartScreen extract-and-run steps
+
 ## [2.63] - 2026-04-08
 
 ### Features

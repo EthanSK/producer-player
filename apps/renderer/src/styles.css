@@ -1233,6 +1233,54 @@ h3 .normalization-preview-header-icon.analysis-platform-icon {
   line-height: 1.25;
 }
 
+/* v3.23 — fullscreen platform bubbles use a two-column layout so the
+ * dead space on the right shows a big trendy applied-reduction readout.
+ * Compact bubbles keep the original single-column layout. */
+.analysis-platform-button-overlay {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.analysis-platform-overlay-left {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  align-items: start;
+}
+
+.analysis-platform-big-readout {
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  gap: 2px;
+  min-width: 72px;
+  padding-left: 4px;
+  color: var(--platform-accent, var(--accent));
+  text-align: right;
+}
+
+.analysis-platform-big-value {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  font-size: clamp(22px, 2.4vw, 30px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.analysis-platform-big-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--platform-accent, var(--accent)) 70%, var(--text-muted));
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
 .analysis-normalization-inline {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2593,7 +2641,14 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   overflow-y: auto;
   overscroll-behavior: contain;
   overflow-anchor: none;
-  padding-right: 2px;
+  /* v3.23 — matching left padding so the 2px hover outline on
+   * .checklist-item-row.is-group-highlighted (box-shadow: 0 0 0 2px ...)
+   * isn't clipped against the scroll region's implicit overflow-x: hidden.
+   * Without this, hovering a listening-device badge that highlights its
+   * own row showed a clean outline on the right + bottom but a hard clip
+   * on the left edge. */
+  padding-left: 4px;
+  padding-right: 4px;
   display: flex;
   flex-direction: column;
 }
@@ -2850,11 +2905,26 @@ body.is-dragging-checklist-timestamp * {
 
 /* Listening-device feature ------------------------------------------------ */
 
+/* v3.23 — split full-width layout. Left half = input wrap, right half = saved
+ * tag chips. `grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)` gives an
+ * exact 50/50 split; `minmax(0, ...)` is required so either side can shrink
+ * below its intrinsic size instead of forcing horizontal overflow on the
+ * parent checklist modal. Tags wrap with flex-wrap but the row defaults to
+ * a single row of height (min-height matches the input), and only grows
+ * when enough tags exist to wrap. */
 .listening-device-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  width: 100%;
   margin-top: 2px;
+}
+
+.listening-device-input-wrap {
+  display: flex;
+  min-width: 0;
+  width: 100%;
 }
 
 .listening-device-input {
@@ -2876,10 +2946,23 @@ body.is-dragging-checklist-timestamp * {
 .listening-device-chip-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   max-width: 100%;
-  overflow-x: auto;
+  min-width: 0;
+  /* Match the input's outer height so the strip collapses to a single
+   * row by default; wrapping tags grow the row naturally without
+   * requiring a separate "expand" affordance. */
+  min-height: 30px;
   padding-bottom: 2px;
+}
+
+.listening-device-chip-row-empty {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+  opacity: 0.7;
+  padding: 2px 4px;
 }
 
 .listening-device-chip {

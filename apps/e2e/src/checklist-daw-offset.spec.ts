@@ -232,6 +232,138 @@ test.describe('Checklist DAW time offset', () => {
     }
   });
 
+  test('MM:SS input UX — auto-advance focus, backspace-back, and paste splitting', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-daw-offset-input-ux'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await seedChecklistWithTimestamp(page);
+      await page.reload();
+      await page.waitForSelector('[data-testid="app-shell"]');
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await openChecklist(page);
+
+      const minutesInput = page.getByTestId('checklist-daw-offset-minutes');
+      const secondsInput = page.getByTestId('checklist-daw-offset-seconds');
+
+      // --- Auto-advance after 2 digits in minutes ---
+      await minutesInput.focus();
+      // Focus should select-all (onFocus=select), so typing replaces "00".
+      await page.keyboard.type('1');
+      await expect(minutesInput).toBeFocused();
+      await expect(minutesInput).toHaveValue('01');
+      await saveScreenshot(page, 'input-ux-after-typing-1.png');
+
+      await page.keyboard.type('2');
+      // After the 2nd digit, focus jumps to seconds AND the seconds value is
+      // selected (so typing overwrites).
+      await expect(secondsInput).toBeFocused();
+      await expect(minutesInput).toHaveValue('12');
+      const secondsSelected = await page.evaluate(() => {
+        const el = document.activeElement as HTMLInputElement | null;
+        if (!el) return null;
+        return {
+          value: el.value,
+          selStart: el.selectionStart,
+          selEnd: el.selectionEnd,
+        };
+      });
+      expect(secondsSelected).toMatchObject({
+        value: '00',
+        selStart: 0,
+        selEnd: 2,
+      });
+      await saveScreenshot(page, 'input-ux-after-autoadvance.png');
+
+      // Typing "34" replaces the selected "00" → final "12:34".
+      await page.keyboard.type('34');
+      await expect(minutesInput).toHaveValue('12');
+      await expect(secondsInput).toHaveValue('34');
+      await saveScreenshot(page, 'input-ux-after-1234.png');
+
+      // --- Backspace on zero seconds returns focus to minutes with selection ---
+      // Reset the seconds part to 0 so backspace triggers the back-nav.
+      await secondsInput.focus();
+      await page.evaluate(() => {
+        const el = document.activeElement as HTMLInputElement | null;
+        if (el) el.setSelectionRange(0, el.value.length);
+      });
+      await page.keyboard.type('0');
+      // Typing "0" into a selected "34" replaces it; clamped value is 0 → "00".
+      await expect(secondsInput).toHaveValue('00');
+
+      // Move caret to start so Backspace is our back-nav signal.
+      await page.evaluate(() => {
+        const el = document.activeElement as HTMLInputElement | null;
+        if (el) el.setSelectionRange(0, 0);
+      });
+      await page.keyboard.press('Backspace');
+      await expect(minutesInput).toBeFocused();
+      const minutesSelected = await page.evaluate(() => {
+        const el = document.activeElement as HTMLInputElement | null;
+        if (!el) return null;
+        return {
+          value: el.value,
+          selStart: el.selectionStart,
+          selEnd: el.selectionEnd,
+        };
+      });
+      expect(minutesSelected).toMatchObject({
+        value: '12',
+        selStart: 0,
+        selEnd: 2,
+      });
+
+      // --- Paste MM:SS into the minutes input ---
+      await minutesInput.focus();
+      await page.evaluate(() => {
+        const el = document.activeElement as HTMLInputElement | null;
+        if (!el) return;
+        el.setSelectionRange(0, el.value.length);
+        const dt = new DataTransfer();
+        dt.setData('text/plain', '07:42');
+        const event = new ClipboardEvent('paste', {
+          clipboardData: dt,
+          bubbles: true,
+          cancelable: true,
+        });
+        el.dispatchEvent(event);
+      });
+      await expect(minutesInput).toHaveValue('07');
+      await expect(secondsInput).toHaveValue('42');
+
+      // --- Paste with single-digit minutes: "3:05" (into seconds field) ---
+      await secondsInput.focus();
+      await page.evaluate(() => {
+        const el = document.activeElement as HTMLInputElement | null;
+        if (!el) return;
+        el.setSelectionRange(0, el.value.length);
+        const dt = new DataTransfer();
+        dt.setData('text/plain', '3:05');
+        const event = new ClipboardEvent('paste', {
+          clipboardData: dt,
+          bubbles: true,
+          cancelable: true,
+        });
+        el.dispatchEvent(event);
+      });
+      await expect(minutesInput).toHaveValue('03');
+      await expect(secondsInput).toHaveValue('05');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('DAW offset + toggle state persist across relaunches via unified user state', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-daw-offset-persist'

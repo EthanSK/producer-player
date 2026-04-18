@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type CSSProperties,
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -1993,6 +1994,11 @@ export function App(): JSX.Element {
   const checklistUnderlyingAnalysisPaneRef = useRef<HTMLElement | null>(null);
   const checklistUnderlyingSidePaneScrollRef = useRef<HTMLDivElement | null>(null);
   const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // DAW offset MM / SS inputs — refs used for auto-advancing focus once the
+  // minutes field has 2 digits, and for returning focus on backspace from an
+  // empty seconds field (standard time-input UX).
+  const checklistDawOffsetMinutesInputRef = useRef<HTMLInputElement | null>(null);
+  const checklistDawOffsetSecondsInputRef = useRef<HTMLInputElement | null>(null);
   const checklistSkipBackTenButtonRef = useRef<HTMLButtonElement | null>(null);
   const checklistSkipBackFiveButtonRef = useRef<HTMLButtonElement | null>(null);
   const lastFocusedChecklistTransportRef = useRef<HTMLButtonElement | null>(null);
@@ -8418,6 +8424,24 @@ export function App(): JSX.Element {
       minutes * 60 + checklistDawOffsetSecondsPart,
       checklistDawOffsetEnabled,
     );
+    // Auto-advance to the seconds input once the user has typed 2 digits,
+    // mimicking native time-input UX. Select the seconds value so the next
+    // keystroke overwrites instead of appending.
+    if (digitsOnly.length >= 2) {
+      const secondsInput = checklistDawOffsetSecondsInputRef.current;
+      if (secondsInput) {
+        // Defer to the next tick so React has flushed the state update and
+        // the seconds input's re-render won't fight our selection range.
+        window.setTimeout(() => {
+          secondsInput.focus();
+          try {
+            secondsInput.select();
+          } catch {
+            // Some browsers throw if the element is detached — safe to ignore.
+          }
+        }, 0);
+      }
+    }
   }
 
   function handleChecklistDawOffsetSecondsChange(raw: string): void {
@@ -8427,6 +8451,73 @@ export function App(): JSX.Element {
       checklistDawOffsetMinutes * 60 + seconds,
       checklistDawOffsetEnabled,
     );
+  }
+
+  // Backspace on an empty/zero seconds input returns focus to the minutes
+  // input and selects its current value (so typing overwrites). Matches
+  // standard browser/DAW time-input UX.
+  function handleChecklistDawOffsetSecondsKeyDown(
+    event: ReactKeyboardEvent<HTMLInputElement>,
+  ): void {
+    if (event.key !== 'Backspace') return;
+    const target = event.currentTarget;
+    const value = target.value;
+    const selStart = target.selectionStart ?? 0;
+    const selEnd = target.selectionEnd ?? 0;
+    // The controlled value is always zero-padded to 2 chars, so the user
+    // visually sees "00" even when the underlying offset is 0. Treat a
+    // backspace as a "go back" navigation when the seconds part is 0 AND
+    // either the caret is at the very start OR the whole field is selected
+    // (both of which would normally be no-op backspaces).
+    const allSelected = selStart === 0 && selEnd === value.length && value.length > 0;
+    const caretAtStart = selStart === 0 && selEnd === 0;
+    const isZero = checklistDawOffsetSecondsPart === 0;
+    if ((isZero && caretAtStart) || (isZero && allSelected) || value === '') {
+      event.preventDefault();
+      const minutesInput = checklistDawOffsetMinutesInputRef.current;
+      if (minutesInput) {
+        minutesInput.focus();
+        try {
+          minutesInput.select();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  // Paste handler: if the clipboard content contains a colon (MM:SS or M:SS),
+  // split it across the two inputs so users can paste a time-formatted string
+  // into either field without fighting the maxLength=2 constraint.
+  function handleChecklistDawOffsetPaste(
+    event: ReactClipboardEvent<HTMLInputElement>,
+  ): void {
+    const text = event.clipboardData.getData('text');
+    if (!text.includes(':')) return; // Let the default handler run.
+    event.preventDefault();
+    const [rawMinutes, rawSeconds] = text.split(':', 2);
+    const minutesDigits = (rawMinutes ?? '').replace(/\D+/g, '').slice(0, 2);
+    const secondsDigits = (rawSeconds ?? '').replace(/\D+/g, '').slice(0, 2);
+    const minutes = minutesDigits === ''
+      ? 0
+      : Math.max(0, Math.min(99, Number.parseInt(minutesDigits, 10)));
+    const seconds = secondsDigits === ''
+      ? 0
+      : Math.max(0, Math.min(59, Number.parseInt(secondsDigits, 10)));
+    writeChecklistDawOffset(minutes * 60 + seconds, checklistDawOffsetEnabled);
+    // Move focus to the seconds input after a paste so the user can keep
+    // typing or tab out naturally.
+    const secondsInput = checklistDawOffsetSecondsInputRef.current;
+    if (secondsInput) {
+      window.setTimeout(() => {
+        secondsInput.focus();
+        try {
+          secondsInput.select();
+        } catch {
+          // ignore
+        }
+      }, 0);
+    }
   }
 
   function handleChecklistDawOffsetEnabledChange(nextEnabled: boolean): void {
@@ -10849,6 +10940,7 @@ export function App(): JSX.Element {
                 <span className="checklist-daw-offset-label">DAW offset</span>
                 <div className="checklist-daw-offset-inputs">
                   <input
+                    ref={checklistDawOffsetMinutesInputRef}
                     type="text"
                     inputMode="numeric"
                     className="checklist-daw-offset-input"
@@ -10857,12 +10949,14 @@ export function App(): JSX.Element {
                       handleChecklistDawOffsetMinutesChange(event.currentTarget.value)
                     }
                     onFocus={(event) => event.currentTarget.select()}
+                    onPaste={handleChecklistDawOffsetPaste}
                     aria-label="DAW offset minutes"
                     data-testid="checklist-daw-offset-minutes"
                     maxLength={2}
                   />
                   <span className="checklist-daw-offset-colon">:</span>
                   <input
+                    ref={checklistDawOffsetSecondsInputRef}
                     type="text"
                     inputMode="numeric"
                     className="checklist-daw-offset-input"
@@ -10871,6 +10965,8 @@ export function App(): JSX.Element {
                       handleChecklistDawOffsetSecondsChange(event.currentTarget.value)
                     }
                     onFocus={(event) => event.currentTarget.select()}
+                    onKeyDown={handleChecklistDawOffsetSecondsKeyDown}
+                    onPaste={handleChecklistDawOffsetPaste}
                     aria-label="DAW offset seconds"
                     data-testid="checklist-daw-offset-seconds"
                     maxLength={2}

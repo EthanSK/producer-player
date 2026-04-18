@@ -73,6 +73,12 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       typeof c.listeningDeviceId === 'string' && c.listeningDeviceId.trim().length > 0
         ? c.listeningDeviceId
         : null;
+    // v3.26.0 — "from mastering" provenance flag. Only persist the
+    // property when it is explicitly true so historical items round-trip
+    // without acquiring a stray `fromMastering: false` key. Any unknown
+    // value (missing, null, string, undefined) safely coerces to false
+    // at render time because the renderer treats undefined as falsy.
+    const fromMastering = c.fromMastering === true ? true : undefined;
     return [{
       id: c.id,
       text: c.text,
@@ -80,6 +86,7 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       timestampSeconds,
       versionNumber,
       listeningDeviceId,
+      ...(fromMastering ? { fromMastering: true } : {}),
     }];
   });
 }

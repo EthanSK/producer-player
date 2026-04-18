@@ -1143,6 +1143,73 @@ function createChecklistItemId(): string {
   return `checklist-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
 }
 
+/**
+ * v3.26.0 — Mastering Checklist promotion.
+ *
+ * Given one of the four mastering rows (LUFS / True Peak / DC Offset /
+ * Clipping) and the measured values that were used to render it, produce
+ * a short, human-readable checklist item describing the current value
+ * and the target the user should aim for. Returns null when the row
+ * doesn't have enough data to generate a sensible message (e.g. LUFS /
+ * True Peak weren't measured yet). Timestamp is intentionally omitted —
+ * mastering findings are timeless (Ethan's words: "It doesn't need to
+ * be associated with any time").
+ */
+export type MasteringChecklistRowId = 'lufs' | 'true-peak' | 'dc-offset' | 'clipping';
+
+export interface MasteringChecklistRowInputs {
+  integratedLufs: number | null;
+  truePeakDbfs: number | null;
+  dcOffset: number;
+  clipCount: number;
+}
+
+export function buildMasteringChecklistItemText(
+  rowId: MasteringChecklistRowId,
+  inputs: MasteringChecklistRowInputs
+): string | null {
+  switch (rowId) {
+    case 'lufs': {
+      if (inputs.integratedLufs === null) return null;
+      const lufs = inputs.integratedLufs;
+      const withinRange = lufs >= -16 && lufs <= -6;
+      if (withinRange) {
+        return `Loudness check — currently ${lufs.toFixed(1)} LUFS Integrated, within the -16 to -6 streaming range`;
+      }
+      if (lufs > -6) {
+        // Louder than typical streaming range.
+        return `Reduce loudness — currently ${lufs.toFixed(1)} LUFS Integrated, target -16 to -6 LUFS for streaming normalization`;
+      }
+      // Quieter than typical streaming range.
+      return `Increase loudness — currently ${lufs.toFixed(1)} LUFS Integrated, target -16 to -6 LUFS for streaming normalization`;
+    }
+    case 'true-peak': {
+      if (inputs.truePeakDbfs === null) return null;
+      const tp = inputs.truePeakDbfs;
+      if (tp < -1) {
+        return `True peak check — currently ${tp.toFixed(1)} dBTP, below the -1 dBTP ceiling`;
+      }
+      return `Tame true peaks — currently ${tp.toFixed(1)} dBTP, target \u2264 -1 dBTP for safe platform normalization`;
+    }
+    case 'dc-offset': {
+      const absOffset = Math.abs(inputs.dcOffset);
+      if (absOffset <= 0.001) {
+        return `DC offset check — none detected (|${inputs.dcOffset.toFixed(4)}|)`;
+      }
+      return `Remove DC offset — currently ${(inputs.dcOffset * 100).toFixed(3)}% (${inputs.dcOffset.toFixed(4)}), target \u22640.001 amplitude`;
+    }
+    case 'clipping': {
+      if (inputs.clipCount === 0) {
+        return 'Clipping check — no clipped samples detected';
+      }
+      const plural = inputs.clipCount === 1 ? '' : 's';
+      return `Fix clipping — ${inputs.clipCount} clipped sample${plural} detected in the master, reduce gain before the limiter`;
+    }
+    default:
+      return null;
+  }
+}
+
 function createListeningDeviceId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -8965,6 +9032,63 @@ export function App(): JSX.Element {
   }
 
   // -----------------------------------------------------------------------
+  // v3.26.0 — Promote a Mastering Checklist row to a user checklist item.
+  // -----------------------------------------------------------------------
+  // Hidden in reference preview mode (no-op early return as a defensive
+  // guard — the button itself is also hidden, see the render-side check
+  // against isRefMode). Builds a human-readable item via
+  // `buildMasteringChecklistItemText`, tags it with the currently-playing
+  // mix version number (NOT the listening device — per Ethan's spec the
+  // device doesn't matter for a timeless mastering finding), and flips
+  // `fromMastering` so the row renders with the FROM MASTERING badge.
+  function handlePromoteMasteringRowToChecklist(
+    rowId: MasteringChecklistRowId,
+    inputs: MasteringChecklistRowInputs
+  ): void {
+    // Safety net: never promote while in reference preview mode. References
+    // don't have checklist items.
+    if (isRefMode) return;
+
+    // Prefer the song currently loaded in the playback engine so the item
+    // follows the audio. Fall back to the UI-selected song when nothing is
+    // loaded yet. If neither is available there's nowhere to attach the
+    // item, so bail silently.
+    const songId = selectedPlaybackSongId ?? selectedSongId ?? null;
+    if (!songId) return;
+
+    const text = buildMasteringChecklistItemText(rowId, inputs);
+    if (!text) return;
+
+    const checklistSong = snapshot.songs.find((song) => song.id === songId) ?? null;
+    const capturedVersion =
+      selectedPlaybackVersion && selectedPlaybackVersion.songId === songId
+        ? selectedPlaybackVersion
+        : checklistSong
+          ? getActiveSongVersion(checklistSong)
+          : null;
+    const capturedVersionNumber = capturedVersion
+      ? getVersionNumberFromFileName(capturedVersion.fileName)
+      : null;
+
+    updateSongChecklistItems(songId, (items) => [
+      {
+        id: createChecklistItemId(),
+        text,
+        completed: false,
+        // Mastering findings are timeless (see Ethan's voices 4786-4788).
+        timestampSeconds: null,
+        versionNumber: capturedVersionNumber,
+        // Listening device is intentionally NOT tagged on mastering
+        // findings — the measured values come from the file, not from
+        // what the user was hearing on.
+        listeningDeviceId: null,
+        fromMastering: true,
+      },
+      ...items,
+    ]);
+  }
+
+  // -----------------------------------------------------------------------
   // Checklist drag-and-drop reordering (Task 2, 2026-04-18)
   // -----------------------------------------------------------------------
   // Items are stored newest-first in `songChecklists[songId]` (new items are
@@ -12095,7 +12219,8 @@ export function App(): JSX.Element {
                     const hasItemMetadata =
                       item.timestampSeconds !== null ||
                       item.versionNumber !== null ||
-                      item.listeningDeviceId !== null;
+                      item.listeningDeviceId !== null ||
+                      item.fromMastering === true;
                     // Hover-highlight: this row should glow whenever another
                     // row's shared tag is being hovered. The hovered tag
                     // itself also glows so it's obvious which group it belongs
@@ -12347,6 +12472,21 @@ export function App(): JSX.Element {
                               onMouseLeave={() => setHoveredChecklistTag(null)}
                             >
                               v{item.versionNumber}
+                            </span>
+                          ) : null}
+                          {item.fromMastering === true ? (
+                            // v3.26.0 — subtle eyebrow badge marking items
+                            // that were promoted from the Mastering
+                            // Checklist. Uppercase + letter-spaced to
+                            // match the mixing-console eyebrow style
+                            // (docs/UI.md). Kept compact so it doesn't
+                            // dominate the row.
+                            <span
+                              className="checklist-from-mastering-badge"
+                              data-testid="song-checklist-item-from-mastering"
+                              title="Promoted from the Mastering Checklist"
+                            >
+                              FROM MASTERING
                             </span>
                           ) : null}
                           {deviceLabel !== null ? (
@@ -14181,50 +14321,108 @@ export function App(): JSX.Element {
                       {renderMasteringPanelDragHandle('fullscreen', 'mastering-checklist')}
                     </div>
                     <div className="mastering-checklist-summary">
-                      <div className={`mastering-checklist-row ${
-                        checklistMeasured.integratedLufs !== null && checklistMeasured.integratedLufs >= -16 && checklistMeasured.integratedLufs <= -6 ? 'pass' : 'warn'
-                      }`}>
-                        <span className="checklist-icon">{checklistMeasured.integratedLufs !== null && checklistMeasured.integratedLufs >= -16 && checklistMeasured.integratedLufs <= -6 ? '\u2713' : '\u26a0'}</span>
-                        <span className="checklist-label">LUFS</span>
-                        <span className="checklist-value">
-                          {checklistMeasured.integratedLufs !== null
-                            ? `${checklistMeasured.integratedLufs.toFixed(1)} LUFS${checklistMeasured.integratedLufs >= -16 && checklistMeasured.integratedLufs <= -6 ? ' \u2014 within streaming range' : ' \u2014 outside typical range (-16 to -6)'}`
-                            : 'Not measured'}
-                        </span>
-                      </div>
-                      <div className={`mastering-checklist-row ${
-                        checklistMeasured.truePeakDbfs !== null && checklistMeasured.truePeakDbfs < -1 ? 'pass' : checklistMeasured.truePeakDbfs !== null && checklistMeasured.truePeakDbfs < 0 ? 'warn' : 'fail'
-                      }`}>
-                        <span className="checklist-icon">{checklistMeasured.truePeakDbfs !== null && checklistMeasured.truePeakDbfs < -1 ? '\u2713' : '\u26a0'}</span>
-                        <span className="checklist-label">True Peak</span>
-                        <span className="checklist-value">
-                          {checklistMeasured.truePeakDbfs !== null
-                            ? `${checklistMeasured.truePeakDbfs.toFixed(1)} dBTP${checklistMeasured.truePeakDbfs < -1 ? ' \u2014 below -1 dBTP ceiling' : ' \u2014 above -1 dBTP, may clip on playback'}`
-                            : 'Not measured'}
-                        </span>
-                      </div>
-                      <div className={`mastering-checklist-row ${
-                        Math.abs(checklistAnalysis.dcOffset) <= 0.001 ? 'pass' : 'warn'
-                      }`}>
-                        <span className="checklist-icon">{Math.abs(checklistAnalysis.dcOffset) <= 0.001 ? '\u2713' : '\u26a0'}</span>
-                        <span className="checklist-label">DC Offset</span>
-                        <span className="checklist-value">
-                          {Math.abs(checklistAnalysis.dcOffset) <= 0.001
-                            ? 'None detected'
-                            : `${(checklistAnalysis.dcOffset * 100).toFixed(3)}% \u2014 wastes headroom, consider removing`}
-                        </span>
-                      </div>
-                      <div className={`mastering-checklist-row ${
-                        checklistAnalysis.clipCount === 0 ? 'pass' : 'fail'
-                      }`}>
-                        <span className="checklist-icon">{checklistAnalysis.clipCount === 0 ? '\u2713' : '\u26a0'}</span>
-                        <span className="checklist-label">Clipping</span>
-                        <span className="checklist-value">
-                          {checklistAnalysis.clipCount === 0
-                            ? 'No clipped samples detected'
-                            : `${checklistAnalysis.clipCount} clipped sample${checklistAnalysis.clipCount === 1 ? '' : 's'} \u2014 reduce gain to avoid distortion`}
-                        </span>
-                      </div>
+                      {/*
+                       * v3.26.0 — each row exposes an "+ Add to checklist"
+                       * affordance on the right. The button is HIDDEN in
+                       * reference preview mode (isRefMode === true) because
+                       * reference tracks don't have checklist items — same
+                       * rationale as the "Using Reference" eyebrow that
+                       * already appears in this panel's header. Click
+                       * builds a timeless checklist item, tags it with the
+                       * currently-playing mix version, and marks it with
+                       * fromMastering so the list renders the FROM
+                       * MASTERING eyebrow. (Ethan voices 4786-4788.)
+                       */}
+                      {(() => {
+                        const masteringInputs: MasteringChecklistRowInputs = {
+                          integratedLufs: checklistMeasured.integratedLufs,
+                          truePeakDbfs: checklistMeasured.truePeakDbfs,
+                          dcOffset: checklistAnalysis.dcOffset,
+                          clipCount: checklistAnalysis.clipCount,
+                        };
+                        const renderPromoteButton = (rowId: MasteringChecklistRowId) => {
+                          if (isRefMode) return null;
+                          return (
+                            <button
+                              type="button"
+                              className="mastering-checklist-row-add-button"
+                              data-testid={`mastering-checklist-add-${rowId}`}
+                              onClick={() =>
+                                handlePromoteMasteringRowToChecklist(rowId, masteringInputs)
+                              }
+                              title="Add this finding to your song checklist"
+                              aria-label="Add to checklist"
+                            >
+                              <span aria-hidden="true" className="mastering-checklist-row-add-icon">+</span>
+                              <span className="mastering-checklist-row-add-label">Add to checklist</span>
+                            </button>
+                          );
+                        };
+                        return (
+                          <>
+                            <div
+                              className={`mastering-checklist-row ${
+                                checklistMeasured.integratedLufs !== null && checklistMeasured.integratedLufs >= -16 && checklistMeasured.integratedLufs <= -6 ? 'pass' : 'warn'
+                              }`}
+                              data-testid="mastering-checklist-row-lufs"
+                            >
+                              <span className="checklist-icon">{checklistMeasured.integratedLufs !== null && checklistMeasured.integratedLufs >= -16 && checklistMeasured.integratedLufs <= -6 ? '\u2713' : '\u26a0'}</span>
+                              <span className="checklist-label">LUFS</span>
+                              <span className="checklist-value">
+                                {checklistMeasured.integratedLufs !== null
+                                  ? `${checklistMeasured.integratedLufs.toFixed(1)} LUFS${checklistMeasured.integratedLufs >= -16 && checklistMeasured.integratedLufs <= -6 ? ' \u2014 within streaming range' : ' \u2014 outside typical range (-16 to -6)'}`
+                                  : 'Not measured'}
+                              </span>
+                              {renderPromoteButton('lufs')}
+                            </div>
+                            <div
+                              className={`mastering-checklist-row ${
+                                checklistMeasured.truePeakDbfs !== null && checklistMeasured.truePeakDbfs < -1 ? 'pass' : checklistMeasured.truePeakDbfs !== null && checklistMeasured.truePeakDbfs < 0 ? 'warn' : 'fail'
+                              }`}
+                              data-testid="mastering-checklist-row-true-peak"
+                            >
+                              <span className="checklist-icon">{checklistMeasured.truePeakDbfs !== null && checklistMeasured.truePeakDbfs < -1 ? '\u2713' : '\u26a0'}</span>
+                              <span className="checklist-label">True Peak</span>
+                              <span className="checklist-value">
+                                {checklistMeasured.truePeakDbfs !== null
+                                  ? `${checklistMeasured.truePeakDbfs.toFixed(1)} dBTP${checklistMeasured.truePeakDbfs < -1 ? ' \u2014 below -1 dBTP ceiling' : ' \u2014 above -1 dBTP, may clip on playback'}`
+                                  : 'Not measured'}
+                              </span>
+                              {renderPromoteButton('true-peak')}
+                            </div>
+                            <div
+                              className={`mastering-checklist-row ${
+                                Math.abs(checklistAnalysis.dcOffset) <= 0.001 ? 'pass' : 'warn'
+                              }`}
+                              data-testid="mastering-checklist-row-dc-offset"
+                            >
+                              <span className="checklist-icon">{Math.abs(checklistAnalysis.dcOffset) <= 0.001 ? '\u2713' : '\u26a0'}</span>
+                              <span className="checklist-label">DC Offset</span>
+                              <span className="checklist-value">
+                                {Math.abs(checklistAnalysis.dcOffset) <= 0.001
+                                  ? 'None detected'
+                                  : `${(checklistAnalysis.dcOffset * 100).toFixed(3)}% \u2014 wastes headroom, consider removing`}
+                              </span>
+                              {renderPromoteButton('dc-offset')}
+                            </div>
+                            <div
+                              className={`mastering-checklist-row ${
+                                checklistAnalysis.clipCount === 0 ? 'pass' : 'fail'
+                              }`}
+                              data-testid="mastering-checklist-row-clipping"
+                            >
+                              <span className="checklist-icon">{checklistAnalysis.clipCount === 0 ? '\u2713' : '\u26a0'}</span>
+                              <span className="checklist-label">Clipping</span>
+                              <span className="checklist-value">
+                                {checklistAnalysis.clipCount === 0
+                                  ? 'No clipped samples detected'
+                                  : `${checklistAnalysis.clipCount} clipped sample${checklistAnalysis.clipCount === 1 ? '' : 's'} \u2014 reduce gain to avoid distortion`}
+                              </span>
+                              {renderPromoteButton('clipping')}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </section>
                   );

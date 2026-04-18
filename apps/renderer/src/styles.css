@@ -4133,6 +4133,69 @@ button.checklist-play-toggle[data-playing='true'] {
   background: rgba(248, 113, 113, 0.04);
 }
 
+/*
+ * v3.26.0 — "+ Add to checklist" button on each mastering-checklist row.
+ * Pushed to the right via margin-left:auto. Compact, subtle; only becomes
+ * prominent on hover/focus so it doesn't compete with the row's pass/
+ * warn/fail accent. Hidden by the render code when reference preview
+ * mode is active (references don't have checklist items), so there's no
+ * media-query hiding here.
+ */
+.mastering-checklist-row-add-button {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted, #6b8199);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.mastering-checklist-row-add-button:hover,
+.mastering-checklist-row-add-button:focus-visible {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border);
+  color: var(--text-primary, #e4ecf5);
+  outline: none;
+}
+.mastering-checklist-row-add-button .mastering-checklist-row-add-icon {
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 700;
+}
+.mastering-checklist-row-add-button .mastering-checklist-row-add-label {
+  letter-spacing: 0.01em;
+}
+
+/*
+ * v3.26.0 — "FROM MASTERING" eyebrow badge on checklist items that were
+ * promoted from the Mastering Checklist. Small, uppercase, letter-spaced
+ * to stay out of the way while still providing provenance at a glance.
+ * Matches the mixing-console eyebrow vibe called out in docs/UI.md.
+ */
+.checklist-from-mastering-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b8199);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  background: rgba(255, 255, 255, 0.015);
+  white-space: nowrap;
+  line-height: 1;
+}
+
 /* Pro indicators (dynamic range) */
 .analysis-pro-indicators {
   display: grid;

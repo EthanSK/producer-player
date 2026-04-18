@@ -65,6 +65,11 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
       candidate.listeningDeviceId.trim().length > 0
         ? candidate.listeningDeviceId
         : null;
+    // v3.26.0 — "from mastering" provenance flag (see SongChecklistItem
+    // contract). Only carry the field forward when it's explicitly true
+    // so historical items keep round-tripping without growing a stray
+    // `fromMastering: false` key.
+    const fromMastering = candidate.fromMastering === true ? true : undefined;
 
     return [
       {
@@ -74,6 +79,7 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
         timestampSeconds,
         versionNumber,
         listeningDeviceId,
+        ...(fromMastering ? { fromMastering: true } : {}),
       },
     ];
   });

@@ -72,6 +72,69 @@ describe('shared user state sanitizers', () => {
     });
   });
 
+  it('preserves fromMastering=true and omits the field otherwise (v3.26.0)', () => {
+    expect(
+      sanitizeSongChecklists({
+        songA: [
+          {
+            id: 'item-from-mastering',
+            text: 'Reduce loudness — currently -5 LUFS integrated',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: 2,
+            listeningDeviceId: null,
+            fromMastering: true,
+          },
+          {
+            id: 'item-manual',
+            text: 'Manual note',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: null,
+          },
+          {
+            id: 'item-from-mastering-bogus',
+            text: 'Garbage fromMastering value should not leak through as true',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: null,
+            fromMastering: 'yes',
+          },
+        ],
+      })
+    ).toEqual({
+      songA: [
+        {
+          id: 'item-from-mastering',
+          text: 'Reduce loudness — currently -5 LUFS integrated',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: 2,
+          listeningDeviceId: null,
+          fromMastering: true,
+        },
+        {
+          id: 'item-manual',
+          text: 'Manual note',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+        },
+        {
+          id: 'item-from-mastering-bogus',
+          text: 'Garbage fromMastering value should not leak through as true',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+        },
+      ],
+    });
+  });
+
   it('preserves listeningDeviceId when valid and drops empty strings', () => {
     expect(
       sanitizeSongChecklists({

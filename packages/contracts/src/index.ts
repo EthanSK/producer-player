@@ -237,6 +237,16 @@ export interface SongChecklistItem {
    * renaming or deleting a device does not mutate historic items.
    */
   listeningDeviceId: string | null;
+  /**
+   * v3.26.0 — true when the item was promoted from a Mastering Checklist
+   * row (LUFS / True Peak / DC Offset / Clipping) via the "+ Add to
+   * checklist" button. Used to render the subtle "FROM MASTERING"
+   * eyebrow badge in the song-checklist modal and to preserve provenance
+   * across state save/load. Defaults to undefined/false for all
+   * historical items; the state-service parser coerces unknown values
+   * back to false so existing stored checklists load unchanged.
+   */
+  fromMastering?: boolean;
 }
 
 /**

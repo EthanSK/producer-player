@@ -310,6 +310,16 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       await setAgentAutoRecommendEnabled(page, false);
       await page.waitForTimeout(700);
 
+      // v3.38 Windows-flake fix (Codex round 2): on slow CI the
+      // AgentChatPanel's header is still physically covering the main
+      // list row, so Playwright sees "<agent-panel-header> intercepts
+      // pointer events" and times out. `force: true` only skips the
+      // actionability check — the click can still land on the panel
+      // header. Correct fix: minimize the panel if it's open, then click.
+      const agentClose = page.getByTestId('agent-panel-close');
+      if (await agentClose.count() > 0 && await agentClose.isVisible()) {
+        await agentClose.click({ timeout: 5_000 }).catch(() => undefined);
+      }
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();

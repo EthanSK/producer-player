@@ -107,6 +107,7 @@ import {
   UNIFIED_STATE_FILE_NAME,
   migrateStateIfNeeded,
 } from './state-service';
+import { PluginHostService } from './plugin-host-service';
 
 declare const __PRODUCER_PLAYER_APP_VERSION__: string;
 declare const __PRODUCER_PLAYER_BUILD_NUMBER__: string;
@@ -411,6 +412,10 @@ async function logMacCodeSigningIdentity(): Promise<void> {
 let mainWindow: BrowserWindow | null = null;
 let libraryService: FileLibraryService | null = null;
 let userStateService: UserStateService | null = null;
+// v3.39 Phase 1a — plugin-host sidecar. Lazy: `.start()` is only called the
+// first time the renderer asks for a plugin scan, so sessions that never
+// touch plugin UI don't pay the spawn cost.
+let pluginHostService: PluginHostService | null = null;
 let shouldAttemptSidecarOrderRestore = false;
 /** Remembers the last directory the user navigated to in any file/folder picker. */
 let lastFileDialogDirectory = '';
@@ -4952,6 +4957,86 @@ function registerIpcHandlers(service: FileLibraryService): void {
     ) => {
       if (!userStateService) throw new Error('User state service not initialized');
       await userStateService.markAiRecommendationsStale(songId, versionNumber, newAnalysisVersion);
+    },
+  );
+
+  // --- v3.39 Phase 1a: Plugin host IPC handlers -----------------------------
+  //
+  // Chain state lives in the unified user state (split-to-disk keeps each
+  // song's chain in its own per-track file), so most of these are thin
+  // wrappers that round-trip through UserStateService. The scan handler is
+  // the one that talks to the sidecar: it lazily spawns `pp-audio-host`,
+  // asks it to enumerate plugins, persists the result so future launches
+  // can render the browser offline, and returns the fresh library.
+
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_SCAN_LIBRARY, async () => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    if (!pluginHostService) pluginHostService = new PluginHostService();
+    if (!pluginHostService.isAvailable()) {
+      throw new Error(
+        'pp-audio-host sidecar binary is not built yet. Run `bash native/pp-audio-host/scripts/build-sidecar.sh` once to bootstrap it, then retry the scan.',
+      );
+    }
+    const library = await pluginHostService.scanPlugins();
+    await userStateService.setPluginLibrary(library);
+    return library;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_GET_LIBRARY, async () => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    return userStateService.getPluginLibrary();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_GET_TRACK_CHAIN, async (_event, songId: string) => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    return userStateService.getTrackPluginChain(songId);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_SET_TRACK_CHAIN,
+    async (_event, songId: string, chain: Parameters<UserStateService['setTrackPluginChain']>[1]) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      return userStateService.setTrackPluginChain(songId, chain);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_ADD_TO_CHAIN,
+    async (_event, songId: string, pluginId: string) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      return userStateService.addPluginToChain(songId, pluginId);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_REMOVE_FROM_CHAIN,
+    async (_event, songId: string, instanceId: string) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      return userStateService.removePluginFromChain(songId, instanceId);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_REORDER_CHAIN,
+    async (_event, songId: string, orderedInstanceIds: string[]) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      return userStateService.reorderPluginChain(songId, orderedInstanceIds);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_TOGGLE_ENABLED,
+    async (_event, songId: string, instanceId: string, enabled: boolean) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      return userStateService.togglePluginEnabled(songId, instanceId, enabled);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_SET_STATE,
+    async (_event, songId: string, instanceId: string, stateBase64: string) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      return userStateService.setPluginState(songId, instanceId, stateBase64);
     },
   );
 

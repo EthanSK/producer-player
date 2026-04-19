@@ -36,9 +36,14 @@ import type {
   ListeningDevice,
   PersistedEqLiveState,
   PerVersionAiRecommendations,
+  PluginChainItem,
+  PluginFormat,
+  PluginInfo,
   ProducerPlayerUserState,
   SavedReferenceTrack,
+  ScannedPluginLibrary,
   SongChecklistItem,
+  TrackPluginChain,
   WindowBounds,
 } from '@producer-player/contracts';
 
@@ -79,6 +84,9 @@ export const PER_TRACK_KEYS = [
   // `splitStateForDisk` hoists it into per-track files automatically; the
   // inner record remains a simple versionNumber-stringified map.
   'perTrackAiRecommendations',
+  // v3.39 Phase 1a — plugin-host insert chain per song. Listed here so the
+  // split-to-disk pipeline hoists each song's chain into its per-track file.
+  'perTrackPluginChains',
 ] as const satisfies readonly (keyof ProducerPlayerUserState)[];
 
 export type PerTrackKey = (typeof PER_TRACK_KEYS)[number];
@@ -460,6 +468,108 @@ function parsePerTrackAiRecommendations(
 // Default state
 // ---------------------------------------------------------------------------
 
+// v3.39 Phase 1a — plugin-host parsers.
+//
+// All parsers return `null` / empty structures on malformed input so a
+// corrupted `pluginLibrary` or chain entry can't crash startup.
+
+const PLUGIN_FORMATS: readonly PluginFormat[] = ['vst3', 'au', 'clap'];
+
+function parsePluginFormat(value: unknown): PluginFormat | null {
+  return typeof value === 'string' && (PLUGIN_FORMATS as readonly string[]).includes(value)
+    ? (value as PluginFormat)
+    : null;
+}
+
+function parsePluginInfo(value: unknown): PluginInfo | null {
+  if (!isRecord(value)) return null;
+  const id = typeof value.id === 'string' && value.id.length > 0 ? value.id : null;
+  const name = typeof value.name === 'string' && value.name.length > 0 ? value.name : null;
+  const vendor = typeof value.vendor === 'string' ? value.vendor : '';
+  const format = parsePluginFormat(value.format);
+  const version = typeof value.version === 'string' ? value.version : '';
+  const pluginPath = typeof value.path === 'string' && value.path.length > 0 ? value.path : null;
+  const categories = Array.isArray(value.categories)
+    ? value.categories.filter((c): c is string => typeof c === 'string' && c.length > 0)
+    : [];
+  const isSupported =
+    typeof value.isSupported === 'boolean' ? value.isSupported : id !== null && pluginPath !== null;
+  const failureReason =
+    typeof value.failureReason === 'string' && value.failureReason.length > 0
+      ? value.failureReason
+      : null;
+  if (!id || !name || !format || !pluginPath) return null;
+  return { id, name, vendor, format, version, path: pluginPath, categories, isSupported, failureReason };
+}
+
+function parseScannedPluginLibrary(value: unknown): ScannedPluginLibrary | undefined {
+  if (!isRecord(value)) return undefined;
+  const scannedAt = typeof value.scannedAt === 'string' && value.scannedAt.length > 0 ? value.scannedAt : null;
+  const scanVersion =
+    typeof value.scanVersion === 'number' && Number.isFinite(value.scanVersion)
+      ? Math.trunc(value.scanVersion)
+      : null;
+  if (!scannedAt || scanVersion === null) return undefined;
+  const pluginsRaw = Array.isArray(value.plugins) ? value.plugins : [];
+  const plugins = pluginsRaw
+    .map(parsePluginInfo)
+    .filter((p): p is PluginInfo => p !== null);
+  return { plugins, scannedAt, scanVersion };
+}
+
+function parsePluginChainItem(value: unknown): PluginChainItem | null {
+  if (!isRecord(value)) return null;
+  const instanceId =
+    typeof value.instanceId === 'string' && value.instanceId.length > 0 ? value.instanceId : null;
+  const pluginId =
+    typeof value.pluginId === 'string' && value.pluginId.length > 0 ? value.pluginId : null;
+  const enabled = typeof value.enabled === 'boolean' ? value.enabled : true;
+  const order =
+    typeof value.order === 'number' && Number.isFinite(value.order) && value.order >= 0
+      ? Math.trunc(value.order)
+      : null;
+  const state =
+    typeof value.state === 'string' && value.state.length > 0 ? value.state : undefined;
+  const presetName =
+    typeof value.presetName === 'string' && value.presetName.length > 0 ? value.presetName : undefined;
+  if (!instanceId || !pluginId || order === null) return null;
+  return {
+    instanceId,
+    pluginId,
+    enabled,
+    order,
+    ...(state !== undefined ? { state } : {}),
+    ...(presetName !== undefined ? { presetName } : {}),
+  };
+}
+
+function parseTrackPluginChain(songId: string, value: unknown): TrackPluginChain | null {
+  if (!isRecord(value)) return null;
+  // Accept either the full {songId, items} shape or a bare {items} shape —
+  // the outer record already carries the songId in its key.
+  const storedSongId = typeof value.songId === 'string' ? value.songId : songId;
+  const itemsRaw = Array.isArray(value.items) ? value.items : [];
+  const items = itemsRaw
+    .map(parsePluginChainItem)
+    .filter((i): i is PluginChainItem => i !== null)
+    // Re-sort by stored `order` to normalise on read; reorder operations
+    // rewrite the array, so out-of-band writes can't leave holes.
+    .sort((a, b) => a.order - b.order)
+    .map((item, index) => ({ ...item, order: index }));
+  return { songId: storedSongId, items };
+}
+
+function parsePerTrackPluginChains(value: unknown): Record<string, TrackPluginChain> {
+  if (!isRecord(value)) return {};
+  const out: Record<string, TrackPluginChain> = {};
+  for (const [songId, raw] of Object.entries(value)) {
+    if (typeof songId !== 'string' || songId.length === 0) continue;
+    const chain = parseTrackPluginChain(songId, raw);
+    if (chain) out[songId] = chain;
+  }
+  return out;
+}
+
 export function createDefaultUserState(): ProducerPlayerUserState {
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -499,6 +609,11 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     checklistDawOffsetDefaultSeconds: 0,
     checklistDawOffsetDefaultEnabled: false,
     lastFileDialogDirectory: '',
+    // v3.39 Phase 1a — plugin hosting. pluginLibrary stays undefined until the
+    // first scan; perTrackPluginChains is an empty map so chain operations can
+    // target any songId without an existence check.
+    pluginLibrary: undefined,
+    perTrackPluginChains: {},
     windowBounds: null,
   };
 }
@@ -601,6 +716,10 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     })(),
     lastFileDialogDirectory:
       typeof raw.lastFileDialogDirectory === 'string' ? raw.lastFileDialogDirectory : '',
+    // v3.39 Phase 1a — plugin hosting storage. Both fields are tolerant of
+    // missing/malformed inputs so pre-v3.39 state files load unchanged.
+    pluginLibrary: parseScannedPluginLibrary(raw.pluginLibrary),
+    perTrackPluginChains: parsePerTrackPluginChains(raw.perTrackPluginChains),
     windowBounds: parseWindowBounds(raw.windowBounds),
   };
 }
@@ -1457,5 +1576,203 @@ export class UserStateService {
     if (autoUpdate !== undefined && autoUpdate !== null) {
       state.autoUpdateEnabled = autoUpdate !== 'false'; // default true
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // v3.39 Phase 1a — plugin-host chain + library storage API.
+  //
+  // Every mutation runs through `enqueueStateMutation` so concurrent chain
+  // edits (typical: renderer optimistically reorders while a sidecar scan
+  // completion updates the library) can't stomp on each other.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Return a track's insert chain, or an empty one if nothing is persisted.
+   * Empty chain → audio pass-through (Ethan's "no plugins → no effect" rule).
+   */
+  async getTrackPluginChain(songId: string): Promise<TrackPluginChain> {
+    if (!songId || songId.length === 0) return { songId: songId ?? '', items: [] };
+    const state = await this.readUserState();
+    const chains = state.perTrackPluginChains ?? {};
+    return chains[songId] ?? { songId, items: [] };
+  }
+
+  /**
+   * Overwrite the chain for `songId`. Used by bulk operations (import/export,
+   * drag-reorder UIs that commit the full new order).
+   */
+  async setTrackPluginChain(
+    songId: string,
+    chain: TrackPluginChain,
+  ): Promise<TrackPluginChain> {
+    if (!songId || songId.length === 0) return { songId: songId ?? '', items: [] };
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      // Normalise order values to 0..n-1 so reads never see holes.
+      const normalised: TrackPluginChain = {
+        songId,
+        items: chain.items.map((item, index) => ({ ...item, order: index })),
+      };
+      const next = { ...(state.perTrackPluginChains ?? {}), [songId]: normalised };
+      await this.patchUserStateUnlocked({ perTrackPluginChains: next });
+      return normalised;
+    });
+  }
+
+  /**
+   * Append a plugin instance to the end of a track's chain.
+   * Returns the updated chain so the caller can drop the round-trip read.
+   */
+  async addPluginToChain(
+    songId: string,
+    pluginId: string,
+    overrides?: Partial<PluginChainItem>,
+  ): Promise<TrackPluginChain> {
+    if (!songId || songId.length === 0 || !pluginId || pluginId.length === 0) {
+      return { songId: songId ?? '', items: [] };
+    }
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      const chains = state.perTrackPluginChains ?? {};
+      const existing = chains[songId]?.items ?? [];
+      const newItem: PluginChainItem = {
+        instanceId:
+          overrides?.instanceId ??
+          `plug-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        pluginId,
+        enabled: overrides?.enabled ?? true,
+        order: existing.length,
+        ...(overrides?.state !== undefined ? { state: overrides.state } : {}),
+        ...(overrides?.presetName !== undefined ? { presetName: overrides.presetName } : {}),
+      };
+      const nextChain: TrackPluginChain = {
+        songId,
+        items: [...existing, newItem],
+      };
+      await this.patchUserStateUnlocked({
+        perTrackPluginChains: { ...chains, [songId]: nextChain },
+      });
+      return nextChain;
+    });
+  }
+
+  /** Remove one instance by id. No-op if not found. */
+  async removePluginFromChain(
+    songId: string,
+    instanceId: string,
+  ): Promise<TrackPluginChain> {
+    if (!songId || songId.length === 0) return { songId, items: [] };
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      const chains = state.perTrackPluginChains ?? {};
+      const existing = chains[songId];
+      if (!existing) return { songId, items: [] };
+      const filtered = existing.items.filter((i) => i.instanceId !== instanceId);
+      const nextChain: TrackPluginChain = {
+        songId,
+        items: filtered.map((item, index) => ({ ...item, order: index })),
+      };
+      await this.patchUserStateUnlocked({
+        perTrackPluginChains: { ...chains, [songId]: nextChain },
+      });
+      return nextChain;
+    });
+  }
+
+  /** Reorder in-place using the full ordered list of instance ids. */
+  async reorderPluginChain(
+    songId: string,
+    orderedInstanceIds: string[],
+  ): Promise<TrackPluginChain> {
+    if (!songId || songId.length === 0) return { songId, items: [] };
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      const chains = state.perTrackPluginChains ?? {};
+      const existing = chains[songId];
+      if (!existing) return { songId, items: [] };
+      const byId = new Map(existing.items.map((i) => [i.instanceId, i] as const));
+      const reordered: PluginChainItem[] = [];
+      for (const id of orderedInstanceIds) {
+        const item = byId.get(id);
+        if (item) {
+          reordered.push({ ...item, order: reordered.length });
+          byId.delete(id);
+        }
+      }
+      // Anything the caller didn't mention keeps its relative order at the end.
+      for (const leftover of byId.values()) {
+        reordered.push({ ...leftover, order: reordered.length });
+      }
+      const nextChain: TrackPluginChain = { songId, items: reordered };
+      await this.patchUserStateUnlocked({
+        perTrackPluginChains: { ...chains, [songId]: nextChain },
+      });
+      return nextChain;
+    });
+  }
+
+  /** Flip the enabled/bypass flag for a single slot. */
+  async togglePluginEnabled(
+    songId: string,
+    instanceId: string,
+    enabled: boolean,
+  ): Promise<TrackPluginChain> {
+    if (!songId || songId.length === 0) return { songId, items: [] };
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      const chains = state.perTrackPluginChains ?? {};
+      const existing = chains[songId];
+      if (!existing) return { songId, items: [] };
+      let touched = false;
+      const nextItems = existing.items.map((i) => {
+        if (i.instanceId !== instanceId) return i;
+        if (i.enabled === enabled) return i;
+        touched = true;
+        return { ...i, enabled };
+      });
+      if (!touched) return existing;
+      const nextChain: TrackPluginChain = { songId, items: nextItems };
+      await this.patchUserStateUnlocked({
+        perTrackPluginChains: { ...chains, [songId]: nextChain },
+      });
+      return nextChain;
+    });
+  }
+
+  /** Persist an opaque base64 plugin state blob for one slot. */
+  async setPluginState(
+    songId: string,
+    instanceId: string,
+    stateBase64: string,
+  ): Promise<TrackPluginChain> {
+    if (!songId || songId.length === 0) return { songId, items: [] };
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      const chains = state.perTrackPluginChains ?? {};
+      const existing = chains[songId];
+      if (!existing) return { songId, items: [] };
+      const nextItems = existing.items.map((i) =>
+        i.instanceId === instanceId ? { ...i, state: stateBase64 } : i,
+      );
+      const nextChain: TrackPluginChain = { songId, items: nextItems };
+      await this.patchUserStateUnlocked({
+        perTrackPluginChains: { ...chains, [songId]: nextChain },
+      });
+      return nextChain;
+    });
+  }
+
+  /** Read the cached scanned plugin library (null when no scan ever ran). */
+  async getPluginLibrary(): Promise<ScannedPluginLibrary | null> {
+    const state = await this.readUserState();
+    return state.pluginLibrary ?? null;
+  }
+
+  /** Store a fresh scan result. Called after the sidecar completes scan_plugins. */
+  async setPluginLibrary(library: ScannedPluginLibrary): Promise<ScannedPluginLibrary> {
+    return this.enqueueStateMutation(async () => {
+      await this.patchUserStateUnlocked({ pluginLibrary: library });
+      return library;
+    });
   }
 }

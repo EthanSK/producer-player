@@ -222,6 +222,17 @@ export const IPC_CHANNELS = {
   AI_RECOMMENDATIONS_SET: 'producer-player:ai-recommendations-set',
   AI_RECOMMENDATIONS_CLEAR: 'producer-player:ai-recommendations-clear',
   AI_RECOMMENDATIONS_MARK_STALE: 'producer-player:ai-recommendations-mark-stale',
+  // v3.39 — Plugin hosting Phase 1a (data model + JUCE sidecar scaffold).
+  // UI lands in Phase 1b.
+  PLUGIN_SCAN_LIBRARY: 'producer-player:plugin-scan-library',
+  PLUGIN_GET_LIBRARY: 'producer-player:plugin-get-library',
+  PLUGIN_GET_TRACK_CHAIN: 'producer-player:plugin-get-track-chain',
+  PLUGIN_SET_TRACK_CHAIN: 'producer-player:plugin-set-track-chain',
+  PLUGIN_ADD_TO_CHAIN: 'producer-player:plugin-add-to-chain',
+  PLUGIN_REMOVE_FROM_CHAIN: 'producer-player:plugin-remove-from-chain',
+  PLUGIN_REORDER_CHAIN: 'producer-player:plugin-reorder-chain',
+  PLUGIN_TOGGLE_ENABLED: 'producer-player:plugin-toggle-enabled',
+  PLUGIN_SET_STATE: 'producer-player:plugin-set-state',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
@@ -292,6 +303,76 @@ export interface PersistedEqLiveState {
   showAiEqCurve: boolean;
   showRefDiffCurve: boolean;
   showEqTonalBalance: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Plugin hosting (v3.39, Phase 1a — data model + JUCE sidecar scaffold)
+//
+// Effects-only, per-song insert chain. macOS-first (VST3 + AU + CLAP).
+// UI lands in Phase 1b; audio path + real plugin loading land in later phases.
+// ---------------------------------------------------------------------------
+
+export type PluginFormat = 'vst3' | 'au' | 'clap';
+
+/**
+ * Metadata for one installed plugin as reported by the native sidecar scan.
+ * Cached in user state so the plugin browser can render offline and survive
+ * sidecar restarts without a re-scan round-trip.
+ */
+export interface PluginInfo {
+  /** Stable cross-session id: `<format>:<uid-or-path-hash>`. */
+  id: string;
+  name: string;
+  vendor: string;
+  format: PluginFormat;
+  version: string;
+  /** Filesystem path to the .vst3 bundle / .component / .clap file. */
+  path: string;
+  /** Vendor-provided category list (may be empty). */
+  categories: string[];
+  /** False when the plugin failed to scan — `failureReason` has the detail. */
+  isSupported: boolean;
+  failureReason: string | null;
+}
+
+/**
+ * One slot in a track's insert chain. `instanceId` is a stable UUID that
+ * survives reorders and enable/disable flips; `pluginId` references an entry
+ * in `ScannedPluginLibrary.plugins`.
+ *
+ * `state` is an opaque base64 blob of plugin-serialized state. When absent
+ * (fresh insert, plugin not yet opened) consumers should use plugin defaults.
+ */
+export interface PluginChainItem {
+  instanceId: string;
+  pluginId: string;
+  enabled: boolean;
+  /** 0-based position in the chain. Reorder rewrites the whole array. */
+  order: number;
+  state?: string;
+  presetName?: string;
+}
+
+/**
+ * Ordered effects chain for one track (song). When the array is empty the
+ * chain is a no-op and the original audio passes through unchanged — required
+ * by Ethan's constraint "If no plugins, no effect on audio."
+ */
+export interface TrackPluginChain {
+  songId: string;
+  items: PluginChainItem[];
+}
+
+/**
+ * Output of a full plugin-folder scan. Persisted as part of
+ * `ProducerPlayerUserState.pluginLibrary` so the plugin browser can render
+ * without hitting the sidecar every launch.
+ */
+export interface ScannedPluginLibrary {
+  plugins: PluginInfo[];
+  scannedAt: string;
+  /** Bumped whenever the scan schema/layout changes. */
+  scanVersion: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -497,6 +578,19 @@ export interface ProducerPlayerUserState {
 
   // File dialog
   lastFileDialogDirectory: string; // Remembers last-used directory across all file pickers
+
+  // v3.39 — Plugin hosting (Phase 1a, storage only; UI lands Phase 1b).
+  //
+  // `pluginLibrary` is the cached result of the most recent native sidecar
+  // scan. Optional so pre-v3.39 state files load cleanly; `parseUserState`
+  // substitutes `undefined` when the field is missing or malformed.
+  //
+  // `perTrackPluginChains` is keyed by songId and MUST be listed in
+  // PER_TRACK_KEYS so the v3.29 split-to-disk pipeline hoists it into
+  // per-track files automatically. When a song has no chain entry, the chain
+  // is a no-op pass-through (Ethan's "no plugins → no effect" constraint).
+  pluginLibrary?: ScannedPluginLibrary;
+  perTrackPluginChains?: Record<string, TrackPluginChain>;
 
   // Main window bounds — persisted across relaunches so the app reopens where
   // it was last positioned. `null` on first launch or when no valid bounds are
@@ -992,6 +1086,18 @@ export interface ProducerPlayerBridge {
     versionNumber: number,
     newAnalysisVersion: string,
   ): Promise<void>;
+
+  // v3.39 — Plugin hosting (Phase 1a storage + sidecar wiring; UI lands 1b).
+  // Renderer consumers arrive in Phase 1b.
+  scanPluginLibrary(): Promise<ScannedPluginLibrary>;
+  getPluginLibrary(): Promise<ScannedPluginLibrary | null>;
+  getTrackPluginChain(songId: string): Promise<TrackPluginChain>;
+  setTrackPluginChain(songId: string, chain: TrackPluginChain): Promise<TrackPluginChain>;
+  addPluginToChain(songId: string, pluginId: string): Promise<TrackPluginChain>;
+  removePluginFromChain(songId: string, instanceId: string): Promise<TrackPluginChain>;
+  reorderPluginChain(songId: string, orderedInstanceIds: string[]): Promise<TrackPluginChain>;
+  togglePluginEnabled(songId: string, instanceId: string, enabled: boolean): Promise<TrackPluginChain>;
+  setPluginState(songId: string, instanceId: string, state: string): Promise<TrackPluginChain>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

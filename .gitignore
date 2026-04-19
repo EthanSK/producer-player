@@ -22,3 +22,10 @@ apps/e2e/test-results/
 
 # Claude Code worktrees
 .claude/worktrees/
+
+# Native audio-host sidecar (v3.39 Phase 1a). JUCE is vendored as a shallow
+# clone/submodule bootstrapped by scripts/build-sidecar.sh; do not commit
+# its 100MB+ source tree, and never commit per-machine CMake build output.
+native/pp-audio-host/JUCE/
+native/pp-audio-host/build/
+native/pp-audio-host/build-*/

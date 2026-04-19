@@ -354,6 +354,35 @@ const bridge: ProducerPlayerBridge = {
       newAnalysisVersion,
     );
   },
+
+  // v3.39 Phase 1a — plugin hosting (data model + sidecar scaffold; UI 1b).
+  async scanPluginLibrary() {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SCAN_LIBRARY);
+  },
+  async getPluginLibrary() {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_GET_LIBRARY);
+  },
+  async getTrackPluginChain(songId: string) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_GET_TRACK_CHAIN, songId);
+  },
+  async setTrackPluginChain(songId, chain) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SET_TRACK_CHAIN, songId, chain);
+  },
+  async addPluginToChain(songId, pluginId) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_ADD_TO_CHAIN, songId, pluginId);
+  },
+  async removePluginFromChain(songId, instanceId) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_REMOVE_FROM_CHAIN, songId, instanceId);
+  },
+  async reorderPluginChain(songId, orderedInstanceIds) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_REORDER_CHAIN, songId, orderedInstanceIds);
+  },
+  async togglePluginEnabled(songId, instanceId, enabled) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_TOGGLE_ENABLED, songId, instanceId, enabled);
+  },
+  async setPluginState(songId, instanceId, stateBase64) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SET_STATE, songId, instanceId, stateBase64);
+  },
 };
 
 contextBridge.exposeInMainWorld('producerPlayer', bridge);

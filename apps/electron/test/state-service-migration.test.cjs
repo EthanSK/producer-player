@@ -121,6 +121,8 @@ test('PER_TRACK_KEYS surface is stable and matches expected songId-keyed fields'
     'songDawOffsets',
     // v3.30: AI mastering recommendations ride the split pipeline.
     'perTrackAiRecommendations',
+    // v3.39 Phase 1a: per-song plugin-host insert chain.
+    'perTrackPluginChains',
   ]);
 });
 

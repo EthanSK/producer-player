@@ -1,0 +1,14 @@
+# CMake build output (per-machine; rebuilt by scripts/build-sidecar.sh)
+build/
+build-*/
+
+# Vendored JUCE — tracked as a shallow clone / submodule bootstrapped by the
+# build script. Its own source tree is fine to ignore when it's present as
+# a submodule; uncomment the next line once we convert to `.gitmodules`.
+# JUCE/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo

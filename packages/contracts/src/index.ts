@@ -456,6 +456,12 @@ export interface ProducerPlayerUserState {
   iCloudBackupEnabled: boolean;
   autoUpdateEnabled: boolean;
 
+  // v3.31 — fullscreen Mastering: show per-metric AI recommendation text.
+  // Default ON (auto-run preference). When OFF, the UI hides rendered AI
+  // recommendation text across the fullscreen panels but the underlying
+  // stored state is untouched so the user can flip back without re-running.
+  showAiRecommendationsFullscreen: boolean;
+
   // Checklist DAW offset — when enabled, checklist timestamps are rendered
   // with a per-song offset added to their raw stored value so the
   // displayed time lines up with the user's digital audio workstation

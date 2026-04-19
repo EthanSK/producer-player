@@ -491,6 +491,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     referenceLevelMatchEnabled: true,
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
+    showAiRecommendationsFullscreen: true,
     songDawOffsets: {},
     checklistDawOffsetDefaultSeconds: 0,
     checklistDawOffsetDefaultEnabled: false,
@@ -555,6 +556,10 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.iCloudBackupEnabled === 'boolean' ? raw.iCloudBackupEnabled : fallback.iCloudBackupEnabled,
     autoUpdateEnabled:
       typeof raw.autoUpdateEnabled === 'boolean' ? raw.autoUpdateEnabled : fallback.autoUpdateEnabled,
+    showAiRecommendationsFullscreen:
+      typeof raw.showAiRecommendationsFullscreen === 'boolean'
+        ? raw.showAiRecommendationsFullscreen
+        : fallback.showAiRecommendationsFullscreen,
     songDawOffsets: parseSongDawOffsets(raw.songDawOffsets),
     // Migration: if the new "default" fields are missing but the legacy
     // app-global `checklistDawOffsetSeconds`/`checklistDawOffsetEnabled`

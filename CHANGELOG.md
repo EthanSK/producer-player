@@ -4,6 +4,14 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.31] - 2026-04-18
+
+### Features
+- Mastering: "Show AI recommendations" toggle + "Regenerate" button in the fullscreen overlay (Phase 3a); light-blue per-metric AI recommendation captions under each stat card and Mastering Checklist row (hidden until the v3.33 auto-run lands)
+
+### Polish
+- Site: remove Windows "security warning" help expandable from the landing page
+
 ## [3.23] - 2026-04-18
 
 ### Polish

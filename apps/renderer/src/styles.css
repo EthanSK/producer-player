@@ -5035,3 +5035,129 @@ button.reference-action.active {
     grid-template-columns: 260px 1fr;
   }
 }
+
+/*
+ * v3.31 — Fullscreen Mastering "Show AI recommendations" toggle + per-metric
+ * AI rec caption text.
+ *
+ * Caption lives under each `.analysis-stat-card` + each
+ * `.mastering-checklist-row` and uses `var(--accent)` (light blue) for a
+ * strong-but-calm visual association with "AI-suggested". We render a tiny
+ * 11px caption with tabular numerals so recs with different decimal widths
+ * don't cause the column to jitter as new recs arrive.
+ *
+ * The shimmer placeholder is a gradient sweep over an accent-tinted pill and
+ * is used while Phase 4 (v3.33) fetches the recommendation in the background.
+ */
+.ai-rec-caption {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-rec-caption-label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.ai-rec-caption-value {
+  font-weight: 500;
+}
+
+.ai-rec-caption.ai-rec-stale .ai-rec-caption-value {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.ai-rec-caption-stale-suffix {
+  margin-left: 4px;
+  font-weight: 400;
+  opacity: 0.7;
+  text-decoration: none;
+}
+
+.ai-rec-caption-shimmer {
+  display: inline-block;
+  width: 72px;
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    rgba(92, 167, 255, 0.18) 0%,
+    rgba(92, 167, 255, 0.35) 50%,
+    rgba(92, 167, 255, 0.18) 100%
+  );
+  background-size: 200% 100%;
+  animation: ai-rec-shimmer 1.4s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes ai-rec-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.mastering-checklist-row .ai-rec-caption {
+  grid-column: 1 / -1;
+  margin-left: 30px;
+}
+
+/* Toggle + regenerate controls in the fullscreen overlay header. */
+.ai-rec-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 10px;
+}
+
+.ai-rec-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ai-rec-toggle input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ai-rec-regenerate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.ai-rec-regenerate:hover {
+  background: rgba(92, 167, 255, 0.12);
+  border-color: var(--accent);
+}
+
+.ai-rec-regenerate:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

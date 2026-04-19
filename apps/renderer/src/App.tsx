@@ -13,6 +13,8 @@ import {
   type WheelEvent,
 } from 'react';
 import type {
+  AiRecommendation,
+  AiRecommendationSet,
   AlbumChecklistItem,
   AudioFileAnalysis,
   AutoUpdateState,
@@ -355,6 +357,55 @@ function fileManagerLabel(platform: string): string {
   return 'Finder';
 }
 
+/**
+ * v3.31 — Render the per-metric "AI recommendation" caption under a stat
+ * card or checklist row. Returns `null` when:
+ *   - the toggle is OFF, OR
+ *   - no rec exists for this metric.
+ *
+ * Layout is deliberately caption-style and tabular so recommendations with
+ * different decimal widths don't jitter the grid. Loading state renders a
+ * shimmer pill; stale recs render with strikethrough + "(stale)" suffix.
+ */
+function renderAiRecommendationCaption(
+  rec: AiRecommendation | undefined,
+  opts: { visible: boolean; metricId: string },
+): ReactNode {
+  if (!opts.visible) return null;
+  if (!rec) return null;
+
+  if (rec.status === 'loading') {
+    return (
+      <span
+        className="ai-rec-caption"
+        data-testid={`ai-rec-${opts.metricId}`}
+        data-ai-rec-status="loading"
+      >
+        <span className="ai-rec-caption-label">AI recommendation:</span>{' '}
+        <span className="ai-rec-caption-shimmer" aria-hidden="true" />
+      </span>
+    );
+  }
+
+  const isStale = rec.status === 'stale';
+  const className = `ai-rec-caption${isStale ? ' ai-rec-stale' : ''}`;
+
+  return (
+    <span
+      className={className}
+      data-testid={`ai-rec-${opts.metricId}`}
+      data-ai-rec-status={rec.status}
+      title={rec.reason}
+    >
+      <span className="ai-rec-caption-label">AI recommendation:</span>{' '}
+      <span className="ai-rec-caption-value">{rec.recommendedValue}</span>
+      {isStale ? (
+        <span className="ai-rec-caption-stale-suffix">(stale)</span>
+      ) : null}
+    </span>
+  );
+}
+
 const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
   off: 'Off',
   one: 'One',
@@ -405,6 +456,13 @@ const INSPECTOR_DRAWER_OPEN_KEY = 'producer-player.inspector-drawer-open.v1';
 const COMPACT_MASTERING_PANEL_LAYOUT_KEY = 'producer-player.mastering-layout.compact.v1';
 const REFERENCE_LEVEL_MATCH_KEY = 'producer-player.reference-level-match.v1';
 const AUTO_UPDATE_ENABLED_KEY = 'producer-player.auto-update-enabled.v1';
+// v3.31 — "Show AI recommendations" toggle in the fullscreen Mastering view.
+// Default ON so auto-runs (v3.33+) surface without requiring a manual flip.
+// Persisted in the unified user state (`showAiRecommendationsFullscreen`) plus
+// cached in localStorage for instant hydration on next launch — mirrors the
+// autoUpdateEnabled / referenceLevelMatchEnabled pattern.
+const SHOW_AI_RECOMMENDATIONS_FULLSCREEN_KEY =
+  'producer-player.show-ai-recommendations-fullscreen.v1';
 const FULLSCREEN_MASTERING_PANEL_LAYOUT_KEY =
   'producer-player.mastering-layout.fullscreen.v1';
 const MAX_SAVED_REFERENCE_TRACKS = 20;
@@ -2072,6 +2130,23 @@ export function App(): JSX.Element {
     const stored = window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY);
     return stored !== 'false'; // default true
   });
+  // v3.31 — fullscreen Mastering "Show AI recommendations" toggle. Default ON
+  // so per-metric AI rec text appears automatically when available; flip OFF to
+  // hide across the fullscreen panels without clearing the underlying state.
+  const [
+    showAiRecommendationsFullscreen,
+    setShowAiRecommendationsFullscreen,
+  ] = useState<boolean>(() => {
+    const stored = window.localStorage.getItem(SHOW_AI_RECOMMENDATIONS_FULLSCREEN_KEY);
+    return stored !== 'false'; // default true
+  });
+  // v3.31 — latest AI recommendation set for the currently playing
+  // (song, versionNumber) pair. `null` means either no track is playing yet or
+  // the agent has never run for this combination. Phase 4 (v3.33) lands the
+  // real agent call; until then this will only ever contain values seeded via
+  // the IPC surface (manual DevTools calls or e2e tests).
+  const [aiRecommendationsForCurrentTrack, setAiRecommendationsForCurrentTrack] =
+    useState<AiRecommendationSet | null>(null);
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
@@ -3474,6 +3549,10 @@ export function App(): JSX.Element {
           setAutoUpdateEnabled(userState.autoUpdateEnabled);
         }
 
+        if (typeof userState.showAiRecommendationsFullscreen === 'boolean') {
+          setShowAiRecommendationsFullscreen(userState.showAiRecommendationsFullscreen);
+        }
+
         if (userState.songDawOffsets && typeof userState.songDawOffsets === 'object') {
           const sanitized: Record<string, { seconds: number; enabled: boolean }> = {};
           for (const [songId, entry] of Object.entries(userState.songDawOffsets)) {
@@ -3711,6 +3790,7 @@ export function App(): JSX.Element {
         referenceLevelMatchEnabled,
         iCloudBackupEnabled,
         autoUpdateEnabled,
+        showAiRecommendationsFullscreen,
         songDawOffsets,
         checklistDawOffsetDefaultSeconds: dawOffsetDefault.seconds,
         checklistDawOffsetDefaultEnabled: dawOffsetDefault.enabled,
@@ -3786,6 +3866,7 @@ export function App(): JSX.Element {
     referenceLevelMatchEnabled,
     iCloudBackupEnabled,
     autoUpdateEnabled,
+    showAiRecommendationsFullscreen,
     songDawOffsets,
     dawOffsetDefault,
     listeningDevices,
@@ -3850,6 +3931,14 @@ export function App(): JSX.Element {
       if (typeof userState.autoUpdateEnabled === 'boolean') {
         setAutoUpdateEnabled(userState.autoUpdateEnabled);
         window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, userState.autoUpdateEnabled ? 'true' : 'false');
+      }
+
+      if (typeof userState.showAiRecommendationsFullscreen === 'boolean') {
+        setShowAiRecommendationsFullscreen(userState.showAiRecommendationsFullscreen);
+        window.localStorage.setItem(
+          SHOW_AI_RECOMMENDATIONS_FULLSCREEN_KEY,
+          userState.showAiRecommendationsFullscreen ? 'true' : 'false',
+        );
       }
 
       if (userState.songDawOffsets && typeof userState.songDawOffsets === 'object') {
@@ -6377,6 +6466,126 @@ export function App(): JSX.Element {
     window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, autoUpdateEnabled ? 'true' : 'false');
     void window.producerPlayer.setAutoUpdateEnabled(autoUpdateEnabled);
   }, [autoUpdateEnabled]);
+
+  // v3.31 — cache the "Show AI recommendations" toggle to localStorage for
+  // instant hydration on next launch. Unified-state persistence happens via the
+  // debounced `setUserState` sync above (which already includes the field).
+  useEffect(() => {
+    window.localStorage.setItem(
+      SHOW_AI_RECOMMENDATIONS_FULLSCREEN_KEY,
+      showAiRecommendationsFullscreen ? 'true' : 'false',
+    );
+  }, [showAiRecommendationsFullscreen]);
+
+  // v3.31 — monotonic request id for AI recommendation refreshes.
+  //
+  // Both the primary fetch effect (on track/version/overlay change) and the
+  // onUserStateChanged listener race against each other to write into
+  // `aiRecommendationsForCurrentTrack`. A single ever-increasing counter
+  // lets both paths tag their in-flight fetch with the latest id and bail
+  // when their resolution is no longer current — this covers track/version
+  // switches, regenerate-click bursts, and state-import floods alike
+  // without overwriting newer writes with stale ones.
+  // (Codex review iterations 1 + 2, 2026-04-18.)
+  const aiRecFetchIdRef = useRef(0);
+  const runAiRecommendationFetch = useCallback(
+    (songId: string, versionNumber: number) => {
+      aiRecFetchIdRef.current += 1;
+      const requestId = aiRecFetchIdRef.current;
+      void window.producerPlayer
+        .getAiRecommendations(songId, versionNumber)
+        .then((set) => {
+          if (aiRecFetchIdRef.current !== requestId) return;
+          setAiRecommendationsForCurrentTrack(set ?? null);
+        })
+        .catch(() => {
+          if (aiRecFetchIdRef.current !== requestId) return;
+          /* noop — keep whatever is currently showing until the next fetch */
+        });
+    },
+    [],
+  );
+
+  // v3.31 — fetch AI recommendations for the currently playing
+  // (song, versionNumber) pair whenever either changes. We also refetch when
+  // the fullscreen overlay opens (analysisExpanded) so newly-seeded recs from
+  // outside the renderer (DevTools / e2e fixtures) become visible without a
+  // reload. Phase 4 (v3.33) will replace this with a real subscription.
+  useEffect(() => {
+    if (
+      !selectedPlaybackSongId ||
+      typeof currentPlaybackVersionNumber !== 'number' ||
+      currentPlaybackVersionNumber < 1
+    ) {
+      // Bump the id so any in-flight fetch from the previous effect run
+      // can no longer land — then clear the visible set.
+      aiRecFetchIdRef.current += 1;
+      setAiRecommendationsForCurrentTrack(null);
+      return;
+    }
+    runAiRecommendationFetch(selectedPlaybackSongId, currentPlaybackVersionNumber);
+  }, [
+    selectedPlaybackSongId,
+    currentPlaybackVersionNumber,
+    analysisExpanded,
+    runAiRecommendationFetch,
+  ]);
+
+  // v3.31 — refresh AI recommendations when the unified user state changes so
+  // a state import / state-service write from main immediately surfaces. The
+  // listener re-reads via IPC rather than inlining the perTrackAiRecommendations
+  // map because the split-to-disk layout owns its values separately.
+  useEffect(() => {
+    const unsubscribe = window.producerPlayer.onUserStateChanged(() => {
+      if (
+        !selectedPlaybackSongId ||
+        typeof currentPlaybackVersionNumber !== 'number' ||
+        currentPlaybackVersionNumber < 1
+      ) {
+        return;
+      }
+      runAiRecommendationFetch(selectedPlaybackSongId, currentPlaybackVersionNumber);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [selectedPlaybackSongId, currentPlaybackVersionNumber, runAiRecommendationFetch]);
+
+  // v3.31 — "Regenerate AI recommendations" button handler (Phase 3a stub).
+  // Clears the stored set for the current (song, versionNumber) so Phase 4's
+  // auto-run (v3.33) can just re-fire. Logs via the main-process logger so the
+  // action is visible in release log files, not only the DevTools console.
+  //
+  // Participates in the monotonic `aiRecFetchIdRef` guard so a slow
+  // `clearAiRecommendations` resolution cannot (a) wipe a newer track's
+  // visible captions after the user navigates away mid-flight, or
+  // (b) race against an older in-flight fetch whose `.then` would otherwise
+  // repaint the recs we just cleared. (Codex review iteration 3, 2026-04-18.)
+  const handleRegenerateAiRecommendations = useCallback(() => {
+    if (
+      !selectedPlaybackSongId ||
+      typeof currentPlaybackVersionNumber !== 'number' ||
+      currentPlaybackVersionNumber < 1
+    ) {
+      return;
+    }
+    const songId = selectedPlaybackSongId;
+    const versionNumber = currentPlaybackVersionNumber;
+    aiRecFetchIdRef.current += 1;
+    const requestId = aiRecFetchIdRef.current;
+    void window.producerPlayer
+      .rendererLog('info', 'AI re-run triggered', { songId, versionNumber })
+      .catch(() => undefined);
+    void window.producerPlayer
+      .clearAiRecommendations(songId, versionNumber)
+      .then(() => {
+        if (aiRecFetchIdRef.current !== requestId) return;
+        setAiRecommendationsForCurrentTrack(null);
+      })
+      .catch(() => {
+        /* noop — Phase 4 wires the real agent call */
+      });
+  }, [selectedPlaybackSongId, currentPlaybackVersionNumber]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -13239,6 +13448,44 @@ export function App(): JSX.Element {
               </div>
               <div className="analysis-overlay-header-controls">
                 <div className="analysis-overlay-header-actions">
+                  {/*
+                   * v3.31 — Phase 3a AI recommendations chain. Toggle hides /
+                   * shows the light-blue per-metric caption across the
+                   * fullscreen panels; the refresh button is a Phase 3a stub
+                   * that clears the stored set for the current track/version
+                   * so Phase 4 (v3.33) auto-run just works when it lands.
+                   */}
+                  <div
+                    className="ai-rec-toolbar"
+                    data-testid="ai-rec-toolbar"
+                  >
+                    <label
+                      className="ai-rec-toggle"
+                      data-testid="ai-rec-toggle-label"
+                      title="Show the AI-suggested value under each metric card and Mastering Checklist row."
+                    >
+                      <input
+                        type="checkbox"
+                        data-testid="ai-rec-toggle"
+                        checked={showAiRecommendationsFullscreen}
+                        onChange={(event) =>
+                          setShowAiRecommendationsFullscreen(event.target.checked)
+                        }
+                      />
+                      <span>Show AI recommendations</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="ai-rec-regenerate"
+                      data-testid="ai-rec-regenerate"
+                      onClick={handleRegenerateAiRecommendations}
+                      disabled={!selectedPlaybackSongId || currentPlaybackVersionNumber === null}
+                      aria-label="Regenerate AI recommendations"
+                      title="Regenerate AI recommendations for the current track/version."
+                    >
+                      <span aria-hidden="true">⟳</span>
+                    </button>
+                  </div>
                   <button
                     type="button"
                     className="ghost"
@@ -13905,38 +14152,74 @@ export function App(): JSX.Element {
                       <span className="loudness-metric-eyebrow" aria-hidden="true">Integrated</span>
                       <span className="analysis-stat-label">Integrated LUFS{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_INTEGRATED_LUFS} /></span>
                       <strong>{measuredIntegratedText}</strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.integrated_lufs,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'integrated_lufs' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
                       <span className="analysis-stat-label">Current loudness{referenceModeSuffixNode} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_CURRENT_LOUDNESS} /></span>
                       <strong>{shortTermEstimateText}</strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.current_loudness,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'current_loudness' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
                       <span className="analysis-stat-label">Loudness range{referenceModeSuffixNode} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /><TechnicalInfoPopover text={TECH_INFO_LRA} /></span>
                       <strong>{measuredLraText}</strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.loudness_range,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'loudness_range' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="True Peak — the highest inter-sample peak level in the track, measured via oversampling.">
                       <span className="analysis-stat-label">True Peak{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /><TechnicalInfoPopover text={TECH_INFO_TRUE_PEAK} /></span>
                       <strong>{measuredTruePeakText}</strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.true_peak,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'true_peak' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="Sample Peak — the highest digital sample value in the track, without oversampling.">
                       <span className="analysis-stat-label">Sample peak{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The highest absolute sample value found in the audio file, measured directly from the digital samples without oversampling. This is what your DAW's standard peak meter shows. It will always be equal to or lower than True Peak because it cannot detect peaks that form between samples during reconstruction.\n\nGood values: Below 0 dBFS. If sample peak is at 0 dBFS, the signal is hitting the digital ceiling. For a properly mastered track, sample peak should be below -0.3 dBFS at minimum, but True Peak is the more important number to watch.\n\nIf it's wrong: If sample peak is at 0 dBFS, you are almost certainly clipping on playback (True Peak will be even higher). Use a true peak limiter with the ceiling set to -1 dBTP. Sample peak matters most when working in contexts where true peak metering is unavailable, or when checking raw recordings before mastering."} links={TRUE_PEAK_LINKS} /><TechnicalInfoPopover text={TECH_INFO_SAMPLE_PEAK} /></span>
                       <strong>{measuredSamplePeakText}</strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.sample_peak,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'sample_peak' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time.">
                       <span className="analysis-stat-label">Peak short-term{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PEAK_SHORT_TERM} /></span>
                       <strong>{measuredMaxShortTermText}</strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.peak_short_term,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'peak_short_term' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
                       <span className="analysis-stat-label">Peak momentary{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PEAK_MOMENTARY} /></span>
                       <strong>{measuredMaxMomentaryText}</strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.peak_momentary,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'peak_momentary' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="Average volume level across the entire track (RMS-based), in dBFS.">
                       <span className="analysis-stat-label">Mean volume{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The average (RMS) level of your entire track expressed in dBFS. RMS stands for Root Mean Square — it squares every sample, averages them, then takes the square root, giving a value that correlates closely with perceived loudness. Unlike LUFS, it does not apply perceptual weighting, so it is a purely mathematical average of signal energy.\n\nGood values: For a mastered pop/rock track, typically -10 to -16 dBFS. Unmastered mixes are usually -18 to -24 dBFS. A heavily limited master might read -8 to -6 dBFS. Classical and acoustic music: -20 to -30 dBFS.\n\nIf it's wrong: Mean volume that is very close to the peak level means the track is heavily limited (low crest factor). If it is very far from the peak (more than 18 dB), the track has large untamed transients. Compare with the crest factor reading to assess your dynamic balance."} links={MEAN_VOLUME_LINKS} /><TechnicalInfoPopover text={TECH_INFO_MEAN_VOLUME} /></span>
                       <strong>{measuredMeanVolumeText}</strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.mean_volume,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'mean_volume' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="Crest Factor — difference between peak and RMS levels. Higher values indicate more dynamic range.">
                       <span className="analysis-stat-label">Crest Factor{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The difference between the sample peak level and the RMS (average) level, in dB. Formula: Crest Factor = Peak dBFS minus RMS dBFS. A higher crest factor means your transients stick out further above the average level — the music has more punch and snap. A lower value means the waveform is more like a brick wall.\n\nGood values: Unmastered/raw mixes: 12-18 dB. Well-mastered pop/rock: 8-12 dB. Heavily limited EDM/hip-hop: 4-8 dB. Extremely squashed masters: under 4 dB. Classical and jazz: 15-20+ dB.\n\nIf it's wrong: Below 6 dB usually means aggressive limiting has crushed your transients — the track will sound loud but lifeless and fatiguing. Above 18 dB could mean uncontrolled peaks that waste headroom. Use a limiter to tame peaks or back off limiting to restore dynamics, depending on which direction you need to go."} links={CREST_FACTOR_LINKS} /><TechnicalInfoPopover text={TECH_INFO_CREST_FACTOR} /></span>
                       <strong>{activeCrestFactorText}</strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.crest_factor,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'crest_factor' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="Number of samples at or above 0 dBFS (digital clipping).">
                       <span className="analysis-stat-label">Clip Count{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The number of individual samples in the file whose absolute value reaches or exceeds 1.0 (0 dBFS) — the digital ceiling. Each clipped sample represents a moment where the signal was too loud to be represented digitally and was hard-clipped, causing distortion.\n\nGood values: Zero. Any non-zero clip count means digital distortion is present in the file. Even a single clipped sample is technically distortion, though a handful may not be audible. Hundreds or thousands of clips will be clearly audible as harsh, crunchy distortion.\n\nIf it's wrong: Reduce gain before your limiter, or lower the limiter output ceiling. If clips are coming from the mix bus, pull down your fader or gain-stage your plugins. Note: some producers intentionally use hard clipping as a creative effect (e.g., clip-to-zero mastering in hip-hop), but the clips should be intentional and controlled, not accidental."} links={CLIP_COUNT_LINKS} /><TechnicalInfoPopover text={TECH_INFO_CLIP_COUNT} /></span>
@@ -13949,6 +14232,10 @@ export function App(): JSX.Element {
                             ? 'Loading…'
                             : '—'}
                       </strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.clip_count,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'clip_count' },
+                      )}
                     </div>
                     <div className="analysis-stat-card" title="DC Offset — mean sample value. Non-zero DC offset wastes headroom.">
                       <span className="analysis-stat-label">DC Offset{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The mean (average) of all sample values in the file. A perfectly centered waveform has a DC offset of 0. A non-zero value means the entire waveform is shifted above or below the center line. The threshold for a warning here is 0.1% (mean sample value > 0.001).\n\nGood values: As close to 0% as possible. Anything under 0.1% is considered clean. Above 0.1% triggers a warning because it wastes headroom — if your waveform is shifted up by 0.5%, you lose 0.5% of your available peak range.\n\nIf it's wrong: DC offset is usually caused by faulty hardware (cheap audio interfaces, phantom power leakage), certain analog-modeled plugins, or recording with a bad cable. Fix it by applying a high-pass filter at a very low frequency (10-20 Hz) or use your DAW's DC offset removal tool (most have one in the audio editor). Always fix DC offset before mastering."} links={DC_OFFSET_LINKS} /><TechnicalInfoPopover text={TECH_INFO_DC_OFFSET} /></span>
@@ -13961,6 +14248,10 @@ export function App(): JSX.Element {
                             ? 'Loading…'
                             : '—'}
                       </strong>
+                      {renderAiRecommendationCaption(
+                        aiRecommendationsForCurrentTrack?.dc_offset,
+                        { visible: showAiRecommendationsFullscreen, metricId: 'dc_offset' },
+                      )}
                     </div>
                   </div>
                 </section>
@@ -14587,6 +14878,13 @@ export function App(): JSX.Element {
                                             : `${evaluation.value} \u2014 ${evaluation.message}`}
                                         </span>
                                         {showAddButton ? renderPromoteButton(rule.id) : null}
+                                        {renderAiRecommendationCaption(
+                                          aiRecommendationsForCurrentTrack?.[rule.id],
+                                          {
+                                            visible: showAiRecommendationsFullscreen,
+                                            metricId: rule.id,
+                                          },
+                                        )}
                                       </div>
                                     );
                                   })}

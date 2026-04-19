@@ -42,11 +42,41 @@ export interface AgentChatMessage {
 export interface AgentChatPromptRequest {
   id: string;
   prompt: string;
+  // v3.33 Phase 4 — when true, dispatch the prompt to the agent session
+  // without auto-opening the chat panel or seeding the user-visible chat
+  // history with the giant analysis-blob prompt. The response still streams
+  // through `onAgentEvent` so the AI recommendation handler can parse it.
+  // Use for background / auto-run flows where the user hasn't asked to see
+  // the raw agent interaction (e.g. auto-run on track open).
+  silent?: boolean;
 }
 
 interface AgentChatPanelProps {
   getAnalysisContext: () => AgentContext | null;
   promptRequest?: AgentChatPromptRequest | null;
+  // v3.33 Phase 4 — auto-run mastering recommendations on track open. The
+  // parent owns the authoritative value (synced to ProducerPlayerUserState
+  // so it survives restart + export/import); we just surface it inside the
+  // Agent Settings panel so the user can flip it from one familiar place.
+  autoRecommendEnabled?: boolean;
+  onAutoRecommendEnabledChange?: (enabled: boolean) => void;
+  // v3.33 Phase 4 — chat-tool detector. When the user types something that
+  // matches the `rerun_mastering_recommendations` tool pattern, we route
+  // the call to the parent instead of sending the literal string to the
+  // agent. Returning `true` means the message was handled locally and
+  // SHOULD NOT be dispatched to the agent. Returning `false` (or undefined)
+  // means fall through to normal chat flow.
+  onDetectChatTool?: (userMessage: string) => boolean;
+  // v3.33 Phase 4 — fired when a silent prompt (auto-run mastering recs)
+  // was dropped because the agent session is already streaming a visible
+  // user turn. The parent must treat this as equivalent to the silent turn
+  // failing — clear any "generating" state, release the dedupe key, etc.
+  // Payload = the silent promptRequest.id that was dropped.
+  onSilentPromptDropped?: (promptRequestId: string) => void;
+  // v3.33 Phase 4 — emitted every time `isStreaming` flips. The parent uses
+  // this to gate the auto-run useEffect so it doesn't keep dispatching +
+  // dropping silent prompts in a retry loop while the user is mid-chat.
+  onChatStreamingChange?: (streaming: boolean) => void;
 }
 
 interface StoredLegacyActiveChat {
@@ -628,6 +658,11 @@ function buildHistorySeed(messages: AgentChatMessage[]): AgentConversationHistor
 export function AgentChatPanel({
   getAnalysisContext,
   promptRequest = null,
+  autoRecommendEnabled = true,
+  onAutoRecommendEnabledChange,
+  onDetectChatTool,
+  onSilentPromptDropped,
+  onChatStreamingChange,
 }: AgentChatPanelProps): JSX.Element {
   const initialChatPersistenceRef = useRef<StoredAgentChatPersistence>(
     readStoredChatPersistence()
@@ -646,6 +681,12 @@ export function AgentChatPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  // v3.33 Phase 4 — notify parent whenever the visible chat session starts
+  // or stops streaming. The App-level auto-run effect uses this as a gate
+  // to avoid dispatching silent prompts while the user is mid-conversation.
+  useEffect(() => {
+    onChatStreamingChange?.(isStreaming);
+  }, [isStreaming, onChatStreamingChange]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [sessionActive, setSessionActive] = useState(false);
   const [provider, setProvider] = useState<AgentProviderId>(() => readStoredProvider());
@@ -729,6 +770,11 @@ export function AgentChatPanel({
   const onboardingScheduledRef = useRef(false);
   const lastHandledPromptRequestIdRef = useRef<string | null>(null);
   const ignoredTurnCompleteCountRef = useRef(0);
+  // v3.33 Phase 4 — count of currently in-flight silent turns whose agent
+  // events should be suppressed from the visible transcript. The background
+  // mastering-rec listener in App.tsx owns those responses. Incremented when
+  // a silent prompt is dispatched, decremented on `turn-complete` / `error`.
+  const silentTurnCountRef = useRef(0);
   const isOpenRef = useRef(isOpen);
 
   isOpenRef.current = isOpen;
@@ -1084,6 +1130,31 @@ export function AgentChatPanel({
 
   useEffect(() => {
     const unsubscribe = window.producerPlayer.onAgentEvent((event: AgentEvent) => {
+      // v3.33 Phase 4 — suppress events that belong to a silent turn (e.g.
+      // the auto-run mastering-rec flow). The App-level listener in App.tsx
+      // owns those responses; the chat transcript must not grow an orphan
+      // agent bubble for every silent delta or a duplicate error banner if
+      // the run fails. `turn-complete` and `error` decrement the silent
+      // counter so subsequent user turns re-enter the visible pipeline.
+      if (silentTurnCountRef.current > 0) {
+        switch (event.type) {
+          case 'text-delta':
+            return;
+          case 'turn-complete':
+          case 'error':
+            silentTurnCountRef.current = Math.max(
+              0,
+              silentTurnCountRef.current - 1,
+            );
+            return;
+          default:
+            // approval-request / session-ended still bubble up so the
+            // panel can recover if something pathological happens during
+            // a silent run.
+            break;
+        }
+      }
+
       switch (event.type) {
         case 'text-delta': {
           const streamId = streamingMessageIdRef.current;
@@ -1450,12 +1521,93 @@ export function AgentChatPanel({
   );
 
   const handleSendMessage = useCallback(
-    async (text: string, options?: { bypassHistoryGuard?: boolean }) => {
+    async (
+      text: string,
+      options?: {
+        bypassHistoryGuard?: boolean;
+        silent?: boolean;
+        promptRequestId?: string;
+      },
+    ) => {
       const trimmedMessage = text.trim();
       if (!trimmedMessage && pendingAttachments.length === 0) return;
       if (historyOpen && !options?.bypassHistoryGuard) return;
+      // v3.33 Phase 4 — silent flag is set by auto-run / background flows
+      // that want the agent's response (via `onAgentEvent`) without polluting
+      // the visible chat transcript with a huge analysis-blob prompt or an
+      // empty assistant bubble that will look confusing if the user opens
+      // the panel mid-run.
+      const silent = options?.silent === true;
+      // v3.33 Phase 4 — chat-tool pattern match. ONLY run the detector on
+      // user-typed messages (not silent / bypassHistoryGuard=true prompt
+      // injections from the app itself), otherwise the auto-run's prompt
+      // containing "mastering recommendations" would loop back to another
+      // auto-run.
+      if (!silent && !options?.bypassHistoryGuard && onDetectChatTool) {
+        if (onDetectChatTool(trimmedMessage)) {
+          // Surface a short acknowledgement in the transcript so the user
+          // understands their message was intercepted + a re-run fired.
+          const ackId = nextMessageId();
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: nextMessageId(),
+              role: 'user',
+              content: trimmedMessage,
+              timestamp: Date.now(),
+              status: 'complete',
+            },
+            {
+              id: ackId,
+              role: 'system',
+              content:
+                'Regenerating AI mastering recommendations for the current track…',
+              timestamp: Date.now(),
+              status: 'complete',
+            },
+          ]);
+          return;
+        }
+      }
+
+      // v3.33 Phase 4 — guard the converse case before the isStreaming
+      // branch even runs. The user sending a VISIBLE message while a
+      // silent run is in flight would: (a) cause agent-service to kill
+      // the silent subprocess on the new sendTurn, and (b) have its own
+      // text-delta / turn-complete events suppressed by the silent
+      // counter we set on the silent dispatch. Reset the counter so the
+      // visible turn's events paint normally, AND notify the parent so
+      // its in-flight AI-rec run + auto-run dedupe key are torn down
+      // (otherwise the dedupe key would be stranded once the visible
+      // response lands without the expected JSON, preventing any retry
+      // for this (songId, versionNumber, analysisVersion)).
+      // (Codex review iterations 3 + 4, 2026-04-18 P2.)
+      if (!silent && silentTurnCountRef.current > 0) {
+        silentTurnCountRef.current = 0;
+        if (onSilentPromptDropped) {
+          // Sentinel id — App's handler is keyed to the currently active
+          // silent requestId via aiRecAgentActiveRequestIdRef, which
+          // takes precedence over this argument. We pass a descriptive
+          // label so the log line can say "interrupted by visible turn".
+          onSilentPromptDropped('__interrupted_by_visible_turn__');
+        }
+      }
 
       if (isStreaming) {
+        // v3.33 Phase 4 — a silent background run (auto-run mastering recs)
+        // must NEVER interrupt a user-initiated chat turn. Drop the silent
+        // dispatch instead, and notify the parent so it can release its
+        // "generating" state + dedupe key (otherwise the App-level run
+        // would stay in flight until the 90s hard timeout with no agent
+        // events ever arriving). Silent runs are best-effort; the user's
+        // explicit conversation is sacred.
+        if (silent) {
+          if (options?.promptRequestId && onSilentPromptDropped) {
+            onSilentPromptDropped(options.promptRequestId);
+          }
+          return;
+        }
+
         const interruptedMessageId = streamingMessageIdRef.current;
 
         if (interruptedMessageId) {
@@ -1515,20 +1667,33 @@ export function AgentChatPanel({
       };
       const pendingAssistantId = nextMessageId();
 
-      setMessages((prev) => [
-        ...prev,
-        userMsg,
-        {
-          id: pendingAssistantId,
-          role: 'agent',
-          content: '',
-          timestamp: Date.now(),
-          status: 'streaming',
-        },
-      ]);
-      streamingMessageIdRef.current = pendingAssistantId;
-      setIsStreaming(true);
-      userScrolledUpRef.current = false;
+      if (!silent) {
+        setMessages((prev) => [
+          ...prev,
+          userMsg,
+          {
+            id: pendingAssistantId,
+            role: 'agent',
+            content: '',
+            timestamp: Date.now(),
+            status: 'streaming',
+          },
+        ]);
+        streamingMessageIdRef.current = pendingAssistantId;
+        setIsStreaming(true);
+        userScrolledUpRef.current = false;
+      } else {
+        // Silent path: tag this turn so the global agent-event listener
+        // suppresses its text-delta / turn-complete / error events from the
+        // visible transcript. Decrement happens inside the listener when
+        // turn-complete or error arrives.
+        silentTurnCountRef.current += 1;
+        // Silent path: don't touch streamingMessageIdRef so a user-driven
+        // turn mid-auto-run isn't accidentally stolen. We still mark the
+        // panel as "seen" because the user state now has AI activity. We
+        // do NOT set isStreaming because no visible assistant bubble is in
+        // flight — the auto-run caller listens to `onAgentEvent` directly.
+      }
 
       // Attachments travel with the turn; clear the pending list from the UI
       // as soon as the turn is sent. The temp files are cleaned up after the
@@ -1577,6 +1742,8 @@ export function AgentChatPanel({
       pendingAttachments,
       provider,
       sessionActive,
+      onDetectChatTool,
+      onSilentPromptDropped,
     ]
   );
 
@@ -1590,14 +1757,25 @@ export function AgentChatPanel({
     }
 
     lastHandledPromptRequestIdRef.current = promptRequest.id;
-    setIsOpen(true);
-    setSettingsOpen(false);
-    setHistoryOpen(false);
-    setHelpDialogOpen(false);
-    userScrolledUpRef.current = false;
-    localStorage.setItem(AGENT_PANEL_SEEN_STORAGE_KEY, 'true');
+    // v3.33 Phase 4 — silent requests (auto-run on track open) do NOT open
+    // the panel or seed the visible message list. The agent still receives
+    // the prompt and streams its response via the global `onAgentEvent`
+    // channel, which the mastering-rec handler in App.tsx listens to.
+    const isSilent = promptRequest.silent === true;
+    if (!isSilent) {
+      setIsOpen(true);
+      setSettingsOpen(false);
+      setHistoryOpen(false);
+      setHelpDialogOpen(false);
+      userScrolledUpRef.current = false;
+      localStorage.setItem(AGENT_PANEL_SEEN_STORAGE_KEY, 'true');
+    }
 
-    void handleSendMessage(promptRequest.prompt, { bypassHistoryGuard: true });
+    void handleSendMessage(promptRequest.prompt, {
+      bypassHistoryGuard: true,
+      silent: isSilent,
+      promptRequestId: promptRequest.id,
+    });
   }, [handleSendMessage, promptRequest]);
 
   const handleInterrupt = useCallback(() => {
@@ -1947,6 +2125,10 @@ export function AgentChatPanel({
             hasHistory={chatHistory.length > 0}
             onClose={() => setSettingsOpen(false)}
             controlsDisabled={isStreaming}
+            autoRecommendEnabled={autoRecommendEnabled}
+            onAutoRecommendEnabledChange={(next) =>
+              onAutoRecommendEnabledChange?.(next)
+            }
           />
         )}
 

@@ -31,6 +31,12 @@ interface AgentSettingsProps {
   hasHistory: boolean;
   onClose: () => void;
   controlsDisabled?: boolean;
+  // v3.33 Phase 4 — auto-run mastering recommendations on track open.
+  // When `false`, opening a new (songId, versionNumber) pair does NOT fire
+  // the agent; the "Regenerate AI recommendations" button in fullscreen
+  // mastering still works. Default ON.
+  autoRecommendEnabled: boolean;
+  onAutoRecommendEnabledChange: (enabled: boolean) => void;
 }
 
 export function AgentSettings({
@@ -49,6 +55,8 @@ export function AgentSettings({
   hasHistory,
   onClose,
   controlsDisabled = false,
+  autoRecommendEnabled,
+  onAutoRecommendEnabledChange,
 }: AgentSettingsProps): JSX.Element {
   const [sttProvider, setSttProvider] = useState<AgentSttProviderId>(() =>
     readStoredAgentSttProvider()
@@ -241,6 +249,32 @@ export function AgentSettings({
           spellCheck={false}
           data-testid="agent-system-prompt-input"
         />
+      </div>
+
+      <div className="agent-settings-section">
+        <label
+          className="agent-settings-toggle-row"
+          title="When ON, opening a new track in fullscreen mastering automatically asks the AI for per-metric recommendations. Turn OFF to avoid automatic LLM spend — the Regenerate button still works manually."
+        >
+          <input
+            type="checkbox"
+            className="agent-settings-toggle-input"
+            checked={autoRecommendEnabled}
+            onChange={(event) => onAutoRecommendEnabledChange(event.target.checked)}
+            data-testid="agent-settings-auto-recommend-toggle"
+          />
+          <span className="agent-settings-toggle-label">
+            Auto-generate mastering recommendations when opening tracks
+          </span>
+        </label>
+        <p
+          className="agent-settings-key-help"
+          data-testid="agent-settings-auto-recommend-help"
+        >
+          {autoRecommendEnabled
+            ? 'The agent runs automatically the first time each track/version is opened in fullscreen mastering.'
+            : 'Auto-run is OFF. Click "Regenerate AI recommendations" in fullscreen mastering to fire a run manually.'}
+        </p>
       </div>
 
       <div className="agent-settings-section">

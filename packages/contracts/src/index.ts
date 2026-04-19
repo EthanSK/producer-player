@@ -462,6 +462,15 @@ export interface ProducerPlayerUserState {
   // stored state is untouched so the user can flip back without re-running.
   showAiRecommendationsFullscreen: boolean;
 
+  // v3.33 (Phase 4) — gate for the auto-run that fires the agent whenever a
+  // new (songId, versionNumber) is opened in fullscreen mastering while the
+  // "Show AI recommendations" toggle is ON and analysis is ready. Default ON.
+  // When OFF, neither a fresh track-open nor a stale analysis refresh will
+  // kick the agent; the manual "Regenerate AI recommendations" button still
+  // works. Surfaced in AgentSettings as a checkbox so the user can opt out
+  // of any automatic LLM spend.
+  agentAutoRecommendEnabled: boolean;
+
   // Checklist DAW offset — when enabled, checklist timestamps are rendered
   // with a per-song offset added to their raw stored value so the
   // displayed time lines up with the user's digital audio workstation

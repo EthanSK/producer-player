@@ -44,6 +44,7 @@ import {
   getMasteringChecklistRuleById,
   groupMasteringChecklistRules,
   masteringChecklistStatusIcon,
+  MASTERING_CHECKLIST_RULES,
   type MasteringChecklistEvaluationInput,
 } from './masteringChecklistRules';
 import {
@@ -117,7 +118,14 @@ import {
   AgentChatPanel,
   type AgentChatPromptRequest,
 } from './AgentChatPanel';
-import { buildAiEqRecommendationPrompt } from './agentPrompts';
+import {
+  buildAiEqRecommendationPrompt,
+  buildMasteringRecommendationsPrompt,
+  computeMasteringAnalysisVersion,
+  parseMasteringRecommendationsResponse,
+  type MasteringRecommendationChecklistFinding,
+  type ParsedMasteringRecommendation,
+} from './agentPrompts';
 import type {
   AgentContext,
   AgentPlatformNormalization,
@@ -2202,6 +2210,28 @@ export function App(): JSX.Element {
   // the IPC surface (manual DevTools calls or e2e tests).
   const [aiRecommendationsForCurrentTrack, setAiRecommendationsForCurrentTrack] =
     useState<AiRecommendationSet | null>(null);
+  // v3.33 Phase 4 — gate that controls whether opening a new
+  // (songId, versionNumber) pair automatically fires the agent to generate
+  // fresh mastering recommendations. Persisted in `ProducerPlayerUserState`
+  // as `agentAutoRecommendEnabled`. Default ON so first-time users see recs
+  // without having to flip a switch. Surfaced in AgentSettings.
+  const [agentAutoRecommendEnabled, setAgentAutoRecommendEnabled] =
+    useState<boolean>(true);
+  // v3.33 Phase 4 — in-flight generation status for the current request.
+  // `null` = idle. `{ source, songId, versionNumber, requestId }` during a
+  // run. Used to block concurrent runs for the same pair and to expose the
+  // "generating..." state to the fullscreen toolbar.
+  const [aiRecommendationsGeneration, setAiRecommendationsGeneration] =
+    useState<{
+      source: 'auto' | 'manual' | 'tool';
+      songId: string;
+      versionNumber: number;
+      requestId: string;
+    } | null>(null);
+  // v3.33 Phase 4 — mirror of AgentChatPanel's `isStreaming`. Used as an
+  // auto-run gate so the effect doesn't churn subscriptions + silent
+  // prompt drops while the user is mid-chat. (Codex review round 3 P2.)
+  const [agentChatStreaming, setAgentChatStreaming] = useState(false);
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
@@ -3608,6 +3638,11 @@ export function App(): JSX.Element {
           setShowAiRecommendationsFullscreen(userState.showAiRecommendationsFullscreen);
         }
 
+        // v3.33 Phase 4 — auto-run gate.
+        if (typeof userState.agentAutoRecommendEnabled === 'boolean') {
+          setAgentAutoRecommendEnabled(userState.agentAutoRecommendEnabled);
+        }
+
         if (userState.songDawOffsets && typeof userState.songDawOffsets === 'object') {
           const sanitized: Record<string, { seconds: number; enabled: boolean }> = {};
           for (const [songId, entry] of Object.entries(userState.songDawOffsets)) {
@@ -3954,6 +3989,7 @@ export function App(): JSX.Element {
         iCloudBackupEnabled,
         autoUpdateEnabled,
         showAiRecommendationsFullscreen,
+        agentAutoRecommendEnabled,
         songDawOffsets,
         checklistDawOffsetDefaultSeconds: dawOffsetDefault.seconds,
         checklistDawOffsetDefaultEnabled: dawOffsetDefault.enabled,
@@ -4030,6 +4066,7 @@ export function App(): JSX.Element {
     iCloudBackupEnabled,
     autoUpdateEnabled,
     showAiRecommendationsFullscreen,
+    agentAutoRecommendEnabled,
     songDawOffsets,
     dawOffsetDefault,
     listeningDevices,
@@ -4102,6 +4139,13 @@ export function App(): JSX.Element {
           SHOW_AI_RECOMMENDATIONS_FULLSCREEN_KEY,
           userState.showAiRecommendationsFullscreen ? 'true' : 'false',
         );
+      }
+
+      // v3.33 Phase 4 — auto-run gate. Import/push preserves the persisted
+      // value; no localStorage mirror needed because the debounced writer
+      // always reads straight from React state.
+      if (typeof userState.agentAutoRecommendEnabled === 'boolean') {
+        setAgentAutoRecommendEnabled(userState.agentAutoRecommendEnabled);
       }
 
       if (userState.songDawOffsets && typeof userState.songDawOffsets === 'object') {
@@ -5377,6 +5421,11 @@ export function App(): JSX.Element {
     if (playbackPreviewMode === 'reference') return null;
     return getVersionNumberFromFileName(selectedPlaybackVersion.fileName);
   }, [selectedPlaybackVersion, playbackPreviewMode]);
+  // v3.33 Phase 4 — ref mirror so late agent responses can check the
+  // currently playing version without triggering a re-render from a
+  // useCallback dep change every time the version flips.
+  const currentPlaybackVersionNumberRef = useRef<number | null>(null);
+  currentPlaybackVersionNumberRef.current = currentPlaybackVersionNumber;
 
   // v3.24: which version id is truly "now playing" for the floating version
   // switcher panel. In reference preview mode the mix version is selected but
@@ -6704,19 +6753,29 @@ export function App(): JSX.Element {
   // without overwriting newer writes with stale ones.
   // (Codex review iterations 1 + 2, 2026-04-18.)
   const aiRecFetchIdRef = useRef(0);
+  // v3.33 Phase 4 — "have we completed a fetch for THIS (songId, versionNumber)
+  // yet" sentinel so the auto-run gate can distinguish `null` = "fetch said
+  // there's nothing stored" (OK to auto-run) from `null` = "fetch hasn't
+  // resolved yet" (wait). Key format: `${songId}::${versionNumber}`.
+  const [aiRecFetchCompletedKey, setAiRecFetchCompletedKey] = useState<string | null>(null);
   const runAiRecommendationFetch = useCallback(
     (songId: string, versionNumber: number) => {
       aiRecFetchIdRef.current += 1;
       const requestId = aiRecFetchIdRef.current;
+      const key = `${songId}::${versionNumber}`;
       void window.producerPlayer
         .getAiRecommendations(songId, versionNumber)
         .then((set) => {
           if (aiRecFetchIdRef.current !== requestId) return;
           setAiRecommendationsForCurrentTrack(set ?? null);
+          setAiRecFetchCompletedKey(key);
         })
         .catch(() => {
           if (aiRecFetchIdRef.current !== requestId) return;
-          /* noop — keep whatever is currently showing until the next fetch */
+          // Still mark as fetch-completed so the auto-run gate doesn't hang
+          // forever on a transient IPC hiccup — next auto-run will re-fetch
+          // anyway when the agent write completes.
+          setAiRecFetchCompletedKey(key);
         });
     },
     [],
@@ -6767,54 +6826,784 @@ export function App(): JSX.Element {
     };
   }, [selectedPlaybackSongId, currentPlaybackVersionNumber, runAiRecommendationFetch]);
 
-  // v3.31 — "Regenerate AI recommendations" button handler (Phase 3a stub).
-  // Clears the stored set for the current (song, versionNumber) so Phase 4's
-  // auto-run (v3.33) can just re-fire. Logs via the main-process logger so the
-  // action is visible in release log files, not only the DevTools console.
+  // ==========================================================================
+  // v3.33 Phase 4 — AI mastering recommendations generation pipeline.
   //
-  // Participates in the monotonic `aiRecFetchIdRef` guard so a slow
-  // `clearAiRecommendations` resolution cannot (a) wipe a newer track's
-  // visible captions after the user navigates away mid-flight, or
-  // (b) race against an older in-flight fetch whose `.then` would otherwise
-  // repaint the recs we just cleared. (Codex review iteration 3, 2026-04-18.)
+  // The agent CLI architecture is pass-through (see `agent-service.ts`): there
+  // is NO server-side tool registry. What acts like a "tool" in the user's
+  // chat is a renderer-side prompt injection + response parse, exactly like
+  // `handleRequestAiEq`. Three entry points converge on the same agent call:
+  //   1. Auto-run on track open (silent, bypasses the chat transcript).
+  //   2. "Regenerate AI recommendations" button in fullscreen mastering.
+  //   3. Chat-tool pattern: user types "rerun mastering recommendations" etc.
+  //
+  // All three:
+  //   - Clear any existing recs for the target (songId, versionNumber).
+  //   - Build the prompt with the current analysis + checklist findings.
+  //   - Subscribe to `onAgentEvent` and accumulate `text-delta` content.
+  //   - On `turn-complete`, parse the JSON block + call `setAiRecommendation`
+  //     once per metric.
+  // ==========================================================================
+
+  // Which metric IDs the agent is asked to recommend on. Mirrors the UI
+  // surface — keep in sync with the set of `renderAiRecommendationCaption`
+  // callsites in the fullscreen Mastering panels + the checklist rules.
+  const AI_REC_CORE_METRIC_IDS = useMemo<ReadonlyArray<string>>(
+    () => [
+      'integrated_lufs',
+      'current_loudness',
+      'loudness_range',
+      'true_peak',
+      'sample_peak',
+      'peak_short_term',
+      'peak_momentary',
+      'mean_volume',
+      'crest_factor',
+      'clip_count',
+      'dc_offset',
+      // Mastering checklist rule IDs (IDs from MASTERING_CHECKLIST_RULES).
+      ...MASTERING_CHECKLIST_RULES.map((rule) => rule.id),
+    ],
+    [],
+  );
+
+  // Spectrum EQ band metric IDs (spectrum_eq_band_0 … spectrum_eq_band_5).
+  // Reuses the existing `buildSpectrumBandMetricId` convention so recs
+  // flow into the same per-band store Phase 3b set up.
+  const AI_REC_SPECTRUM_BAND_METRIC_IDS = useMemo<ReadonlyArray<string>>(
+    () => [0, 1, 2, 3, 4, 5].map((i) => buildSpectrumBandMetricId(i)),
+    [],
+  );
+
+  // One ever-increasing counter guards against late agent responses racing
+  // newer runs. `trigger()` bumps the counter and returns the current id;
+  // the response handler bails if the id no longer matches.
+  const aiRecAgentRunIdRef = useRef(0);
+  // Mirror of the latest start timestamp so we can clamp obnoxiously slow
+  // agent calls (e.g. CLI hung) — 90 s hard timeout per run.
+  const aiRecAgentTimeoutMsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const AI_REC_AGENT_TIMEOUT_MS = 90_000;
+
+  // Accumulator for the currently active agent run's text deltas. Reset each
+  // time we fire a new run so a cancelled run can't bleed into the next one.
+  const aiRecAgentAccumulatorRef = useRef('');
+  const aiRecAgentActiveRequestIdRef = useRef<string | null>(null);
+  const aiRecAgentUnsubscribeRef = useRef<(() => void) | null>(null);
+
+  // Returns the analysisVersion fingerprint for the currently loaded track.
+  // Null when analysis hasn't run yet — callers that need a deterministic
+  // fingerprint should gate on that null.
+  const computeCurrentAnalysisVersion = useCallback((): string | null => {
+    if (!analysis || !measuredAnalysis) return null;
+    return computeMasteringAnalysisVersion({
+      integratedLufs: measuredAnalysis.integratedLufs ?? null,
+      truePeakDbfs: measuredAnalysis.truePeakDbfs ?? null,
+      loudnessRangeLufs: measuredAnalysis.loudnessRangeLufs ?? null,
+      crestFactorDb: analysis.crestFactorDb ?? null,
+      peakDbfs: analysis.peakDbfs ?? null,
+      tonalBalance: analysis.tonalBalance ?? null,
+      sampleRateHz: measuredAnalysis.sampleRateHz ?? null,
+    });
+  }, [analysis, measuredAnalysis]);
+
+  // Clean up any dangling agent subscription / timeout from a previous run.
+  const cancelActiveAiRecAgentRun = useCallback(() => {
+    if (aiRecAgentUnsubscribeRef.current) {
+      try {
+        aiRecAgentUnsubscribeRef.current();
+      } catch {
+        /* ignore */
+      }
+      aiRecAgentUnsubscribeRef.current = null;
+    }
+    if (aiRecAgentTimeoutMsRef.current) {
+      clearTimeout(aiRecAgentTimeoutMsRef.current);
+      aiRecAgentTimeoutMsRef.current = null;
+    }
+    aiRecAgentAccumulatorRef.current = '';
+    aiRecAgentActiveRequestIdRef.current = null;
+  }, []);
+
+  // Shared core of the three entry points. Kicks off a new run for
+  // (songId, versionNumber). `source` is just for logging + status state.
+  const triggerMasteringRecommendationsAgentRun = useCallback(
+    (args: {
+      songId: string;
+      versionNumber: number;
+      source: 'auto' | 'manual' | 'tool';
+    }) => {
+      const { songId, versionNumber, source } = args;
+      if (!selectedPlaybackVersion) return;
+      if (selectedPlaybackVersion.songId !== songId) return;
+
+      // Only proceed if analysis is ready. Without it the prompt would be
+      // noise and the agent would hallucinate.
+      const analysisVersion = computeCurrentAnalysisVersion();
+      if (!analysisVersion) return;
+
+      // Bump monotonic run id + cancel any in-flight run.
+      cancelActiveAiRecAgentRun();
+      aiRecAgentRunIdRef.current += 1;
+      const runId = aiRecAgentRunIdRef.current;
+      const requestId = `ai-rec-${source}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      aiRecAgentActiveRequestIdRef.current = requestId;
+      aiRecAgentAccumulatorRef.current = '';
+
+      setAiRecommendationsGeneration({
+        source,
+        songId,
+        versionNumber,
+        requestId,
+      });
+
+      void window.producerPlayer
+        .rendererLog('info', 'AI mastering recommendation run started', {
+          songId,
+          versionNumber,
+          source,
+          requestId,
+          analysisVersion,
+        })
+        .catch(() => undefined);
+
+      // v3.33 Phase 4 — E2E test mock.
+      //
+      // If a test harness has installed a canned-response hook on the window,
+      // short-circuit the agent call and drive the persistence flow directly.
+      // The hook receives the same inputs the real agent would see and must
+      // return a parsed `Record<metricId, ParsedMasteringRecommendation>` (or
+      // null to simulate a parse failure). Keeps real LLM calls out of CI
+      // without having to stub the entire AgentService.
+      const mockFn = (window as unknown as {
+        __producerPlayerAiRecMock?: (input: {
+          songId: string;
+          versionNumber: number;
+          analysisVersion: string;
+          source: 'auto' | 'manual' | 'tool';
+          metricIds: ReadonlyArray<string>;
+          spectrumBandMetricIds: ReadonlyArray<string>;
+        }) => Record<string, ParsedMasteringRecommendation> | null;
+      }).__producerPlayerAiRecMock;
+
+      if (typeof mockFn === 'function') {
+        const runSongId = songId;
+        const runVersionNumber = versionNumber;
+        const runAnalysisVersion = analysisVersion;
+        const runRequestId = requestId;
+        const runSource = source;
+        const runId2 = runId;
+
+        // Async mock so the "generating..." state renders for one tick
+        // (mirrors the real agent's latency for visual regressions).
+        void Promise.resolve()
+          .then(async () => {
+            if (aiRecAgentRunIdRef.current !== runId2) return;
+            const parsed = mockFn({
+              songId: runSongId,
+              versionNumber: runVersionNumber,
+              analysisVersion: runAnalysisVersion,
+              source: runSource,
+              metricIds: AI_REC_CORE_METRIC_IDS,
+              spectrumBandMetricIds: AI_REC_SPECTRUM_BAND_METRIC_IDS,
+            });
+
+            setAiRecommendationsGeneration((prev) =>
+              prev?.requestId === runRequestId ? null : prev,
+            );
+
+            if (!parsed || Object.keys(parsed).length === 0) return;
+
+            const generatedAt = Date.now();
+            const activeProviderMock =
+              window.localStorage.getItem('producer-player.agent-provider') ||
+              'claude';
+            const activeModelMock =
+              window.localStorage.getItem(
+                `producer-player.agent-model.${activeProviderMock}`,
+              ) || `${activeProviderMock}-default`;
+
+            const ops: Array<Promise<unknown>> = [];
+            for (const [metricId, entry] of Object.entries(parsed)) {
+              const rec: AiRecommendation = {
+                recommendedValue: entry.recommendedValue,
+                recommendedRawValue: entry.recommendedRawValue,
+                reason: entry.reason ?? '',
+                model: `mock-${activeModelMock}`,
+                requestId: runRequestId,
+                analysisVersion: runAnalysisVersion,
+                generatedAt,
+                status: 'fresh',
+              };
+              ops.push(
+                window.producerPlayer
+                  .setAiRecommendation(
+                    runSongId,
+                    runVersionNumber,
+                    metricId,
+                    rec,
+                  )
+                  .catch(() => undefined),
+              );
+            }
+            await Promise.all(ops);
+
+            if (
+              selectedPlaybackSongIdRef.current === runSongId &&
+              currentPlaybackVersionNumberRef.current === runVersionNumber
+            ) {
+              runAiRecommendationFetch(runSongId, runVersionNumber);
+            }
+          })
+          .catch(() => undefined);
+
+        return;
+      }
+
+      // Build the prompt using the CURRENT analysis + mastering checklist
+      // evaluations. We evaluate rules here (not at render time) because we
+      // want the exact same findings the user sees in the fullscreen
+      // panels, captured atomically at run start.
+      const checklistFindings: MasteringRecommendationChecklistFinding[] =
+        MASTERING_CHECKLIST_RULES.map((rule) => {
+          const evaluation = rule.evaluate({
+            measured: measuredAnalysis,
+            analysis,
+          });
+          return {
+            id: rule.id,
+            label: rule.label,
+            status: evaluation.status,
+            value: evaluation.value,
+            message: evaluation.message,
+          };
+        });
+
+      const prompt = buildMasteringRecommendationsPrompt({
+        trackName: selectedPlaybackVersion.fileName,
+        analysis: {
+          integratedLufs: measuredAnalysis?.integratedLufs ?? null,
+          truePeakDbfs: measuredAnalysis?.truePeakDbfs ?? null,
+          samplePeakDbfs: measuredAnalysis?.samplePeakDbfs ?? null,
+          loudnessRangeLufs: measuredAnalysis?.loudnessRangeLufs ?? null,
+          crestFactorDb: analysis?.crestFactorDb ?? null,
+          dcOffset: analysis?.dcOffset ?? null,
+          clipCount: analysis?.clipCount ?? null,
+          maxShortTermLufs: measuredAnalysis?.maxShortTermLufs ?? null,
+          maxMomentaryLufs: measuredAnalysis?.maxMomentaryLufs ?? null,
+          meanVolumeDbfs: measuredAnalysis?.meanVolumeDbfs ?? null,
+          peakDbfs: analysis?.peakDbfs ?? null,
+          tonalBalance: analysis?.tonalBalance ?? null,
+          sampleRateHz: measuredAnalysis?.sampleRateHz ?? null,
+        },
+        checklistFindings,
+        metricIds: AI_REC_CORE_METRIC_IDS,
+        spectrumBandMetricIds: AI_REC_SPECTRUM_BAND_METRIC_IDS,
+      });
+
+      // Figure out which model is currently active for logging / persistence.
+      const activeProvider =
+        window.localStorage.getItem('producer-player.agent-provider') ||
+        'claude';
+      const activeModel =
+        window.localStorage.getItem(
+          `producer-player.agent-model.${activeProvider}`,
+        ) || `${activeProvider}-default`;
+
+      // Subscribe to agent events BEFORE dispatching the prompt so we don't
+      // drop a fast first delta.
+      const unsubscribe = window.producerPlayer.onAgentEvent(async (event) => {
+        // Stale run guard — a newer run has been kicked off.
+        if (aiRecAgentRunIdRef.current !== runId) return;
+
+        if (event.type === 'text-delta') {
+          aiRecAgentAccumulatorRef.current += event.content ?? '';
+          return;
+        }
+
+        if (event.type === 'error') {
+          cancelActiveAiRecAgentRun();
+          setAiRecommendationsGeneration((prev) =>
+            prev?.requestId === requestId ? null : prev,
+          );
+          void window.producerPlayer
+            .rendererLog('warn', 'AI mastering recommendation run errored', {
+              songId,
+              versionNumber,
+              requestId,
+              source,
+            })
+            .catch(() => undefined);
+          return;
+        }
+
+        if (event.type !== 'turn-complete') return;
+
+        const accumulated = aiRecAgentAccumulatorRef.current;
+        cancelActiveAiRecAgentRun();
+
+        const parsed = parseMasteringRecommendationsResponse(accumulated);
+        setAiRecommendationsGeneration((prev) =>
+          prev?.requestId === requestId ? null : prev,
+        );
+
+        if (!parsed || Object.keys(parsed).length === 0) {
+          void window.producerPlayer
+            .rendererLog('warn', 'AI mastering recommendation run parsed nothing', {
+              songId,
+              versionNumber,
+              requestId,
+              source,
+              accumulatedLength: accumulated.length,
+            })
+            .catch(() => undefined);
+          return;
+        }
+
+        const generatedAt = Date.now();
+        const persisted: Array<Promise<unknown>> = [];
+        for (const [metricId, entry] of Object.entries(parsed)) {
+          const rec: AiRecommendation = {
+            recommendedValue: entry.recommendedValue,
+            recommendedRawValue: entry.recommendedRawValue,
+            reason: entry.reason ?? '',
+            model: activeModel,
+            requestId,
+            analysisVersion,
+            generatedAt,
+            status: 'fresh',
+          };
+          persisted.push(
+            window.producerPlayer
+              .setAiRecommendation(songId, versionNumber, metricId, rec)
+              .catch((err: unknown) => {
+                void window.producerPlayer
+                  .rendererLog('warn', 'setAiRecommendation failed', {
+                    songId,
+                    versionNumber,
+                    metricId,
+                    requestId,
+                    message: err instanceof Error ? err.message : String(err),
+                  })
+                  .catch(() => undefined);
+              }),
+          );
+        }
+
+        await Promise.all(persisted);
+
+        // Refresh the renderer's visible set so captions paint immediately
+        // without waiting for the onUserStateChanged listener (the IPC surface
+        // does NOT push USER_STATE_CHANGED on per-metric writes by design).
+        if (
+          selectedPlaybackSongIdRef.current === songId &&
+          currentPlaybackVersionNumberRef.current === versionNumber
+        ) {
+          runAiRecommendationFetch(songId, versionNumber);
+        }
+
+        void window.producerPlayer
+          .rendererLog('info', 'AI mastering recommendation run completed', {
+            songId,
+            versionNumber,
+            requestId,
+            source,
+            metricCount: Object.keys(parsed).length,
+          })
+          .catch(() => undefined);
+      });
+      aiRecAgentUnsubscribeRef.current = unsubscribe;
+
+      // Hard timeout — clean up if the CLI stalls.
+      aiRecAgentTimeoutMsRef.current = setTimeout(() => {
+        if (aiRecAgentRunIdRef.current !== runId) return;
+        cancelActiveAiRecAgentRun();
+        setAiRecommendationsGeneration((prev) =>
+          prev?.requestId === requestId ? null : prev,
+        );
+        void window.producerPlayer
+          .rendererLog('warn', 'AI mastering recommendation run timed out', {
+            songId,
+            versionNumber,
+            requestId,
+            source,
+            timeoutMs: AI_REC_AGENT_TIMEOUT_MS,
+          })
+          .catch(() => undefined);
+      }, AI_REC_AGENT_TIMEOUT_MS);
+
+      // Fire the prompt through the chat pipeline. Auto-run uses `silent`
+      // so the panel doesn't pop open and the transcript stays clean.
+      setAgentChatPromptRequest({
+        id: requestId,
+        prompt,
+        silent: source === 'auto',
+      });
+    },
+    [
+      selectedPlaybackVersion,
+      measuredAnalysis,
+      analysis,
+      computeCurrentAnalysisVersion,
+      cancelActiveAiRecAgentRun,
+      runAiRecommendationFetch,
+      AI_REC_CORE_METRIC_IDS,
+      AI_REC_SPECTRUM_BAND_METRIC_IDS,
+    ],
+  );
+
+  // v3.33 Phase 4 — user-initiated regenerate (button in fullscreen toolbar
+  // or chat-tool pattern match). Clears existing recs, then fires the agent.
+  //
+  // Supersedes the Phase 3a stub: the button still clears first, but now
+  // a real agent call follows so the panel actually repopulates with fresh
+  // recs rather than just going blank.
+  const handleRerunMasteringRecommendations = useCallback(
+    (source: 'manual' | 'tool') => {
+      if (
+        !selectedPlaybackSongId ||
+        typeof currentPlaybackVersionNumber !== 'number' ||
+        currentPlaybackVersionNumber < 1
+      ) {
+        return;
+      }
+      const songId = selectedPlaybackSongId;
+      const versionNumber = currentPlaybackVersionNumber;
+      aiRecFetchIdRef.current += 1;
+      const clearRequestId = aiRecFetchIdRef.current;
+
+      void window.producerPlayer
+        .rendererLog('info', 'AI re-run triggered', {
+          songId,
+          versionNumber,
+          source,
+        })
+        .catch(() => undefined);
+
+      void window.producerPlayer
+        .clearAiRecommendations(songId, versionNumber)
+        .then(() => {
+          if (aiRecFetchIdRef.current !== clearRequestId) return;
+          setAiRecommendationsForCurrentTrack(null);
+          // Kick off the real agent call AFTER the clear lands so the UI
+          // always sees "cleared → regenerating" rather than "stale →
+          // overwritten" transitions.
+          triggerMasteringRecommendationsAgentRun({
+            songId,
+            versionNumber,
+            source,
+          });
+        })
+        .catch(() => undefined);
+
+      // Spectrum AI EQ hygiene (kept from Phase 3b).
+      try {
+        window.localStorage.removeItem(`${AI_EQ_PER_SONG_KEY_PREFIX}${songId}`);
+      } catch {
+        /* ignore — storage may be full/unavailable */
+      }
+      setAiRecommendedEq(null);
+      setShowAiEqCurve(false);
+    },
+    [
+      selectedPlaybackSongId,
+      currentPlaybackVersionNumber,
+      triggerMasteringRecommendationsAgentRun,
+    ],
+  );
+
   const handleRegenerateAiRecommendations = useCallback(() => {
+    handleRerunMasteringRecommendations('manual');
+  }, [handleRerunMasteringRecommendations]);
+
+  // v3.33 Phase 4 — auto-run dedupe key. Declared before the drop-handler
+  // callback so it can release the key when a silent prompt is cancelled
+  // by AgentChatPanel. Assigned inside the auto-run useEffect below.
+  const autoRunDedupeKeyRef = useRef<string | null>(null);
+
+  // v3.33 Phase 4 — when AgentChatPanel drops a silent prompt because a
+  // visible user chat is already streaming, we must unwind the in-flight
+  // state we optimistically committed in `triggerMasteringRecommendationsAgentRun`:
+  //   - release the "generating" UI state so the toolbar isn't stuck.
+  //   - clear the auto-run dedupe key so the effect can retry next tick.
+  //   - tear down the subscribed onAgentEvent listener + timeout.
+  //
+  // Without this the run would hang silently until the 90s timeout and
+  // — worse — the dedupe key would prevent the auto-run effect from
+  // retrying the same (songId, versionNumber, analysisVersion) combo.
+  // (Codex review iteration 2, 2026-04-18 P2.)
+  const handleSilentPromptDropped = useCallback(
+    (droppedRequestId: string) => {
+      // Two entry points:
+      //   1. AgentChatPanel dropped a silent prompt because the visible
+      //      chat was already streaming (droppedRequestId = actual silent
+      //      promptRequest.id). Match it against the active run's id.
+      //   2. A user-visible turn interrupted an already-started silent run
+      //      (droppedRequestId = the sentinel
+      //      '__interrupted_by_visible_turn__'). Tear down whatever silent
+      //      run is active regardless of id.
+      const isSentinel = droppedRequestId === '__interrupted_by_visible_turn__';
+      const activeRequestId = aiRecAgentActiveRequestIdRef.current;
+      if (!isSentinel && activeRequestId !== droppedRequestId) return;
+      if (isSentinel && !activeRequestId) return;
+
+      cancelActiveAiRecAgentRun();
+      setAiRecommendationsGeneration((prev) =>
+        isSentinel || prev?.requestId === droppedRequestId ? null : prev,
+      );
+      // Release the dedupe key so the auto-run effect can re-evaluate and
+      // retry once the visible user turn finishes.
+      autoRunDedupeKeyRef.current = null;
+      void window.producerPlayer
+        .rendererLog(
+          'info',
+          isSentinel
+            ? 'AI mastering recommendation silent run interrupted by visible turn'
+            : 'AI mastering recommendation silent prompt dropped',
+          {
+            requestId: droppedRequestId,
+            activeRequestId: activeRequestId ?? null,
+          },
+        )
+        .catch(() => undefined);
+    },
+    [cancelActiveAiRecAgentRun],
+  );
+
+  // v3.33 Phase 4 — auto-run on track open.
+  //
+  // Fires once per (songId, versionNumber) pair when all gates pass:
+  //   - `agentAutoRecommendEnabled` is ON (user's master kill-switch).
+  //   - `showAiRecommendationsFullscreen` is ON (no point running if hidden).
+  //   - Not in reference preview mode (playbackPreviewMode !== 'reference').
+  //   - Both `measuredAnalysis` AND `analysis` are present (analysis ready).
+  //   - Agent features are enabled.
+  //   - The per-track aiRecommendedFlag is false (haven't done this track
+  //     at this analysisVersion yet).
+  //   - No run is currently in flight for this pair.
+  //
+  // A per-(songId, versionNumber, analysisVersion) dedupe ref guards against
+  // React 18 StrictMode double-invocation + dep re-fires from unrelated
+  // state churn during a single track open. (Declared above so the
+  // silent-prompt-dropped handler can release the key.)
+  useEffect(() => {
+    if (!ENABLE_AGENT_FEATURES) return;
+    if (!agentAutoRecommendEnabled) return;
+    if (!showAiRecommendationsFullscreen) return;
+    // v3.33 Phase 4 — don't churn auto-run dispatches while the user is
+    // mid-chat. AgentChatPanel would just keep dropping them via
+    // onSilentPromptDropped, which in turn clears our dedupe key and
+    // re-fires this effect. Wait until the visible turn is idle.
+    // (Codex review round 3 P2.)
+    if (agentChatStreaming) return;
+    if (playbackPreviewMode === 'reference') return;
+    if (!selectedPlaybackSongId) return;
     if (
-      !selectedPlaybackSongId ||
       typeof currentPlaybackVersionNumber !== 'number' ||
       currentPlaybackVersionNumber < 1
     ) {
       return;
     }
-    const songId = selectedPlaybackSongId;
-    const versionNumber = currentPlaybackVersionNumber;
-    aiRecFetchIdRef.current += 1;
-    const requestId = aiRecFetchIdRef.current;
-    void window.producerPlayer
-      .rendererLog('info', 'AI re-run triggered', { songId, versionNumber })
-      .catch(() => undefined);
-    void window.producerPlayer
-      .clearAiRecommendations(songId, versionNumber)
-      .then(() => {
-        if (aiRecFetchIdRef.current !== requestId) return;
-        setAiRecommendationsForCurrentTrack(null);
-      })
-      .catch(() => {
-        /* noop — Phase 4 wires the real agent call */
-      });
-    // v3.32 Phase 3b — Regenerate should also clear the Spectrum's own
-    // AI EQ render so the cyan dashed curve disappears alongside the
-    // Mastering captions. Wipe both localStorage (authoritative for the
-    // inline overlay via `readAiEqForSong`) and the in-memory state, so
-    // the user sees a unified "clean slate" and the next AI Recommend
-    // click starts from scratch.
-    try {
-      window.localStorage.removeItem(`${AI_EQ_PER_SONG_KEY_PREFIX}${songId}`);
-    } catch {
-      /* ignore — storage may be full/unavailable */
+    if (!analysis || !measuredAnalysis) return;
+    const analysisVersion = computeCurrentAnalysisVersion();
+    if (!analysisVersion) return;
+
+    // Already running?
+    if (aiRecommendationsGeneration) return;
+
+    const dedupeKey = `${selectedPlaybackSongId}::${currentPlaybackVersionNumber}::${analysisVersion}`;
+    if (autoRunDedupeKeyRef.current === dedupeKey) return;
+
+    // Already-done guard: if the per-track record has at least one fresh rec
+    // with a matching analysisVersion, skip. We check via the currently
+    // loaded set (loaded by the runAiRecommendationFetch useEffect). We
+    // distinguish "fetch completed, nothing stored" from "fetch hasn't
+    // resolved yet" via `aiRecFetchCompletedKey` so null alone doesn't
+    // block the gate forever on brand-new tracks.
+    const currentFetchKey = `${selectedPlaybackSongId}::${currentPlaybackVersionNumber}`;
+    if (aiRecFetchCompletedKey !== currentFetchKey) {
+      // Fetch for the current (songId, versionNumber) hasn't completed yet.
+      // Wait for the next effect run (which fires after the fetch resolves).
+      return;
     }
-    setAiRecommendedEq(null);
-    setShowAiEqCurve(false);
-  }, [selectedPlaybackSongId, currentPlaybackVersionNumber]);
+    if (aiRecommendationsForCurrentTrack) {
+      const hasFreshMatch = Object.values(aiRecommendationsForCurrentTrack).some(
+        (rec) =>
+          rec.status === 'fresh' && rec.analysisVersion === analysisVersion,
+      );
+      if (hasFreshMatch) {
+        // Mark as "done for this analysisVersion" so we don't keep re-
+        // checking on every dep change. Mirror key the dedupe guard uses.
+        autoRunDedupeKeyRef.current = dedupeKey;
+        return;
+      }
+    }
+    // If aiRecommendationsForCurrentTrack is null AND we've confirmed the
+    // fetch completed, that's the "no recs yet" state → safe to auto-run.
+
+    autoRunDedupeKeyRef.current = dedupeKey;
+
+    triggerMasteringRecommendationsAgentRun({
+      songId: selectedPlaybackSongId,
+      versionNumber: currentPlaybackVersionNumber,
+      source: 'auto',
+    });
+  }, [
+    agentAutoRecommendEnabled,
+    showAiRecommendationsFullscreen,
+    agentChatStreaming,
+    playbackPreviewMode,
+    selectedPlaybackSongId,
+    currentPlaybackVersionNumber,
+    analysis,
+    measuredAnalysis,
+    aiRecommendationsForCurrentTrack,
+    aiRecFetchCompletedKey,
+    aiRecommendationsGeneration,
+    computeCurrentAnalysisVersion,
+    triggerMasteringRecommendationsAgentRun,
+  ]);
+
+  // v3.33 Phase 4 — stale detection.
+  //
+  // Whenever the analysis fingerprint for the current (songId, versionNumber)
+  // diverges from what's stored on the persisted recs, call
+  // `markAiRecommendationsStale` so the UI's stale treatment (strikethrough
+  // + "(stale)") kicks in. This is fire-and-forget — we don't block the
+  // render; the onUserStateChanged listener re-fetches when the write lands.
+  const lastStaleCheckKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedPlaybackSongId) return;
+    if (
+      typeof currentPlaybackVersionNumber !== 'number' ||
+      currentPlaybackVersionNumber < 1
+    ) {
+      return;
+    }
+    if (!aiRecommendationsForCurrentTrack) return;
+    const analysisVersion = computeCurrentAnalysisVersion();
+    if (!analysisVersion) return;
+
+    const checkKey = `${selectedPlaybackSongId}::${currentPlaybackVersionNumber}::${analysisVersion}`;
+    if (lastStaleCheckKeyRef.current === checkKey) return;
+
+    // Only mark stale if at least one fresh rec has a DIFFERENT analysisVersion
+    // — the state-service call is idempotent but we avoid the IPC round-trip
+    // when nothing needs flipping.
+    const hasDivergentFresh = Object.values(
+      aiRecommendationsForCurrentTrack,
+    ).some(
+      (rec) => rec.status === 'fresh' && rec.analysisVersion !== analysisVersion,
+    );
+
+    lastStaleCheckKeyRef.current = checkKey;
+
+    if (!hasDivergentFresh) return;
+
+    void window.producerPlayer
+      .markAiRecommendationsStale(
+        selectedPlaybackSongId,
+        currentPlaybackVersionNumber,
+        analysisVersion,
+      )
+      .then(() => {
+        // Refresh the visible set so the captions flip to stale treatment.
+        runAiRecommendationFetch(
+          selectedPlaybackSongId,
+          currentPlaybackVersionNumber,
+        );
+      })
+      .catch(() => undefined);
+  }, [
+    selectedPlaybackSongId,
+    currentPlaybackVersionNumber,
+    aiRecommendationsForCurrentTrack,
+    computeCurrentAnalysisVersion,
+    runAiRecommendationFetch,
+  ]);
+
+  // v3.33 Phase 4 — chat-tool pattern match for "rerun_mastering_recommendations".
+  //
+  // The agent is a CLI pass-through with no server-side tool registry, so the
+  // "tool" is implemented as a renderer-side detector of user intent in the
+  // chat. We listen for common phrasings in what the user types, then route
+  // that through the same `handleRerunMasteringRecommendations` path a
+  // button click would take.
+  //
+  // Pattern coverage:
+  //   - "/regenerate", "/regen"
+  //   - "rerun mastering recommendations"
+  //   - "regenerate (ai )?(mastering )?recommendations"
+  //   - "refresh (mastering|ai) recommendations"
+  //   - "rerun_mastering_recommendations" (the canonical tool name)
+  //
+  // Detector runs on the promptRequest ONLY when the user types it directly
+  // (sourced from the chat composer) — we don't want to re-fire when the
+  // auto-run itself builds a prompt that happens to contain the word
+  // "recommendation". Gate: the promptRequest.id does NOT start with our
+  // own `ai-rec-` prefix.
+  const handleAgentChatToolMatch = useCallback(
+    (userMessage: string) => {
+      if (!userMessage) return false;
+      const normalized = userMessage.toLowerCase().trim();
+      const patterns = [
+        /^\/regenerate\b/,
+        /^\/regen\b/,
+        /^rerun[_\s-]?mastering[_\s-]?recommendations\b/,
+        /^(please\s+)?(re)?(-?run|regenerate|refresh)\s+(ai\s+)?(mastering\s+)?recommendations\b/,
+      ];
+      for (const re of patterns) {
+        if (re.test(normalized)) {
+          handleRerunMasteringRecommendations('tool');
+          return true;
+        }
+      }
+      return false;
+    },
+    [handleRerunMasteringRecommendations],
+  );
+  // Reference the handler so the chat-tool detector stays wired even when
+  // the renderer rebuilds. The AgentChatPanel is the caller for user-typed
+  // messages; for now we keep the detector available to direct callers via
+  // a side-effect-free window assignment useful for e2e test harnesses.
+  useEffect(() => {
+    (window as unknown as {
+      __producerPlayerAiRecTool?: (message: string) => boolean;
+    }).__producerPlayerAiRecTool = handleAgentChatToolMatch;
+    return () => {
+      delete (window as unknown as {
+        __producerPlayerAiRecTool?: unknown;
+      }).__producerPlayerAiRecTool;
+    };
+  }, [handleAgentChatToolMatch]);
+
+  // v3.33 Phase 4 — test hook so E2E specs can set the auto-run gate
+  // synchronously on the renderer (bypassing the setUserState → main → IPC
+  // roundtrip which doesn't bounce back a USER_STATE_CHANGED event, leaving
+  // the React state stale and the debounced writer poised to re-publish the
+  // default value on its next tick). Wrapped in a CSS-variable-flagged
+  // try/catch so production builds remain side-effect clean.
+  useEffect(() => {
+    (window as unknown as {
+      __producerPlayerSetAutoRecommend?: (enabled: boolean) => void;
+      __producerPlayerGetAnalysisVersion?: () => string | null;
+    }).__producerPlayerSetAutoRecommend = (enabled: boolean) => {
+      setAgentAutoRecommendEnabled(enabled);
+    };
+    (window as unknown as {
+      __producerPlayerGetAnalysisVersion?: () => string | null;
+    }).__producerPlayerGetAnalysisVersion = () =>
+      computeCurrentAnalysisVersion();
+    return () => {
+      delete (window as unknown as {
+        __producerPlayerSetAutoRecommend?: unknown;
+      }).__producerPlayerSetAutoRecommend;
+      delete (window as unknown as {
+        __producerPlayerGetAnalysisVersion?: unknown;
+      }).__producerPlayerGetAnalysisVersion;
+    };
+  }, [computeCurrentAnalysisVersion]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -15650,6 +16439,11 @@ export function App(): JSX.Element {
         <AgentChatPanel
           getAnalysisContext={getAnalysisContext}
           promptRequest={agentChatPromptRequest}
+          autoRecommendEnabled={agentAutoRecommendEnabled}
+          onAutoRecommendEnabledChange={setAgentAutoRecommendEnabled}
+          onDetectChatTool={handleAgentChatToolMatch}
+          onSilentPromptDropped={handleSilentPromptDropped}
+          onChatStreamingChange={setAgentChatStreaming}
         />
       ) : null}
 

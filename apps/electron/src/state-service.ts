@@ -492,6 +492,9 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
     showAiRecommendationsFullscreen: true,
+    // v3.33 Phase 4 — auto-run on track open. Default ON so first-time users
+    // immediately see AI recs without having to hunt for a toggle.
+    agentAutoRecommendEnabled: true,
     songDawOffsets: {},
     checklistDawOffsetDefaultSeconds: 0,
     checklistDawOffsetDefaultEnabled: false,
@@ -560,6 +563,11 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.showAiRecommendationsFullscreen === 'boolean'
         ? raw.showAiRecommendationsFullscreen
         : fallback.showAiRecommendationsFullscreen,
+    // v3.33 Phase 4 — gate for the auto-run on track open.
+    agentAutoRecommendEnabled:
+      typeof raw.agentAutoRecommendEnabled === 'boolean'
+        ? raw.agentAutoRecommendEnabled
+        : fallback.agentAutoRecommendEnabled,
     songDawOffsets: parseSongDawOffsets(raw.songDawOffsets),
     // Migration: if the new "default" fields are missing but the legacy
     // app-global `checklistDawOffsetSeconds`/`checklistDawOffsetEnabled`

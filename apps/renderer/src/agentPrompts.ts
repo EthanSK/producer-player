@@ -196,6 +196,321 @@ export function buildAiEqRecommendationPrompt(stats: AiEqPromptStats): string {
   return parts.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// v3.33 Phase 4 — Mastering recommendations (agent-driven) prompt + parser.
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-rule mastering-checklist finding rendered into the prompt so the agent
+ * can reference the pass/warn/fail verdicts while reasoning about targets.
+ */
+export interface MasteringRecommendationChecklistFinding {
+  id: string;
+  label: string;
+  status: string;
+  value: string;
+  message: string;
+}
+
+/**
+ * Inputs to `buildMasteringRecommendationsPrompt`.
+ *
+ * All fields are optional because real-world tracks sometimes have
+ * incomplete analysis (e.g. a bad file or a decode error on a single field).
+ * The prompt builder silently skips missing rows so the agent never sees
+ * placeholder "N/A" lines that could be hallucinated as real values.
+ */
+export interface MasteringRecommendationsPromptInput {
+  trackName?: string;
+  analysis?: {
+    integratedLufs?: number | null;
+    truePeakDbfs?: number | null;
+    samplePeakDbfs?: number | null;
+    loudnessRangeLufs?: number | null;
+    crestFactorDb?: number | null;
+    dcOffset?: number | null;
+    clipCount?: number | null;
+    maxShortTermLufs?: number | null;
+    maxMomentaryLufs?: number | null;
+    meanVolumeDbfs?: number | null;
+    peakDbfs?: number | null;
+    tonalBalance?: { low: number; mid: number; high: number } | null;
+    sampleRateHz?: number | null;
+  };
+  checklistFindings?: ReadonlyArray<MasteringRecommendationChecklistFinding>;
+  /** Metric IDs that the agent should return recommendations for. */
+  metricIds: ReadonlyArray<string>;
+  /** Optional list of spectrum EQ band metric IDs (e.g. spectrum_eq_band_0). */
+  spectrumBandMetricIds?: ReadonlyArray<string>;
+}
+
+/**
+ * Build the prompt we send to the agent for the "generate per-metric
+ * mastering recommendations" request. The agent MUST respond with a JSON
+ * block matching `MASTERING_RECOMMENDATIONS_RESPONSE_SCHEMA` so
+ * `parseMasteringRecommendationsResponse` can parse it deterministically.
+ *
+ * Design intent: one prompt → one response → many per-metric `setAiRecommendation`
+ * calls. This keeps the agent cost linear (single turn) and avoids N×
+ * round-trips per track open.
+ */
+export function buildMasteringRecommendationsPrompt(
+  input: MasteringRecommendationsPromptInput,
+): string {
+  const parts: string[] = [
+    'You are helping a music producer master this track for modern streaming distribution.',
+    'For each listed metric, recommend a TARGET value that would improve the master.',
+    'Keep recommendations realistic: achievable by the producer adjusting their existing mix.',
+    '',
+  ];
+
+  if (input.trackName) {
+    parts.push(`Track: "${input.trackName}".`);
+  }
+
+  const a = input.analysis ?? {};
+  const analysisLines: string[] = [];
+  if (typeof a.integratedLufs === 'number') {
+    analysisLines.push(`- Integrated LUFS: ${a.integratedLufs.toFixed(2)}`);
+  }
+  if (typeof a.truePeakDbfs === 'number') {
+    analysisLines.push(`- True Peak: ${a.truePeakDbfs.toFixed(2)} dBTP`);
+  }
+  if (typeof a.samplePeakDbfs === 'number') {
+    analysisLines.push(`- Sample Peak: ${a.samplePeakDbfs.toFixed(2)} dBFS`);
+  }
+  if (typeof a.loudnessRangeLufs === 'number') {
+    analysisLines.push(`- Loudness Range (LRA): ${a.loudnessRangeLufs.toFixed(2)} LU`);
+  }
+  if (typeof a.crestFactorDb === 'number') {
+    analysisLines.push(`- Crest Factor: ${a.crestFactorDb.toFixed(2)} dB`);
+  }
+  if (typeof a.dcOffset === 'number') {
+    analysisLines.push(`- DC Offset: ${a.dcOffset.toFixed(4)}`);
+  }
+  if (typeof a.clipCount === 'number') {
+    analysisLines.push(`- Clip Count: ${a.clipCount} samples`);
+  }
+  if (typeof a.maxShortTermLufs === 'number') {
+    analysisLines.push(`- Max Short-Term LUFS: ${a.maxShortTermLufs.toFixed(2)}`);
+  }
+  if (typeof a.maxMomentaryLufs === 'number') {
+    analysisLines.push(`- Max Momentary LUFS: ${a.maxMomentaryLufs.toFixed(2)}`);
+  }
+  if (typeof a.meanVolumeDbfs === 'number') {
+    analysisLines.push(`- Mean Volume: ${a.meanVolumeDbfs.toFixed(2)} dBFS`);
+  }
+  if (typeof a.peakDbfs === 'number') {
+    analysisLines.push(`- Web Audio Peak: ${a.peakDbfs.toFixed(2)} dBFS`);
+  }
+  if (a.tonalBalance) {
+    analysisLines.push(
+      `- Spectral Balance: low=${(a.tonalBalance.low * 100).toFixed(1)}%, mid=${(a.tonalBalance.mid * 100).toFixed(1)}%, high=${(a.tonalBalance.high * 100).toFixed(1)}%`,
+    );
+  }
+  if (typeof a.sampleRateHz === 'number') {
+    analysisLines.push(`- Sample Rate: ${a.sampleRateHz} Hz`);
+  }
+
+  if (analysisLines.length > 0) {
+    parts.push('Current analysis:', ...analysisLines, '');
+  }
+
+  if (input.checklistFindings && input.checklistFindings.length > 0) {
+    parts.push('Mastering Checklist findings:');
+    for (const f of input.checklistFindings) {
+      parts.push(`- ${f.label} (${f.id}): ${f.status} at "${f.value}" — ${f.message}`);
+    }
+    parts.push('');
+  }
+
+  parts.push(
+    'Return your answer as a JSON block inside ```json ... ``` fences matching this exact schema:',
+    '```json',
+    '{',
+    '  "recommendations": {',
+    '    "<metricId>": {',
+    '      "recommendedValue": "string, formatted for display (include units)",',
+    '      "recommendedRawValue": 0,',
+    '      "reason": "1-2 sentence justification"',
+    '    }',
+    '  }',
+    '}',
+    '```',
+    '- `recommendedValue` is the formatted string the UI will show (e.g. "-14.0 LUFS", "-1.0 dBTP", "reduce 1.5 dB on sub").',
+    '- `recommendedRawValue` is OPTIONAL but strongly preferred when the metric is a single number. Use the same numeric unit as the analysis line above.',
+    '- `reason` is 1-2 plain-english sentences, shown in the hover tooltip. No markdown.',
+    '',
+    `Include an entry for EVERY metric ID in this list: ${input.metricIds.join(', ')}.`,
+  );
+
+  if (input.spectrumBandMetricIds && input.spectrumBandMetricIds.length > 0) {
+    parts.push(
+      `Also include entries for these spectrum EQ band metric IDs (each a gain in dB, range -12 to +12): ${input.spectrumBandMetricIds.join(', ')}.`,
+    );
+  }
+
+  parts.push(
+    'Do not wrap the JSON in prose that would break the fence. Do not invent metric IDs not in the list above.',
+  );
+
+  return parts.join('\n');
+}
+
+/**
+ * Parsed shape of one metric's entry in the agent response.
+ */
+export interface ParsedMasteringRecommendation {
+  recommendedValue: string;
+  recommendedRawValue?: number;
+  reason: string;
+}
+
+/**
+ * Extract the `{ "recommendations": { ... } }` JSON block from the agent's
+ * accumulated text delta stream. Returns `null` if no valid JSON block was
+ * found or the parsed shape is wrong.
+ *
+ * Tolerates:
+ * - Prose before/after the fence.
+ * - Missing code-fence language tag (```json vs bare ```).
+ * - Bare JSON with no fence (agent ignores the instruction).
+ */
+export function parseMasteringRecommendationsResponse(
+  text: string,
+): Record<string, ParsedMasteringRecommendation> | null {
+  if (!text || text.length === 0) return null;
+
+  const candidates: string[] = [];
+
+  // 1. ```json ... ``` fenced block.
+  const fencedMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  if (fencedMatch?.[1]) candidates.push(fencedMatch[1]);
+
+  // 2. Bare {"recommendations": ...} JSON object at top level. A lazy
+  //    regex like `\{[\s\S]*?\}\s*\}` only captures up to the first nested
+  //    `}}` pair and truncates responses with multiple metric entries —
+  //    Codex review P2, 2026-04-18. Use a tiny brace-balance scanner
+  //    starting at the `"recommendations"` key's enclosing `{` so the
+  //    candidate string covers the full object, string escapes and all.
+  const recsStart = text.indexOf('"recommendations"');
+  if (recsStart !== -1) {
+    // Walk backward to the nearest `{` — that is the outer object.
+    let openIdx = -1;
+    for (let i = recsStart; i >= 0; i -= 1) {
+      if (text[i] === '{') {
+        openIdx = i;
+        break;
+      }
+    }
+    if (openIdx !== -1) {
+      let depth = 0;
+      let inString = false;
+      let escapeNext = false;
+      let closeIdx = -1;
+      for (let i = openIdx; i < text.length; i += 1) {
+        const ch = text[i];
+        if (escapeNext) {
+          escapeNext = false;
+          continue;
+        }
+        if (inString) {
+          if (ch === '\\') {
+            escapeNext = true;
+            continue;
+          }
+          if (ch === '"') {
+            inString = false;
+          }
+          continue;
+        }
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+        if (ch === '{') depth += 1;
+        else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            closeIdx = i;
+            break;
+          }
+        }
+      }
+      if (closeIdx !== -1) {
+        candidates.push(text.slice(openIdx, closeIdx + 1));
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      const recs = (parsed as { recommendations?: unknown }).recommendations;
+      if (!recs || typeof recs !== 'object' || Array.isArray(recs)) continue;
+      const out: Record<string, ParsedMasteringRecommendation> = {};
+      for (const [metricId, entry] of Object.entries(recs as Record<string, unknown>)) {
+        if (!metricId || typeof entry !== 'object' || entry === null) continue;
+        const e = entry as Record<string, unknown>;
+        const recommendedValue =
+          typeof e.recommendedValue === 'string' && e.recommendedValue.length > 0
+            ? e.recommendedValue
+            : null;
+        const reason = typeof e.reason === 'string' ? e.reason : '';
+        if (!recommendedValue) continue;
+        const parsedEntry: ParsedMasteringRecommendation = {
+          recommendedValue,
+          reason,
+        };
+        if (typeof e.recommendedRawValue === 'number' && Number.isFinite(e.recommendedRawValue)) {
+          parsedEntry.recommendedRawValue = e.recommendedRawValue;
+        }
+        out[metricId] = parsedEntry;
+      }
+      if (Object.keys(out).length > 0) return out;
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Compute a short, deterministic fingerprint of the mastering analysis inputs
+ * that back a recommendation run. Stored as `analysisVersion` on each rec;
+ * when the fingerprint diverges the UI + `markAiRecommendationsStale` can
+ * flip existing recs to `'stale'` so the user knows they no longer reflect
+ * the current measurement.
+ *
+ * Lightweight string join — avoids pulling in a hash lib and makes diffs
+ * trivially debuggable when recs mysteriously stale out.
+ */
+export function computeMasteringAnalysisVersion(input: {
+  integratedLufs?: number | null;
+  truePeakDbfs?: number | null;
+  loudnessRangeLufs?: number | null;
+  crestFactorDb?: number | null;
+  peakDbfs?: number | null;
+  tonalBalance?: { low: number; mid: number; high: number } | null;
+  sampleRateHz?: number | null;
+}): string {
+  const rounded = (value: number | null | undefined, digits = 2): string => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a';
+    return value.toFixed(digits);
+  };
+  const tb = input.tonalBalance;
+  return [
+    rounded(input.integratedLufs),
+    rounded(input.truePeakDbfs),
+    rounded(input.loudnessRangeLufs),
+    rounded(input.crestFactorDb),
+    rounded(input.peakDbfs),
+    tb ? `${rounded(tb.low, 3)}|${rounded(tb.mid, 3)}|${rounded(tb.high, 3)}` : 'n/a',
+    rounded(input.sampleRateHz, 0),
+  ].join('::');
+}
+
 export function captureAgentUiContext(): AgentUiContext {
   const rawDomSnapshot = document.documentElement?.outerHTML ?? '';
   const domSnapshot =

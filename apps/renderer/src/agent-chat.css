@@ -376,6 +376,29 @@ body.agent-chat-panel-dragging * {
   letter-spacing: 0.5px;
 }
 
+/* v3.33 Phase 4 — auto-run toggle in Agent Settings. Inline label + checkbox
+ * so the setting reads as a single-line statement rather than a label/input
+ * row (which would feel heavier than the other toggles in this surface). */
+.agent-settings-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.agent-settings-toggle-input {
+  margin-top: 2px;
+  cursor: pointer;
+  accent-color: var(--accent, #5ca7ff);
+}
+
+.agent-settings-toggle-label {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
 .agent-settings-provider-row {
   display: flex;
   gap: 4px;

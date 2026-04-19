@@ -106,6 +106,42 @@ test.describe('AI recommendations fullscreen UI @smoke', () => {
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await page.getByTestId('main-list-row').first().click();
 
+      // --- Disable the auto-run gate so the seeded recs aren't overwritten
+      // --- by a Phase 4 real agent call that happens to fire mid-test.
+      // --- Then wait until the renderer has computed an analysisVersion for
+      // --- the opened track (required so our "fresh" seed uses the same
+      // --- fingerprint the Phase 4 auto-stale effect will compare against —
+      // --- otherwise it would flip our fresh rec to stale immediately).
+      await page.waitForFunction(
+        () =>
+          typeof (window as unknown as {
+            __producerPlayerSetAutoRecommend?: (enabled: boolean) => void;
+          }).__producerPlayerSetAutoRecommend === 'function' &&
+          typeof (window as unknown as {
+            __producerPlayerGetAnalysisVersion?: () => string | null;
+          }).__producerPlayerGetAnalysisVersion === 'function',
+        null,
+        { timeout: 10_000 },
+      );
+      await page.evaluate(() => {
+        const setter = (window as unknown as {
+          __producerPlayerSetAutoRecommend?: (enabled: boolean) => void;
+        }).__producerPlayerSetAutoRecommend;
+        setter?.(false);
+      });
+      const analysisVersion = await page.waitForFunction(
+        () => {
+          const fn = (window as unknown as {
+            __producerPlayerGetAnalysisVersion?: () => string | null;
+          }).__producerPlayerGetAnalysisVersion;
+          const v = fn?.();
+          return typeof v === 'string' && v.length > 0 ? v : null;
+        },
+        null,
+        { timeout: 15_000 },
+      );
+      const analysisVersionString = (await analysisVersion.jsonValue()) as string;
+
       // --- Seed a fresh rec + a stale rec directly via the IPC surface ---
       // Both belong to the currently playing (songId, versionNumber) pair
       // so they render as captions under the corresponding stat cards.
@@ -113,7 +149,13 @@ test.describe('AI recommendations fullscreen UI @smoke', () => {
       // `analysisExpanded` refetch effect picks up the seeded values —
       // setAiRecommendation does not push USER_STATE_CHANGED by design
       // (the IPC surface is authoritative; Phase 4 wires real-time sync).
-      const seedResult = await page.evaluate(async () => {
+      //
+      // The fresh rec uses a sentinel analysisVersion that matches nothing
+      // the renderer will compute — BUT we flip the auto-stale effect off
+      // for this test via the same kill-switch that gates the auto-run,
+      // because the Phase 3a assertions here deliberately check the UI's
+      // pre-Phase-4 "trust the status the caller set" contract.
+      const seedResult = await page.evaluate(async (currentAnalysisVersion) => {
         interface TestApi {
           getUserState: () => Promise<{
             songOrder?: string[];
@@ -137,7 +179,10 @@ test.describe('AI recommendations fullscreen UI @smoke', () => {
           reason: 'Target Spotify ceiling with 1.5 LU headroom.',
           model: 'test-model',
           requestId: 'req-fresh',
-          analysisVersion: 'v1',
+          // Must match the live analysisVersion or Phase 4 auto-stale will
+          // immediately flip this rec to 'stale' — defeating the point of
+          // asserting on the 'fresh' treatment.
+          analysisVersion: currentAnalysisVersion,
           generatedAt: Date.now(),
           status: 'fresh' as const,
         };
@@ -147,7 +192,9 @@ test.describe('AI recommendations fullscreen UI @smoke', () => {
           reason: 'Historical recommendation; analysis drift detected.',
           model: 'test-model',
           requestId: 'req-stale',
-          analysisVersion: 'v0',
+          // Deliberate mismatch so this rec stays 'stale' (also matches the
+          // explicit `status: 'stale'` seed below).
+          analysisVersion: 'v0-mismatch',
           generatedAt: Date.now() - 60_000,
           status: 'stale' as const,
         };
@@ -155,7 +202,7 @@ test.describe('AI recommendations fullscreen UI @smoke', () => {
         await api.setAiRecommendation(songId, 1, 'integrated_lufs', freshRec);
         await api.setAiRecommendation(songId, 1, 'true_peak', staleRec);
         return { songId };
-      });
+      }, analysisVersionString);
       expect(seedResult.songId).toBeTruthy();
 
       // --- Open the fullscreen Mastering overlay -------------------------

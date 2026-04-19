@@ -233,6 +233,13 @@ export const IPC_CHANNELS = {
   PLUGIN_REORDER_CHAIN: 'producer-player:plugin-reorder-chain',
   PLUGIN_TOGGLE_ENABLED: 'producer-player:plugin-toggle-enabled',
   PLUGIN_SET_STATE: 'producer-player:plugin-set-state',
+  // v3.42 — Plugin hosting Phase 3 (native editor windows).
+  PLUGIN_EDITOR_OPEN: 'producer-player:plugin-editor-open',
+  PLUGIN_EDITOR_CLOSE: 'producer-player:plugin-editor-close',
+  // Unsolicited event the main process pushes to the renderer when the
+  // sidecar reports an editor window was closed by the user (OS close
+  // button) rather than by an explicit close_editor IPC call.
+  PLUGIN_EDITOR_CLOSED_EVENT: 'producer-player:plugin-editor-closed-event',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
@@ -1098,6 +1105,15 @@ export interface ProducerPlayerBridge {
   reorderPluginChain(songId: string, orderedInstanceIds: string[]): Promise<TrackPluginChain>;
   togglePluginEnabled(songId: string, instanceId: string, enabled: boolean): Promise<TrackPluginChain>;
   setPluginState(songId: string, instanceId: string, state: string): Promise<TrackPluginChain>;
+
+  // v3.42 — Plugin hosting Phase 3. Native plugin-editor windows. The
+  // sidecar owns the JUCE DocumentWindow; these bridge methods just ask
+  // it to open/close by instanceId. `onPluginEditorClosed` fires when the
+  // user closes an editor via the OS close button so the renderer can
+  // clear its per-slot "open" indicator.
+  openPluginEditor(instanceId: string): Promise<{ alreadyOpen: boolean }>;
+  closePluginEditor(instanceId: string): Promise<void>;
+  onPluginEditorClosed(listener: (instanceId: string) => void): () => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

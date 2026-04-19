@@ -5110,6 +5110,50 @@ function registerIpcHandlers(service: FileLibraryService): void {
     },
   );
 
+  // --- v3.42 Phase 3: Plugin editor window IPC -----------------------------
+  //
+  // open/close ask the sidecar to show/hide a native DocumentWindow for the
+  // plugin's AudioProcessorEditor. The sidecar emits editor_closed events
+  // when the user closes a window via the OS close button; we forward
+  // those to the renderer over a dedicated IPC channel so React can clear
+  // the per-slot "open" indicator without the user re-clicking Edit.
+  //
+  // Lazy-init guard: if the sidecar binary isn't built yet, open fails
+  // with a clear error.
+
+  let editorClosedForwarderRegistered = false;
+  const ensureEditorClosedForwarder = (service: PluginHostService): void => {
+    if (editorClosedForwarderRegistered) return;
+    editorClosedForwarderRegistered = true;
+    service.onEditorClosed((instanceId) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_CHANNELS.PLUGIN_EDITOR_CLOSED_EVENT, instanceId);
+      }
+    });
+  };
+
+  const getOrCreatePluginHost = (): PluginHostService => {
+    if (!pluginHostService) pluginHostService = new PluginHostService();
+    ensureEditorClosedForwarder(pluginHostService);
+    return pluginHostService;
+  };
+
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_EDITOR_OPEN, async (_event, instanceId: string) => {
+    const service = getOrCreatePluginHost();
+    if (!service.isAvailable()) {
+      throw new Error(
+        'pp-audio-host sidecar binary is not built yet. Native plugin editors require the sidecar.',
+      );
+    }
+    return service.openPluginEditor(instanceId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_EDITOR_CLOSE, async (_event, instanceId: string) => {
+    const service = getOrCreatePluginHost();
+    if (!service.isAvailable()) return; // nothing to close if we never started
+    await service.closePluginEditor(instanceId);
+  });
+
   // --- Agent IPC handlers ---
 
   if (!ENABLE_AGENT_FEATURES) {

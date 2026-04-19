@@ -1,13 +1,11 @@
 /**
- * PluginChainStrip (v3.40, Phase 1b — UI only)
+ * PluginChainStrip (v3.40 Phase 1b UI; v3.42 Phase 3 edit button)
  * ---------------------------------------------------------------------------
  * Renders the ordered insert chain for the currently selected song.
  *
  * Purely presentational: chain mutations are forwarded to the parent via
  * callbacks, which fan out to IPC (`window.producerPlayer.addPluginToChain`,
- * etc.) in App.tsx. Audio wiring lands in Phase 2 and the editor window in
- * Phase 3 — the `onOpenEditor` prop exists but is intentionally a no-op stub
- * here.
+ * etc.) in App.tsx.
  *
  * Layout modes:
  *   - 'fullscreen' → horizontal pill row. Mounts as a row inside the
@@ -16,6 +14,15 @@
  *                    (docked) mastering preview.
  *
  * Reorder uses arrow buttons for the MVP (drag-drop is Phase 1c polish).
+ *
+ * v3.42 Phase 3 — per-slot "Edit" button opens the plugin's native editor
+ * window (owned by the JUCE sidecar). Clicking Edit toggles the window open
+ * or brings it to the front. When the user closes the window via the OS
+ * close button the sidecar pushes an `editor_closed` event back through
+ * IPC, and App.tsx clears the id from `openEditorInstanceIds` so the
+ * button visually toggles off. The button is disabled for slots that have
+ * no loaded sidecar instance yet (e.g. during an in-flight reconcile, or
+ * when the sidecar binary isn't built).
  */
 
 import { useMemo, useState } from 'react';
@@ -39,6 +46,17 @@ export interface PluginChainStripProps {
   onReorder: (orderedInstanceIds: string[]) => void;
   onOpenEditor: (instanceId: string) => void;
   onScan: () => void;
+  /**
+   * v3.42 Phase 3 — set of instanceIds whose native editor window is
+   * currently open. Used to visually highlight the Edit button.
+   */
+  openEditorInstanceIds?: ReadonlySet<string>;
+  /**
+   * v3.42 Phase 3 — set of instanceIds the sidecar currently has loaded.
+   * When an item's id is NOT in this set, the Edit button is disabled
+   * (nothing to edit until the sidecar instantiates the plugin).
+   */
+  loadedInstanceIds?: ReadonlySet<string>;
 }
 
 function findPluginInfo(
@@ -69,6 +87,8 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     onReorder,
     onOpenEditor,
     onScan,
+    openEditorInstanceIds,
+    loadedInstanceIds,
   } = props;
 
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -116,6 +136,12 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
           const info = findPluginInfo(library, item.pluginId);
           const displayName = info?.name ?? 'Unknown plugin';
           const vendor = info?.vendor ?? '';
+          const editorOpen = openEditorInstanceIds?.has(item.instanceId) ?? false;
+          // When `loadedInstanceIds` is undefined the parent hasn't opted
+          // in to sidecar-state tracking, so we don't disable the button
+          // (legacy behavior: still call onOpenEditor and let the IPC
+          // layer surface errors). When provided, we honor it strictly.
+          const editDisabled = loadedInstanceIds ? !loadedInstanceIds.has(item.instanceId) : false;
           return (
             <div
               key={item.instanceId}
@@ -179,6 +205,26 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
                   </button>
                 </span>
               ) : null}
+
+              {/* v3.42 Phase 3 — dedicated Edit button. Opens the plugin's
+                   native editor window (owned by the sidecar). */}
+              <button
+                type="button"
+                className={`plugin-pill__edit${editorOpen ? ' plugin-pill__edit--open' : ''}`}
+                onClick={() => onOpenEditor(item.instanceId)}
+                disabled={editDisabled}
+                aria-pressed={editorOpen}
+                aria-label={
+                  editorOpen
+                    ? `Plugin editor open for ${displayName}`
+                    : `Open plugin editor for ${displayName}`
+                }
+                title={editDisabled ? 'Plugin is loading…' : 'Edit plugin'}
+                data-testid="plugin-pill-edit"
+                data-open={editorOpen ? 'true' : 'false'}
+              >
+                <span aria-hidden="true">✎</span>
+              </button>
 
               <button
                 type="button"

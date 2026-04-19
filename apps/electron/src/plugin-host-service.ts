@@ -118,6 +118,23 @@ export interface ProcessBlockResult {
 }
 
 /**
+ * Result of `openPluginEditor`. `alreadyOpen` is true if the window was
+ * already visible — the sidecar just brings it to the front in that case.
+ */
+export interface OpenEditorResult {
+  instanceId: string;
+  alreadyOpen: boolean;
+}
+
+/**
+ * Listener for unsolicited `editor_closed` events the sidecar emits when
+ * the user clicks the OS close button on a plugin-editor window. The
+ * renderer needs this so its "open" state clears without the user having
+ * to re-click the in-app Edit button.
+ */
+export type EditorClosedListener = (instanceId: string) => void;
+
+/**
  * Plan produced by `diffChainReconciliation`. Split out so tests can
  * assert the diff logic without touching the sidecar.
  */
@@ -176,6 +193,14 @@ export class PluginHostService {
   /** Cached plugin library, set by `rememberLibrary` so the service can resolve pluginId → path without a round-trip. */
   private cachedLibrary: ScannedPluginLibrary | null = null;
   private reconciliationTail: Promise<void> = Promise.resolve();
+  /**
+   * v3.42 Phase 3 — listeners for `editor_closed` events the sidecar pushes
+   * when the user closes a plugin-editor window via the OS close button.
+   * main.ts registers one listener that forwards to the renderer.
+   */
+  private editorClosedListeners = new Set<EditorClosedListener>();
+  /** Editor instance ids currently open (tracked from open/close requests + editor_closed events). */
+  private openEditorIds = new Set<string>();
 
   constructor(
     binaryPath: string | null = resolveSidecarBinary(),
@@ -247,6 +272,10 @@ export class PluginHostService {
       // All sidecar-owned state is gone; the diff logic will reload next
       // time the renderer asks for a processed block / reconciles a chain.
       this.loadedInstances.clear();
+      // Surface "editor is no longer open" for every tracked editor so the
+      // renderer doesn't get stuck with an open-state badge pointing at a
+      // dead sidecar.
+      this.notifyTrackedEditorsClosed('during exit');
       this.child = null;
       this.readyPromise = null;
     });
@@ -287,6 +316,20 @@ export class PluginHostService {
     }
   }
 
+  private notifyTrackedEditorsClosed(context: string): void {
+    const stale = Array.from(this.openEditorIds);
+    this.openEditorIds.clear();
+    for (const instanceId of stale) {
+      for (const listener of this.editorClosedListeners) {
+        try {
+          listener(instanceId);
+        } catch (err) {
+          log.warn(`[plugin-host] editor_closed listener threw ${context}`, err);
+        }
+      }
+    }
+  }
+
   private handleLine(line: string): void {
     let parsed: unknown;
     try {
@@ -302,6 +345,25 @@ export class PluginHostService {
       if (this.readyHandler) {
         this.readyHandler();
         this.readyHandler = null;
+      }
+      return;
+    }
+
+    // v3.42 Phase 3 — unsolicited editor_closed event from the sidecar.
+    // No `id` because the renderer never asked for it (user clicked the
+    // OS close button). Notify listeners so React state can clear the
+    // per-slot "open" indicator.
+    if (obj.event === 'editor_closed') {
+      const instanceId = typeof obj.instanceId === 'string' ? obj.instanceId : null;
+      if (instanceId) {
+        this.openEditorIds.delete(instanceId);
+        for (const listener of this.editorClosedListeners) {
+          try {
+            listener(instanceId);
+          } catch (err) {
+            log.warn('[plugin-host] editor_closed listener threw', err);
+          }
+        }
       }
       return;
     }
@@ -430,6 +492,10 @@ export class PluginHostService {
   async unloadPlugin(instanceId: string): Promise<void> {
     await this.send('unload_plugin', { instanceId }, { timeoutMs: 10_000 });
     this.loadedInstances.delete(instanceId);
+    // The sidecar also closes any open editor for this instance and emits
+    // an editor_closed event, which clears openEditorIds via handleLine.
+    // Belt-and-suspenders: drop it here too in case the event is in flight.
+    this.openEditorIds.delete(instanceId);
   }
 
   /**
@@ -554,6 +620,62 @@ export class PluginHostService {
     await this.send('set_plugin_state', { instanceId, stateBase64 }, { timeoutMs: 10_000 });
   }
 
+  // -------------------------------------------------------------------------
+  // v3.42 Phase 3 — plugin editor window control.
+  //
+  // The sidecar owns the JUCE AudioProcessorEditor + its DocumentWindow.
+  // The renderer just asks us to open/close by instanceId and listens for
+  // `editor_closed` events so it can clear the per-slot "open" indicator
+  // when the user closes the window via the OS close button.
+  //
+  // Safe-edge behavior:
+  //   - Unknown instanceId → sidecar returns error ("not loaded"), we
+  //     surface it as a rejected promise. The renderer rolls back its
+  //     optimistic open marker if this happens during load/unload races.
+  //   - open_editor is idempotent: calling twice while the window is
+  //     already visible just brings it to the front (alreadyOpen=true).
+  //   - close_editor is idempotent: closing an already-closed editor
+  //     returns wasOpen=false.
+  // -------------------------------------------------------------------------
+
+  async openPluginEditor(instanceId: string): Promise<OpenEditorResult> {
+    if (!instanceId) {
+      throw new Error('openPluginEditor: instanceId is required');
+    }
+    const reply = await this.send<Record<string, unknown>>(
+      'open_editor',
+      { instanceId },
+      { timeoutMs: 15_000 },
+    );
+    this.openEditorIds.add(instanceId);
+    return {
+      instanceId,
+      alreadyOpen: Boolean(reply.alreadyOpen),
+    };
+  }
+
+  async closePluginEditor(instanceId: string): Promise<void> {
+    if (!instanceId) return;
+    await this.send('close_editor', { instanceId }, { timeoutMs: 10_000 });
+    this.openEditorIds.delete(instanceId);
+  }
+
+  getOpenEditorIds(): string[] {
+    return Array.from(this.openEditorIds);
+  }
+
+  /**
+   * Subscribe to `editor_closed` events. Returns an unsubscribe function
+   * (matches the pattern used elsewhere in the codebase for renderer
+   * event listeners).
+   */
+  onEditorClosed(listener: EditorClosedListener): () => void {
+    this.editorClosedListeners.add(listener);
+    return () => {
+      this.editorClosedListeners.delete(listener);
+    };
+  }
+
   /** Tell the sidecar to flush + exit, then kill the process if needed. */
   async stop(): Promise<void> {
     if (!this.child || this.child.killed) return;
@@ -565,6 +687,7 @@ export class PluginHostService {
         this.child = null;
       }
       this.loadedInstances.clear();
+      this.notifyTrackedEditorsClosed('during stop');
     }
   }
 }

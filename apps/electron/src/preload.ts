@@ -383,6 +383,27 @@ const bridge: ProducerPlayerBridge = {
   async setPluginState(songId, instanceId, stateBase64) {
     return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SET_STATE, songId, instanceId, stateBase64);
   },
+
+  // v3.42 Phase 3 — native plugin editor windows.
+  async openPluginEditor(instanceId: string) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_EDITOR_OPEN, instanceId);
+  },
+
+  async closePluginEditor(instanceId: string) {
+    await ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_EDITOR_CLOSE, instanceId);
+  },
+
+  onPluginEditorClosed(listener: (instanceId: string) => void) {
+    const wrappedListener = (_event: unknown, instanceId: unknown) => {
+      if (typeof instanceId === 'string' && instanceId.length > 0) {
+        listener(instanceId);
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.PLUGIN_EDITOR_CLOSED_EVENT, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PLUGIN_EDITOR_CLOSED_EVENT, wrappedListener);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld('producerPlayer', bridge);

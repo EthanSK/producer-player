@@ -5314,6 +5314,39 @@ button.reference-action.active {
   cursor: not-allowed;
 }
 
+.plugin-pill__edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.plugin-pill__edit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text-main);
+}
+
+.plugin-pill__edit:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.plugin-pill__edit--open {
+  background: color-mix(in srgb, var(--accent-strong) 20%, transparent);
+  border-color: var(--accent-strong);
+  color: var(--text-main);
+}
+
 .plugin-pill__toggle {
   width: 28px;
   height: 16px;

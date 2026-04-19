@@ -2390,6 +2390,13 @@ export function App(): JSX.Element {
   });
   const [pluginLibrary, setPluginLibrary] = useState<ScannedPluginLibrary | null>(null);
   const [pluginLibraryScanning, setPluginLibraryScanning] = useState(false);
+  // v3.42 Phase 3 — per-slot native-editor open state. Keyed by instanceId.
+  // The sidecar is the source of truth; we add on successful open_editor
+  // IPC replies and remove on close_editor replies OR on unsolicited
+  // `editor_closed` events the main process forwards from the sidecar.
+  const [openEditorInstanceIds, setOpenEditorInstanceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const selectedSongIdForPluginChainRef = useRef<string | null>(null);
   selectedSongIdForPluginChainRef.current = selectedSongId;
   const pluginChainRef = useRef<TrackPluginChain>(pluginChain);
@@ -9443,13 +9450,100 @@ export function App(): JSX.Element {
     [selectedSongId],
   );
 
-  const handlePluginOpenEditor = useCallback((_instanceId: string) => {
-    // Phase 3 will open the plugin editor window. For now we only log so the
-    // smoke test can assert the click handler is wired up.
-    void window.producerPlayer.rendererLog('info', '[plugin-chain] open editor (stub)', {
-      instanceId: _instanceId,
+  // v3.42 Phase 3 — toggle a plugin's native editor window. If the button
+  // is already "open" (editor currently visible), the click closes it.
+  // Otherwise we ask the sidecar to open it and optimistically mark it
+  // open so the button toggles immediately; if the open IPC fails we
+  // roll the state back. Close follows the same pattern: clear
+  // optimistically, then restore the marker if the sidecar rejects.
+  const handlePluginOpenEditor = useCallback((instanceId: string) => {
+    if (!instanceId) return;
+    const isOpen = openEditorInstanceIds.has(instanceId);
+    if (isOpen) {
+      // Optimistically clear; if close fails, restore while the slot still
+      // belongs to the selected chain.
+      setOpenEditorInstanceIds((prev) => {
+        if (!prev.has(instanceId)) return prev;
+        const next = new Set(prev);
+        next.delete(instanceId);
+        return next;
+      });
+      void window.producerPlayer
+        .closePluginEditor(instanceId)
+        .catch((err) => {
+          setOpenEditorInstanceIds((prev) => {
+            if (prev.has(instanceId)) return prev;
+            const stillInCurrentChain = pluginChainRef.current.items.some((item) => item.instanceId === instanceId);
+            if (!stillInCurrentChain) return prev;
+            const next = new Set(prev);
+            next.add(instanceId);
+            return next;
+          });
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] close editor failed', {
+            instanceId,
+            error: String(err),
+          });
+        });
+      return;
+    }
+    // Optimistic open — flip the button on immediately, then fall back on
+    // error. The sidecar answers within ~100ms on a loaded plugin.
+    setOpenEditorInstanceIds((prev) => {
+      if (prev.has(instanceId)) return prev;
+      const next = new Set(prev);
+      next.add(instanceId);
+      return next;
     });
+    void window.producerPlayer
+      .openPluginEditor(instanceId)
+      .catch((err) => {
+        setOpenEditorInstanceIds((prev) => {
+          if (!prev.has(instanceId)) return prev;
+          const next = new Set(prev);
+          next.delete(instanceId);
+          return next;
+        });
+        void window.producerPlayer.rendererLog('error', '[plugin-chain] open editor failed', {
+          instanceId,
+          error: String(err),
+        });
+      });
+  }, [openEditorInstanceIds]);
+
+  // v3.42 Phase 3 — subscribe to editor_closed events pushed by the
+  // sidecar when the user closes an editor via the OS close button. We
+  // clear the id from our open-state Set so the Edit button toggles off
+  // automatically.
+  useEffect(() => {
+    const unsubscribe = window.producerPlayer.onPluginEditorClosed((instanceId) => {
+      setOpenEditorInstanceIds((prev) => {
+        if (!prev.has(instanceId)) return prev;
+        const next = new Set(prev);
+        next.delete(instanceId);
+        return next;
+      });
+    });
+    return () => {
+      unsubscribe();
+    };
   }, []);
+
+  // v3.42 Phase 3 — if the currently-selected song's chain loses an item
+  // (slot removed, chain replaced, song switched), drop any stale
+  // editor-open markers that reference items no longer in the chain. The
+  // sidecar already closes orphaned editors on unload_plugin, but this
+  // keeps our optimistic UI state from getting wedged if an event is lost.
+  useEffect(() => {
+    if (openEditorInstanceIds.size === 0) return;
+    const liveIds = new Set(pluginChain.items.map((item) => item.instanceId));
+    let changed = false;
+    const next = new Set<string>();
+    for (const id of openEditorInstanceIds) {
+      if (liveIds.has(id)) next.add(id);
+      else changed = true;
+    }
+    if (changed) setOpenEditorInstanceIds(next);
+  }, [pluginChain.items, openEditorInstanceIds]);
 
   const handlePluginScan = useCallback(() => {
     if (pluginLibraryScanning) return;
@@ -12679,6 +12773,7 @@ export function App(): JSX.Element {
               onReorder={handlePluginReorder}
               onOpenEditor={handlePluginOpenEditor}
               onScan={handlePluginScan}
+              openEditorInstanceIds={openEditorInstanceIds}
             />
           ) : null}
         </section>
@@ -15550,6 +15645,7 @@ export function App(): JSX.Element {
                     onReorder={handlePluginReorder}
                     onOpenEditor={handlePluginOpenEditor}
                     onScan={handlePluginScan}
+                    openEditorInstanceIds={openEditorInstanceIds}
                   />
                 ) : null}
 

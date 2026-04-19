@@ -151,6 +151,22 @@ test('stop sends shutdown and kills the child', async () => {
   assert.equal(fake.killed || service.isRunning() === false, true);
 });
 
+test('stop notifies editor_closed listeners for tracked open editors', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      open_editor: (req) => ({ instanceId: req.params.instanceId, alreadyOpen: false }),
+      shutdown: {},
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  const closedIds = [];
+  service.onEditorClosed((id) => closedIds.push(id));
+  await service.openPluginEditor('inst-stop');
+  await service.stop();
+  assert.deepEqual(closedIds, ['inst-stop']);
+  assert.deepEqual(service.getOpenEditorIds(), []);
+});
+
 // ---------------------------------------------------------------------------
 // Phase 2 — reconciliation diff logic (pure function)
 // ---------------------------------------------------------------------------
@@ -450,6 +466,72 @@ test('setParameter / getParameter round-trip', async () => {
   await service.setParameter('i', 3, 0.75);
   const v = await service.getParameter('i', 3);
   assert.equal(v, 0.75);
+});
+
+// ---------------------------------------------------------------------------
+// v3.42 Phase 3 — native editor window open/close + editor_closed events.
+// ---------------------------------------------------------------------------
+
+test('openPluginEditor sends open_editor and tracks the id', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      open_editor: (req) => ({ instanceId: req.params.instanceId, alreadyOpen: false }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  const res = await service.openPluginEditor('inst-1');
+  assert.equal(res.instanceId, 'inst-1');
+  assert.equal(res.alreadyOpen, false);
+  assert.deepEqual(service.getOpenEditorIds(), ['inst-1']);
+});
+
+test('closePluginEditor sends close_editor and drops the id', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      open_editor: (req) => ({ instanceId: req.params.instanceId, alreadyOpen: false }),
+      close_editor: (req) => ({ instanceId: req.params.instanceId, wasOpen: true }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.openPluginEditor('inst-1');
+  await service.closePluginEditor('inst-1');
+  assert.deepEqual(service.getOpenEditorIds(), []);
+});
+
+test('editor_closed sidecar events fire onEditorClosed listeners and clear state', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      open_editor: (req) => ({ instanceId: req.params.instanceId, alreadyOpen: false }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  const closedIds = [];
+  const unsub = service.onEditorClosed((id) => closedIds.push(id));
+  await service.openPluginEditor('inst-x');
+  // Push an unsolicited editor_closed event down the fake stdout.
+  fake.stdout.write(
+    `${JSON.stringify({ event: 'editor_closed', instanceId: 'inst-x' })}\n`,
+  );
+  // Give the event loop a tick to deliver the line.
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(closedIds, ['inst-x']);
+  assert.deepEqual(service.getOpenEditorIds(), []);
+  unsub();
+});
+
+test('unloadPlugin removes any tracked open-editor state for the same id', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      open_editor: (req) => ({ instanceId: req.params.instanceId, alreadyOpen: false }),
+      unload_plugin: (req) => ({ instanceId: req.params.instanceId, wasLoaded: true }),
+      load_plugin: (req) => ({ instanceId: req.params.instanceId }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.loadPlugin({ instanceId: 'inst-1', pluginPath: '/p', format: 'vst3' });
+  await service.openPluginEditor('inst-1');
+  await service.unloadPlugin('inst-1');
+  assert.deepEqual(service.getOpenEditorIds(), []);
 });
 
 test('get/setPluginState round-trip', async () => {

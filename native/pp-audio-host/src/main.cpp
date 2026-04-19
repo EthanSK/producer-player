@@ -1,6 +1,25 @@
 /*
   pp-audio-host — Producer Player native plugin-host sidecar.
 
+  Phase 3 (v3.42):
+    - Adds `open_editor` / `close_editor` JSON-RPC methods. Each opens (or
+      closes) a JUCE `AudioProcessorEditor` inside a top-level
+      `DocumentWindow` on the JUCE message thread. Editor windows are keyed
+      by instanceId and tracked in g_openEditors.
+    - When the user closes a window via the OS close button, we emit a
+      `{"event":"editor_closed","instanceId":"..."}` JSON line on stdout so
+      the renderer can clear its "open" state without the user having to
+      click the in-app Edit button again.
+    - To keep the JUCE message loop pumping while still reading stdin, the
+      REPL was split in two: a background thread owns the blocking
+      `std::getline`, and every parsed command is bounced back to the
+      message thread via `MessageManager::callAsync`. The main thread pumps
+      `MessageManager::runDispatchLoopUntil(20)` slices so Cocoa events
+      (clicks, keystrokes, redraws in plugin GUIs) are serviced normally.
+    - `shutdown` now flips g_shouldExit from the message thread after
+      draining editors/plugins, so destructors run on the same thread that
+      created them (mandatory for JUCE/Cocoa safety).
+
   Phase 2 (v3.41):
     - Implements real `load_plugin` / `unload_plugin` / `process_block` so the
       sidecar can actually instantiate JUCE plugins and run audio through a
@@ -55,8 +74,10 @@
 #include <juce_core/juce_core.h>
 
 #include <iostream>
+#include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -76,6 +97,177 @@ struct LoadedInstance
 };
 
 std::unordered_map<std::string, LoadedInstance> g_instances;
+
+// ---------------------------------------------------------------------------
+// Phase 3 — native plugin-editor windows.
+//
+// Each open editor is owned by an EditorWindow (a DocumentWindow that wraps
+// the plugin's AudioProcessorEditor). We key them by instanceId so the
+// renderer can ask us to open/close a specific slot and so that repeated
+// open_editor calls idempotently bring an existing window to the front
+// instead of leaking a second one.
+//
+// Everything in this map MUST be created, touched, and destroyed on the
+// JUCE message thread. See g_messageThreadId and the callAsync dispatch
+// in runRepl() below.
+// ---------------------------------------------------------------------------
+
+std::thread::id g_messageThreadId;
+void emit (const juce::var& reply);                    // forward
+juce::var makeError (const juce::String& message);     // forward
+juce::var makeOk();                                    // forward
+
+// Forward-declared so EditorWindow::closeButtonPressed can schedule its own
+// destruction via callAsync before the container exists.
+static bool eraseOpenEditor (const juce::String& instanceId);
+
+void notifyEditorClosed (const juce::String& instanceId)
+{
+    juce::DynamicObject::Ptr ev (new juce::DynamicObject());
+    ev->setProperty ("event", "editor_closed");
+    ev->setProperty ("instanceId", instanceId);
+    emit (juce::var (ev.get()));
+}
+
+class EditorWindow : public juce::DocumentWindow
+{
+public:
+    EditorWindow (const juce::String& instanceIdIn,
+                  juce::AudioProcessorEditor* editor,
+                  const juce::String& titleText)
+        : juce::DocumentWindow (titleText,
+                                juce::Colours::darkgrey,
+                                juce::DocumentWindow::closeButton,
+                                /* addToDesktop */ true),
+          instanceId (instanceIdIn)
+    {
+        setUsingNativeTitleBar (true);
+        setResizable (editor->isResizable(), /*useBottomRightCornerResizer*/ false);
+        // DocumentWindow takes ownership of the content component when the
+        // deleteWhenRemoved flag is true. The plugin editor is owned by the
+        // plugin instance; once the window removes it, JUCE deletes it,
+        // which matches how standalone hosts run editors.
+        setContentOwned (editor, /*resizeToFit*/ true);
+        centreWithSize (getWidth(), getHeight());
+        setVisible (true);
+        toFront (true);
+    }
+
+    void closeButtonPressed() override
+    {
+        // Capture the id before `this` is destroyed by the erase() below.
+        auto id = instanceId;
+
+        // Destroy on the message thread after the current call stack
+        // unwinds; deleting the window in the middle of its own callback
+        // is a known JUCE footgun.
+        juce::MessageManager::callAsync ([id]() {
+            if (eraseOpenEditor (id))
+                notifyEditorClosed (id);
+        });
+    }
+
+    juce::String instanceId;
+};
+
+std::unordered_map<std::string, std::unique_ptr<EditorWindow>> g_openEditors;
+
+static bool eraseOpenEditor (const juce::String& instanceId)
+{
+    auto it = g_openEditors.find (instanceId.toStdString());
+    if (it != g_openEditors.end())
+    {
+        g_openEditors.erase (it);
+        return true;
+    }
+    return false;
+}
+
+juce::var handleOpenEditor (const juce::var& params)
+{
+    auto* obj = params.getDynamicObject();
+    if (! obj) return makeError ("open_editor: params must be object");
+    auto instanceId = obj->getProperty ("instanceId").toString();
+    if (instanceId.isEmpty())
+        return makeError ("open_editor: instanceId is required");
+
+    auto stdId = instanceId.toStdString();
+    auto it = g_instances.find (stdId);
+    if (it == g_instances.end() || ! it->second.plugin)
+        return makeError ("open_editor: unknown instanceId (not loaded)");
+
+    // Idempotent: if already open, just bring it forward and succeed.
+    auto existing = g_openEditors.find (stdId);
+    if (existing != g_openEditors.end() && existing->second)
+    {
+        existing->second->toFront (true);
+        juce::DynamicObject::Ptr reply (new juce::DynamicObject());
+        reply->setProperty ("ok", true);
+        reply->setProperty ("instanceId", instanceId);
+        reply->setProperty ("alreadyOpen", true);
+        return juce::var (reply.get());
+    }
+
+    auto* plugin = it->second.plugin.get();
+    auto* editor = plugin->createEditorIfNeeded();
+    if (editor == nullptr)
+        return makeError ("open_editor: plugin does not expose an editor");
+
+    auto title = plugin->getName();
+    auto window = std::make_unique<EditorWindow> (instanceId, editor, title);
+    g_openEditors.emplace (stdId, std::move (window));
+
+    juce::DynamicObject::Ptr reply (new juce::DynamicObject());
+    reply->setProperty ("ok", true);
+    reply->setProperty ("instanceId", instanceId);
+    reply->setProperty ("alreadyOpen", false);
+    return juce::var (reply.get());
+}
+
+juce::var handleCloseEditor (const juce::var& params)
+{
+    auto* obj = params.getDynamicObject();
+    if (! obj) return makeError ("close_editor: params must be object");
+    auto instanceId = obj->getProperty ("instanceId").toString();
+    if (instanceId.isEmpty())
+        return makeError ("close_editor: instanceId is required");
+    auto stdId = instanceId.toStdString();
+    auto it = g_openEditors.find (stdId);
+    bool wasOpen = (it != g_openEditors.end());
+    if (wasOpen)
+        g_openEditors.erase (it);
+
+    juce::DynamicObject::Ptr reply (new juce::DynamicObject());
+    reply->setProperty ("ok", true);
+    reply->setProperty ("instanceId", instanceId);
+    reply->setProperty ("wasOpen", wasOpen);
+    return juce::var (reply.get());
+}
+
+// Called when a plugin is being unloaded — close its editor first so we
+// don't end up with a window pointing at a destroyed AudioProcessor.
+void closeEditorForInstanceIfOpen (const std::string& stdId)
+{
+    auto it = g_openEditors.find (stdId);
+    if (it == g_openEditors.end()) return;
+    juce::String idCopy (it->first);
+    g_openEditors.erase (it);
+    notifyEditorClosed (idCopy);
+}
+
+void closeAllEditorsAndReleasePlugins()
+{
+    for (auto it = g_openEditors.begin(); it != g_openEditors.end(); )
+    {
+        auto idCopy = juce::String (it->first);
+        it = g_openEditors.erase (it);
+        notifyEditorClosed (idCopy);
+    }
+
+    for (auto& kv : g_instances)
+        if (kv.second.plugin) kv.second.plugin->releaseResources();
+    g_instances.clear();
+}
 
 // Lazily-constructed plugin format manager. Owning it globally means we
 // don't re-register formats per call (which is the non-trivial cost in JUCE).
@@ -382,6 +574,11 @@ juce::var handleUnloadPlugin (const juce::var& params)
         reply->setProperty ("wasLoaded", false);
         return juce::var (reply.get());
     }
+    // Close any open editor first so the window isn't left pointing at
+    // a plugin we're about to destroy. This also emits editor_closed so
+    // the renderer can clear its "open" state without a race.
+    closeEditorForInstanceIfOpen (stdId);
+
     if (it->second.plugin)
         it->second.plugin->releaseResources();
     g_instances.erase (it);
@@ -560,91 +757,138 @@ juce::var handleSetPluginState (const juce::var& params)
     return makeOk();
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3: we need a real JUCE message loop running on the main thread so
+// plugin editor windows can receive Cocoa events. The previous design
+// blocked the main thread in std::getline, which was fine while the sidecar
+// had no GUI surface but would freeze any native editor we opened.
+//
+// Strategy:
+//   - main thread     → MessageManager::runDispatchLoopUntil(20ms) slices
+//   - stdin thread    → reads newline-delimited JSON from std::cin and
+//                        bounces each command to the message thread via
+//                        MessageManager::callAsync. Heavy work (plugin
+//                        instantiation, editor creation) happens on the
+//                        message thread.
+//   - `shutdown`      → drains message-thread state, then flips g_shouldExit
+//                        so main() can unwind cleanly.
+//
+// All touches of g_instances and g_openEditors happen on the message
+// thread, so we don't need a mutex.
+// ---------------------------------------------------------------------------
+
+juce::var dispatchMethodOnMessageThread (const juce::String& method, const juce::var& params)
+{
+    jassert (std::this_thread::get_id() == g_messageThreadId);
+
+    if (method == "scan_plugins")      return handleScanPlugins (params);
+    if (method == "load_plugin")       return handleLoadPlugin (params);
+    if (method == "unload_plugin")     return handleUnloadPlugin (params);
+    if (method == "process_block")     return handleProcessBlock (params);
+    if (method == "set_parameter")     return handleSetParameter (params);
+    if (method == "get_parameter")     return handleGetParameter (params);
+    if (method == "get_plugin_state")  return handleGetPluginState (params);
+    if (method == "set_plugin_state")  return handleSetPluginState (params);
+    if (method == "open_editor")       return handleOpenEditor (params);
+    if (method == "close_editor")      return handleCloseEditor (params);
+
+    return makeError ("unknown method: " + method);
+}
+
+void processCommandOnMessageThread (const juce::String& method,
+                                    const juce::var& params,
+                                    juce::var id,
+                                    bool isShutdown)
+{
+    if (isShutdown)
+    {
+        closeAllEditorsAndReleasePlugins();
+
+        auto ack = makeOk();
+        if (auto* ackObj = ack.getDynamicObject())
+            if (! id.isVoid())
+                ackObj->setProperty ("id", id);
+        emit (ack);
+
+        // Outer loop owns exit — see g_shouldExit in runRepl().
+        return;
+    }
+
+    auto result = dispatchMethodOnMessageThread (method, params);
+    if (auto* obj = result.getDynamicObject())
+        if (! id.isVoid())
+            obj->setProperty ("id", id);
+    emit (result);
+}
+
+// Global flag the stdin thread flips when the REPL should exit. We don't
+// use MessageManager::stopDispatchLoop here because on a console app
+// (no JUCEApplication) stopping the Cocoa runloop from inside a callAsync
+// has caused crashes in testing (observed: SIGSEGV during NSApp teardown).
+// Instead we own the outer loop and pump JUCE events in small slices.
+std::atomic<bool> g_shouldExit { false };
+
 void runRepl()
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
+    g_messageThreadId = std::this_thread::get_id();
 
     juce::DynamicObject::Ptr hello (new juce::DynamicObject());
     hello->setProperty ("event", "ready");
-    hello->setProperty ("version", "0.2.0");
+    hello->setProperty ("version", "0.3.0");
     emit (juce::var (hello.get()));
 
-    // Phase 2: audio buffers can be large, so don't cap the line length.
-    std::string line;
-    line.reserve (1 << 16);
-    while (std::getline (std::cin, line))
+    // stdin reader — runs on a background thread so the main thread stays
+    // free to pump the message loop. Every parsed line is bounced back to
+    // the message thread via callAsync (so plugin state, editor windows,
+    // etc. are all touched from the same thread).
+    std::thread stdinThread ([]() {
+        std::string line;
+        line.reserve (1 << 16);
+        while (std::getline (std::cin, line))
+        {
+            if (g_shouldExit) break;
+            if (line.empty()) continue;
+
+            juce::String lineCopy (line);
+            juce::MessageManager::callAsync ([lineCopy]() {
+                auto parsed = juce::JSON::parse (lineCopy);
+                if (! parsed.isObject())
+                {
+                    emit (makeError ("command must be a JSON object"));
+                    return;
+                }
+                auto method = parsed["method"].toString();
+                auto id = parsed["id"];
+                auto params = parsed["params"];
+                const bool isShutdown = (method == "shutdown");
+                processCommandOnMessageThread (method, params, id, isShutdown);
+                if (isShutdown) g_shouldExit = true;
+            });
+        }
+        // If stdin closes while commands are queued, enqueue exit behind
+        // those commands so piped requests still run before teardown.
+        juce::MessageManager::callAsync ([]() { g_shouldExit = true; });
+    });
+
+    // Pump the JUCE message loop in small slices so Cocoa events (plugin
+    // editor input, redraws) get serviced AND we can observe
+    // g_shouldExit between slices. This avoids the stopDispatchLoop
+    // crash path we saw when trying to tear down from inside callAsync.
+    auto* mm = juce::MessageManager::getInstance();
+    while (! g_shouldExit)
     {
-        if (line.empty()) continue;
-
-        auto parsed = juce::JSON::parse (juce::String (line));
-        if (! parsed.isObject())
-        {
-            emit (makeError ("command must be a JSON object"));
-            continue;
-        }
-
-        auto method = parsed["method"].toString();
-        auto id = parsed["id"];
-        auto params = parsed["params"];
-
-        juce::var result;
-        if (method == "scan_plugins")
-        {
-            result = handleScanPlugins (params);
-        }
-        else if (method == "load_plugin")
-        {
-            result = handleLoadPlugin (params);
-        }
-        else if (method == "unload_plugin")
-        {
-            result = handleUnloadPlugin (params);
-        }
-        else if (method == "process_block")
-        {
-            result = handleProcessBlock (params);
-        }
-        else if (method == "set_parameter")
-        {
-            result = handleSetParameter (params);
-        }
-        else if (method == "get_parameter")
-        {
-            result = handleGetParameter (params);
-        }
-        else if (method == "get_plugin_state")
-        {
-            result = handleGetPluginState (params);
-        }
-        else if (method == "set_plugin_state")
-        {
-            result = handleSetPluginState (params);
-        }
-        else if (method == "shutdown")
-        {
-            // Drain loaded plugins so destructors run before we exit.
-            for (auto& kv : g_instances)
-                if (kv.second.plugin) kv.second.plugin->releaseResources();
-            g_instances.clear();
-
-            auto ack = makeOk();
-            if (auto* ackObj = ack.getDynamicObject())
-                if (! id.isVoid())
-                    ackObj->setProperty ("id", id);
-            emit (ack);
-            break;
-        }
-        else
-        {
-            result = makeError ("unknown method: " + method);
-        }
-
-        if (auto* obj = result.getDynamicObject())
-            if (! id.isVoid())
-                obj->setProperty ("id", id);
-
-        emit (result);
+        mm->runDispatchLoopUntil (20 /* ms */);
     }
+
+    // Explicit EOF can set g_shouldExit without a shutdown command. Clean up
+    // while ScopedJuceInitialiser_GUI is still alive, otherwise global plugin
+    // destructors can run after JUCE/Cocoa teardown.
+    closeAllEditorsAndReleasePlugins();
+
+    // Detach — std::cin.read blocks and there's no portable way to
+    // interrupt it. Process exit will reclaim the thread.
+    stdinThread.detach();
 }
 } // namespace
 

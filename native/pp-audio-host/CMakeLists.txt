@@ -44,7 +44,11 @@ target_compile_definitions(pp-audio-host PRIVATE
     # the scaffold scans VST3 + AU which cover ~95% of installed effects
     # on a typical macOS producer machine.
     JUCE_USE_CURL=0
-    JUCE_WEB_BROWSER=0)
+    JUCE_WEB_BROWSER=0
+    # v3.42 Phase 3: opens native plugin-editor windows. The REPL pumps
+    # the message loop in ~20ms slices between stdin commands, which uses
+    # `runDispatchLoopUntil` — gated behind this flag.
+    JUCE_MODAL_LOOPS_PERMITTED=1)
 
 target_link_libraries(pp-audio-host PRIVATE
     juce::juce_audio_utils

@@ -132,7 +132,10 @@ import type {
   AgentStaticAnalysis,
   MasteringAnalysisCachePayload,
   MasteringCacheEntry,
+  ScannedPluginLibrary,
+  TrackPluginChain,
 } from '@producer-player/contracts';
+import { PluginChainStrip } from './lib/PluginChainStrip';
 import {
   LUFS_LINKS,
   TRUE_PEAK_LINKS,
@@ -2376,6 +2379,25 @@ export function App(): JSX.Element {
     useState<FullscreenMasteringPanelId | null>(null);
   const [agentChatPromptRequest, setAgentChatPromptRequest] =
     useState<AgentChatPromptRequest | null>(null);
+
+  // v3.40 — Plugin hosting Phase 1b (UI only). Chain state is fetched
+  // per-song from the main process (per-track persisted JSON) and the
+  // library is cached in unified state. Both are pure render data for
+  // this phase — no audio wiring yet.
+  const [pluginChain, setPluginChain] = useState<TrackPluginChain>({
+    songId: '',
+    items: [],
+  });
+  const [pluginLibrary, setPluginLibrary] = useState<ScannedPluginLibrary | null>(null);
+  const [pluginLibraryScanning, setPluginLibraryScanning] = useState(false);
+  const selectedSongIdForPluginChainRef = useRef<string | null>(null);
+  selectedSongIdForPluginChainRef.current = selectedSongId;
+  const pluginChainRef = useRef<TrackPluginChain>(pluginChain);
+  const commitPluginChain = useCallback((chain: TrackPluginChain) => {
+    if (chain.songId !== (selectedSongIdForPluginChainRef.current ?? '')) return;
+    pluginChainRef.current = chain;
+    setPluginChain(chain);
+  }, []);
   const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrackEntry[]>(() =>
     readSavedReferenceTracks()
   );
@@ -9240,6 +9262,209 @@ export function App(): JSX.Element {
     setShowAiEqCurve(stored !== null);
   }, [selectedSongId]);
 
+  // v3.40 Phase 1b — Plugin chain: load per-song chain on track switch.
+  // Chain is per-songId (not per-version), so a new version of the same
+  // song reuses the same chain.
+  const pluginChainLoadedForSongIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedSongId) {
+      commitPluginChain({ songId: '', items: [] });
+      pluginChainLoadedForSongIdRef.current = null;
+      return;
+    }
+    if (selectedSongId === pluginChainLoadedForSongIdRef.current) return;
+    pluginChainLoadedForSongIdRef.current = selectedSongId;
+    commitPluginChain({ songId: selectedSongId, items: [] });
+    let cancelled = false;
+    void window.producerPlayer
+      .getTrackPluginChain(selectedSongId)
+      .then((chain) => {
+        if (cancelled) return;
+        commitPluginChain(chain);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        void window.producerPlayer.rendererLog(
+          'error',
+          '[plugin-chain] getTrackPluginChain failed',
+          { error: String(err) },
+        );
+        commitPluginChain({ songId: selectedSongId, items: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [commitPluginChain, selectedSongId]);
+
+  // v3.40 Phase 1b — Plugin library: load cached library on mount and
+  // kick a background scan if the cache is empty OR older than 7 days.
+  // Rationale: the user won't realistically install plugins more often
+  // than weekly on a dev rig, and the scan is expensive enough (40+
+  // AudioUnits on a typical mac) that we don't want to do it on every
+  // session. Scan failures (missing sidecar binary in a dev build, etc.)
+  // are logged and swallowed — the UI still renders the empty-library
+  // call-to-action so the user can hit "Scan plugins" manually.
+  //
+  // E2E tests can suppress the background scan by setting
+  // `window.__producerPlayerDisablePluginLibraryBootstrap = true` before the
+  // App mounts (usually not practical; tests instead flip it ASAP and also
+  // seed a fake library, letting the in-flight scan's "setPluginLibrary" be
+  // skipped via the same flag).
+  const pluginLibraryBootstrappedRef = useRef(false);
+  useEffect(() => {
+    if (pluginLibraryBootstrappedRef.current) return;
+    pluginLibraryBootstrappedRef.current = true;
+    const scanSuppressed = () =>
+      (window as unknown as {
+        __producerPlayerDisablePluginLibraryBootstrap?: boolean;
+      }).__producerPlayerDisablePluginLibraryBootstrap === true;
+    const STALE_MS = 7 * 24 * 60 * 60 * 1000;
+    void window.producerPlayer
+      .getPluginLibrary()
+      .then((library) => {
+        if (!scanSuppressed()) setPluginLibrary(library);
+        const scannedAt = library ? Date.parse(library.scannedAt) : NaN;
+        const isEmpty = !library || library.plugins.length === 0;
+        const isStale = Number.isFinite(scannedAt)
+          ? Date.now() - scannedAt > STALE_MS
+          : true;
+        if (!isEmpty && !isStale) return;
+        if (scanSuppressed()) return;
+        // Fire and forget — the dialog can show a "Scan plugins" CTA if this
+        // fails (sidecar missing in dev, etc.). We never throw into the
+        // renderer tree.
+        setPluginLibraryScanning(true);
+        window.producerPlayer
+          .scanPluginLibrary()
+          .then((freshLibrary) => {
+            if (scanSuppressed()) return;
+            setPluginLibrary(freshLibrary);
+          })
+          .catch((err) => {
+            void window.producerPlayer.rendererLog(
+              'warn',
+              '[plugin-chain] background scan failed',
+              { error: String(err) },
+            );
+          })
+          .finally(() => setPluginLibraryScanning(false));
+      })
+      .catch((err) => {
+        void window.producerPlayer.rendererLog(
+          'error',
+          '[plugin-chain] getPluginLibrary failed',
+          { error: String(err) },
+        );
+      });
+  }, []);
+
+  // v3.40 Phase 1b — Test hook: let E2E tests seed the renderer's cached
+  // plugin library directly so the plugin-browser dialog renders a
+  // deterministic set without needing the native pp-audio-host sidecar to
+  // exist in the test environment. Noop in production — the flag is only
+  // read from window. See apps/e2e/src/plugin-chain-strip.spec.ts.
+  useEffect(() => {
+    (window as unknown as {
+      __producerPlayerSetPluginLibrary?: (library: ScannedPluginLibrary | null) => void;
+    }).__producerPlayerSetPluginLibrary = (library) => {
+      setPluginLibrary(library);
+    };
+    return () => {
+      delete (window as unknown as {
+        __producerPlayerSetPluginLibrary?: unknown;
+      }).__producerPlayerSetPluginLibrary;
+    };
+  }, []);
+
+  // v3.40 Phase 1b — Plugin chain mutation handlers. Each call round-trips
+  // through the unified state service, which returns the full updated
+  // chain so the renderer stays in sync (and reorders stay atomic).
+  const handlePluginAdd = useCallback(
+    (pluginId: string) => {
+      if (!selectedSongId) return;
+      void window.producerPlayer
+        .addPluginToChain(selectedSongId, pluginId)
+        .then((chain) => commitPluginChain(chain))
+        .catch((err) =>
+          window.producerPlayer.rendererLog('error', '[plugin-chain] add failed', {
+            error: String(err),
+          }),
+        );
+    },
+    [selectedSongId],
+  );
+
+  const handlePluginRemove = useCallback(
+    (instanceId: string) => {
+      if (!selectedSongId) return;
+      void window.producerPlayer
+        .removePluginFromChain(selectedSongId, instanceId)
+        .then((chain) => commitPluginChain(chain))
+        .catch((err) =>
+          window.producerPlayer.rendererLog('error', '[plugin-chain] remove failed', {
+            error: String(err),
+          }),
+        );
+    },
+    [selectedSongId],
+  );
+
+  const handlePluginToggle = useCallback(
+    (instanceId: string) => {
+      if (!selectedSongId) return;
+      const current = pluginChainRef.current.items.find(
+        (item) => item.instanceId === instanceId,
+      );
+      if (!current) return;
+      void window.producerPlayer
+        .togglePluginEnabled(selectedSongId, instanceId, !current.enabled)
+        .then((chain) => commitPluginChain(chain))
+        .catch((err) =>
+          window.producerPlayer.rendererLog('error', '[plugin-chain] toggle failed', {
+            error: String(err),
+          }),
+        );
+    },
+    [selectedSongId, commitPluginChain],
+  );
+
+  const handlePluginReorder = useCallback(
+    (orderedInstanceIds: string[]) => {
+      if (!selectedSongId) return;
+      void window.producerPlayer
+        .reorderPluginChain(selectedSongId, orderedInstanceIds)
+        .then((chain) => commitPluginChain(chain))
+        .catch((err) =>
+          window.producerPlayer.rendererLog('error', '[plugin-chain] reorder failed', {
+            error: String(err),
+          }),
+        );
+    },
+    [selectedSongId],
+  );
+
+  const handlePluginOpenEditor = useCallback((_instanceId: string) => {
+    // Phase 3 will open the plugin editor window. For now we only log so the
+    // smoke test can assert the click handler is wired up.
+    void window.producerPlayer.rendererLog('info', '[plugin-chain] open editor (stub)', {
+      instanceId: _instanceId,
+    });
+  }, []);
+
+  const handlePluginScan = useCallback(() => {
+    if (pluginLibraryScanning) return;
+    setPluginLibraryScanning(true);
+    void window.producerPlayer
+      .scanPluginLibrary()
+      .then((library) => setPluginLibrary(library))
+      .catch((err) =>
+        window.producerPlayer.rendererLog('error', '[plugin-chain] manual scan failed', {
+          error: String(err),
+        }),
+      )
+      .finally(() => setPluginLibraryScanning(false));
+  }, [pluginLibraryScanning]);
+
   // Restore per-song live EQ state when song changes
   const autoLoadEqLiveSongIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -12437,6 +12662,25 @@ export function App(): JSX.Element {
               Pick a track to see loudness analysis and A/B.
             </p>
           )}
+          {/*
+           * v3.40 — Phase 1b Plugin chain strip (compact). Shown at the
+           * bottom of the docked mastering preview so it stays reachable
+           * without opening the fullscreen overlay. Vertical layout.
+           */}
+          {selectedSongId && selectedPlaybackVersion ? (
+            <PluginChainStrip
+              chain={pluginChain}
+              library={pluginLibrary}
+              layout="compact"
+              scanning={pluginLibraryScanning}
+              onAdd={handlePluginAdd}
+              onRemove={handlePluginRemove}
+              onToggle={handlePluginToggle}
+              onReorder={handlePluginReorder}
+              onOpenEditor={handlePluginOpenEditor}
+              onScan={handlePluginScan}
+            />
+          ) : null}
         </section>
       </aside>
 
@@ -15288,6 +15532,26 @@ export function App(): JSX.Element {
                   </div>
                 </section>
 
+                {/*
+                 * v3.40 — Phase 1b Plugin chain strip (fullscreen row).
+                 * Mounted above Platform Normalization so the chain sits in
+                 * the same visual band as the audio-path controls. Audio
+                 * wiring lands in Phase 2 — this is UI only.
+                 */}
+                {selectedSongId ? (
+                  <PluginChainStrip
+                    chain={pluginChain}
+                    library={pluginLibrary}
+                    layout="fullscreen"
+                    scanning={pluginLibraryScanning}
+                    onAdd={handlePluginAdd}
+                    onRemove={handlePluginRemove}
+                    onToggle={handlePluginToggle}
+                    onReorder={handlePluginReorder}
+                    onOpenEditor={handlePluginOpenEditor}
+                    onScan={handlePluginScan}
+                  />
+                ) : null}
 
                 <section
                   className={`analysis-overlay-section${

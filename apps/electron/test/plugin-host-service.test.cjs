@@ -1,21 +1,31 @@
 /**
- * v3.39 Phase 1a — PluginHostService unit tests.
+ * PluginHostService unit tests.
+ *
+ * v3.39 (Phase 1a): scan / start / stop / "not implemented" round-trips.
+ * v3.41 (Phase 2) additions:
+ *   - diffChainReconciliation: pure diff logic, no child process.
+ *   - reconcileTrackChain: loads new slots, unloads removed ones, leaves
+ *                          unchanged slots alone. Errors are collected, not
+ *                          thrown.
+ *   - processBlock:        round-trips buffer + chain and returns processed
+ *                          base64 + processedSlots count.
+ *   - Empty-chain invariant: a chain with zero items (or all disabled) still
+ *                            returns an ok:true passthrough from the sidecar.
  *
  * We inject a scriptable fake child into PluginHostService via the optional
  * `spawnFn` constructor argument. The fake mirrors what pp-audio-host does
- * on the wire:
- *   - on "start", emits `{"event":"ready"}` so `.start()` resolves
- *   - on each JSON command, replies with a canned response (or an error)
- *
- * That keeps the test hermetic — no real binary is required, so the suite
- * passes on CI machines that don't have the sidecar built.
+ * on the wire, so the suite stays hermetic — no real binary required.
  */
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const test = require('node:test');
 
-const { PluginHostService, resolveSidecarBinary } = require('../dist/plugin-host-service.test.cjs');
+const {
+  PluginHostService,
+  resolveSidecarBinary,
+  diffChainReconciliation,
+} = require('../dist/plugin-host-service.test.cjs');
 
 /** Build a fake ChildProcessWithoutNullStreams-like object we can script. */
 function makeFakeChild({ replies = {}, emitReady = true } = {}) {
@@ -32,9 +42,6 @@ function makeFakeChild({ replies = {}, emitReady = true } = {}) {
     child.emit('exit', 0, null);
   };
 
-  // Buffer stdin lines and respond based on the `replies` map. Keys are
-  // method names; values are either an object (used verbatim, with the
-  // request id patched in) or a function (called with the parsed request).
   let buffer = '';
   stdin.on('data', (chunk) => {
     buffer += chunk.toString('utf8');
@@ -54,32 +61,35 @@ function makeFakeChild({ replies = {}, emitReady = true } = {}) {
           );
           continue;
         }
-        const body = typeof handler === 'function' ? handler(req) : handler;
-        // Default ok:true but allow handlers to explicitly return ok:false.
-        const merged = { id: req.id, ok: true, ...body };
-        if (Object.prototype.hasOwnProperty.call(body, 'ok')) merged.ok = body.ok;
-        stdout.write(`${JSON.stringify(merged)}\n`);
+        Promise.resolve(typeof handler === 'function' ? handler(req) : handler)
+          .then((body) => {
+            const merged = { id: req.id, ok: true, ...(body || {}) };
+            if (body && Object.prototype.hasOwnProperty.call(body, 'ok')) merged.ok = body.ok;
+            stdout.write(`${JSON.stringify(merged)}\n`);
+          })
+          .catch((e) => {
+            stdout.write(`${JSON.stringify({ id: req.id, ok: false, error: String(e) })}\n`);
+          });
       } catch (e) {
         stdout.write(`${JSON.stringify({ ok: false, error: String(e) })}\n`);
       }
     }
   });
 
-  // Synthesise the ready handshake asynchronously so the consumer can
-  // register its data handler first.
   if (emitReady) {
     setImmediate(() => {
-      stdout.write(`${JSON.stringify({ event: 'ready', version: '0.1.0-test' })}\n`);
+      stdout.write(`${JSON.stringify({ event: 'ready', version: '0.2.0-test' })}\n`);
     });
   }
 
   return child;
 }
 
+// ---------------------------------------------------------------------------
+// Existing Phase 1a coverage
+// ---------------------------------------------------------------------------
+
 test('resolveSidecarBinary returns null when no build output exists in a pristine cwd', () => {
-  // Using /tmp guarantees neither candidate path exists; this tests the
-  // "binary not yet built" branch that the IPC handler uses to decide
-  // whether to surface the bootstrap hint.
   const found = resolveSidecarBinary('/tmp/pp-does-not-exist-here');
   assert.equal(found, null);
 });
@@ -118,12 +128,7 @@ test('scanPlugins parses a canned reply into a ScannedPluginLibrary shape', asyn
             isSupported: true,
             failureReason: null,
           },
-          {
-            // Malformed entry — missing required `path` — must be dropped.
-            id: 'vst3:bad',
-            name: 'Broken',
-            format: 'vst3',
-          },
+          { id: 'vst3:bad', name: 'Broken', format: 'vst3' },
         ],
         scanVersion: 1,
       },
@@ -139,29 +144,324 @@ test('scanPlugins parses a canned reply into a ScannedPluginLibrary shape', asyn
 });
 
 test('stop sends shutdown and kills the child', async () => {
-  const fake = makeFakeChild({
-    replies: {
-      shutdown: {},
-    },
-  });
+  const fake = makeFakeChild({ replies: { shutdown: {} } });
   const service = new PluginHostService('/fake/path', () => fake);
   await service.start();
   await service.stop();
   assert.equal(fake.killed || service.isRunning() === false, true);
 });
 
-test('load_plugin surfaces the sidecar\'s "not implemented" error', async () => {
+// ---------------------------------------------------------------------------
+// Phase 2 — reconciliation diff logic (pure function)
+// ---------------------------------------------------------------------------
+
+test('diffChainReconciliation: fresh chain → all slots to load', () => {
+  const plan = diffChainReconciliation(new Set(), [
+    { instanceId: 'a', pluginId: 'vst3:x', enabled: true, order: 0 },
+    { instanceId: 'b', pluginId: 'vst3:y', enabled: false, order: 1 },
+  ]);
+  assert.equal(plan.toLoad.length, 2);
+  assert.equal(plan.toUnload.length, 0);
+  assert.equal(plan.unchanged.length, 0);
+});
+
+test('diffChainReconciliation: chain cleared → everything unloads', () => {
+  const plan = diffChainReconciliation(new Set(['a', 'b']), []);
+  assert.deepEqual(plan.toLoad, []);
+  assert.deepEqual([...plan.toUnload].sort(), ['a', 'b']);
+});
+
+test('diffChainReconciliation: unchanged ids stay unchanged regardless of enable/reorder', () => {
+  const plan = diffChainReconciliation(new Set(['a', 'b']), [
+    { instanceId: 'b', pluginId: 'vst3:y', enabled: false, order: 0 },
+    { instanceId: 'a', pluginId: 'vst3:x', enabled: true, order: 1 },
+    { instanceId: 'c', pluginId: 'vst3:z', enabled: true, order: 2 },
+  ]);
+  assert.deepEqual(plan.toLoad.map((t) => t.instanceId), ['c']);
+  assert.deepEqual(plan.toUnload, []);
+  assert.deepEqual(plan.unchanged.sort(), ['a', 'b']);
+});
+
+test('diffChainReconciliation: skips malformed items (no instanceId or pluginId)', () => {
+  const plan = diffChainReconciliation(new Set(), [
+    { instanceId: '', pluginId: 'vst3:x', enabled: true, order: 0 },
+    { instanceId: 'a', pluginId: '', enabled: true, order: 1 },
+    { instanceId: 'b', pluginId: 'vst3:y', enabled: true, order: 2 },
+  ]);
+  assert.deepEqual(plan.toLoad.map((t) => t.instanceId), ['b']);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — load / unload / reconcile
+// ---------------------------------------------------------------------------
+
+function makeLibrary() {
+  return {
+    plugins: [
+      {
+        id: 'vst3:abc',
+        name: 'Pro-Q 4',
+        vendor: 'FabFilter',
+        format: 'vst3',
+        version: '4.0',
+        path: '/Library/Audio/Plug-Ins/VST3/FabFilter Pro-Q 4.vst3',
+        categories: ['Fx', 'EQ'],
+        isSupported: true,
+        failureReason: null,
+      },
+      {
+        id: 'au:def',
+        name: 'AUCompressor',
+        vendor: 'Apple',
+        format: 'au',
+        version: '1.0',
+        path: '/Library/Audio/Plug-Ins/Components/AUCompressor.component',
+        categories: ['Dynamics'],
+        isSupported: true,
+        failureReason: null,
+      },
+    ],
+    scannedAt: new Date().toISOString(),
+    scanVersion: 1,
+  };
+}
+
+test('loadPlugin tracks the instance id and returns sidecar metadata', async () => {
   const fake = makeFakeChild({
     replies: {
-      load_plugin: () => ({ ok: false, error: 'not implemented' }),
+      load_plugin: (req) => ({
+        instanceId: req.params.instanceId,
+        reportedLatencySamples: 64,
+        numInputs: 2,
+        numOutputs: 2,
+      }),
     },
   });
-  // makeFakeChild handler always stamps ok:true — override by making the
-  // handler emit directly. Simpler: use replies=none so the test-bundle
-  // falls back to "no mock for load_plugin" which is semantically equivalent.
   const service = new PluginHostService('/fake/path', () => fake);
-  await assert.rejects(
-    service.loadPlugin('track-a', 0, 'vst3:xyz'),
-    /not implemented|no mock for load_plugin/,
-  );
+  const res = await service.loadPlugin({
+    instanceId: 'i-1',
+    pluginPath: '/Library/Audio/Plug-Ins/VST3/Pro-Q 4.vst3',
+    format: 'vst3',
+  });
+  assert.equal(res.instanceId, 'i-1');
+  assert.equal(res.reportedLatencySamples, 64);
+  assert.deepEqual(service.getLoadedInstanceIds(), ['i-1']);
+});
+
+test('unloadPlugin drops the instance id from the loaded set', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      load_plugin: (req) => ({ instanceId: req.params.instanceId }),
+      unload_plugin: (req) => ({ instanceId: req.params.instanceId, wasLoaded: true }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.loadPlugin({ instanceId: 'x', pluginPath: '/p', format: 'vst3' });
+  await service.unloadPlugin('x');
+  assert.deepEqual(service.getLoadedInstanceIds(), []);
+});
+
+test('reconcileTrackChain: loads new slots, unloads removed ones', async () => {
+  const calls = { load: [], unload: [] };
+  const fake = makeFakeChild({
+    replies: {
+      load_plugin: (req) => {
+        calls.load.push(req.params.instanceId);
+        return { instanceId: req.params.instanceId };
+      },
+      unload_plugin: (req) => {
+        calls.unload.push(req.params.instanceId);
+        return { instanceId: req.params.instanceId, wasLoaded: true };
+      },
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  service.rememberLibrary(makeLibrary());
+
+  // Start with one loaded
+  await service.loadPlugin({ instanceId: 'keep-me', pluginPath: '/p', format: 'vst3' });
+  calls.load.length = 0;
+
+  const result = await service.reconcileTrackChain({
+    songId: 'song-1',
+    items: [
+      { instanceId: 'keep-me', pluginId: 'vst3:abc', enabled: true, order: 0 },
+      { instanceId: 'new-one', pluginId: 'au:def', enabled: false, order: 1 },
+    ],
+  });
+  assert.deepEqual(calls.load, ['new-one']);
+  assert.deepEqual(calls.unload, []);
+  assert.deepEqual(result.loaded, ['new-one']);
+  assert.deepEqual(result.failed, []);
+});
+
+test('reconcileTrackChain: empty chain unloads all instances (invariant: no plugins → no effect)', async () => {
+  const calls = { load: [], unload: [] };
+  const fake = makeFakeChild({
+    replies: {
+      load_plugin: (req) => { calls.load.push(req.params.instanceId); return { instanceId: req.params.instanceId }; },
+      unload_plugin: (req) => { calls.unload.push(req.params.instanceId); return { instanceId: req.params.instanceId, wasLoaded: true }; },
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  service.rememberLibrary(makeLibrary());
+  await service.loadPlugin({ instanceId: 'a', pluginPath: '/p', format: 'vst3' });
+  await service.loadPlugin({ instanceId: 'b', pluginPath: '/p', format: 'vst3' });
+
+  await service.reconcileTrackChain({ songId: 's', items: [] });
+  assert.deepEqual(calls.unload.sort(), ['a', 'b']);
+  assert.deepEqual(service.getLoadedInstanceIds(), []);
+});
+
+test('reconcileTrackChain: missing cached library → slot flagged as failed, chain still advances', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      load_plugin: (req) => ({ instanceId: req.params.instanceId }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  // No rememberLibrary call, so pluginId → path lookup will fail.
+  const result = await service.reconcileTrackChain({
+    songId: 's',
+    items: [{ instanceId: 'x', pluginId: 'vst3:abc', enabled: true, order: 0 }],
+  });
+  assert.equal(result.failed.length, 1);
+  assert.match(result.failed[0].error, /not found in cached library/);
+  assert.deepEqual(result.loaded, []);
+});
+
+test('reconcileTrackChain serializes rapid add/remove so stale loads are unloaded', async () => {
+  const calls = { load: [], unload: [] };
+  const fake = makeFakeChild({
+    replies: {
+      load_plugin: (req) =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            calls.load.push(req.params.instanceId);
+            resolve({ instanceId: req.params.instanceId });
+          }, 25);
+        }),
+      unload_plugin: (req) => {
+        calls.unload.push(req.params.instanceId);
+        return { instanceId: req.params.instanceId, wasLoaded: true };
+      },
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  service.rememberLibrary(makeLibrary());
+
+  const add = service.reconcileTrackChain({
+    songId: 's',
+    items: [{ instanceId: 'stale', pluginId: 'vst3:abc', enabled: true, order: 0 }],
+  });
+  const clear = service.reconcileTrackChain({ songId: 's', items: [] });
+
+  await Promise.all([add, clear]);
+  assert.deepEqual(calls.load, ['stale']);
+  assert.deepEqual(calls.unload, ['stale']);
+  assert.deepEqual(service.getLoadedInstanceIds(), []);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — processBlock + empty-chain bypass
+// ---------------------------------------------------------------------------
+
+test('processBlock round-trips base64 buffer through the sidecar', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      process_block: (req) => ({
+        channels: req.params.channels,
+        frames: req.params.frames,
+        bufferBase64: req.params.bufferBase64, // echo
+        processedSlots: req.params.chain.filter((c) => c.enabled).length,
+      }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  const res = await service.processBlock({
+    chain: [
+      { instanceId: 'a', enabled: true },
+      { instanceId: 'b', enabled: false },
+    ],
+    bufferBase64: 'AAAAAA==', // 4 bytes → 1 float32 frame
+    frames: 1,
+    channels: 1,
+  });
+  assert.equal(res.frames, 1);
+  assert.equal(res.processedSlots, 1);
+  assert.equal(res.bufferBase64, 'AAAAAA==');
+});
+
+test('processBlock with an all-disabled chain still gets ok:true (sidecar passthrough)', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      process_block: (req) => ({
+        channels: 2,
+        frames: req.params.frames,
+        bufferBase64: req.params.bufferBase64,
+        processedSlots: 0,
+      }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  const res = await service.processBlock({
+    chain: [{ instanceId: 'a', enabled: false }, { instanceId: 'b', enabled: false }],
+    bufferBase64: 'AAAAAA==',
+    frames: 1,
+    channels: 1,
+  });
+  assert.equal(res.processedSlots, 0);
+});
+
+test('processBlock with an empty chain is a pure passthrough (zero slots processed)', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      process_block: (req) => ({
+        channels: 2,
+        frames: req.params.frames,
+        bufferBase64: req.params.bufferBase64,
+        processedSlots: 0,
+      }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  const res = await service.processBlock({
+    chain: [],
+    bufferBase64: 'AAAAAA==',
+    frames: 1,
+    channels: 1,
+  });
+  assert.equal(res.processedSlots, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — parameter + state wrappers
+// ---------------------------------------------------------------------------
+
+test('setParameter / getParameter round-trip', async () => {
+  let stored = 0.25;
+  const fake = makeFakeChild({
+    replies: {
+      set_parameter: (req) => { stored = req.params.value; return {}; },
+      get_parameter: () => ({ value: stored }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.setParameter('i', 3, 0.75);
+  const v = await service.getParameter('i', 3);
+  assert.equal(v, 0.75);
+});
+
+test('get/setPluginState round-trip', async () => {
+  let stored = '';
+  const fake = makeFakeChild({
+    replies: {
+      get_plugin_state: () => ({ stateBase64: stored }),
+      set_plugin_state: (req) => { stored = req.params.stateBase64; return {}; },
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.setPluginState('i', 'SGVsbG8=');
+  const state = await service.getPluginState('i');
+  assert.equal(state, 'SGVsbG8=');
 });

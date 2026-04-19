@@ -89,6 +89,7 @@ import type {
   SongVersion,
   UpdateCheckResult,
   SongWithVersions,
+  TrackPluginChain,
   TransportCommand,
   WindowBounds,
 } from '@producer-player/contracts';
@@ -4979,13 +4980,71 @@ function registerIpcHandlers(service: FileLibraryService): void {
     }
     const library = await pluginHostService.scanPlugins();
     await userStateService.setPluginLibrary(library);
+    // Phase 2 (v3.41): keep the service's cached library in sync so
+    // subsequent `reconcileTrackChain` calls can resolve pluginId → path
+    // without re-scanning. `scanPlugins` already calls `rememberLibrary`
+    // internally, but we repeat it here for clarity.
+    pluginHostService.rememberLibrary(library);
     return library;
   });
 
   ipcMain.handle(IPC_CHANNELS.PLUGIN_GET_LIBRARY, async () => {
     if (!userStateService) throw new Error('User state service not initialized');
-    return userStateService.getPluginLibrary();
+    const library = await userStateService.getPluginLibrary();
+    // Prime the sidecar service cache from persisted state on the first
+    // renderer query after a cold start, so reconciliation doesn't have to
+    // force a rescan on every launch.
+    if (library && pluginHostService) {
+      pluginHostService.rememberLibrary(library);
+    }
+    return library;
   });
+
+  /**
+   * Phase 2 (v3.41): chain-edit reconciliation helper.
+   *
+   * Fire-and-forget. Called after every chain mutation (add / remove /
+   * setTrackChain). Chain state is the renderer's source of truth — it's
+   * already persisted to disk by the time we get here — so we MUST NOT
+   * block the IPC reply on sidecar latency. The sidecar may be slow to
+   * load a plugin (JUCE `createPluginInstance` can take seconds), may not
+   * be built yet, or may be unavailable entirely; none of that should
+   * stall the UI's add/remove round-trip.
+   *
+   * Empty chains still go through reconcile so any previously-loaded
+   * instances for this song get unloaded (the diff treats every loaded
+   * id as unreferenced when `items` is empty). Ethan's "no plugins →
+   * no effect" invariant is enforced separately in the renderer's
+   * audio-routing fast-path (zero IPC for empty/all-disabled chains)
+   * and in the sidecar's `handleProcessBlock` (memcpy passthrough).
+   *
+   * Errors are logged, never thrown.
+   */
+  const reconcileChainIfPossible = (chain: TrackPluginChain): void => {
+    if (!pluginHostService) pluginHostService = new PluginHostService();
+    if (!pluginHostService.isAvailable()) return; // sidecar not built yet
+    const service = pluginHostService;
+    // Detached promise on purpose — don't `await` the IPC reply, but still
+    // attach a .catch so an unhandled-rejection never crashes the host.
+    void Promise.resolve()
+      .then(async () => {
+        if (userStateService) {
+          service.rememberLibrary(await userStateService.getPluginLibrary());
+        }
+        return service.reconcileTrackChain(chain);
+      })
+      .then((result) => {
+        if (result.failed.length > 0) {
+          log.warn(
+            `[plugin-host] reconcile ${chain.songId}: ${result.failed.length} slot(s) failed`,
+            result.failed,
+          );
+        }
+      })
+      .catch((err) => {
+        log.warn(`[plugin-host] reconcile ${chain.songId} failed`, err);
+      });
+  };
 
   ipcMain.handle(IPC_CHANNELS.PLUGIN_GET_TRACK_CHAIN, async (_event, songId: string) => {
     if (!userStateService) throw new Error('User state service not initialized');
@@ -4996,7 +5055,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
     IPC_CHANNELS.PLUGIN_SET_TRACK_CHAIN,
     async (_event, songId: string, chain: Parameters<UserStateService['setTrackPluginChain']>[1]) => {
       if (!userStateService) throw new Error('User state service not initialized');
-      return userStateService.setTrackPluginChain(songId, chain);
+      const next = await userStateService.setTrackPluginChain(songId, chain);
+      reconcileChainIfPossible(next);
+      return next;
     },
   );
 
@@ -5004,7 +5065,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
     IPC_CHANNELS.PLUGIN_ADD_TO_CHAIN,
     async (_event, songId: string, pluginId: string) => {
       if (!userStateService) throw new Error('User state service not initialized');
-      return userStateService.addPluginToChain(songId, pluginId);
+      const next = await userStateService.addPluginToChain(songId, pluginId);
+      reconcileChainIfPossible(next);
+      return next;
     },
   );
 
@@ -5012,7 +5075,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
     IPC_CHANNELS.PLUGIN_REMOVE_FROM_CHAIN,
     async (_event, songId: string, instanceId: string) => {
       if (!userStateService) throw new Error('User state service not initialized');
-      return userStateService.removePluginFromChain(songId, instanceId);
+      const next = await userStateService.removePluginFromChain(songId, instanceId);
+      reconcileChainIfPossible(next);
+      return next;
     },
   );
 
@@ -5020,6 +5085,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
     IPC_CHANNELS.PLUGIN_REORDER_CHAIN,
     async (_event, songId: string, orderedInstanceIds: string[]) => {
       if (!userStateService) throw new Error('User state service not initialized');
+      // Reorder doesn't change membership so no reconcile needed — the
+      // sidecar is keyed by instanceId, and the next `processBlock` request
+      // carries the fresh order in its `chain` array.
       return userStateService.reorderPluginChain(songId, orderedInstanceIds);
     },
   );
@@ -5028,6 +5096,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
     IPC_CHANNELS.PLUGIN_TOGGLE_ENABLED,
     async (_event, songId: string, instanceId: string, enabled: boolean) => {
       if (!userStateService) throw new Error('User state service not initialized');
+      // Toggle is a pure runtime flag — the sidecar keeps the instance
+      // loaded either way. Flipping it is instant; no reconcile needed.
       return userStateService.togglePluginEnabled(songId, instanceId, enabled);
     },
   );

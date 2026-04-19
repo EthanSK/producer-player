@@ -3,16 +3,26 @@
  * sidecar (JUCE-based, ships at `native/pp-audio-host/build/bin/pp-audio-host`
  * during development and is bundled into the packaged app in later phases).
  *
- * Phase 1a scope (v3.39):
+ * Phase 2 scope (v3.41):
  *   - Lazy `start()`: spawns the sidecar only when something actually needs
  *     it. Renderers that never open the plugin browser never pay the cost.
  *   - `scanPlugins()`: sends `scan_plugins` and parses the reply into the
  *     shared `ScannedPluginLibrary` shape.
+ *   - `loadPlugin()` / `unloadPlugin()`: real lifecycle commands, with the
+ *     sidecar instantiating (and later `releaseResources`-ing) JUCE plugin
+ *     instances keyed by the renderer-supplied stable `instanceId`.
+ *   - `reconcileTrackChain()`: diff-and-apply the desired chain against the
+ *     current set of loaded plugin instances — load new slots, unload
+ *     removed ones, leave unchanged ones alone. This is the single path
+ *     that Electron-main uses when a track is opened or the chain is edited.
+ *   - `processBlock()`: round-trip a stereo float32 buffer through the
+ *     enabled slots in order. Used only when the renderer chooses the
+ *     sidecar audio route (empty/all-disabled chains short-circuit in the
+ *     renderer — see `App.tsx` / Phase 2.5).
+ *   - `setParameter()` / `getParameter()` / `get_plugin_state` /
+ *     `set_plugin_state`: minimal wrappers so Phase 3 (automation) and
+ *     Phase 4 (preset persistence) can plug in without reshaping the protocol.
  *   - `stop()`: sends `shutdown` then kills the process.
- *   - `load_plugin` / `unload_plugin` / `setParameter` / `getParameter` /
- *     `processBlock` wrappers exist but surface a clear "not implemented"
- *     error from the sidecar — they land in Phase 2 alongside the real
- *     plugin loading + audio path.
  *
  * The protocol is newline-delimited JSON over the sidecar's stdio:
  *   request  → {"id":n,"method":"<name>","params":{...}}
@@ -21,12 +31,27 @@
  * The first line of sidecar stdout is always a `{"event":"ready"}`
  * handshake; the service awaits that before sending any commands so the
  * caller never races on spawn latency.
+ *
+ * Ethan's invariant: **if the chain has zero enabled plugins, audio must
+ * pass through unchanged.** Enforced at two layers:
+ *   1. The renderer skips the sidecar entirely when
+ *      `chain.items.filter(i => i.enabled).length === 0` — zero IPC,
+ *      zero added latency. That's the real fast path.
+ *   2. Even if a caller does invoke `processBlock` on an empty/all-disabled
+ *      chain, the sidecar short-circuits to a memcpy-style passthrough.
+ *      See `handleProcessBlock` in `native/pp-audio-host/src/main.cpp`.
  */
 
 import { spawn as defaultSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { resolve } from 'node:path';
 import log from 'electron-log/main';
-import type { PluginFormat, PluginInfo, ScannedPluginLibrary } from '@producer-player/contracts';
+import type {
+  PluginChainItem,
+  PluginFormat,
+  PluginInfo,
+  ScannedPluginLibrary,
+  TrackPluginChain,
+} from '@producer-player/contracts';
 
 /**
  * Signature of the `spawn` function we use to launch the sidecar. Exposed
@@ -40,6 +65,7 @@ type PendingRejecter = (reason: Error) => void;
 interface Pending {
   resolve: PendingResolver;
   reject: PendingRejecter;
+  timer: NodeJS.Timeout;
 }
 
 /** Resolved path to the built sidecar binary, or null when it isn't present. */
@@ -63,6 +89,80 @@ export function resolveSidecarBinary(cwd: string = process.cwd()): string | null
   return null;
 }
 
+export interface LoadPluginOptions {
+  instanceId: string;
+  pluginPath: string;
+  format: PluginFormat;
+  sampleRate?: number;
+  blockSize?: number;
+}
+
+export interface LoadPluginResult {
+  instanceId: string;
+  reportedLatencySamples: number;
+  numInputs: number;
+  numOutputs: number;
+  alreadyLoaded?: boolean;
+}
+
+export interface ProcessBlockItem {
+  instanceId: string;
+  enabled: boolean;
+}
+
+export interface ProcessBlockResult {
+  frames: number;
+  channels: number;
+  bufferBase64: string;
+  processedSlots: number;
+}
+
+/**
+ * Plan produced by `diffChainReconciliation`. Split out so tests can
+ * assert the diff logic without touching the sidecar.
+ */
+export interface ChainReconciliationPlan {
+  toLoad: Array<{ instanceId: string; pluginId: string }>;
+  toUnload: string[];
+  unchanged: string[];
+}
+
+/**
+ * Compute the set of instance operations needed to bring the loaded plugin
+ * set from `loaded` to whatever the desired chain lists. Pure function so
+ * the unit tests can exercise it without any IPC.
+ *
+ * - A slot whose `instanceId` is already loaded is a no-op regardless of
+ *   its `pluginId` (the renderer treats `instanceId` as the stable key).
+ * - Slots that are newly present → `toLoad`.
+ * - Loaded instances that the chain no longer references → `toUnload`.
+ *   Disabled slots are kept loaded so toggling back on is instant — the
+ *   renderer's `chain` payload in `process_block` controls whether the
+ *   instance actually runs on audio.
+ */
+export function diffChainReconciliation(
+  loaded: ReadonlySet<string>,
+  desired: ReadonlyArray<PluginChainItem>,
+): ChainReconciliationPlan {
+  const toLoad: ChainReconciliationPlan['toLoad'] = [];
+  const unchanged: string[] = [];
+  const desiredIds = new Set<string>();
+  for (const item of desired) {
+    if (!item.instanceId || !item.pluginId) continue;
+    desiredIds.add(item.instanceId);
+    if (loaded.has(item.instanceId)) {
+      unchanged.push(item.instanceId);
+    } else {
+      toLoad.push({ instanceId: item.instanceId, pluginId: item.pluginId });
+    }
+  }
+  const toUnload: string[] = [];
+  for (const id of loaded) {
+    if (!desiredIds.has(id)) toUnload.push(id);
+  }
+  return { toLoad, toUnload, unchanged };
+}
+
 export class PluginHostService {
   private child: ChildProcessWithoutNullStreams | null = null;
   private readyPromise: Promise<void> | null = null;
@@ -71,6 +171,11 @@ export class PluginHostService {
   private stdoutBuffer = '';
   private binaryPath: string | null;
   private spawnFn: SpawnFn;
+  /** Instance ids currently live inside the sidecar. */
+  private loadedInstances = new Set<string>();
+  /** Cached plugin library, set by `rememberLibrary` so the service can resolve pluginId → path without a round-trip. */
+  private cachedLibrary: ScannedPluginLibrary | null = null;
+  private reconciliationTail: Promise<void> = Promise.resolve();
 
   constructor(
     binaryPath: string | null = resolveSidecarBinary(),
@@ -88,6 +193,21 @@ export class PluginHostService {
   /** True when the sidecar binary is present on disk. */
   isAvailable(): boolean {
     return this.binaryPath !== null;
+  }
+
+  /** Snapshot of currently loaded instance ids. Exposed for tests. */
+  getLoadedInstanceIds(): string[] {
+    return Array.from(this.loadedInstances);
+  }
+
+  /**
+   * Stash the library so `loadPlugin(pluginId, instanceId)` can look up a
+   * plugin's filesystem path + format without a sidecar round-trip. Called
+   * by the main-process IPC layer after every successful scan + on startup
+   * once the persisted library has been loaded from state.
+   */
+  rememberLibrary(library: ScannedPluginLibrary | null): void {
+    this.cachedLibrary = library;
   }
 
   /**
@@ -120,9 +240,13 @@ export class PluginHostService {
     child.on('exit', (code, signal) => {
       log.info(`[plugin-host] exited (code=${code}, signal=${signal})`);
       for (const pending of this.pending.values()) {
+        clearTimeout(pending.timer);
         pending.reject(new Error('pp-audio-host exited before reply'));
       }
       this.pending.clear();
+      // All sidecar-owned state is gone; the diff logic will reload next
+      // time the renderer asks for a processed block / reconciles a chain.
+      this.loadedInstances.clear();
       this.child = null;
       this.readyPromise = null;
     });
@@ -132,6 +256,10 @@ export class PluginHostService {
       // same parser that handles regular replies by installing a
       // one-shot handler keyed on a sentinel id.
       const timer = setTimeout(() => {
+        this.readyHandler = null;
+        if (this.child && !this.child.killed) {
+          this.child.kill('SIGTERM');
+        }
         rejectReady(new Error('pp-audio-host did not signal ready within 10s'));
       }, 10_000);
 
@@ -163,7 +291,7 @@ export class PluginHostService {
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
-    } catch (err) {
+    } catch {
       log.warn(`[plugin-host] failed to parse line: ${line}`);
       return;
     }
@@ -191,22 +319,42 @@ export class PluginHostService {
     }
   }
 
-  private async send<T = unknown>(method: string, params: unknown = {}): Promise<T> {
+  private async send<T = unknown>(
+    method: string,
+    params: unknown = {},
+    opts: { timeoutMs?: number } = {},
+  ): Promise<T> {
     await this.start();
     if (!this.child) throw new Error('pp-audio-host not running');
 
     const id = this.nextId++;
     const payload = `${JSON.stringify({ id, method, params })}\n`;
+    const timeoutMs = opts.timeoutMs ?? 30_000;
 
     return new Promise<T>((resolvePromise, rejectPromise) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        if (this.child && !this.child.killed) {
+          this.child.kill('SIGTERM');
+        }
+        rejectPromise(new Error(`pp-audio-host ${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
       this.pending.set(id, {
-        resolve: (v) => resolvePromise(v as T),
-        reject: rejectPromise,
+        resolve: (v) => {
+          clearTimeout(timer);
+          resolvePromise(v as T);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          rejectPromise(err);
+        },
+        timer,
       });
       try {
         this.child!.stdin.write(payload);
       } catch (err) {
         this.pending.delete(id);
+        clearTimeout(timer);
         rejectPromise(err instanceof Error ? err : new Error(String(err)));
       }
     });
@@ -218,7 +366,7 @@ export class PluginHostService {
    * sidecar's built-in defaults on macOS).
    */
   async scanPlugins(opts?: { format?: 'vst3' | 'au' | 'all'; paths?: string[] }): Promise<ScannedPluginLibrary> {
-    const reply = await this.send<Record<string, unknown>>('scan_plugins', opts ?? {});
+    const reply = await this.send<Record<string, unknown>>('scan_plugins', opts ?? {}, { timeoutMs: 120_000 });
     const pluginsRaw = Array.isArray(reply.plugins) ? (reply.plugins as unknown[]) : [];
     const plugins: PluginInfo[] = pluginsRaw.flatMap((p) => {
       if (!p || typeof p !== 'object' || Array.isArray(p)) return [];
@@ -252,36 +400,158 @@ export class PluginHostService {
       typeof reply.scanVersion === 'number' && Number.isFinite(reply.scanVersion)
         ? (reply.scanVersion as number)
         : 1;
-    return {
+    const library: ScannedPluginLibrary = {
       plugins,
       scannedAt: new Date().toISOString(),
       scanVersion,
     };
+    this.rememberLibrary(library);
+    return library;
   }
 
-  async loadPlugin(_trackId: string, _slot: number, _pluginId: string): Promise<never> {
-    await this.send('load_plugin', { trackId: _trackId, slot: _slot, pluginId: _pluginId });
-    throw new Error('unreachable — sidecar is expected to reject load_plugin in Phase 1a');
+  /**
+   * Load one plugin slot into the sidecar. `instanceId` is the stable UUID
+   * the renderer issued when the slot was added; it survives reorders and
+   * toggles so reconciliation just needs to compare sets of ids.
+   */
+  async loadPlugin(opts: LoadPluginOptions): Promise<LoadPluginResult> {
+    const reply = await this.send<Record<string, unknown>>('load_plugin', opts, { timeoutMs: 60_000 });
+    this.loadedInstances.add(opts.instanceId);
+    return {
+      instanceId: opts.instanceId,
+      reportedLatencySamples: Number(reply.reportedLatencySamples) || 0,
+      numInputs: Number(reply.numInputs) || 2,
+      numOutputs: Number(reply.numOutputs) || 2,
+      alreadyLoaded: Boolean(reply.alreadyLoaded),
+    };
   }
 
-  async unloadPlugin(_trackId: string, _slot: number): Promise<never> {
-    await this.send('unload_plugin', { trackId: _trackId, slot: _slot });
-    throw new Error('unreachable — sidecar is expected to reject unload_plugin in Phase 1a');
+  /** Drop one plugin slot from the sidecar. Idempotent — unknown ids are fine. */
+  async unloadPlugin(instanceId: string): Promise<void> {
+    await this.send('unload_plugin', { instanceId }, { timeoutMs: 10_000 });
+    this.loadedInstances.delete(instanceId);
   }
 
-  async setParameter(_trackId: string, _slot: number, _paramId: number, _value: number): Promise<never> {
-    await this.send('set_parameter', { trackId: _trackId, slot: _slot, paramId: _paramId, value: _value });
-    throw new Error('unreachable — set_parameter is Phase 2');
+  /**
+   * Apply the desired chain against what's loaded, using `diffChainReconciliation`.
+   * - Newly-present slots are looked up in the cached library to get their
+   *   filesystem path + format, then sent as `load_plugin`.
+   * - Slots no longer referenced are `unload_plugin`ed.
+   * - Unchanged slots are left alone (including disabled ones — bypass is a
+   *   runtime flag, not a lifecycle event).
+   *
+   * Returns the set of changes that were applied. Throws only if the sidecar
+   * connection fails; per-slot failures are collected and reported.
+   */
+  async reconcileTrackChain(
+    chain: TrackPluginChain,
+    opts: { sampleRate?: number; blockSize?: number } = {},
+  ): Promise<{ loaded: string[]; unloaded: string[]; failed: Array<{ instanceId: string; error: string }> }> {
+    const queued = this.reconciliationTail
+      .catch(() => undefined)
+      .then(() => this.reconcileTrackChainNow(chain, opts));
+    this.reconciliationTail = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    return queued;
   }
 
-  async getParameter(_trackId: string, _slot: number, _paramId: number): Promise<never> {
-    await this.send('get_parameter', { trackId: _trackId, slot: _slot, paramId: _paramId });
-    throw new Error('unreachable — get_parameter is Phase 2');
+  private async reconcileTrackChainNow(
+    chain: TrackPluginChain,
+    opts: { sampleRate?: number; blockSize?: number } = {},
+  ): Promise<{ loaded: string[]; unloaded: string[]; failed: Array<{ instanceId: string; error: string }> }> {
+    const plan = diffChainReconciliation(this.loadedInstances, chain.items);
+    const failed: Array<{ instanceId: string; error: string }> = [];
+    const loadedOk: string[] = [];
+    const unloadedOk: string[] = [];
+
+    // Unload first so we free resources before (potentially) loading more.
+    for (const instanceId of plan.toUnload) {
+      try {
+        await this.unloadPlugin(instanceId);
+        unloadedOk.push(instanceId);
+      } catch (err) {
+        failed.push({ instanceId, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    for (const { instanceId, pluginId } of plan.toLoad) {
+      const info = this.cachedLibrary?.plugins.find((p) => p.id === pluginId) ?? null;
+      if (!info) {
+        failed.push({ instanceId, error: `pluginId ${pluginId} not found in cached library — re-scan required` });
+        continue;
+      }
+      try {
+        await this.loadPlugin({
+          instanceId,
+          pluginPath: info.path,
+          format: info.format,
+          sampleRate: opts.sampleRate,
+          blockSize: opts.blockSize,
+        });
+        loadedOk.push(instanceId);
+      } catch (err) {
+        failed.push({ instanceId, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    return { loaded: loadedOk, unloaded: unloadedOk, failed };
   }
 
-  async processBlock(): Promise<never> {
-    await this.send('process_block');
-    throw new Error('unreachable — process_block is Phase 2');
+  /**
+   * Send a stereo float32 block through the enabled slots of `chain`, in
+   * order. Returns the processed buffer (base64-encoded float32 interleaved).
+   *
+   * Passing an empty chain or a chain with every slot disabled still returns
+   * the input verbatim — the sidecar short-circuits — but the renderer is
+   * expected to skip this IPC entirely in that case (see App.tsx). This
+   * double-enforcement matches Ethan's "zero plugins → zero effect" invariant.
+   */
+  async processBlock(opts: {
+    chain: ProcessBlockItem[];
+    bufferBase64: string;
+    frames: number;
+    channels?: number;
+    sampleRate?: number;
+    blockSize?: number;
+  }): Promise<ProcessBlockResult> {
+    const reply = await this.send<Record<string, unknown>>('process_block', {
+      chain: opts.chain,
+      bufferBase64: opts.bufferBase64,
+      frames: opts.frames,
+      channels: opts.channels ?? 2,
+      sampleRate: opts.sampleRate,
+      blockSize: opts.blockSize,
+    });
+    return {
+      frames: Number(reply.frames) || opts.frames,
+      channels: Number(reply.channels) || opts.channels || 2,
+      bufferBase64: typeof reply.bufferBase64 === 'string' ? (reply.bufferBase64 as string) : '',
+      processedSlots: Number(reply.processedSlots) || 0,
+    };
+  }
+
+  async setParameter(instanceId: string, paramIndex: number, value: number): Promise<void> {
+    await this.send('set_parameter', { instanceId, paramIndex, value }, { timeoutMs: 10_000 });
+  }
+
+  async getParameter(instanceId: string, paramIndex: number): Promise<number> {
+    const reply = await this.send<Record<string, unknown>>(
+      'get_parameter',
+      { instanceId, paramIndex },
+      { timeoutMs: 10_000 },
+    );
+    return typeof reply.value === 'number' ? (reply.value as number) : 0;
+  }
+
+  async getPluginState(instanceId: string): Promise<string> {
+    const reply = await this.send<Record<string, unknown>>('get_plugin_state', { instanceId }, { timeoutMs: 10_000 });
+    return typeof reply.stateBase64 === 'string' ? (reply.stateBase64 as string) : '';
+  }
+
+  async setPluginState(instanceId: string, stateBase64: string): Promise<void> {
+    await this.send('set_plugin_state', { instanceId, stateBase64 }, { timeoutMs: 10_000 });
   }
 
   /** Tell the sidecar to flush + exit, then kill the process if needed. */
@@ -294,6 +564,7 @@ export class PluginHostService {
         this.child.kill('SIGTERM');
         this.child = null;
       }
+      this.loadedInstances.clear();
     }
   }
 }

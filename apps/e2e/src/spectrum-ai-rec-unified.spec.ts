@@ -117,10 +117,25 @@ test.describe('Spectrum AI recommendations unified store (Phase 3b) @smoke', () 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await page.getByTestId('main-list-row').first().click();
 
+      // v3.36: read the songId directly from the rendered row rather than
+      // `state.songOrder[0]`. The DOM row is populated synchronously from
+      // the scan result, but `songOrder` is only written to persisted state
+      // via the debounced App.tsx sync (~500ms). On slow CI the evaluate
+      // below fires before the debounce flushes, so `songOrder[0]` was
+      // `undefined` → "no song in songOrder". Reading the data attribute
+      // matches the same ground truth the user sees.
+      const songIdFromRow = await page
+        .getByTestId('main-list-row')
+        .first()
+        .getAttribute('data-song-id');
+      if (!songIdFromRow) {
+        throw new Error('main-list-row missing data-song-id attribute');
+      }
+
       // --- Seed spectrum-band recs (freshly generated) + a fresh mastering
       //     rec, plus one stale spectrum band so the stale path is also
       //     exercised -------------------------------------------------------
-      const seedResult = await page.evaluate(async () => {
+      const seedResult = await page.evaluate(async (songIdFromDom: string) => {
         interface TestApi {
           getUserState: () => Promise<{
             songOrder?: string[];
@@ -138,9 +153,8 @@ test.describe('Spectrum AI recommendations unified store (Phase 3b) @smoke', () 
         }
         const api = (window as unknown as { producerPlayer?: TestApi }).producerPlayer;
         if (!api) throw new Error('producerPlayer API unavailable');
-        const state = await api.getUserState();
-        const songId = state.songOrder?.[0];
-        if (!songId) throw new Error('no song in songOrder');
+        const songId = songIdFromDom;
+        if (!songId) throw new Error('songIdFromDom missing');
 
         const gains = [2.0, -1.5, 0.5, 1.0, -0.5, 3.0];
         const generatedAt = Date.now();
@@ -176,7 +190,7 @@ test.describe('Spectrum AI recommendations unified store (Phase 3b) @smoke', () 
         // Read back through the same IPC surface to assert the set surfaced
         const readBack = await api.getAiRecommendations(songId, 1);
         return { songId, readBack };
-      });
+      }, songIdFromRow);
 
       expect(seedResult.songId).toBeTruthy();
       expect(seedResult.readBack).toBeTruthy();
@@ -206,9 +220,8 @@ test.describe('Spectrum AI recommendations unified store (Phase 3b) @smoke', () 
       await page.getByTestId('ai-rec-regenerate').click();
       await expect(mastCaption).toHaveCount(0, { timeout: 5_000 });
 
-      const afterRegen = await page.evaluate(async () => {
+      const afterRegen = await page.evaluate(async (songIdFromDom: string) => {
         interface TestApi {
-          getUserState: () => Promise<{ songOrder?: string[] } & Record<string, unknown>>;
           getAiRecommendations: (
             songId: string,
             versionNumber: number,
@@ -216,12 +229,11 @@ test.describe('Spectrum AI recommendations unified store (Phase 3b) @smoke', () 
         }
         const api = (window as unknown as { producerPlayer?: TestApi }).producerPlayer;
         if (!api) throw new Error('producerPlayer API unavailable');
-        const state = await api.getUserState();
-        const songId = state.songOrder?.[0];
-        if (!songId) throw new Error('no song in songOrder');
+        const songId = songIdFromDom;
+        if (!songId) throw new Error('songIdFromDom missing');
         const set = await api.getAiRecommendations(songId, 1);
         return { set };
-      });
+      }, songIdFromRow);
       // After regenerate the whole set for this (song, version) is wiped
       // — including every spectrum_eq_band_N metric.
       expect(afterRegen.set).toBeNull();

@@ -9,6 +9,7 @@ import {
   type AgentSaveAttachmentPayload,
   type AgentSendTurnPayload,
   type AgentStartSessionPayload,
+  type AiRecommendation,
   type AutoUpdateState,
   type AutoUpdateStateListener,
   type ICloudBackupData,
@@ -311,6 +312,47 @@ const bridge: ProducerPlayerBridge = {
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.USER_STATE_CHANGED, wrappedListener);
     };
+  },
+
+  // v3.30 — AI mastering recommendations (storage-only; no UI consumer yet).
+  async getAiRecommendations(songId: string, versionNumber: number) {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_RECOMMENDATIONS_GET, songId, versionNumber);
+  },
+
+  async setAiRecommendation(
+    songId: string,
+    versionNumber: number,
+    metricId: string,
+    recommendation: AiRecommendation,
+  ) {
+    await ipcRenderer.invoke(
+      IPC_CHANNELS.AI_RECOMMENDATIONS_SET,
+      songId,
+      versionNumber,
+      metricId,
+      recommendation,
+    );
+  },
+
+  async clearAiRecommendations(songId: string, versionNumber?: number) {
+    await ipcRenderer.invoke(
+      IPC_CHANNELS.AI_RECOMMENDATIONS_CLEAR,
+      songId,
+      versionNumber ?? null,
+    );
+  },
+
+  async markAiRecommendationsStale(
+    songId: string,
+    versionNumber: number,
+    newAnalysisVersion: string,
+  ) {
+    await ipcRenderer.invoke(
+      IPC_CHANNELS.AI_RECOMMENDATIONS_MARK_STALE,
+      songId,
+      versionNumber,
+      newAnalysisVersion,
+    );
   },
 };
 

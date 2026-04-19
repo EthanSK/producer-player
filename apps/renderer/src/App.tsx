@@ -3716,6 +3716,13 @@ export function App(): JSX.Element {
         checklistDawOffsetDefaultEnabled: dawOffsetDefault.enabled,
         lastFileDialogDirectory: '', // managed by main process
         windowBounds: null, // managed by main process — ignored on write
+        // v3.30 storage-only feature: AI mastering recommendations are
+        // authoritatively owned by the main process via the dedicated
+        // setAiRecommendation / clearAiRecommendations IPC surface. The
+        // renderer sends an empty placeholder here and the main process's
+        // SET_USER_STATE handler preserves the on-disk value so this
+        // debounced sync can't wipe it. UI consumer lands in v3.31+.
+        perTrackAiRecommendations: {},
       };
 
       // Enrich with agent settings from localStorage (these are managed by

@@ -28,10 +28,14 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import log from 'electron-log/main';
 import type {
+  AiRecommendation,
+  AiRecommendationSet,
+  AiRecommendationStatus,
   AlbumChecklistItem,
   EqSnapshot,
   ListeningDevice,
   PersistedEqLiveState,
+  PerVersionAiRecommendations,
   ProducerPlayerUserState,
   SavedReferenceTrack,
   SongChecklistItem,
@@ -70,6 +74,11 @@ export const PER_TRACK_KEYS = [
   'eqLiveStates',
   'aiEqRecommendations',
   'songDawOffsets',
+  // v3.30: AI mastering recommendations keyed by (songId → versionNumber → set).
+  // The outer record is songId-keyed so the split-to-disk machinery in
+  // `splitStateForDisk` hoists it into per-track files automatically; the
+  // inner record remains a simple versionNumber-stringified map.
+  'perTrackAiRecommendations',
 ] as const satisfies readonly (keyof ProducerPlayerUserState)[];
 
 export type PerTrackKey = (typeof PER_TRACK_KEYS)[number];
@@ -334,6 +343,120 @@ function parseSongDawOffsets(
 }
 
 // ---------------------------------------------------------------------------
+// v3.30 — AI recommendation parsers
+// ---------------------------------------------------------------------------
+
+const AI_RECOMMENDATION_STATUSES: readonly AiRecommendationStatus[] = [
+  'fresh',
+  'stale',
+  'loading',
+  'failed',
+];
+
+function parseAiRecommendation(value: unknown): AiRecommendation | null {
+  if (!isRecord(value)) return null;
+  const recommendedValue = typeof value.recommendedValue === 'string' ? value.recommendedValue : null;
+  const reason = typeof value.reason === 'string' ? value.reason : null;
+  const model = typeof value.model === 'string' ? value.model : null;
+  const requestId = typeof value.requestId === 'string' ? value.requestId : null;
+  const analysisVersion = typeof value.analysisVersion === 'string' ? value.analysisVersion : null;
+  const generatedAtRaw = value.generatedAt;
+  const generatedAt =
+    typeof generatedAtRaw === 'number' && Number.isFinite(generatedAtRaw) && generatedAtRaw >= 0
+      ? generatedAtRaw
+      : null;
+  const statusRaw = value.status;
+  const status =
+    typeof statusRaw === 'string' && AI_RECOMMENDATION_STATUSES.includes(statusRaw as AiRecommendationStatus)
+      ? (statusRaw as AiRecommendationStatus)
+      : null;
+  if (
+    recommendedValue === null ||
+    reason === null ||
+    model === null ||
+    requestId === null ||
+    analysisVersion === null ||
+    generatedAt === null ||
+    status === null
+  ) {
+    return null;
+  }
+  const rec: AiRecommendation = {
+    recommendedValue,
+    reason,
+    model,
+    requestId,
+    analysisVersion,
+    generatedAt,
+    status,
+  };
+  if (
+    typeof value.recommendedRawValue === 'number' &&
+    Number.isFinite(value.recommendedRawValue)
+  ) {
+    rec.recommendedRawValue = value.recommendedRawValue;
+  }
+  return rec;
+}
+
+function parseAiRecommendationSet(value: unknown): AiRecommendationSet {
+  if (!isRecord(value)) return {};
+  const result: AiRecommendationSet = {};
+  for (const [metricId, rec] of Object.entries(value)) {
+    if (!metricId) continue;
+    const parsed = parseAiRecommendation(rec);
+    if (parsed) result[metricId] = parsed;
+  }
+  return result;
+}
+
+function parsePerVersionAiRecommendations(value: unknown): PerVersionAiRecommendations | null {
+  if (!isRecord(value)) return null;
+  const recommendations = parseAiRecommendationSet(value.recommendations);
+  const aiRecommendedFlag = typeof value.aiRecommendedFlag === 'boolean' ? value.aiRecommendedFlag : false;
+  const lastRunAtRaw = value.lastRunAt;
+  const lastRunAt =
+    lastRunAtRaw === null || lastRunAtRaw === undefined
+      ? null
+      : typeof lastRunAtRaw === 'number' && Number.isFinite(lastRunAtRaw) && lastRunAtRaw >= 0
+        ? lastRunAtRaw
+        : null;
+  return { recommendations, aiRecommendedFlag, lastRunAt };
+}
+
+/**
+ * Parse the top-level `perTrackAiRecommendations` map. Shape is
+ *   Record<songId, Record<versionNumberString, PerVersionAiRecommendations>>.
+ *
+ * JSON forces string keys on the inner record; we accept string-ish integers
+ * (`"1"`, `"42"`) and drop anything that fails to coerce into a finite,
+ * non-negative integer. That way a corrupt key never silently shifts a real
+ * version's data under a garbage key.
+ */
+function parsePerTrackAiRecommendations(
+  value: unknown,
+): Record<string, Record<string, PerVersionAiRecommendations>> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, Record<string, PerVersionAiRecommendations>> = {};
+  for (const [songId, perVersionRaw] of Object.entries(value)) {
+    if (!songId || songId.length === 0) continue;
+    if (!isRecord(perVersionRaw)) continue;
+    const perVersion: Record<string, PerVersionAiRecommendations> = {};
+    for (const [versionKey, payload] of Object.entries(perVersionRaw)) {
+      if (!versionKey) continue;
+      const versionNum = Number(versionKey);
+      if (!Number.isFinite(versionNum) || versionNum < 0 || !Number.isInteger(versionNum)) continue;
+      const parsed = parsePerVersionAiRecommendations(payload);
+      if (parsed) perVersion[String(versionNum)] = parsed;
+    }
+    if (Object.keys(perVersion).length > 0) {
+      result[songId] = perVersion;
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Default state
 // ---------------------------------------------------------------------------
 
@@ -357,6 +480,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     eqSnapshots: {},
     eqLiveStates: {},
     aiEqRecommendations: {},
+    perTrackAiRecommendations: {},
     agentProvider: '',
     agentModels: {},
     agentThinking: {},
@@ -414,6 +538,7 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     eqSnapshots: parseEqSnapshots(raw.eqSnapshots),
     eqLiveStates: parseEqLiveStates(raw.eqLiveStates),
     aiEqRecommendations: parseAiEqRecommendations(raw.aiEqRecommendations),
+    perTrackAiRecommendations: parsePerTrackAiRecommendations(raw.perTrackAiRecommendations),
     agentProvider: typeof raw.agentProvider === 'string' ? raw.agentProvider : '',
     agentModels: parseStringMapRecord(raw.agentModels),
     agentThinking: parseStringMapRecord(raw.agentThinking),
@@ -685,9 +810,67 @@ function decodeSongIdFromFilename(baseName: string): string {
 export class UserStateService {
   private stateDirectoryPath: string;
   private cachedState: ProducerPlayerUserState | null = null;
+  /**
+   * Serialization tail for every read-modify-write mutation on the user
+   * state. All `patchUserState`, `setAiRecommendation`, `clearAiRecommendations`,
+   * `markAiRecommendationsStale`, and `writeUserStatePreservingAiRecommendations`
+   * calls enqueue their read+merge+write cycle here so concurrent callers
+   * see a consistent view of disk.
+   *
+   * Codex-found (2026-04-18, 3 rounds of review):
+   * - Round 1: `Promise.all` over per-metric writes raced on the AI-rec
+   *   read-modify-write and lost sibling metrics.
+   * - Round 2: `SET_USER_STATE` read the "preserve" slice before a concurrent
+   *   AI-rec write landed, then wrote the stale slice back.
+   * - Round 3: other `patchUserState` callers (window bounds, dialog
+   *   directory, library service) could still stomp a just-written AI-rec
+   *   slice via the same cached-then-stale window.
+   *
+   * Making this a shared mutation queue (rather than an AI-rec-only queue)
+   * closes all three via a single mechanism and matches the reality that
+   * every state write goes through the same disk/path.
+   */
+  private stateWriteTail: Promise<unknown> = Promise.resolve();
 
   constructor(stateDirectoryPath: string) {
     this.stateDirectoryPath = stateDirectoryPath;
+  }
+
+  /**
+   * Queue a read-modify-write mutation so the entire cycle runs serially on
+   * this service instance. Rejections are swallowed from the shared tail so
+   * one failed mutation doesn't poison the chain for subsequent callers,
+   * but the original promise returned to the caller still rejects normally.
+   */
+  private enqueueStateMutation<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.stateWriteTail.then(task, task);
+    this.stateWriteTail = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * Write a full user state while preserving the latest on-disk
+   * `perTrackAiRecommendations` value. Used by the renderer's debounced
+   * full-state sync, which sends `{}` as a placeholder for AI recs.
+   *
+   * Codex-found (2026-04-18, round 2): without going through the AI-rec
+   * write queue, a `SET_USER_STATE` invocation can race with a concurrent
+   * `setAiRecommendation` — the full-state handler read `existing.perTrack...`
+   * before the rec write flipped state, then writes that stale slice back.
+   * Routing the preserve-and-write through the AI queue forces a happens-
+   * after on any concurrent rec mutation.
+   */
+  async writeUserStatePreservingAiRecommendations(
+    incoming: ProducerPlayerUserState,
+  ): Promise<ProducerPlayerUserState> {
+    return this.enqueueStateMutation(async () => {
+      const current = await this.readUserState();
+      const merged: ProducerPlayerUserState = {
+        ...incoming,
+        perTrackAiRecommendations: current.perTrackAiRecommendations,
+      };
+      return this.writeUserState(merged);
+    });
   }
 
   getFilePath(): string {
@@ -737,8 +920,25 @@ export class UserStateService {
     return validated;
   }
 
-  /** Apply a partial update (merge into current state, write). */
+  /**
+   * Apply a partial update (merge into current state, write). Serialized via
+   * the shared state-mutation queue so concurrent patches and AI-rec writes
+   * don't race on the read-modify-write cycle — see
+   * `stateWriteTail` for the full history of this fix.
+   */
   async patchUserState(patch: Partial<ProducerPlayerUserState>): Promise<ProducerPlayerUserState> {
+    return this.enqueueStateMutation(() => this.patchUserStateUnlocked(patch));
+  }
+
+  /**
+   * Internal: merge-and-write WITHOUT acquiring `stateWriteTail`. Callers
+   * that already hold the lock (the AI-rec mutators,
+   * `writeUserStatePreservingAiRecommendations`) use this to avoid
+   * deadlocking against themselves.
+   */
+  private async patchUserStateUnlocked(
+    patch: Partial<ProducerPlayerUserState>,
+  ): Promise<ProducerPlayerUserState> {
     const current = await this.readUserState();
     const next: ProducerPlayerUserState = { ...current, ...patch };
     return this.writeUserState(next);
@@ -752,6 +952,192 @@ export class UserStateService {
   /** Whether the unified state file exists on disk. */
   fileExists(): boolean {
     return existsSync(this.getFilePath()) || this.isSplitLayout();
+  }
+
+  // -----------------------------------------------------------------------
+  // v3.30 — AI mastering recommendations (storage API; UI lands in v3.31+)
+  //
+  // Recommendations are nested under
+  //   state.perTrackAiRecommendations[songId][String(versionNumber)]
+  // which piggybacks on the v3.29 split-to-disk pipeline: because
+  // `perTrackAiRecommendations` is listed in PER_TRACK_KEYS, writes go into
+  // `state/tracks/<base64url(songId)>.json` automatically.
+  // -----------------------------------------------------------------------
+
+  /**
+   * Read the recommendation set for one (songId, versionNumber) slot.
+   * Returns `null` if nothing has been stored for that combination so
+   * callers can distinguish "no run yet" from "run returned no metrics".
+   */
+  async getAiRecommendations(
+    songId: string,
+    versionNumber: number,
+  ): Promise<AiRecommendationSet | null> {
+    if (!songId || songId.length === 0) return null;
+    if (!Number.isFinite(versionNumber) || !Number.isInteger(versionNumber) || versionNumber < 0) {
+      return null;
+    }
+    const state = await this.readUserState();
+    const perSong = state.perTrackAiRecommendations[songId];
+    if (!perSong) return null;
+    const slot = perSong[String(versionNumber)];
+    return slot ? slot.recommendations : null;
+  }
+
+  /**
+   * Set a single metric recommendation for (songId, versionNumber, metricId).
+   * Creates the outer and inner containers on demand. Flips
+   * `aiRecommendedFlag` to `true` iff the set now contains at least one
+   * `'fresh'` rec. Updates `lastRunAt` to the rec's `generatedAt`.
+   *
+   * Serialized via `enqueueStateMutation` so concurrent callers
+   * (e.g. `Promise.all` over a full recommendation set from one agent run)
+   * don't stomp on each other's sibling metrics.
+   */
+  async setAiRecommendation(
+    songId: string,
+    versionNumber: number,
+    metricId: string,
+    recommendation: AiRecommendation,
+  ): Promise<void> {
+    if (!songId || songId.length === 0) return;
+    if (!metricId || metricId.length === 0) return;
+    if (!Number.isFinite(versionNumber) || !Number.isInteger(versionNumber) || versionNumber < 0) {
+      return;
+    }
+
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      const perSong = { ...(state.perTrackAiRecommendations[songId] ?? {}) };
+      const versionKey = String(versionNumber);
+      const existingSlot = perSong[versionKey] ?? {
+        recommendations: {},
+        aiRecommendedFlag: false,
+        lastRunAt: null,
+      };
+      const nextRecommendations: AiRecommendationSet = {
+        ...existingSlot.recommendations,
+        [metricId]: recommendation,
+      };
+      const hasFresh = Object.values(nextRecommendations).some((r) => r.status === 'fresh');
+      perSong[versionKey] = {
+        recommendations: nextRecommendations,
+        aiRecommendedFlag: hasFresh,
+        lastRunAt: recommendation.generatedAt,
+      };
+
+      await this.patchUserStateUnlocked({
+        perTrackAiRecommendations: {
+          ...state.perTrackAiRecommendations,
+          [songId]: perSong,
+        },
+      });
+    });
+  }
+
+  /**
+   * Wipe recommendations for a song. When `versionNumber` is provided, only
+   * that version's slot is cleared and other versions are preserved. When
+   * `versionNumber` is omitted, every version for the song is removed.
+   *
+   * Serialized alongside `setAiRecommendation` so a clear cannot race with
+   * a concurrent write.
+   */
+  async clearAiRecommendations(songId: string, versionNumber?: number): Promise<void> {
+    if (!songId || songId.length === 0) return;
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      const perSong = state.perTrackAiRecommendations[songId];
+      if (!perSong) return;
+
+      const nextPerTrack = { ...state.perTrackAiRecommendations };
+
+      if (versionNumber === undefined) {
+        delete nextPerTrack[songId];
+      } else {
+        if (
+          !Number.isFinite(versionNumber) ||
+          !Number.isInteger(versionNumber) ||
+          versionNumber < 0
+        ) {
+          return;
+        }
+        const versionKey = String(versionNumber);
+        if (!(versionKey in perSong)) return;
+        const nextPerSong = { ...perSong };
+        delete nextPerSong[versionKey];
+        if (Object.keys(nextPerSong).length === 0) {
+          delete nextPerTrack[songId];
+        } else {
+          nextPerTrack[songId] = nextPerSong;
+        }
+      }
+
+      await this.patchUserStateUnlocked({ perTrackAiRecommendations: nextPerTrack });
+    });
+  }
+
+  /**
+   * When the analysis fingerprint for a (songId, versionNumber) changes,
+   * flip every rec whose stored `analysisVersion` differs from
+   * `newAnalysisVersion` to `status: 'stale'`. Recs whose analysisVersion
+   * already matches (race: another code path re-ran against the new
+   * analysis) are left untouched.
+   *
+   * Recs are KEPT, not deleted — users may still find them useful as a
+   * historical baseline. The UI treats 'stale' as a muted / dimmed render.
+   *
+   * Also clears `aiRecommendedFlag` when no fresh recs remain.
+   */
+  async markAiRecommendationsStale(
+    songId: string,
+    versionNumber: number,
+    newAnalysisVersion: string,
+  ): Promise<void> {
+    if (!songId || songId.length === 0) return;
+    if (!Number.isFinite(versionNumber) || !Number.isInteger(versionNumber) || versionNumber < 0) {
+      return;
+    }
+    if (typeof newAnalysisVersion !== 'string' || newAnalysisVersion.length === 0) return;
+
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      const perSong = state.perTrackAiRecommendations[songId];
+      if (!perSong) return;
+      const versionKey = String(versionNumber);
+      const slot = perSong[versionKey];
+      if (!slot) return;
+
+      const nextRecommendations: AiRecommendationSet = {};
+      let touched = false;
+      for (const [metricId, rec] of Object.entries(slot.recommendations)) {
+        if (rec.analysisVersion !== newAnalysisVersion && rec.status !== 'stale') {
+          nextRecommendations[metricId] = { ...rec, status: 'stale' };
+          touched = true;
+        } else {
+          nextRecommendations[metricId] = rec;
+        }
+      }
+
+      if (!touched) return;
+
+      const hasFresh = Object.values(nextRecommendations).some((r) => r.status === 'fresh');
+      const nextPerSong = {
+        ...perSong,
+        [versionKey]: {
+          ...slot,
+          recommendations: nextRecommendations,
+          aiRecommendedFlag: hasFresh,
+        },
+      };
+
+      await this.patchUserStateUnlocked({
+        perTrackAiRecommendations: {
+          ...state.perTrackAiRecommendations,
+          [songId]: nextPerSong,
+        },
+      });
+    });
   }
 
   // -----------------------------------------------------------------------

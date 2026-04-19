@@ -119,6 +119,8 @@ test('PER_TRACK_KEYS surface is stable and matches expected songId-keyed fields'
     'eqLiveStates',
     'aiEqRecommendations',
     'songDawOffsets',
+    // v3.30: AI mastering recommendations ride the split pipeline.
+    'perTrackAiRecommendations',
   ]);
 });
 

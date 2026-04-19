@@ -217,6 +217,11 @@ export const IPC_CHANNELS = {
   EXPORT_USER_STATE: 'producer-player:export-user-state',
   IMPORT_USER_STATE: 'producer-player:import-user-state',
   USER_STATE_CHANGED: 'producer-player:user-state-changed',
+  // v3.30 — AI mastering recommendations (storage layer only; UI in v3.31+)
+  AI_RECOMMENDATIONS_GET: 'producer-player:ai-recommendations-get',
+  AI_RECOMMENDATIONS_SET: 'producer-player:ai-recommendations-set',
+  AI_RECOMMENDATIONS_CLEAR: 'producer-player:ai-recommendations-clear',
+  AI_RECOMMENDATIONS_MARK_STALE: 'producer-player:ai-recommendations-mark-stale',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
@@ -289,6 +294,79 @@ export interface PersistedEqLiveState {
   showEqTonalBalance: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// AI mastering recommendations (v3.30, Phase 2 — storage schema only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifecycle status of a single AI recommendation entry.
+ *
+ * - `fresh`   — analysisVersion at generation time matches the track's
+ *               current analysis fingerprint. Safe to display normally.
+ * - `stale`   — analysis changed since generation; the rec may no longer
+ *               reflect the current mix. Rendered with a muted treatment so
+ *               the user can still read it and decide whether to re-run.
+ * - `loading` — generation in flight. UI renders a placeholder.
+ * - `failed`  — the agent request failed. UI renders a retry affordance.
+ */
+export type AiRecommendationStatus = 'fresh' | 'stale' | 'loading' | 'failed';
+
+/**
+ * One AI-recommended value for a single metric on a single track/version.
+ *
+ * Metric IDs are the same IDs used by `masteringChecklistRules.ts` and the
+ * spectrum analyzer panels (e.g. `integrated_lufs`, `true_peak`,
+ * `spectral_balance__sub`, `platform__spotify`). Storing raw + formatted
+ * value separately lets the UI render without reparsing `recommendedValue`.
+ */
+export interface AiRecommendation {
+  /** Formatted for display, e.g. `"-12.5 LUFS"`, `"reduce 1.5 dB on sub"`. */
+  recommendedValue: string;
+  /** Optional machine-parseable form when the rec is a single number. */
+  recommendedRawValue?: number;
+  /** Short human-readable justification; surfaced in tooltip + optional detail row. */
+  reason: string;
+  /** Model identifier (e.g. `"claude-opus-4-6"`, `"gpt-5.4"`). */
+  model: string;
+  /** Unique per-request id, for correlation + stale-write rejection. */
+  requestId: string;
+  /**
+   * Opaque fingerprint of the analysis that backed this rec at generation
+   * time. When the current analysis fingerprint diverges, the rec is flipped
+   * to `'stale'` by `markAiRecommendationsStale`.
+   */
+  analysisVersion: string;
+  /** Unix milliseconds. */
+  generatedAt: number;
+  /** Lifecycle status — see `AiRecommendationStatus`. */
+  status: AiRecommendationStatus;
+}
+
+/**
+ * A map of recommendations for a single track/version, keyed by metric ID.
+ *
+ * The keys are arbitrary metric IDs (including unicode) so consumers should
+ * not assume a closed enum — the set of metrics grows as new mastering
+ * panels are added, and v3.30 stores whatever ids the caller provides.
+ */
+export type AiRecommendationSet = Record<string, AiRecommendation>;
+
+/**
+ * Recommendations scoped to one (songId, versionNumber) pair.
+ *
+ * - `recommendations`   — per-metric map.
+ * - `aiRecommendedFlag` — true when at least one metric in the set has a
+ *                         `'fresh'` rec. Used by the auto-run trigger gate
+ *                         (v3.31+) to skip already-done tracks.
+ * - `lastRunAt`         — unix ms of the most recent generation run end
+ *                         (success or failure), or `null` if none.
+ */
+export interface PerVersionAiRecommendations {
+  recommendations: AiRecommendationSet;
+  aiRecommendedFlag: boolean;
+  lastRunAt: number | null;
+}
+
 /**
  * Unified user state — a single file that holds ALL user-authored data.
  * Layout/UI preferences (panel order, expanded states) stay in localStorage.
@@ -339,6 +417,26 @@ export interface ProducerPlayerUserState {
 
   // AI EQ recommendations (per-song) — gain arrays suggested by AI
   aiEqRecommendations: Record<string, number[]>;
+
+  // v3.30: AI mastering recommendations (Phase 2 — storage only; no UI yet).
+  //
+  // Scoped by (songId, versionNumber, analysisVersion):
+  //   perTrackAiRecommendations[songId][versionNumber] = PerVersionAiRecommendations
+  //
+  // Each `PerVersionAiRecommendations` holds a map of metric recommendations
+  // keyed by the same metric IDs used by the mastering checklist rules and
+  // spectrum analyzer panels. When the analysis fingerprint changes for a
+  // (songId, versionNumber) pair, call
+  // `markAiRecommendationsStale(songId, versionNumber, newAnalysisVersion)` to
+  // flip the still-valid recs to `'stale'` (they are kept — users may still
+  // find the old rec useful — but the UI renders them differently).
+  //
+  // versionNumber is stored as the stringified integer key because JSON
+  // objects only support string keys. The state-service parser coerces it
+  // back to an integer-like shape on read.
+  //
+  // UI, auto-run, and agent tool surfaces land in v3.31+.
+  perTrackAiRecommendations: Record<string, Record<string, PerVersionAiRecommendations>>;
 
   // Agent settings
   agentProvider: string;
@@ -860,6 +958,25 @@ export interface ProducerPlayerBridge {
   exportUserState(): Promise<UserStateExportResult>;
   importUserState(): Promise<UserStateImportResult>;
   onUserStateChanged(listener: (state: ProducerPlayerUserState) => void): () => void;
+
+  // v3.30 — AI mastering recommendations (Phase 2 storage surface, no UI yet).
+  // Renderer consumers land in v3.31+.
+  getAiRecommendations(
+    songId: string,
+    versionNumber: number,
+  ): Promise<AiRecommendationSet | null>;
+  setAiRecommendation(
+    songId: string,
+    versionNumber: number,
+    metricId: string,
+    recommendation: AiRecommendation,
+  ): Promise<void>;
+  clearAiRecommendations(songId: string, versionNumber?: number): Promise<void>;
+  markAiRecommendationsStale(
+    songId: string,
+    versionNumber: number,
+    newAnalysisVersion: string,
+  ): Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

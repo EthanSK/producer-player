@@ -68,6 +68,7 @@ import type {
   AgentStartSessionPayload,
   AgentSendTurnPayload,
   AgentRespondApprovalPayload,
+  AiRecommendation,
   AudioFileAnalysis,
   AutoUpdateState,
   MasteringAnalysisCachePayload,
@@ -4660,6 +4661,12 @@ function registerIpcHandlers(service: FileLibraryService): void {
     // Several fields are authoritatively owned by the main process and must
     // not be overwritten by the renderer's debounced sync (the renderer sends
     // placeholder values for these). Preserve whatever is already on disk.
+    //
+    // v3.30 codex-found race (round 2): AI recommendations must be merged
+    // under the same write queue as `setAiRecommendation` so a full-state
+    // sync landing between a concurrent rec write's read and write phases
+    // can't publish a stale slice. The service method below takes care of
+    // that — read the comment on `writeUserStatePreservingAiRecommendations`.
     const existing = await userStateService.readUserState();
     const merged: ProducerPlayerUserState = {
       ...state,
@@ -4668,8 +4675,11 @@ function registerIpcHandlers(service: FileLibraryService): void {
       songOrder: existing.songOrder,
       autoMoveOld: existing.autoMoveOld,
       lastFileDialogDirectory: existing.lastFileDialogDirectory,
+      // Placeholder — `writeUserStatePreservingAiRecommendations` overwrites
+      // this with the latest on-disk value under the AI-rec write lock.
+      perTrackAiRecommendations: existing.perTrackAiRecommendations,
     };
-    const updated = await userStateService.writeUserState(merged);
+    const updated = await userStateService.writeUserStatePreservingAiRecommendations(merged);
 
     // Also sync the linked folders and song order into the library service
     // so old-format persistence continues to work during the transition.
@@ -4895,6 +4905,55 @@ function registerIpcHandlers(service: FileLibraryService): void {
       return { success: false, error: `Failed to import: ${message}` };
     }
   });
+
+  // --- AI mastering recommendations IPC handlers (v3.30 storage layer) ---
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_RECOMMENDATIONS_GET,
+    async (_event, songId: string, versionNumber: number) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      return userStateService.getAiRecommendations(songId, versionNumber);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_RECOMMENDATIONS_SET,
+    async (
+      _event,
+      songId: string,
+      versionNumber: number,
+      metricId: string,
+      recommendation: AiRecommendation,
+    ) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      await userStateService.setAiRecommendation(songId, versionNumber, metricId, recommendation);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_RECOMMENDATIONS_CLEAR,
+    async (_event, songId: string, versionNumber: number | null) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      if (versionNumber === null || versionNumber === undefined) {
+        await userStateService.clearAiRecommendations(songId);
+      } else {
+        await userStateService.clearAiRecommendations(songId, versionNumber);
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AI_RECOMMENDATIONS_MARK_STALE,
+    async (
+      _event,
+      songId: string,
+      versionNumber: number,
+      newAnalysisVersion: string,
+    ) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      await userStateService.markAiRecommendationsStale(songId, versionNumber, newAnalysisVersion);
+    },
+  );
 
   // --- Agent IPC handlers ---
 

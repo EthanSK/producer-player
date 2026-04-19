@@ -65,6 +65,37 @@ jobs:
           npm run build -w apps/renderer
           npm run build -w apps/electron
 
+  unit-tests:
+    name: Unit tests (domain + renderer + electron)
+    runs-on: ubuntu-latest
+    needs: node-build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspace packages (required for test bundles)
+        run: |
+          npm run build -w packages/contracts
+          npm run build -w packages/domain
+
+      - name: Run domain unit tests
+        run: npm test -w packages/domain
+
+      - name: Run renderer unit tests (vitest)
+        run: npm test -w @producer-player/renderer
+
+      - name: Run electron state-service unit tests
+        run: npm test -w @producer-player/electron
+
   runtime-smoke:
     name: Runtime smoke (ubuntu)
     runs-on: ubuntu-latest

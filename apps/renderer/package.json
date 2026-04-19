@@ -7,7 +7,8 @@
     "dev": "vite --host 127.0.0.1 --port 4207 --strictPort",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@producer-player/contracts": "*",

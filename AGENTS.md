@@ -149,6 +149,35 @@ flags) should remain localStorage-only.
   - `npm run e2e:core`
   - `npm run e2e:full` (same coverage as legacy `e2e:ci`)
 
+## CI & Testing
+
+### Post-push CI monitoring
+
+After pushing a commit that cuts a release or runs the test suite, monitor
+the CI workflows (use `gh run list --limit 3` or watch the release workflow)
+for up to 10-15 minutes. If a test-job fails:
+- Inspect the failure log (`gh run view <run-id> --log-failed`)
+- Fix the underlying bug (don't just skip or delete the test)
+- Pre-commit-codex-review the fix
+- Push a fresh commit (bump version if the project uses auto-release-on-push)
+
+Do not declare shipping success without seeing the CI green. "Pushed" is
+not the same as "released" or "passed" — the workflow gives us the real
+signal.
+
+### What runs on every push (ubuntu)
+
+1. `node-build` — version-bump policy, typecheck, build all workspaces.
+2. `unit-tests` — domain (`npm test -w packages/domain`), renderer
+   (`npm test -w @producer-player/renderer`, vitest), electron
+   state-service (`npm test -w @producer-player/electron`).
+3. `runtime-smoke` — `npm run e2e:smoke` (Playwright @smoke-tagged specs).
+4. `windows-ci` — typecheck + build + domain tests + `ci:smoke`.
+
+Renderer vitest + electron state-service tests were added to CI in v3.34
+after the test-coverage audit (2026-04-19) exposed them as "exist but
+never run in CI".
+
 ## Release Versioning
 
 - **Version format is ALWAYS x.y (display) / x.y.0 (internal). Never x.y.z where z > 0.**

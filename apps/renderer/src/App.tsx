@@ -15,6 +15,7 @@ import {
 import type {
   AiRecommendation,
   AiRecommendationSet,
+  AiRecommendationStatus,
   AlbumChecklistItem,
   AudioFileAnalysis,
   AutoUpdateState,
@@ -477,6 +478,60 @@ const MASTERING_CACHE_DISCLOSURE_REMINDER =
   'If you reference cached track analyses, explicitly tell the user those values came from the mastering cache.';
 const AI_EQ_PER_SONG_KEY_PREFIX = 'producer-player.ai-eq-recommendation.';
 const EQ_LIVE_STATE_PER_SONG_KEY_PREFIX = 'producer-player.eq-live-state.';
+// v3.32 — Phase 3b. The Spectrum Analyzer's AI EQ recommendations migrate
+// into the unified v3.30 `perTrackAiRecommendations` store under metric IDs
+// `spectrum_eq_band_0` ... `spectrum_eq_band_N`, with one `AiRecommendation`
+// entry per FREQUENCY_BANDS band (see `buildSpectrumBandMetricId`). The
+// Spectrum keeps its own localStorage persistence (dual-write) so its inline
+// EQ overlay renders with zero latency; the unified-store write lets the rest
+// of the v3.30 machinery (fullscreen toggle gate, regenerate button, agent
+// queries, stale-flip) treat Spectrum recs the same as every other metric.
+const SPECTRUM_AI_EQ_METRIC_ID_PREFIX = 'spectrum_eq_band_';
+const SPECTRUM_AI_EQ_VERSION_NUMBER = 1;
+// One-shot sentinel: once set, the legacy `aiEqRecommendations` map has been
+// copied into the unified store as `stale` recs. The Spectrum keeps running
+// its own localStorage persistence post-migration (dual-write), so the
+// sentinel only guards the copy-over; it doesn't block future writes.
+const SPECTRUM_AI_MIGRATED_TO_UNIFIED_KEY =
+  'producer-player.spectrum-ai-migrated-to-unified-v3.32';
+const SPECTRUM_LEGACY_ANALYSIS_VERSION = 'legacy-pre-v3.30';
+
+function buildSpectrumBandMetricId(bandIndex: number): string {
+  return `${SPECTRUM_AI_EQ_METRIC_ID_PREFIX}${bandIndex}`;
+}
+
+/**
+ * Shape a single EQ band's recommended gain into an `AiRecommendation` so it
+ * can be written through the unified v3.30 storage surface. The Spectrum's
+ * per-band recs use the same schema as every other metric — `status: 'fresh'`
+ * for live agent output, `'stale'` for the one-shot legacy migration, and the
+ * band's label surfaces in the `reason` field so the AI-rec caption reads
+ * naturally in any consumer that re-renders the set outside the spectrum.
+ */
+function buildSpectrumBandRecommendation(args: {
+  bandIndex: number;
+  gainDb: number;
+  status: AiRecommendationStatus;
+  analysisVersion: string;
+  generatedAt: number;
+  model: string;
+  requestId: string;
+}): AiRecommendation {
+  const { bandIndex, gainDb, status, analysisVersion, generatedAt, model, requestId } = args;
+  const band = FREQUENCY_BANDS[bandIndex];
+  const label = band ? band.label : `Band ${bandIndex + 1}`;
+  const sign = gainDb >= 0 ? '+' : '';
+  return {
+    recommendedValue: `${sign}${gainDb.toFixed(1)} dB on ${label}`,
+    recommendedRawValue: gainDb,
+    reason: `AI-recommended EQ gain for the ${label} band.`,
+    model,
+    requestId,
+    analysisVersion,
+    generatedAt,
+    status,
+  };
+}
 const MIX_REF_SHORTCUT_STORAGE_KEY = 'producer-player.mix-ref-shortcut.v1';
 
 interface StoredShortcut {
@@ -3616,6 +3671,114 @@ export function App(): JSX.Element {
           }
         }
 
+        // v3.32 Phase 3b — one-shot migration: copy the legacy
+        // `aiEqRecommendations` map into the unified v3.30
+        // `perTrackAiRecommendations` store as stale recs under
+        // `spectrum_eq_band_N` metric IDs. Gated by BOTH a localStorage
+        // sentinel AND a per-song probe against the unified store — the
+        // sentinel handles the hot path, and the unified-store probe is a
+        // defense-in-depth check for the case where localStorage was wiped
+        // (fresh Chromium profile, dev↔prod switch, iCloud restore, etc.)
+        // but the unified state already holds fresh post-v3.32 recs. Codex
+        // 2026-04-18 Phase 3b review round 1: without the unified-store
+        // probe, a fresh-profile-but-preserved-state scenario would overwrite
+        // fresh spectrum_eq_band_N recs with stale legacy ones. Legacy data
+        // was stored per-song-only (no versionNumber), so we map every
+        // song's entry under versionNumber=SPECTRUM_AI_EQ_VERSION_NUMBER (1).
+        // A permanent backup of the old map already lives in the v3.29
+        // pre-split monolithic backup, so we don't need a fresh one here.
+        try {
+          const alreadyMigrated = window.localStorage.getItem(
+            SPECTRUM_AI_MIGRATED_TO_UNIFIED_KEY,
+          );
+          if (
+            alreadyMigrated !== '1' &&
+            userState.aiEqRecommendations &&
+            Object.keys(userState.aiEqRecommendations).length > 0
+          ) {
+            const migratedAt = Date.now();
+            // Probe the unified store once per song and skip migration for
+            // any song that already has spectrum_eq_band_* recs. This must
+            // complete before the sentinel flips so repeated startup flushes
+            // don't lose the guard if a single setAiRecommendation fails.
+            await Promise.all(
+              Object.entries(userState.aiEqRecommendations).map(
+                async ([songId, gains]) => {
+                  if (!songId || !Array.isArray(gains)) return;
+                  // Fetch the current unified set for this song at
+                  // versionNumber=1 and skip if ANY spectrum_eq_band_* rec
+                  // already lives there — that rec is either fresh (post-
+                  // v3.32) or already stale from a prior migration; either
+                  // way we must not stomp it with a legacy write.
+                  let existingSet: AiRecommendationSet | null = null;
+                  try {
+                    existingSet =
+                      await window.producerPlayer.getAiRecommendations(
+                        songId,
+                        SPECTRUM_AI_EQ_VERSION_NUMBER,
+                      );
+                  } catch {
+                    /* read failed — treat as empty and migrate */
+                  }
+                  const hasExistingSpectrum = existingSet
+                    ? Object.keys(existingSet).some((metricId) =>
+                        metricId.startsWith(
+                          SPECTRUM_AI_EQ_METRIC_ID_PREFIX,
+                        ),
+                      )
+                    : false;
+                  if (hasExistingSpectrum) return;
+                  for (
+                    let bandIndex = 0;
+                    bandIndex < gains.length;
+                    bandIndex += 1
+                  ) {
+                    const gainDb = gains[bandIndex];
+                    if (
+                      typeof gainDb !== 'number' ||
+                      !Number.isFinite(gainDb)
+                    ) {
+                      continue;
+                    }
+                    const rec = buildSpectrumBandRecommendation({
+                      bandIndex,
+                      gainDb,
+                      status: 'stale',
+                      analysisVersion: SPECTRUM_LEGACY_ANALYSIS_VERSION,
+                      generatedAt: migratedAt,
+                      model: 'legacy-migration',
+                      requestId: `spectrum-legacy-migrate-${songId}-band-${bandIndex}`,
+                    });
+                    try {
+                      await window.producerPlayer.setAiRecommendation(
+                        songId,
+                        SPECTRUM_AI_EQ_VERSION_NUMBER,
+                        buildSpectrumBandMetricId(bandIndex),
+                        rec,
+                      );
+                    } catch {
+                      /* best effort — localStorage path still renders */
+                    }
+                  }
+                },
+              ),
+            );
+            window.localStorage.setItem(
+              SPECTRUM_AI_MIGRATED_TO_UNIFIED_KEY,
+              '1',
+            );
+          } else if (alreadyMigrated !== '1') {
+            // Nothing to migrate on this machine — still mark done so we
+            // don't walk the empty map on every future startup.
+            window.localStorage.setItem(
+              SPECTRUM_AI_MIGRATED_TO_UNIFIED_KEY,
+              '1',
+            );
+          }
+        } catch {
+          /* ignore — migration is best effort, dual-write keeps UX alive */
+        }
+
         // v3.16.0: hydrate per-song "restore reference on open" toggles into
         // localStorage cache so `readRestoreReferenceForSong` has the right
         // values ready before the auto-restore useEffect fires on first
@@ -5828,6 +5991,33 @@ export function App(): JSX.Element {
     // Accumulate text deltas from the agent response and parse on completion
     let accumulated = '';
 
+    // v3.32 Phase 3b — also mirror the parsed per-band gains into the unified
+    // `perTrackAiRecommendations` store (metric IDs `spectrum_eq_band_0..N`)
+    // so the rest of the v3.30 AI-rec machinery (fullscreen toggle, regenerate
+    // button, agent query tools) can treat Spectrum recs the same as any
+    // other metric. We dual-write: localStorage stays the fast path for the
+    // inline Spectrum overlay (no IPC round-trip to re-render the cyan
+    // dashed curve), and the unified store becomes the authoritative store
+    // for everything else.
+    const requestVersionNumber = selectedPlaybackVersion
+      ? getVersionNumberFromFileName(selectedPlaybackVersion.fileName) ??
+        SPECTRUM_AI_EQ_VERSION_NUMBER
+      : SPECTRUM_AI_EQ_VERSION_NUMBER;
+    const unifiedRequestId = `spectrum-ai-eq-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
+    // analysisVersion = short digest of the mix analysis inputs that shaped
+    // this rec, so `markAiRecommendationsStale` can flip these bands when the
+    // mix is re-analysed. Lightweight string — avoids pulling in a hash lib.
+    const unifiedAnalysisVersion = [
+      analysis?.peakDbfs?.toFixed(2) ?? 'n/a',
+      analysis?.integratedLufsEstimate?.toFixed(2) ?? 'n/a',
+      analysis?.crestFactorDb?.toFixed(2) ?? 'n/a',
+      analysis?.tonalBalance?.low?.toFixed(2) ?? 'n/a',
+      analysis?.tonalBalance?.mid?.toFixed(2) ?? 'n/a',
+      analysis?.tonalBalance?.high?.toFixed(2) ?? 'n/a',
+    ].join('|');
+
     const unsubscribe = window.producerPlayer.onAgentEvent((event) => {
       if (event.type === 'text-delta') {
         accumulated += event.content;
@@ -5838,6 +6028,32 @@ export function App(): JSX.Element {
           setAiRecommendedEq(parsed);
           setShowAiEqCurve(true);
           persistAiEqForSong(requestSongId, parsed);
+          // Dual-write to the unified store. Fire-and-forget — the Spectrum
+          // UX already feels live via localStorage, and the IPC layer
+          // serializes concurrent sets (see `stateWriteTail` in
+          // state-service.ts) so sibling bands cannot race each other.
+          const generatedAt = Date.now();
+          for (let bandIndex = 0; bandIndex < parsed.length; bandIndex += 1) {
+            const rec = buildSpectrumBandRecommendation({
+              bandIndex,
+              gainDb: parsed[bandIndex],
+              status: 'fresh',
+              analysisVersion: unifiedAnalysisVersion,
+              generatedAt,
+              model: 'agent-live',
+              requestId: `${unifiedRequestId}-band-${bandIndex}`,
+            });
+            void window.producerPlayer
+              .setAiRecommendation(
+                requestSongId,
+                requestVersionNumber,
+                buildSpectrumBandMetricId(bandIndex),
+                rec,
+              )
+              .catch(() => {
+                /* noop — dual-write; localStorage keeps the rec visible */
+              });
+          }
         }
         setAiEqLoading(false);
       } else if (event.type === 'error') {
@@ -6585,6 +6801,19 @@ export function App(): JSX.Element {
       .catch(() => {
         /* noop — Phase 4 wires the real agent call */
       });
+    // v3.32 Phase 3b — Regenerate should also clear the Spectrum's own
+    // AI EQ render so the cyan dashed curve disappears alongside the
+    // Mastering captions. Wipe both localStorage (authoritative for the
+    // inline overlay via `readAiEqForSong`) and the in-memory state, so
+    // the user sees a unified "clean slate" and the next AI Recommend
+    // click starts from scratch.
+    try {
+      window.localStorage.removeItem(`${AI_EQ_PER_SONG_KEY_PREFIX}${songId}`);
+    } catch {
+      /* ignore — storage may be full/unavailable */
+    }
+    setAiRecommendedEq(null);
+    setShowAiEqCurve(false);
   }, [selectedPlaybackSongId, currentPlaybackVersionNumber]);
 
   useEffect(() => {
@@ -7599,13 +7828,27 @@ export function App(): JSX.Element {
   }, [showRefDiffCurve, analysis, referenceTrack]);
 
   // Compute AI-recommended EQ curve from the AI's per-band gain suggestions.
+  //
+  // v3.32 Phase 3b — the fullscreen "Show AI recommendations" toggle now gates
+  // the Spectrum's AI EQ curve while the fullscreen overlay is open. Toggle
+  // OFF → curve hides (along with the Mastering captions); data stays in
+  // localStorage + the unified store so flipping back ON restores the curve
+  // instantly. Outside the fullscreen overlay (compact dock, etc.) the gate
+  // doesn't apply — the compact dock SpectrumAnalyzer isn't passed `aiEqCurve`
+  // anyway, so the effective behaviour is "fullscreen only".
   const aiEqCurve = useMemo(() => {
     if (!showAiEqCurve || !aiRecommendedEq) return undefined;
+    if (analysisExpanded && !showAiRecommendationsFullscreen) return undefined;
     const hasAny = aiRecommendedEq.some((g) => Math.abs(g) > 0.01);
     if (!hasAny) return undefined;
     const sampleRate = playbackAudioContextRef.current?.sampleRate ?? 44100;
     return computeEqGainCurve(aiRecommendedEq, 256, 20, 20000, sampleRate);
-  }, [showAiEqCurve, aiRecommendedEq]);
+  }, [
+    showAiEqCurve,
+    aiRecommendedEq,
+    analysisExpanded,
+    showAiRecommendationsFullscreen,
+  ]);
 
   async function loadReferenceTrack(
     sourceType: ReferenceTrackSource,

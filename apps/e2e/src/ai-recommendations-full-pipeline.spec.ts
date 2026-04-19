@@ -379,6 +379,21 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
         .poll(async () => getMockCallCount(page), { timeout: 20_000 })
         .toBeGreaterThanOrEqual(1);
 
+      // v3.36 (Codex round 2): wait for a rendered AI caption with the
+      // mock's canned value, not just the mock call count. The mock call
+      // happens BEFORE `setAiRecommendation` lands + React flushes — if we
+      // fire the detector on the mock-count signal alone, the subsequent
+      // `clearAiRecommendations()` can race the in-flight auto-run's state
+      // update and the second mock call is either dropped by the monotonic
+      // run-id guard or timed-out by the poll. Asserting on the rendered
+      // text (`-14.0 LUFS` from the mock) proves the full
+      // mock → parse → setAiRecommendation → fetchback → render chain
+      // completed so the detector always fires from a steady state.
+      await expect(page.getByTestId('ai-rec-integrated_lufs')).toContainText(
+        '-14.0 LUFS',
+        { timeout: 20_000 },
+      );
+
       const callsBefore = await getMockCallCount(page);
 
       // Invoke the detector directly via the window harness hook. The UX
@@ -393,8 +408,11 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       });
       expect(handled).toBe(true);
 
+      // v3.35: bumped from 10s to 20s to match the auto-run poll timeout —
+      // CI ubuntu runners regularly need >10s for the clear → retrigger
+      // → mock-invocation chain under load.
       await expect
-        .poll(async () => getMockCallCount(page), { timeout: 10_000 })
+        .poll(async () => getMockCallCount(page), { timeout: 20_000 })
         .toBeGreaterThan(callsBefore);
 
       const lastSource = await page.evaluate(() => {

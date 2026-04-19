@@ -29,6 +29,7 @@ import { useMemo, useState } from 'react';
 import type {
   PluginChainItem,
   PluginInfo,
+  PluginPresetEntry,
   ScannedPluginLibrary,
   TrackPluginChain,
 } from '@producer-player/contracts';
@@ -45,7 +46,11 @@ export interface PluginChainStripProps {
   onToggle: (instanceId: string) => void;
   onReorder: (orderedInstanceIds: string[]) => void;
   onOpenEditor: (instanceId: string) => void;
+  onSavePreset?: (instanceId: string, name: string) => void;
+  onRecallPreset?: (instanceId: string, name: string) => void;
+  onDeletePreset?: (pluginId: string, name: string) => void;
   onScan: () => void;
+  presetsByPluginId?: Record<string, PluginPresetEntry[]>;
   /**
    * v3.42 Phase 3 — set of instanceIds whose native editor window is
    * currently open. Used to visually highlight the Edit button.
@@ -86,12 +91,17 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     onToggle,
     onReorder,
     onOpenEditor,
+    onSavePreset,
+    onRecallPreset,
+    onDeletePreset,
     onScan,
+    presetsByPluginId,
     openEditorInstanceIds,
     loadedInstanceIds,
   } = props;
 
   const [browserOpen, setBrowserOpen] = useState(false);
+  const [presetMenuInstanceId, setPresetMenuInstanceId] = useState<string | null>(null);
 
   // Chain items are stored as an unordered array in state, but must render in
   // `order` — the IPC layer guarantees `order` is a 0-based stable sequence.
@@ -142,6 +152,8 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
           // (legacy behavior: still call onOpenEditor and let the IPC
           // layer surface errors). When provided, we honor it strictly.
           const editDisabled = loadedInstanceIds ? !loadedInstanceIds.has(item.instanceId) : false;
+          const presetMenuOpen = presetMenuInstanceId === item.instanceId;
+          const savedPresets = presetsByPluginId?.[item.pluginId] ?? [];
           return (
             <div
               key={item.instanceId}
@@ -225,6 +237,94 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
               >
                 <span aria-hidden="true">✎</span>
               </button>
+
+              <div className="plugin-pill__preset-wrap">
+                <button
+                  type="button"
+                  className="plugin-pill__preset"
+                  onClick={() =>
+                    setPresetMenuInstanceId((current) =>
+                      current === item.instanceId ? null : item.instanceId,
+                    )
+                  }
+                  aria-haspopup="menu"
+                  aria-expanded={presetMenuOpen}
+                  aria-label={`Preset menu for ${displayName}`}
+                  title="Plugin presets"
+                  data-testid="plugin-pill-preset-menu"
+                >
+                  <span aria-hidden="true">⋯</span>
+                </button>
+                {presetMenuOpen ? (
+                  <div
+                    className="plugin-preset-menu"
+                    role="menu"
+                    aria-label={`Presets for ${displayName}`}
+                  >
+                    <button
+                      type="button"
+                      className="plugin-preset-menu__item"
+                      role="menuitem"
+                      onClick={() => {
+                        const name = window.prompt('Save preset as:');
+                        if (!name) return;
+                        onSavePreset?.(item.instanceId, name);
+                        setPresetMenuInstanceId(null);
+                      }}
+                      disabled={!onSavePreset}
+                    >
+                      Save preset…
+                    </button>
+
+                    <div className="plugin-preset-menu__section" aria-label="Load preset">
+                      <span className="plugin-preset-menu__heading">Load preset</span>
+                      {savedPresets.length > 0 ? (
+                        savedPresets.map((preset) => (
+                          <button
+                            type="button"
+                            className="plugin-preset-menu__item"
+                            role="menuitem"
+                            key={`load-${preset.name}`}
+                            onClick={() => {
+                              onRecallPreset?.(item.instanceId, preset.name);
+                              setPresetMenuInstanceId(null);
+                            }}
+                            disabled={!onRecallPreset}
+                          >
+                            {preset.name}
+                          </button>
+                        ))
+                      ) : (
+                        <span className="plugin-preset-menu__empty">No saved presets</span>
+                      )}
+                    </div>
+
+                    {onDeletePreset ? (
+                      <div className="plugin-preset-menu__section" aria-label="Delete preset">
+                        <span className="plugin-preset-menu__heading">Delete preset</span>
+                        {savedPresets.length > 0 ? (
+                          savedPresets.map((preset) => (
+                            <button
+                              type="button"
+                              className="plugin-preset-menu__item plugin-preset-menu__item--danger"
+                              role="menuitem"
+                              key={`delete-${preset.name}`}
+                              onClick={() => {
+                                onDeletePreset(item.pluginId, preset.name);
+                                setPresetMenuInstanceId(null);
+                              }}
+                            >
+                              {preset.name}
+                            </button>
+                          ))
+                        ) : (
+                          <span className="plugin-preset-menu__empty">No saved presets</span>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
 
               <button
                 type="button"

@@ -233,6 +233,11 @@ export const IPC_CHANNELS = {
   PLUGIN_REORDER_CHAIN: 'producer-player:plugin-reorder-chain',
   PLUGIN_TOGGLE_ENABLED: 'producer-player:plugin-toggle-enabled',
   PLUGIN_SET_STATE: 'producer-player:plugin-set-state',
+  // v3.43 Phase 4 — Plugin preset save/recall.
+  PLUGIN_PRESET_SAVE: 'producer-player:plugin-preset-save',
+  PLUGIN_PRESET_RECALL: 'producer-player:plugin-preset-recall',
+  PLUGIN_PRESET_LIST: 'producer-player:plugin-preset-list',
+  PLUGIN_PRESET_DELETE: 'producer-player:plugin-preset-delete',
   // v3.42 — Plugin hosting Phase 3 (native editor windows).
   PLUGIN_EDITOR_OPEN: 'producer-player:plugin-editor-open',
   PLUGIN_EDITOR_CLOSE: 'producer-player:plugin-editor-close',
@@ -380,6 +385,22 @@ export interface ScannedPluginLibrary {
   scannedAt: string;
   /** Bumped whenever the scan schema/layout changes. */
   scanVersion: number;
+}
+
+/**
+ * v3.43 Phase 4 — saved opaque state blobs, scoped per stable plugin id.
+ * Names are unique within a pluginIdentifier; the blob is sidecar-owned.
+ */
+export interface PluginPresetEntry {
+  pluginIdentifier: string;
+  name: string;
+  stateBase64: string;
+  savedAt: string;
+}
+
+export interface PluginPresetLibrary {
+  version: 1;
+  presets: PluginPresetEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,6 +1126,10 @@ export interface ProducerPlayerBridge {
   reorderPluginChain(songId: string, orderedInstanceIds: string[]): Promise<TrackPluginChain>;
   togglePluginEnabled(songId: string, instanceId: string, enabled: boolean): Promise<TrackPluginChain>;
   setPluginState(songId: string, instanceId: string, state: string): Promise<TrackPluginChain>;
+  savePluginPreset(songId: string, instanceId: string, name: string): Promise<PluginPresetEntry>;
+  recallPluginPreset(songId: string, instanceId: string, name: string): Promise<TrackPluginChain>;
+  listPluginPresets(pluginIdentifier: string): Promise<PluginPresetEntry[]>;
+  deletePluginPreset(pluginIdentifier: string, name: string): Promise<void>;
 
   // v3.42 — Plugin hosting Phase 3. Native plugin-editor windows. The
   // sidecar owns the JUCE DocumentWindow; these bridge methods just ask

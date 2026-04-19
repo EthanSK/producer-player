@@ -383,6 +383,18 @@ const bridge: ProducerPlayerBridge = {
   async setPluginState(songId, instanceId, stateBase64) {
     return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SET_STATE, songId, instanceId, stateBase64);
   },
+  async savePluginPreset(songId, instanceId, name) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PRESET_SAVE, { songId, instanceId, name });
+  },
+  async recallPluginPreset(songId, instanceId, name) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PRESET_RECALL, { songId, instanceId, name });
+  },
+  async listPluginPresets(pluginIdentifier) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PRESET_LIST, { pluginIdentifier });
+  },
+  async deletePluginPreset(pluginIdentifier, name) {
+    await ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PRESET_DELETE, { pluginIdentifier, name });
+  },
 
   // v3.42 Phase 3 — native plugin editor windows.
   async openPluginEditor(instanceId: string) {

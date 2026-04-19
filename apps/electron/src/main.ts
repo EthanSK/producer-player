@@ -109,6 +109,7 @@ import {
   migrateStateIfNeeded,
 } from './state-service';
 import { PluginHostService } from './plugin-host-service';
+import { PluginPresetLibraryStore } from './plugin-preset-library';
 
 declare const __PRODUCER_PLAYER_APP_VERSION__: string;
 declare const __PRODUCER_PLAYER_BUILD_NUMBER__: string;
@@ -417,6 +418,7 @@ let userStateService: UserStateService | null = null;
 // first time the renderer asks for a plugin scan, so sessions that never
 // touch plugin UI don't pay the spawn cost.
 let pluginHostService: PluginHostService | null = null;
+let pluginPresetLibrary: PluginPresetLibraryStore | null = null;
 let shouldAttemptSidecarOrderRestore = false;
 /** Remembers the last directory the user navigated to in any file/folder picker. */
 let lastFileDialogDirectory = '';
@@ -5137,6 +5139,83 @@ function registerIpcHandlers(service: FileLibraryService): void {
     ensureEditorClosedForwarder(pluginHostService);
     return pluginHostService;
   };
+
+  const getOrCreatePluginPresetLibrary = (): PluginPresetLibraryStore => {
+    if (!pluginPresetLibrary) {
+      pluginPresetLibrary = new PluginPresetLibraryStore(app.getPath('userData'));
+    }
+    return pluginPresetLibrary;
+  };
+
+  const getLoadedPluginSlot = async (songId: string, instanceId: string) => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    const chain = await userStateService.getTrackPluginChain(songId);
+    const item = chain.items.find((slot) => slot.instanceId === instanceId) ?? null;
+    if (!item || !item.pluginId) {
+      throw new Error('No plugin is loaded in this slot.');
+    }
+    return { chain, item };
+  };
+
+  const ensurePresetSidecarReady = (instanceId: string): PluginHostService => {
+    const service = getOrCreatePluginHost();
+    if (!service.isAvailable() || !service.getLoadedInstanceIds().includes(instanceId)) {
+      throw new Error('Plugin is still loading — try again in a moment.');
+    }
+    return service;
+  };
+
+  // --- v3.43 Phase 4: Plugin preset save/recall IPC ------------------------
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_PRESET_SAVE,
+    async (_event, args: { songId: string; instanceId: string; name: string }) => {
+      const { item } = await getLoadedPluginSlot(args.songId, args.instanceId);
+      const service = ensurePresetSidecarReady(args.instanceId);
+      let stateBase64 = '';
+      try {
+        stateBase64 = await service.getPluginState(args.instanceId);
+      } catch (err) {
+        log.warn('[plugin-presets] getPluginState failed', err);
+        throw new Error('Plugin is still loading — try again in a moment.');
+      }
+      return getOrCreatePluginPresetLibrary().savePreset(item.pluginId, args.name, stateBase64);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_PRESET_RECALL,
+    async (_event, args: { songId: string; instanceId: string; name: string }) => {
+      const { item } = await getLoadedPluginSlot(args.songId, args.instanceId);
+      const preset = await getOrCreatePluginPresetLibrary().getPreset(item.pluginId, args.name);
+      if (!preset) {
+        throw new Error('Preset not found.');
+      }
+      const service = ensurePresetSidecarReady(args.instanceId);
+      try {
+        await service.setPluginState(args.instanceId, preset.stateBase64);
+      } catch (err) {
+        log.warn('[plugin-presets] setPluginState failed', err);
+        throw new Error('Plugin is still loading — try again in a moment.');
+      }
+      if (!userStateService) throw new Error('User state service not initialized');
+      return userStateService.setPluginState(args.songId, args.instanceId, preset.stateBase64);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_PRESET_LIST,
+    async (_event, args: { pluginIdentifier: string }) => {
+      return getOrCreatePluginPresetLibrary().listPresetsFor(args.pluginIdentifier);
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_PRESET_DELETE,
+    async (_event, args: { pluginIdentifier: string; name: string }) => {
+      await getOrCreatePluginPresetLibrary().deletePreset(args.pluginIdentifier, args.name);
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.PLUGIN_EDITOR_OPEN, async (_event, instanceId: string) => {
     const service = getOrCreatePluginHost();

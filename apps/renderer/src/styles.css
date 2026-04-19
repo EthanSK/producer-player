@@ -5347,6 +5347,103 @@ button.reference-action.active {
   color: var(--text-main);
 }
 
+.plugin-pill__preset-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.plugin-pill__preset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.plugin-pill__preset:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text-main);
+}
+
+.plugin-preset-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 80;
+  min-width: 180px;
+  max-width: min(240px, 80vw);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 4px;
+  cursor: default;
+}
+
+.plugin-preset-menu__section {
+  display: grid;
+  gap: 3px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.plugin-preset-menu__heading {
+  padding: 3px 6px 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.plugin-preset-menu__item {
+  width: 100%;
+  min-height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-main);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 5px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-preset-menu__item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.plugin-preset-menu__item:disabled,
+.plugin-preset-menu__empty {
+  color: var(--text-muted);
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.plugin-preset-menu__item--danger {
+  color: var(--danger);
+}
+
+.plugin-preset-menu__empty {
+  display: block;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 .plugin-pill__toggle {
   width: 28px;
   height: 16px;

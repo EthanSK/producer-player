@@ -132,6 +132,7 @@ import type {
   AgentStaticAnalysis,
   MasteringAnalysisCachePayload,
   MasteringCacheEntry,
+  PluginPresetEntry,
   ScannedPluginLibrary,
   TrackPluginChain,
 } from '@producer-player/contracts';
@@ -2390,6 +2391,10 @@ export function App(): JSX.Element {
   });
   const [pluginLibrary, setPluginLibrary] = useState<ScannedPluginLibrary | null>(null);
   const [pluginLibraryScanning, setPluginLibraryScanning] = useState(false);
+  const [pluginPresetsByPluginId, setPluginPresetsByPluginId] = useState<
+    Record<string, PluginPresetEntry[]>
+  >({});
+  const loadedPresetPluginIdsRef = useRef<Set<string>>(new Set());
   // v3.42 Phase 3 — per-slot native-editor open state. Keyed by instanceId.
   // The sidecar is the source of truth; we add on successful open_editor
   // IPC replies and remove on close_editor replies OR on unsolicited
@@ -9383,6 +9388,33 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  const refreshPluginPresets = useCallback((pluginId: string) => {
+    if (!pluginId) return Promise.resolve();
+    return window.producerPlayer
+      .listPluginPresets(pluginId)
+      .then((presets) => {
+        setPluginPresetsByPluginId((prev) => ({ ...prev, [pluginId]: presets }));
+      })
+      .catch((err) => {
+        loadedPresetPluginIdsRef.current.delete(pluginId);
+        void window.producerPlayer.rendererLog('error', '[plugin-chain] preset list failed', {
+          pluginId,
+          error: String(err),
+        });
+      });
+  }, []);
+
+  // v3.43 Phase 4 — keep the preset menus warm for every plugin currently
+  // visible in the selected track's chain. Save/delete explicitly refresh.
+  useEffect(() => {
+    const uniquePluginIds = new Set(pluginChain.items.map((item) => item.pluginId).filter(Boolean));
+    for (const pluginId of uniquePluginIds) {
+      if (loadedPresetPluginIdsRef.current.has(pluginId)) continue;
+      loadedPresetPluginIdsRef.current.add(pluginId);
+      void refreshPluginPresets(pluginId);
+    }
+  }, [pluginChain.items, refreshPluginPresets]);
+
   // v3.40 Phase 1b — Plugin chain mutation handlers. Each call round-trips
   // through the unified state service, which returns the full updated
   // chain so the renderer stays in sync (and reorders stay atomic).
@@ -9448,6 +9480,75 @@ export function App(): JSX.Element {
         );
     },
     [selectedSongId],
+  );
+
+  const handlePluginSavePreset = useCallback(
+    (instanceId: string, rawName: string) => {
+      if (!selectedSongId) return;
+      const name = rawName.trim();
+      if (!name) {
+        setError('Preset name is required.');
+        return;
+      }
+      void window.producerPlayer
+        .savePluginPreset(selectedSongId, instanceId, name)
+        .then((preset) => {
+          loadedPresetPluginIdsRef.current.add(preset.pluginIdentifier);
+          return refreshPluginPresets(preset.pluginIdentifier);
+        })
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(message);
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] preset save failed', {
+            instanceId,
+            error: message,
+          });
+        });
+    },
+    [refreshPluginPresets, selectedSongId],
+  );
+
+  const handlePluginRecallPreset = useCallback(
+    (instanceId: string, name: string) => {
+      if (!selectedSongId) return;
+      const pluginId =
+        pluginChainRef.current.items.find((item) => item.instanceId === instanceId)?.pluginId ?? '';
+      void window.producerPlayer
+        .recallPluginPreset(selectedSongId, instanceId, name)
+        .then((chain) => {
+          commitPluginChain(chain);
+          if (pluginId) return refreshPluginPresets(pluginId);
+          return undefined;
+        })
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(message);
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] preset recall failed', {
+            instanceId,
+            name,
+            error: message,
+          });
+        });
+    },
+    [commitPluginChain, refreshPluginPresets, selectedSongId],
+  );
+
+  const handlePluginDeletePreset = useCallback(
+    (pluginId: string, name: string) => {
+      void window.producerPlayer
+        .deletePluginPreset(pluginId, name)
+        .then(() => refreshPluginPresets(pluginId))
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(message);
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] preset delete failed', {
+            pluginId,
+            name,
+            error: message,
+          });
+        });
+    },
+    [refreshPluginPresets],
   );
 
   // v3.42 Phase 3 — toggle a plugin's native editor window. If the button
@@ -12772,7 +12873,11 @@ export function App(): JSX.Element {
               onToggle={handlePluginToggle}
               onReorder={handlePluginReorder}
               onOpenEditor={handlePluginOpenEditor}
+              onSavePreset={handlePluginSavePreset}
+              onRecallPreset={handlePluginRecallPreset}
+              onDeletePreset={handlePluginDeletePreset}
               onScan={handlePluginScan}
+              presetsByPluginId={pluginPresetsByPluginId}
               openEditorInstanceIds={openEditorInstanceIds}
             />
           ) : null}
@@ -15644,7 +15749,11 @@ export function App(): JSX.Element {
                     onToggle={handlePluginToggle}
                     onReorder={handlePluginReorder}
                     onOpenEditor={handlePluginOpenEditor}
+                    onSavePreset={handlePluginSavePreset}
+                    onRecallPreset={handlePluginRecallPreset}
+                    onDeletePreset={handlePluginDeletePreset}
                     onScan={handlePluginScan}
+                    presetsByPluginId={pluginPresetsByPluginId}
                     openEditorInstanceIds={openEditorInstanceIds}
                   />
                 ) : null}

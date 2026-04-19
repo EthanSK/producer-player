@@ -49,4 +49,18 @@ await build({
   plugins: [shimElectronLog],
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs');
+// v3.43 Phase 4 — bundle the plugin preset library for hermetic Node tests.
+await build({
+  entryPoints: [resolve(appDir, 'src/plugin-preset-library.ts')],
+  outfile: resolve(appDir, 'dist/plugin-preset-library.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+  external: ['node:fs/promises', 'node:path'],
+  plugins: [shimElectronLog],
+});
+
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs');

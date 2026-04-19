@@ -139,7 +139,7 @@ export type EditorClosedListener = (instanceId: string) => void;
  * assert the diff logic without touching the sidecar.
  */
 export interface ChainReconciliationPlan {
-  toLoad: Array<{ instanceId: string; pluginId: string }>;
+  toLoad: Array<{ instanceId: string; pluginId: string; state?: string }>;
   toUnload: string[];
   unchanged: string[];
 }
@@ -170,7 +170,11 @@ export function diffChainReconciliation(
     if (loaded.has(item.instanceId)) {
       unchanged.push(item.instanceId);
     } else {
-      toLoad.push({ instanceId: item.instanceId, pluginId: item.pluginId });
+      toLoad.push({
+        instanceId: item.instanceId,
+        pluginId: item.pluginId,
+        ...(item.state !== undefined ? { state: item.state } : {}),
+      });
     }
   }
   const toUnload: string[] = [];
@@ -542,7 +546,7 @@ export class PluginHostService {
       }
     }
 
-    for (const { instanceId, pluginId } of plan.toLoad) {
+    for (const { instanceId, pluginId, state } of plan.toLoad) {
       const info = this.cachedLibrary?.plugins.find((p) => p.id === pluginId) ?? null;
       if (!info) {
         failed.push({ instanceId, error: `pluginId ${pluginId} not found in cached library — re-scan required` });
@@ -556,6 +560,9 @@ export class PluginHostService {
           sampleRate: opts.sampleRate,
           blockSize: opts.blockSize,
         });
+        // v3.43 Phase 4 — rehydrate persisted preset/plugin state after a
+        // cold load so recalled presets survive app relaunches.
+        if (typeof state === 'string') await this.setPluginState(instanceId, state);
         loadedOk.push(instanceId);
       } catch (err) {
         failed.push({ instanceId, error: err instanceof Error ? err.message : String(err) });

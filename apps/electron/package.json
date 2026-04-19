@@ -7,7 +7,7 @@
     "dev": "npm run build && wait-on http://127.0.0.1:4207 && cross-env ELECTRON_DEV=true RENDERER_DEV_URL=http://127.0.0.1:4207 electron ./dist/main.cjs",
     "build": "node ./scripts/build-main.mjs",
     "build:test-bundle": "node ./scripts/build-state-service-cjs.mjs",
-    "test": "npm run build:test-bundle && node --test \"test/**/*.test.cjs\"",
+    "test": "npm run build:test-bundle && node --test test/*.test.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "electron ./dist/main.cjs"
   },

@@ -62,6 +62,15 @@ body,
   max-width: min(720px, calc(100vw - 48px)) !important;
 }
 
+/* v3.63 — flush the toaster wrapper to the top-right corner with zero gap.
+ * Doubled attribute selector boosts specificity over Sonner's inline styles. */
+[data-sonner-toaster][data-sonner-toaster] {
+  top: 0 !important;
+  right: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
 [data-sonner-toaster] [data-sonner-toast] {
   width: 100% !important;
   min-height: 0 !important;
@@ -5362,6 +5371,38 @@ button.reference-action.active {
 .ai-rec-regenerate:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* v3.63 — ✨ AI Stars button variant for the mastering fullscreen header.
+ * Prominent pill with accent gradient so the user's eye is drawn to it —
+ * this is now the explicit trigger for AI recommendations (auto-run was
+ * disabled in v3.63). Uses !important on layout/color rules to override
+ * the base .ai-rec-regenerate styling while keeping the disabled/hover
+ * affordances from that class. */
+.ai-stars-button {
+  background: linear-gradient(
+    135deg,
+    rgba(92, 167, 255, 0.25),
+    rgba(180, 110, 255, 0.25)
+  ) !important;
+  border: 1px solid var(--accent) !important;
+  color: var(--accent) !important;
+  font-size: 15px !important;
+  padding: 4px 10px !important;
+  border-radius: 999px !important;
+  box-shadow: 0 0 10px rgba(92, 167, 255, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.ai-stars-button:hover:not(:disabled) {
+  transform: scale(1.06);
+  box-shadow: 0 0 14px rgba(92, 167, 255, 0.55);
+  background: linear-gradient(
+    135deg,
+    rgba(92, 167, 255, 0.35),
+    rgba(180, 110, 255, 0.35)
+  ) !important;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

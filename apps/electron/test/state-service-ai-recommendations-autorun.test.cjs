@@ -192,27 +192,30 @@ test('a fresh rec under the new analysisVersion after stale detection flips the 
   }
 });
 
-test('agentAutoRecommendEnabled defaults to true and round-trips through parseUserState', async () => {
-  // 1. Default state has the flag ON — first-time users opt IN to auto-run.
+test('agentAutoRecommendEnabled defaults to false and round-trips through parseUserState', async () => {
+  // v3.63 — default OFF. Ethan's call: don't auto-burn agent credits on
+  // song open; users opt in via AgentSettings. The ✨ AI Stars button in the
+  // mastering fullscreen header is the explicit trigger.
+  // 1. Default state has the flag OFF — first-time users opt IN to auto-run.
   const defaultState = createDefaultUserState();
-  assert.equal(defaultState.agentAutoRecommendEnabled, true);
+  assert.equal(defaultState.agentAutoRecommendEnabled, false);
 
-  // 2. Explicit `false` round-trips.
-  const offState = parseUserState({
+  // 2. Explicit `true` round-trips.
+  const onState = parseUserState({
     ...defaultState,
-    agentAutoRecommendEnabled: false,
+    agentAutoRecommendEnabled: true,
   });
-  assert.equal(offState.agentAutoRecommendEnabled, false);
+  assert.equal(onState.agentAutoRecommendEnabled, true);
 
-  // 3. Missing field falls back to the default (ON) so older state files
-  //    don't silently disable a feature the user never opted out of.
+  // 3. Missing field falls back to the default (OFF) so older state files
+  //    inherit the new conservative default on upgrade.
   const legacyRaw = { ...defaultState };
   delete legacyRaw.agentAutoRecommendEnabled;
   const legacyParsed = parseUserState(legacyRaw);
   assert.equal(
     legacyParsed.agentAutoRecommendEnabled,
-    true,
-    'pre-v3.33 state files default ON after upgrade',
+    false,
+    'pre-v3.63 state files default OFF after upgrade',
   );
 
   // 4. Non-boolean values are rejected and fall back to the default.
@@ -220,7 +223,7 @@ test('agentAutoRecommendEnabled defaults to true and round-trips through parseUs
     ...defaultState,
     agentAutoRecommendEnabled: 'yes',
   });
-  assert.equal(garbageParsed.agentAutoRecommendEnabled, true);
+  assert.equal(garbageParsed.agentAutoRecommendEnabled, false);
 });
 
 test('agentAutoRecommendEnabled survives writeUserState round-trip', async () => {

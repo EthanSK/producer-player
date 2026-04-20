@@ -602,9 +602,11 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
     showAiRecommendationsFullscreen: true,
-    // v3.33 Phase 4 — auto-run on track open. Default ON so first-time users
-    // immediately see AI recs without having to hunt for a toggle.
-    agentAutoRecommendEnabled: true,
+    // v3.33 Phase 4 — auto-run on track open.
+    // v3.63 — default OFF. Users opt in via AgentSettings. Ethan's call:
+    // don't burn agent credits automatically on song open; the ✨ AI Stars
+    // button in the mastering fullscreen header is the explicit trigger.
+    agentAutoRecommendEnabled: false,
     songDawOffsets: {},
     checklistDawOffsetDefaultSeconds: 0,
     checklistDawOffsetDefaultEnabled: false,

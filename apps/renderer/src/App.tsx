@@ -2434,10 +2434,12 @@ export function App(): JSX.Element {
   // v3.33 Phase 4 — gate that controls whether opening a new
   // (songId, versionNumber) pair automatically fires the agent to generate
   // fresh mastering recommendations. Persisted in `ProducerPlayerUserState`
-  // as `agentAutoRecommendEnabled`. Default ON so first-time users see recs
-  // without having to flip a switch. Surfaced in AgentSettings.
+  // as `agentAutoRecommendEnabled`. Surfaced in AgentSettings.
+  // v3.63 — default OFF. Users opt in via AgentSettings. Ethan's call:
+  // don't burn agent credits automatically on song open. The ✨ AI Stars
+  // button in the mastering fullscreen header is the explicit trigger.
   const [agentAutoRecommendEnabled, setAgentAutoRecommendEnabled] =
-    useState<boolean>(true);
+    useState<boolean>(false);
   // v3.33 Phase 4 — in-flight generation status for the current request.
   // `null` = idle. `{ source, songId, versionNumber, requestId }` during a
   // run. Used to block concurrent runs for the same pair and to expose the
@@ -15597,11 +15599,29 @@ export function App(): JSX.Element {
               <div className="analysis-overlay-header-controls">
                 <div className="analysis-overlay-header-actions">
                   {/*
+                   * v3.63 — ✨ AI Stars button hoisted to the top of the
+                   * mastering fullscreen header. Always visible (not gated by
+                   * the "Show AI recommendations" toggle), because this is
+                   * now the explicit trigger for AI recs — auto-run on track
+                   * open is OFF by default to avoid burning agent credits.
+                   * The button keeps the legacy `ai-rec-regenerate` class
+                   * and `data-testid` so existing E2E specs still target it.
+                   */}
+                  <button
+                    type="button"
+                    className="ai-rec-regenerate ai-stars-button"
+                    data-testid="ai-rec-regenerate"
+                    onClick={handleRegenerateAiRecommendations}
+                    disabled={!selectedPlaybackSongId || currentPlaybackVersionNumber === null}
+                    aria-label="Generate AI recommendations"
+                    title="Generate AI recommendations (✨)"
+                  >
+                    <span aria-hidden="true">✨</span>
+                  </button>
+                  {/*
                    * v3.31 — Phase 3a AI recommendations chain. Toggle hides /
                    * shows the light-blue per-metric caption across the
-                   * fullscreen panels; the refresh button is a Phase 3a stub
-                   * that clears the stored set for the current track/version
-                   * so Phase 4 (v3.33) auto-run just works when it lands.
+                   * fullscreen panels.
                    */}
                   <div
                     className="ai-rec-toolbar"
@@ -15622,17 +15642,6 @@ export function App(): JSX.Element {
                       />
                       <span>Show AI recommendations</span>
                     </label>
-                    <button
-                      type="button"
-                      className="ai-rec-regenerate"
-                      data-testid="ai-rec-regenerate"
-                      onClick={handleRegenerateAiRecommendations}
-                      disabled={!selectedPlaybackSongId || currentPlaybackVersionNumber === null}
-                      aria-label="Regenerate AI recommendations"
-                      title="Regenerate AI recommendations for the current track/version."
-                    >
-                      <span aria-hidden="true">⟳</span>
-                    </button>
                   </div>
                   <button
                     type="button"

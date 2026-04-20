@@ -22,17 +22,24 @@ interface ToastApi {
   dismiss: (id: string) => void;
 }
 
+// v3.63 — ALL toasts auto-dismiss. Previously `error` was sticky (Infinity)
+// unless the user clicked. Ethan's call: even "AI thing started" error toasts
+// should fade on their own. 8s gives enough time to read + click "View log".
 const DEFAULT_DURATION_MS: Record<ToastKind, number> = {
   info: 4000,
   success: 3000,
   warning: 6000,
-  error: Infinity,
+  error: 8000,
 };
 
 function durationFor(toast: Toast): number {
-  return toast.durationMs === 0
-    ? Infinity
-    : toast.durationMs ?? DEFAULT_DURATION_MS[toast.kind] ?? 4000;
+  // v3.63 — only honor explicit durations that are positive finite ms.
+  // Zero / negative / undefined all fall back to the kind default so toasts
+  // never stick around indefinitely.
+  if (typeof toast.durationMs === 'number' && toast.durationMs > 0) {
+    return toast.durationMs;
+  }
+  return DEFAULT_DURATION_MS[toast.kind] ?? 4000;
 }
 
 export function useToast(): ToastApi {

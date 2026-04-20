@@ -42,10 +42,12 @@ import {
 } from './audioAnalysis';
 import {
   getMasteringChecklistRuleById,
+  getMasteringChecklistRuleMeta,
   groupMasteringChecklistRules,
   masteringChecklistStatusIcon,
   MASTERING_CHECKLIST_RULES,
   type MasteringChecklistEvaluationInput,
+  type MasteringChecklistImportance,
 } from './masteringChecklistRules';
 import {
   computePlatformNormalizationPreview,
@@ -137,6 +139,10 @@ import type {
   TrackPluginChain,
 } from '@producer-player/contracts';
 import { PluginChainStrip } from './lib/PluginChainStrip';
+import {
+  MasteringChecklistImportanceMeter,
+  MasteringChecklistRowHelp,
+} from './lib/MasteringChecklistImportance';
 import { useToast } from './lib/ToastStack';
 import {
   LUFS_LINKS,
@@ -10933,6 +10939,20 @@ export function App(): JSX.Element {
       },
       ...items,
     ]);
+
+    // v3.46 — surface visible feedback. Previously clicking "Add to
+    // checklist" from the fullscreen Mastering view silently inserted
+    // the row into the (hidden) song checklist, leaving the user
+    // wondering if the click registered. We deliberately DO NOT
+    // navigate to the checklist view; the Mastering fullscreen stays
+    // put so Ethan can add several rows in one pass. The toast keyed
+    // by row id collapses rapid double-clicks on the same row into a
+    // single dismissing snackbar.
+    toast.show({
+      id: `mastering-promote-${rowId}`,
+      kind: 'success',
+      text: 'Added to checklist',
+    });
   }
 
   // -----------------------------------------------------------------------
@@ -13936,7 +13956,7 @@ export function App(): JSX.Element {
           <div ref={checklistModalCardRef} className="checklist-modal-card">
             <div className="checklist-modal-header">
               <div>
-                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, and revisions you need to make for this track.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song.\n\nWhy you'd want to: Keep a structured record of what needs fixing in each song so nothing slips through the cracks between sessions.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
+                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Tag new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to tag subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
                 <p className="muted">
                   {checklistCompletedCount}/{checklistModalItems.length} completed
                 </p>
@@ -13944,7 +13964,9 @@ export function App(): JSX.Element {
               <div
                 className={`checklist-daw-offset-control${checklistDawOffsetEnabled ? ' is-active' : ''}`}
                 data-testid="checklist-daw-offset-control"
-                title="Add a DAW time offset so timestamps displayed here line up with your digital audio workstation arrangement position. Does not change where clicks seek to."
+                title={checklistDawOffsetEnabled
+                  ? 'DAW offset is active: displayed timestamps are shifted to match your DAW arrangement. Clicks still seek to the correct audio position. Toggle off to show raw file times.'
+                  : 'DAW offset (currently off). Turn this on to shift displayed checklist timestamps by a fixed minutes:seconds amount so they line up with your DAW arrangement. The help (?) button explains when to use it.'}
               >
                 <span
                   className="checklist-daw-offset-help"
@@ -16473,6 +16495,16 @@ export function App(): JSX.Element {
                                     const statusClass = evaluation.status;
                                     const icon = masteringChecklistStatusIcon(evaluation.status);
                                     const showAddButton = evaluation.status !== 'unavailable';
+                                    // v3.46 — pull authored importance +
+                                    // whyItMatters out of the rule metadata
+                                    // map. Rendered inline next to the rule
+                                    // label as a subtle 1-5 dot indicator
+                                    // (colour-coded green/yellow/red) with a
+                                    // help (?) button whose tooltip shows
+                                    // the whyItMatters blurb + importance
+                                    // rationale. Not user-adjustable.
+                                    const meta = getMasteringChecklistRuleMeta(rule.id);
+                                    const importance = meta.importance;
                                     return (
                                       <div
                                         key={rule.id}
@@ -16480,7 +16512,18 @@ export function App(): JSX.Element {
                                         data-testid={`mastering-checklist-row-${rule.id}`}
                                       >
                                         <span className="checklist-icon">{icon}</span>
-                                        <span className="checklist-label">{rule.label}</span>
+                                        <span className="checklist-label">
+                                          {rule.label}
+                                          <MasteringChecklistImportanceMeter
+                                            importance={importance}
+                                            ruleLabel={rule.label}
+                                          />
+                                          <MasteringChecklistRowHelp
+                                            ruleLabel={rule.label}
+                                            importance={importance}
+                                            whyItMatters={meta.whyItMatters}
+                                          />
+                                        </span>
                                         <span className="checklist-value">
                                           {evaluation.status === 'unavailable'
                                             ? 'Not measured'

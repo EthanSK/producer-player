@@ -2670,7 +2670,14 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 
 /* DAW offset header widget — sits between the title and the Done button.
  * When the toggle is OFF, the numeric inputs stay visible but dim so the
- * user's last-typed offset value is still visible. */
+ * user's last-typed offset value is still visible.
+ *
+ * v3.46 — reduced inactive opacity (0.75 → 0.45) and swapped the border
+ * to a neutral grey instead of the theme --border (which has a blue
+ * cast). Ethan flagged the previous treatment as "permanently blue
+ * outline of a blue dot" that read as a notification indicator.
+ * Inactive state now fades into the header surface; the pill only
+ * takes on the success-green palette once the offset is active. */
 .checklist-daw-offset-control {
   display: inline-flex;
   align-items: center;
@@ -2680,12 +2687,17 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   margin-left: auto;
   padding: 4px 8px;
   border-radius: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(156, 175, 196, 0.18);
   background: rgba(255, 255, 255, 0.02);
   font-size: 11px;
   color: var(--text-muted);
-  opacity: 0.75;
+  opacity: 0.45;
   transition: opacity 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.checklist-daw-offset-control:hover,
+.checklist-daw-offset-control:focus-within {
+  opacity: 0.85;
 }
 
 .checklist-daw-offset-control.is-active {
@@ -5864,4 +5876,119 @@ button.reference-action.active {
     animation: none;
     transition: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Mastering Checklist — per-row importance indicator + help popover (v3.46)
+ *
+ * Subtle 1-5 dot meter + `?` trigger that sit inline next to the rule
+ * label. Deliberately muted so they inform without shouting — pass/warn/
+ * fail status icons remain the loudest element in the row.
+ * --------------------------------------------------------------------------- */
+
+.mastering-checklist-importance-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  padding: 0 2px;
+  vertical-align: middle;
+  cursor: help;
+  opacity: 0.7;
+}
+
+.mastering-checklist-importance-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(156, 175, 196, 0.25);
+  transition: background 0.15s ease;
+}
+
+.mastering-checklist-importance-meter.importance-low
+  .mastering-checklist-importance-dot.is-filled {
+  background: var(--success, #5fd28f);
+}
+
+.mastering-checklist-importance-meter.importance-mid
+  .mastering-checklist-importance-dot.is-filled {
+  background: var(--warning, #f0c150);
+}
+
+.mastering-checklist-importance-meter.importance-high
+  .mastering-checklist-importance-dot.is-filled {
+  background: var(--danger, #e35d5d);
+}
+
+.mastering-checklist-row-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.mastering-checklist-row-help-trigger {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(156, 175, 196, 0.35);
+  background: transparent;
+  color: #9cafc4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.mastering-checklist-row-help-trigger:hover,
+.mastering-checklist-row-help.is-open .mastering-checklist-row-help-trigger {
+  color: var(--accent, #5ca7ff);
+  border-color: rgba(92, 167, 255, 0.55);
+  background: rgba(92, 167, 255, 0.1);
+}
+
+.mastering-checklist-row-help-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(320px, 80vw);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #2b3a49);
+  background: var(--bg-1, #0f1620);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-main, #d7e3ef);
+  white-space: normal;
+  pointer-events: auto;
+}
+
+.mastering-checklist-row-help-title {
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--text-main, #d7e3ef);
+}
+
+.mastering-checklist-row-help-importance {
+  font-size: 11px;
+  color: var(--text-muted, #9cafc4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mastering-checklist-row-help-body {
+  color: var(--text-muted, #9cafc4);
 }

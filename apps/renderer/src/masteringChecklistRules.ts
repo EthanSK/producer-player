@@ -72,6 +72,136 @@ export interface MasteringChecklistRule {
   evaluate(input: MasteringChecklistEvaluationInput): MasteringChecklistEvaluation;
 }
 
+/**
+ * Authored metadata for each rule, surfaced alongside every row as a
+ * subtle 1-5 importance indicator + help (?) popover.
+ *
+ * `importance` is 1-5 (5 = deal-breaker for streaming / QC, 1 = polish).
+ * `whyItMatters` is a 1-2 sentence plain-English explanation shown in
+ * the per-row help popover. Stored in a parallel map (keyed by rule
+ * id) rather than on the rule object so the existing compact rule
+ * declarations below survive the project's auto-formatter.
+ *
+ * Values set based on published mastering checklists: iZotope Ozone,
+ * Sonible's smart mastering workflow, Ian Shepherd's Mastering The Mix,
+ * and Bob Katz's K-System writing.
+ *
+ * v3.46 — introduced alongside the per-row help popover UI.
+ */
+export type MasteringChecklistImportance = 1 | 2 | 3 | 4 | 5;
+
+export interface MasteringChecklistRuleMeta {
+  importance: MasteringChecklistImportance;
+  whyItMatters: string;
+}
+
+export const MASTERING_CHECKLIST_METADATA: Readonly<Record<string, MasteringChecklistRuleMeta>> = {
+  // Loudness
+  lufs: {
+    importance: 5,
+    whyItMatters:
+      'Streaming platforms normalize to a target LUFS (-14 on Spotify/YouTube, -16 on Apple/Tidal). Master too loud and they turn you DOWN, flattening transients; master too quiet and you disappear next to other tracks.',
+  },
+  'loudness-range': {
+    importance: 3,
+    whyItMatters:
+      'LRA captures macro-dynamic contrast between quiet and loud sections. Very low LRA = crushed and fatiguing; very high LRA means quiet verses get lost on noisy playback environments.',
+  },
+  'short-term-gap': {
+    importance: 2,
+    whyItMatters:
+      'A large gap between short-term and integrated loudness means one very loud section is dragging the average around — typically a sign of an uneven master.',
+  },
+  'momentary-peak': {
+    importance: 2,
+    whyItMatters:
+      'Very high momentary peaks (drops, impact hits) can trigger aggressive normalization on streaming platforms and make the rest of the master feel quiet by comparison.',
+  },
+
+  // Peaks
+  'true-peak': {
+    importance: 5,
+    whyItMatters:
+      'Inter-sample peaks above -1 dBTP will clip when decoded by lossy codecs (AAC, MP3, Opus). This is the one pro-mastering rule that is non-negotiable — streaming services will mangle your track if you break it.',
+  },
+  clipping: {
+    importance: 5,
+    whyItMatters:
+      'Sample-accurate clipping produces audible distortion and harshness no mastering engineer would ship intentionally. If this flags, back off your limiter ceiling before anything else.',
+  },
+  'isp-risk': {
+    importance: 4,
+    whyItMatters:
+      'Samples that sit at or just below 0 dBFS often reconstruct above 0 dB between sample points, causing codec clipping even when the raw file looks clean. A true-peak limiter catches these before they leave your DAW.',
+  },
+
+  // Dynamics
+  'crest-factor': {
+    importance: 4,
+    whyItMatters:
+      'Peak-to-loudness ratio signals how much transient life your master retains. Below ~8 dB the punch is gone; modern pop commonly sits 8-12 dB; dynamic genres (jazz, acoustic, orchestral) sit 14+ dB.',
+  },
+  'over-limiting': {
+    importance: 3,
+    whyItMatters:
+      'Long stretches pinned against the limiter ceiling erase micro-dynamics and make the master sound small on good speakers. A healthy master has visible variation on the meters, not a flat-topped wall.',
+  },
+
+  // Spectrum
+  'spectral-bass': {
+    importance: 4,
+    whyItMatters:
+      'Low-end balance is the single biggest source of translation problems across playback systems. Too much sub and the track turns to mud on laptop speakers; too little and it feels thin in cars and clubs.',
+  },
+  'spectral-treble': {
+    importance: 3,
+    whyItMatters:
+      'Excess high end causes listener fatigue on earbuds and can over-drive de-essers on streaming pipelines. Too little and the master sounds dull next to reference tracks.',
+  },
+
+  // Housekeeping
+  'dc-offset': {
+    importance: 2,
+    whyItMatters:
+      'DC offset wastes headroom and can cause pops/clicks at edit boundaries. Cheap fix — a 20 Hz high-pass on the master bus removes it.',
+  },
+  'silence-trim': {
+    importance: 2,
+    whyItMatters:
+      'Leading/trailing silence longer than ~1 s triggers loading gaps on streaming platforms and disrupts gapless album playback. Trim the dead air before export.',
+  },
+  'sample-rate': {
+    importance: 3,
+    whyItMatters:
+      'Distributors expect 44.1 kHz or 48 kHz at 16/24-bit. Odd rates force downstream resampling that can introduce aliasing and get masters kicked back by QC.',
+  },
+  'noise-floor': {
+    importance: 2,
+    whyItMatters:
+      'An elevated noise floor becomes audible hiss between tracks and on loud playback. Usually indicates a missing high-pass on the mix bus or hot gain staging.',
+  },
+  'truncated-tail': {
+    importance: 3,
+    whyItMatters:
+      'Reverb/delay tails chopped by a hard edit sound unnatural and amateurish. Always let the last sound decay fully below the noise floor before export.',
+  },
+};
+
+/**
+ * Look up the authored importance + whyItMatters metadata for a rule.
+ * Returns a safe default (importance 3, generic copy) if the rule is not
+ * yet annotated — future-proofs the UI against new rules added without
+ * an accompanying metadata entry.
+ */
+export function getMasteringChecklistRuleMeta(ruleId: string): MasteringChecklistRuleMeta {
+  return (
+    MASTERING_CHECKLIST_METADATA[ruleId] ?? {
+      importance: 3,
+      whyItMatters: 'Contributes to the overall technical health of the master.',
+    }
+  );
+}
+
 const UNAVAILABLE: MasteringChecklistEvaluation = {
   status: 'unavailable',
   value: '—',

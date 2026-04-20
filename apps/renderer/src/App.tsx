@@ -207,7 +207,8 @@ type CompactMasteringPanelId =
   | 'core-metrics'
   | 'normalization'
   | 'tonal-balance'
-  | 'reference';
+  | 'reference'
+  | 'plugins';
 type FullscreenMasteringPanelId =
   | 'visualizations'
   | 'reference'
@@ -216,6 +217,7 @@ type FullscreenMasteringPanelId =
   | 'stereo-correlation'
   | 'tonal-balance'
   | 'loudness-peaks'
+  | 'plugins'
   | 'normalization'
   | 'comparison'
   | 'vectorscope'
@@ -230,6 +232,9 @@ type FullscreenMasteringPanelId =
 
 type MasteringPanelId = CompactMasteringPanelId | FullscreenMasteringPanelId;
 type MasteringPanelSurface = 'compact' | 'fullscreen';
+
+const PLUGIN_CHAIN_HELP_TEXT =
+  'The Plugin Chain lets you insert VST3/AU plugins into the mastering signal path. Add plugins with the + button, drag the ⋮⋮ handle to reorder, click a plugin name to open its native editor, and use the power toggle to bypass any slot without removing it. Your chain is saved per-song. Use the ⋯ preset menu to save and recall per-plugin presets — great for standardizing mastering chains across an album.';
 
 const CHECKLIST_INTERACTIVE_DRAG_SELECTOR =
   'textarea, input, button, select, a, [data-no-drag]';
@@ -367,6 +372,10 @@ const MASTERING_PANEL_ASK_AI_META: Record<
   reference: {
     label: 'Reference Track',
     focus: 'A/B comparison strategy, level matching, and how the mix differs from the reference master',
+  },
+  plugins: {
+    label: 'Plugin Chain',
+    focus: 'VST3/AU insert plugins, chain order, bypass state, and how they shape the mastering signal',
   },
   visualizations: {
     label: 'Visualizations',
@@ -921,6 +930,7 @@ const DEFAULT_COMPACT_MASTERING_PANEL_ORDER: readonly CompactMasteringPanelId[] 
   'normalization',
   'tonal-balance',
   'reference',
+  'plugins',
 ];
 
 const DEFAULT_FULLSCREEN_MASTERING_PANEL_ORDER: readonly FullscreenMasteringPanelId[] = [
@@ -931,6 +941,7 @@ const DEFAULT_FULLSCREEN_MASTERING_PANEL_ORDER: readonly FullscreenMasteringPane
   'stereo-correlation',
   'tonal-balance',
   'loudness-peaks',
+  'plugins',
   'normalization',
   'comparison',
   'vectorscope',
@@ -13316,38 +13327,53 @@ export function App(): JSX.Element {
               ) : null}
                 </section>
               </div>
+
+              {selectedSongId ? (
+                <div
+                  className={`analysis-draggable-panel-shell analysis-draggable-panel-shell-compact${
+                    compactMasteringDropTargetPanelId === 'plugins' ? ' drop-target' : ''
+                  }`}
+                  style={getCompactMasteringPanelStyle('plugins')}
+                  onDragOver={(event) => handleCompactMasteringPanelDragOver(event, 'plugins')}
+                  onDrop={(event) => handleCompactMasteringPanelDrop(event, 'plugins')}
+                >
+                  <section
+                    className="analysis-compact-section"
+                    data-testid="analysis-compact-plugins-panel"
+                  >
+                    <div className="analysis-panel-header-row">
+                      <h3>Plugins <HelpTooltip text={PLUGIN_CHAIN_HELP_TEXT} /></h3>
+                      {renderMasteringPanelDragHandle('compact', 'plugins')}
+                    </div>
+                    <PluginChainStrip
+                      chain={pluginChain}
+                      library={pluginLibrary}
+                      layout="compact"
+                      scanning={pluginLibraryScanning}
+                      onAdd={handlePluginAdd}
+                      onRemove={handlePluginRemove}
+                      onToggle={handlePluginToggle}
+                      onReorder={handlePluginReorder}
+                      onOpenEditor={handlePluginOpenEditor}
+                      onSavePreset={handlePluginSavePreset}
+                      onRecallPreset={handlePluginRecallPreset}
+                      onDeletePreset={handlePluginDeletePreset}
+                      onScan={handlePluginScan}
+                      presetsByPluginId={pluginPresetsByPluginId}
+                      openEditorInstanceIds={openEditorInstanceIds}
+                      loadedInstanceIds={loadedInstanceIds}
+                      instanceLatencies={instanceLatencies}
+                      hideHeader
+                    />
+                  </section>
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="muted" data-testid="analysis-empty-state">
               Pick a track to see loudness analysis and A/B.
             </p>
           )}
-          {/*
-           * v3.40 — Phase 1b Plugin chain strip (compact). Shown at the
-           * bottom of the docked mastering preview so it stays reachable
-           * without opening the fullscreen overlay. Vertical layout.
-           */}
-          {selectedSongId && selectedPlaybackVersion ? (
-            <PluginChainStrip
-              chain={pluginChain}
-              library={pluginLibrary}
-              layout="compact"
-              scanning={pluginLibraryScanning}
-              onAdd={handlePluginAdd}
-              onRemove={handlePluginRemove}
-              onToggle={handlePluginToggle}
-              onReorder={handlePluginReorder}
-              onOpenEditor={handlePluginOpenEditor}
-              onSavePreset={handlePluginSavePreset}
-              onRecallPreset={handlePluginRecallPreset}
-              onDeletePreset={handlePluginDeletePreset}
-              onScan={handlePluginScan}
-              presetsByPluginId={pluginPresetsByPluginId}
-              openEditorInstanceIds={openEditorInstanceIds}
-              loadedInstanceIds={loadedInstanceIds}
-              instanceLatencies={instanceLatencies}
-            />
-          ) : null}
         </section>
       </aside>
 
@@ -16248,25 +16274,40 @@ export function App(): JSX.Element {
                  * wiring lands in Phase 2 — this is UI only.
                  */}
                 {selectedSongId ? (
-                  <PluginChainStrip
-                    chain={pluginChain}
-                    library={pluginLibrary}
-                    layout="fullscreen"
-                    scanning={pluginLibraryScanning}
-                    onAdd={handlePluginAdd}
-                    onRemove={handlePluginRemove}
-                    onToggle={handlePluginToggle}
-                    onReorder={handlePluginReorder}
-                    onOpenEditor={handlePluginOpenEditor}
-                    onSavePreset={handlePluginSavePreset}
-                    onRecallPreset={handlePluginRecallPreset}
-                    onDeletePreset={handlePluginDeletePreset}
-                    onScan={handlePluginScan}
-                    presetsByPluginId={pluginPresetsByPluginId}
-                    openEditorInstanceIds={openEditorInstanceIds}
-                    loadedInstanceIds={loadedInstanceIds}
-                    instanceLatencies={instanceLatencies}
-                  />
+                  <section
+                    className={`analysis-overlay-section${
+                      fullscreenMasteringDropTargetPanelId === 'plugins' ? ' drop-target' : ''
+                    }`}
+                    data-testid="analysis-overlay-plugins-panel"
+                    style={getFullscreenMasteringPanelStyle('plugins')}
+                    onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'plugins')}
+                    onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'plugins')}
+                  >
+                    <div className="analysis-panel-header-row">
+                      <h3>Plugins <HelpTooltip text={PLUGIN_CHAIN_HELP_TEXT} /></h3>
+                      {renderMasteringPanelDragHandle('fullscreen', 'plugins')}
+                    </div>
+                    <PluginChainStrip
+                      chain={pluginChain}
+                      library={pluginLibrary}
+                      layout="fullscreen"
+                      scanning={pluginLibraryScanning}
+                      onAdd={handlePluginAdd}
+                      onRemove={handlePluginRemove}
+                      onToggle={handlePluginToggle}
+                      onReorder={handlePluginReorder}
+                      onOpenEditor={handlePluginOpenEditor}
+                      onSavePreset={handlePluginSavePreset}
+                      onRecallPreset={handlePluginRecallPreset}
+                      onDeletePreset={handlePluginDeletePreset}
+                      onScan={handlePluginScan}
+                      presetsByPluginId={pluginPresetsByPluginId}
+                      openEditorInstanceIds={openEditorInstanceIds}
+                      loadedInstanceIds={loadedInstanceIds}
+                      instanceLatencies={instanceLatencies}
+                      hideHeader
+                    />
+                  </section>
                 ) : null}
 
                 <section

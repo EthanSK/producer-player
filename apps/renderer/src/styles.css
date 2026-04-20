@@ -5304,6 +5304,13 @@ button.reference-action.active {
   min-width: 0;
 }
 
+.plugin-chain-strip--embedded {
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .plugin-chain-strip__header {
   display: flex;
   align-items: baseline;
@@ -5373,6 +5380,15 @@ button.reference-action.active {
 
 .plugin-pill--disabled {
   opacity: 0.4;
+}
+
+.plugin-pill--dragging {
+  opacity: 0.35;
+}
+
+.plugin-pill--drag-overlay {
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+  cursor: grabbing;
 }
 
 .plugin-pill__grab {

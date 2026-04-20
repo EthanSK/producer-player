@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.53] - 2026-04-20
+
+### Features
+- Auto-update: "Recheck" button next to "Restart & Update" so a newer release landing between download and restart can be fetched without restarting first
+
 ## [3.31] - 2026-04-18
 
 ### Features

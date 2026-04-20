@@ -191,6 +191,7 @@ export const IPC_CHANNELS = {
   OPEN_UPDATE_DOWNLOAD: 'producer-player:open-update-download',
   AUTO_UPDATE_CHECK: 'producer-player:auto-update-check',
   AUTO_UPDATE_DOWNLOAD: 'producer-player:auto-update-download',
+  AUTO_UPDATE_RECHECK: 'producer-player:auto-update-recheck',
   AUTO_UPDATE_INSTALL: 'producer-player:auto-update-install',
   AUTO_UPDATE_SET_ENABLED: 'producer-player:auto-update-set-enabled',
   AUTO_UPDATE_STATE_CHANGED: 'producer-player:auto-update-state-changed',
@@ -758,6 +759,12 @@ export interface AutoUpdateState {
   disabledReason?: 'not-packaged' | 'mac-app-store' | 'test-mode' | null;
 }
 
+export type AutoUpdateRecheckResult =
+  | { status: 'newer-downloading'; version: string | null }
+  | { status: 'same-version'; version: string | null }
+  | { status: 'no-update'; version: string | null }
+  | { status: 'error'; message: string };
+
 export type AutoUpdateStateListener = (state: AutoUpdateState) => void;
 
 export type AgentProviderId = 'claude' | 'codex';
@@ -1092,6 +1099,7 @@ export interface ProducerPlayerBridge {
   openUpdateDownload(url?: string | null): Promise<void>;
   autoUpdateCheck(): Promise<void>;
   autoUpdateDownload(): Promise<void>;
+  autoUpdateRecheck(): Promise<AutoUpdateRecheckResult>;
   autoUpdateInstall(): Promise<void>;
   setAutoUpdateEnabled(enabled: boolean): Promise<void>;
   onAutoUpdateStateChanged(listener: AutoUpdateStateListener): () => void;

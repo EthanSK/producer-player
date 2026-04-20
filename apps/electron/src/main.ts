@@ -70,6 +70,7 @@ import type {
   AgentRespondApprovalPayload,
   AiRecommendation,
   AudioFileAnalysis,
+  AutoUpdateRecheckResult,
   AutoUpdateState,
   MasteringAnalysisCachePayload,
   ICloudAvailabilityResult,
@@ -1064,12 +1065,41 @@ function getAutoUpdateDisabledReason(): AutoUpdateState['disabledReason'] {
 // without downloading anything. The user explicitly kicks off the download
 // via the "Download and Install" button.
 let shouldAutoDownloadOnNextAvailable = false;
+let minimumAutoDownloadVersion: string | null = null;
+let recheckPendingDownloadedVersion: string | null = null;
 
 // When true, a successful `update-downloaded` event should immediately call
 // `quitAndInstall`. This is flipped on by the renderer-initiated
 // `AUTO_UPDATE_DOWNLOAD` IPC so the "Download and Install" button performs
 // both actions from a single click.
 let installAfterDownload = false;
+
+function getAutoUpdateDisabledMessage(reason: NonNullable<AutoUpdateState['disabledReason']>): string {
+  if (reason === 'mac-app-store') {
+    return 'Producer Player was installed from the Mac App Store — updates come through the App Store app.';
+  }
+
+  if (reason === 'not-packaged') {
+    return 'Updates require a packaged build. This copy is a development/dev-unpacked run.';
+  }
+
+  return 'Updates are not available in test mode.';
+}
+
+function compareUpdateVersions(left: string | null | undefined, right: string | null | undefined): number {
+  if (!left || !right) {
+    return 0;
+  }
+
+  const leftComparable = toComparableVersion(left);
+  const rightComparable = toComparableVersion(right);
+
+  if (!leftComparable || !rightComparable) {
+    return left.localeCompare(right);
+  }
+
+  return compareSemver(leftComparable, rightComparable);
+}
 
 // BUG FIX (2026-04-16, a992797): configureAutoUpdater() stacked duplicate listeners on every toggle.
 // After a few enable/disable cycles, racing `update-downloaded` handlers regressed the state machine.
@@ -1198,6 +1228,30 @@ function configureAutoUpdater(): void {
     // Successful check — cancel any pending retry and reset attempt counter.
     clearAutoUpdateRetry();
     const displayVersion = info.version ? toDisplayVersion(info.version) : null;
+
+    if (
+      recheckPendingDownloadedVersion &&
+      compareUpdateVersions(info.version, recheckPendingDownloadedVersion) <= 0
+    ) {
+      shouldAutoDownloadOnNextAvailable = false;
+      minimumAutoDownloadVersion = null;
+      const pendingDisplayVersion = toDisplayVersion(recheckPendingDownloadedVersion);
+      recheckPendingDownloadedVersion = null;
+      log.info('[producer-player:auto-update] preserving pending downloaded update after recheck', {
+        availableVersion: info.version,
+      });
+      emitAutoUpdateState({
+        status: 'downloaded',
+        version: pendingDisplayVersion,
+        progress: null,
+        error: null,
+        lastCheckedAt: new Date().toISOString(),
+        lastKnownLatestVersion: pendingDisplayVersion,
+      });
+      return;
+    }
+
+    recheckPendingDownloadedVersion = null;
     // IMPORTANT: Always use toDisplayVersion() when showing versions to users
     emitAutoUpdateState({
       status: 'available',
@@ -1214,6 +1268,16 @@ function configureAutoUpdater(): void {
     // flip this flag, so they just surface status to the UI.
     if (shouldAutoDownloadOnNextAvailable) {
       shouldAutoDownloadOnNextAvailable = false;
+      const shouldDownload =
+        minimumAutoDownloadVersion === null ||
+        compareUpdateVersions(info.version, minimumAutoDownloadVersion) > 0;
+      minimumAutoDownloadVersion = null;
+      if (!shouldDownload) {
+        log.info('[producer-player:auto-update] skipping auto-download for non-newer update', {
+          availableVersion: info.version,
+        });
+        return;
+      }
       void autoUpdater.downloadUpdate().catch((error: unknown) => {
         log.warn('[producer-player:auto-update] background download failed', {
           error: error instanceof Error ? error.message : String(error),
@@ -1225,9 +1289,23 @@ function configureAutoUpdater(): void {
   autoUpdater.on('update-not-available', (info) => {
     log.info('[producer-player:auto-update] no update available', { version: info.version });
     shouldAutoDownloadOnNextAvailable = false;
+    minimumAutoDownloadVersion = null;
     // Successful check — cancel any pending retry and reset attempt counter.
     clearAutoUpdateRetry();
     const displayVersion = info.version ? toDisplayVersion(info.version) : null;
+    if (recheckPendingDownloadedVersion) {
+      const pendingDisplayVersion = toDisplayVersion(recheckPendingDownloadedVersion);
+      recheckPendingDownloadedVersion = null;
+      emitAutoUpdateState({
+        status: 'downloaded',
+        version: pendingDisplayVersion,
+        progress: null,
+        error: null,
+        lastCheckedAt: new Date().toISOString(),
+        lastKnownLatestVersion: displayVersion ?? pendingDisplayVersion,
+      });
+      return;
+    }
     // IMPORTANT: Always use toDisplayVersion() when showing versions to users
     emitAutoUpdateState({
       status: 'not-available',
@@ -1316,6 +1394,8 @@ function configureAutoUpdater(): void {
       stack: errorRecord?.stack,
     });
     shouldAutoDownloadOnNextAvailable = false;
+    minimumAutoDownloadVersion = null;
+    recheckPendingDownloadedVersion = null;
     installAfterDownload = false;
 
     // Schedule a retry with exponential backoff (10s / 30s / 60s). After
@@ -4627,6 +4707,70 @@ function registerIpcHandlers(service: FileLibraryService): void {
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_RECHECK, async (): Promise<AutoUpdateRecheckResult> => {
+    const disabledReason = getAutoUpdateDisabledReason();
+    if (disabledReason) {
+      log.info('[producer-player:auto-update] skipping recheck', { disabledReason });
+      return { status: 'error', message: getAutoUpdateDisabledMessage(disabledReason) };
+    }
+
+    configureAutoUpdater();
+    clearAutoUpdateRetry();
+
+    const currentDownloadedVersion =
+      currentAutoUpdateState.status === 'downloaded' ? currentAutoUpdateState.version : null;
+
+    shouldAutoDownloadOnNextAvailable = true;
+    minimumAutoDownloadVersion = currentDownloadedVersion;
+    recheckPendingDownloadedVersion = currentDownloadedVersion;
+
+    const restorePendingDownloadedState = (): void => {
+      if (!currentDownloadedVersion) return;
+      emitAutoUpdateState({
+        status: 'downloaded',
+        version: toDisplayVersion(currentDownloadedVersion),
+        progress: null,
+        error: null,
+      });
+    };
+
+    try {
+      log.info('[producer-player:auto-update] rechecking pending downloaded update');
+      const result = await autoUpdater.checkForUpdates();
+      const availableVersion = result?.updateInfo?.version ?? null;
+
+      if (
+        !availableVersion ||
+        compareUpdateVersions(availableVersion, APP_VERSION_INFO.semanticVersion) <= 0
+      ) {
+        restorePendingDownloadedState();
+        return { status: 'no-update', version: null };
+      }
+
+      if (currentDownloadedVersion && compareUpdateVersions(availableVersion, currentDownloadedVersion) <= 0) {
+        restorePendingDownloadedState();
+        return {
+          status: 'same-version',
+          version: toDisplayVersion(currentDownloadedVersion),
+        };
+      }
+
+      return {
+        status: 'newer-downloading',
+        version: toDisplayVersion(availableVersion),
+      };
+    } catch (error: unknown) {
+      shouldAutoDownloadOnNextAvailable = false;
+      minimumAutoDownloadVersion = null;
+      recheckPendingDownloadedVersion = null;
+      restorePendingDownloadedState();
+      log.warn('[producer-player:auto-update] recheck failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { status: 'error', message: friendlyUpdateErrorMessage(error) };
     }
   });
 

@@ -40,6 +40,7 @@ import type {
   AiRecommendationStatus,
   AlbumChecklistItem,
   AudioFileAnalysis,
+  AutoUpdateRecheckResult,
   AutoUpdateState,
   ICloudAvailabilityResult,
   ICloudBackupData,
@@ -2343,6 +2344,7 @@ export function App(): JSX.Element {
     nextRetryInMs: null,
     disabledReason: null,
   });
+  const [isRecheckingUpdate, setIsRecheckingUpdate] = useState(false);
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(() => {
     const stored = window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY);
     return stored !== 'false'; // default true
@@ -10073,6 +10075,55 @@ export function App(): JSX.Element {
     });
   }
 
+  async function handleRecheckForUpdates(): Promise<void> {
+    if (isRecheckingUpdate) return;
+
+    setIsRecheckingUpdate(true);
+    try {
+      const result: AutoUpdateRecheckResult = await window.producerPlayer.autoUpdateRecheck();
+      if (result.status === 'newer-downloading') {
+        toast.show({
+          id: 'update-recheck',
+          kind: 'info',
+          text: `Newer update v${result.version ?? 'latest'} downloading…`,
+        });
+        return;
+      }
+
+      if (result.status === 'same-version') {
+        toast.show({
+          id: 'update-recheck',
+          kind: 'info',
+          text: `No newer updates — v${result.version ?? 'latest'} is still the latest.`,
+        });
+        return;
+      }
+
+      if (result.status === 'no-update') {
+        toast.show({
+          id: 'update-recheck',
+          kind: 'info',
+          text: 'No newer updates.',
+        });
+        return;
+      }
+
+      toast.show({
+        id: 'update-recheck',
+        kind: 'error',
+        text: result.message,
+      });
+    } catch (cause: unknown) {
+      toast.show({
+        id: 'update-recheck',
+        kind: 'error',
+        text: cause instanceof Error ? cause.message : 'Could not recheck for updates.',
+      });
+    } finally {
+      setIsRecheckingUpdate(false);
+    }
+  }
+
   function handleSongRatingChange(songId: string, nextRatingValue: number): void {
     const nextRating = getNormalizedSliderRating(nextRatingValue);
 
@@ -12363,6 +12414,27 @@ export function App(): JSX.Element {
           </button>
           <button
             type="button"
+            data-testid="auto-update-banner-recheck"
+            disabled={isRecheckingUpdate}
+            onClick={() => {
+              void handleRecheckForUpdates();
+            }}
+            style={{
+              padding: '2px 10px',
+              borderRadius: '4px',
+              border: '1px solid rgba(0,0,0,0.3)',
+              background: 'rgba(0,0,0,0.15)',
+              color: '#000',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: isRecheckingUpdate ? 'default' : 'pointer',
+              opacity: isRecheckingUpdate ? 0.65 : 1,
+            }}
+          >
+            📡 Recheck
+          </button>
+          <button
+            type="button"
             data-testid="auto-update-banner-dismiss"
             onClick={() => {
               setUpdateBannerDismissed(true);
@@ -14083,6 +14155,20 @@ export function App(): JSX.Element {
                 title="Restart now to finish installing the update."
               >
                 Restart &amp; Update
+              </button>
+            ) : null}
+            {isUpdateDownloaded ? (
+              <button
+                type="button"
+                className="ghost"
+                disabled={isRecheckingUpdate}
+                onClick={() => {
+                  void handleRecheckForUpdates();
+                }}
+                data-testid="support-feedback-recheck-update"
+                title="Check whether a newer update is available before restarting."
+              >
+                📡 Recheck
               </button>
             ) : null}
 

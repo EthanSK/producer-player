@@ -940,6 +940,7 @@ const CHECKLIST_CAPTURE_LOOKBACK_SECONDS = 3;
  * deltaY) = earlier, scroll down (positive deltaY) = later.
  */
 const CHECKLIST_PREVIEW_WHEEL_STEP_SECONDS = 0.1;
+const CHECKLIST_PREVIEW_WHEEL_SHIFT_STEP_SECONDS = 0.5;
 /**
  * Drag-to-scrub: 1px of vertical movement = 0.1s. Drag up = later (lower y
  * value → later time), drag down = earlier. Mirrors the scroll semantics so
@@ -10192,8 +10193,11 @@ export function App(): JSX.Element {
     }
 
     const base = checklistCapturedTimestamp ?? captureCurrentPlaybackTimestamp() ?? 0;
+    const stepSeconds = event.shiftKey
+      ? CHECKLIST_PREVIEW_WHEEL_SHIFT_STEP_SECONDS
+      : CHECKLIST_PREVIEW_WHEEL_STEP_SECONDS;
     const next = clampChecklistTimestampFractional(
-      base + direction * CHECKLIST_PREVIEW_WHEEL_STEP_SECONDS
+      base + direction * stepSeconds
     );
     if (next === null) {
       return;
@@ -13964,9 +13968,7 @@ export function App(): JSX.Element {
               <div
                 className={`checklist-daw-offset-control${checklistDawOffsetEnabled ? ' is-active' : ''}`}
                 data-testid="checklist-daw-offset-control"
-                title={checklistDawOffsetEnabled
-                  ? 'DAW offset is active: displayed timestamps are shifted to match your DAW arrangement. Clicks still seek to the correct audio position. Toggle off to show raw file times.'
-                  : 'DAW offset (currently off). Turn this on to shift displayed checklist timestamps by a fixed minutes:seconds amount so they line up with your DAW arrangement. The help (?) button explains when to use it.'}
+                title="Add a DAW time offset so timestamps displayed here line up with your digital audio workstation arrangement position. Does not change where clicks seek to."
               >
                 <span
                   className="checklist-daw-offset-help"
@@ -14146,6 +14148,18 @@ export function App(): JSX.Element {
                       draggingChecklistItemId !== item.id &&
                       checklistDragOverItemId === item.id &&
                       checklistDragOverPosition === 'after';
+                    // v3.24: "now-playing" marker. The checklist item's
+                    // version tag is current only when its v1/v2/... tag
+                    // matches the loaded player version and the modal is
+                    // showing that same song. Keeping the song check avoids
+                    // highlights leaking across songs with overlapping
+                    // version numbers. (Codex review, 2026-04-18.)
+                    const isCurrentVersionTag =
+                      item.versionNumber !== null &&
+                      currentPlaybackVersionNumber !== null &&
+                      item.versionNumber === currentPlaybackVersionNumber &&
+                      selectedPlaybackSongId !== null &&
+                      checklistModalSong.id === selectedPlaybackSongId;
                     return (
                     <li
                       key={item.id}
@@ -14164,20 +14178,7 @@ export function App(): JSX.Element {
                       data-item-id={item.id}
                       data-item-version-number={item.versionNumber ?? ''}
                       data-current-version={
-                        // Highlight requires: item has a version tag, we know
-                        // what version is playing, the numbers match, AND the
-                        // checklist modal is showing the SAME song as is
-                        // playing. Otherwise opening song B's checklist while
-                        // song A v2 is playing would wrongly highlight B's v2
-                        // items — they'd share the number but not the song.
-                        // (Codex review, 2026-04-18.)
-                        item.versionNumber !== null &&
-                        currentPlaybackVersionNumber !== null &&
-                        item.versionNumber === currentPlaybackVersionNumber &&
-                        selectedPlaybackSongId !== null &&
-                        checklistModalSong.id === selectedPlaybackSongId
-                          ? 'true'
-                          : 'false'
+                        isCurrentVersionTag ? 'true' : 'false'
                       }
                       onDragStart={(event) => {
                         // Cancel drag that starts from interactive descendants
@@ -14269,20 +14270,7 @@ export function App(): JSX.Element {
                       }${isDraggingThisRow ? ' is-drag-source' : ''}${
                         showDropBefore ? ' drop-preview-before' : ''
                       }${showDropAfter ? ' drop-preview-after' : ''}${
-                        // v3.24: "now-playing" highlight. Subtle accent border
-                        // when the checklist item's v1/v2/… tag matches the
-                        // version currently loaded in the player AND the
-                        // checklist modal is showing that same song. All four
-                        // conditions are needed — skipping the song check
-                        // leaks highlights across songs with overlapping
-                        // version numbers. (Codex review, 2026-04-18.)
-                        item.versionNumber !== null &&
-                        currentPlaybackVersionNumber !== null &&
-                        item.versionNumber === currentPlaybackVersionNumber &&
-                        selectedPlaybackSongId !== null &&
-                        checklistModalSong.id === selectedPlaybackSongId
-                          ? ' checklist-item--current-version'
-                          : ''
+                        isCurrentVersionTag ? ' checklist-item--current-version' : ''
                       }`}
                       style={
                         groupHighlightColor
@@ -14356,7 +14344,11 @@ export function App(): JSX.Element {
                           })() : null}
                           {item.versionNumber !== null ? (
                             <span
-                              className="checklist-version-badge"
+                              className={`checklist-version-badge${
+                                isCurrentVersionTag
+                                  ? ' checklist-version-badge--current'
+                                  : ''
+                              }`}
                               data-testid="song-checklist-item-version"
                               onMouseEnter={() =>
                                 setHoveredChecklistTag({
@@ -14543,7 +14535,7 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="checklist-timestamp-badge checklist-input-timestamp-preview"
-                    title={`Seek to ${formatTime(checklistCapturedTimestamp)} — scroll or drag vertically to adjust`}
+                    title={`Seek to ${formatTime(checklistCapturedTimestamp)} — scroll or drag vertically to adjust; hold Shift for coarser steps`}
                     data-testid="song-checklist-input-timestamp-preview"
                     onClick={() => {
                       if (checklistPreviewSuppressNextClickRef.current) {

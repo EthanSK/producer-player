@@ -1869,36 +1869,9 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 }
 
 /* ── v3.24 Checklist "now-playing" version highlight ──
-   Subtle 1.5px accent outline + tint so checklist items tagged with the
-   version currently loaded in the player stand out without shouting. Uses
-   the existing --accent token so it retheme-s automatically. The CSS is
-   intentionally scoped to the has-metadata variant since the versionNumber
-   badge is only ever rendered on those rows. */
-
-.checklist-item-row.checklist-item--current-version {
-  border: 1.5px solid var(--accent);
-  background: rgba(92, 167, 255, 0.06);
-  /* position:relative anchors the ::after "now playing" dot. The base
-     .checklist-item-row rule doesn't set a position so we scope it to this
-     variant to avoid disturbing the base layout. */
-  position: relative;
-  /* The tint keeps the accent recognisable but doesn't fight the existing
-     is-active (timestamp-hit) or is-group-highlighted hover states, which
-     are both stronger and take over when they apply. */
-}
-
-.checklist-item-row.checklist-item--current-version::after {
-  content: '';
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 4px rgba(92, 167, 255, 0.7);
-  pointer-events: none;
-}
+   Accent the version tag for the version currently loaded in the player.
+   The row keeps its class for selectors, but the visual treatment belongs
+   on the version badge so the state reads as "this version is playing." */
 
 .analysis-reference-slots {
   display: grid;
@@ -2670,14 +2643,7 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 
 /* DAW offset header widget — sits between the title and the Done button.
  * When the toggle is OFF, the numeric inputs stay visible but dim so the
- * user's last-typed offset value is still visible.
- *
- * v3.46 — reduced inactive opacity (0.75 → 0.45) and swapped the border
- * to a neutral grey instead of the theme --border (which has a blue
- * cast). Ethan flagged the previous treatment as "permanently blue
- * outline of a blue dot" that read as a notification indicator.
- * Inactive state now fades into the header surface; the pill only
- * takes on the success-green palette once the offset is active. */
+ * user's last-typed offset value is still visible. */
 .checklist-daw-offset-control {
   display: inline-flex;
   align-items: center;
@@ -2687,17 +2653,12 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   margin-left: auto;
   padding: 4px 8px;
   border-radius: 8px;
-  border: 1px solid rgba(156, 175, 196, 0.18);
+  border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
   font-size: 11px;
   color: var(--text-muted);
-  opacity: 0.45;
+  opacity: 0.75;
   transition: opacity 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.checklist-daw-offset-control:hover,
-.checklist-daw-offset-control:focus-within {
-  opacity: 0.85;
 }
 
 .checklist-daw-offset-control.is-active {
@@ -3111,6 +3072,26 @@ body.is-dragging-checklist-timestamp * {
   line-height: 1.2;
   white-space: nowrap;
   cursor: default;
+}
+
+.checklist-version-badge--current {
+  position: relative;
+  border: 1.5px solid var(--accent);
+  background: rgba(92, 167, 255, 0.15);
+  color: #8ec5ff;
+}
+
+.checklist-version-badge--current::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 4px rgba(92, 167, 255, 0.7);
+  pointer-events: none;
 }
 
 /* Listening-device feature ------------------------------------------------ */

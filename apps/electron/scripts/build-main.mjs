@@ -164,7 +164,15 @@ await rm(binaryOutputDirectory, { recursive: true, force: true });
 await mkdir(binaryOutputDirectory, { recursive: true });
 
 const shouldBundleFfmpeg = process.env.PRODUCER_PLAYER_SKIP_BUNDLED_FFMPEG !== 'true';
-const shouldBundleSidecar = process.env.PRODUCER_PLAYER_SKIP_BUNDLED_SIDECAR !== 'true';
+// Producer Player is macOS-only (VST3/AU via JUCE). The pp-audio-host sidecar
+// only builds on macOS; on Linux + Windows CI runners it fails with missing
+// deps / toolchain differences and breaks the whole Release Desktop workflow,
+// stranding macOS users (see 2026-04-20 v3.57-v3.59 stuck run). Gate the
+// sidecar step on darwin so cross-platform matrix legs still produce a valid
+// Electron bundle. The explicit opt-out env var still works for parity.
+const shouldBundleSidecar =
+  process.platform === 'darwin' &&
+  process.env.PRODUCER_PLAYER_SKIP_BUNDLED_SIDECAR !== 'true';
 const shouldBuildUniversalMacFfmpeg =
   shouldBundleFfmpeg &&
   process.platform === 'darwin' &&
@@ -201,7 +209,13 @@ function runSidecarBuild() {
 }
 
 if (!shouldBundleSidecar) {
-  console.info('[producer-player/electron] Skipping bundled pp-audio-host sidecar for this build target.');
+  if (process.platform !== 'darwin') {
+    console.info(
+      `[producer-player/electron] Skipping pp-audio-host sidecar build on non-macOS (platform=${process.platform}).`,
+    );
+  } else {
+    console.info('[producer-player/electron] Skipping bundled pp-audio-host sidecar for this build target.');
+  }
 } else {
   // Build the sidecar if it isn't already on disk. This is the path that
   // was missing in v3.46–v3.49: `npm run build` -> this script -> ffmpeg-only

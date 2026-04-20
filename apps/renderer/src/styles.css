@@ -1858,13 +1858,35 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   gap: 6px;
 }
 
-.version-switcher-now-playing-dot {
+/* v3.51 — Self-documenting "Now playing" badge for the currently-audible
+   version row in the floating version switcher panel. Previous design was a
+   standalone blue dot with only an aria-label tooltip, which was opaque to
+   sighted users (Ethan flagged it). Adds explicit "Now playing" text so the
+   affordance reads at a glance. */
+.version-switcher-now-playing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(92, 167, 255, 0.45);
+  background: rgba(92, 167, 255, 0.15);
+  color: #8ec5ff;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  line-height: 1.4;
+  text-transform: none;
+  flex-shrink: 0;
+}
+
+.version-switcher-now-playing-badge-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 6px rgba(92, 167, 255, 0.6);
+  box-shadow: 0 0 4px rgba(92, 167, 255, 0.7);
   flex-shrink: 0;
 }
 

@@ -10667,6 +10667,11 @@ export function App(): JSX.Element {
       schedulePlaybackLoadTimeout('version-switcher-autoplay');
     }
     setSelectedPlaybackVersionId(versionId);
+    // v3.51 — Ethan reported that clicking a version row felt like it opened
+    // a nested popup. Traced the flow: handler only flips playback state and
+    // closes the panel. No popup opener in this code path. If the nested-popup
+    // behavior returns, look for a useEffect listening to
+    // selectedPlaybackVersionId that toggles inspectorDrawerOpen/checklistModalSongId.
     // Close the panel on a successful switch. Users who want to audition
     // several versions in a row can re-open it; keeping it open otherwise
     // obscures the transport controls they're likely about to use.
@@ -17492,9 +17497,9 @@ export function App(): JSX.Element {
               <div className="version-switcher-list">
                 {versionSwitcherVersions.map((version) => {
                   // isActive drives the visible "now playing" affordances
-                  // (accent row + dot). Using nowPlayingVersionId (which is
-                  // null in reference mode) so the panel stays truthful about
-                  // what is actually audible. (Codex review, 2026-04-18.)
+                  // (accent row + label). Using nowPlayingVersionId (which
+                  // is null in reference mode) so the panel stays truthful
+                  // about what is actually audible. (Codex review, 2026-04-18.)
                   const isActive = version.id === nowPlayingVersionId;
                   const durationMs = version.durationMs;
                   const durationLabel =
@@ -17518,10 +17523,16 @@ export function App(): JSX.Element {
                       <span className="version-switcher-item-meta">
                         {isActive ? (
                           <span
-                            className="version-switcher-now-playing-dot"
+                            className="version-switcher-now-playing-badge"
                             aria-label="Now playing"
-                            title="Now playing"
-                          />
+                            title="This version is currently loaded in the player"
+                          >
+                            <span
+                              className="version-switcher-now-playing-badge-dot"
+                              aria-hidden="true"
+                            />
+                            Now playing
+                          </span>
                         ) : null}
                         {durationLabel}
                       </span>

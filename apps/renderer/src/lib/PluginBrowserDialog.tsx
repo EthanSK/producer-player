@@ -78,6 +78,25 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
     });
   }, [filteredPlugins.length]);
 
+  // v3.45 — lazy first-time scan.
+  //
+  // Startup no longer kicks off a background plugin scan (that triggered
+  // macOS network-volume permission prompts at every launch — see
+  // App.tsx `pluginLibraryBootstrappedRef` comment). Instead, the FIRST
+  // time the user opens this dialog and finds the cached library empty,
+  // we auto-start a scan here. Mounting the dialog == user clicked the
+  // "+ Add plugin" button, so the permission prompt (if any) is now
+  // contextual to a user action rather than firing out of nowhere.
+  const autoScanAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (autoScanAttemptedRef.current) return;
+    if (scanning) return;
+    const isEmpty = !library || library.plugins.length === 0;
+    if (!isEmpty) return;
+    autoScanAttemptedRef.current = true;
+    onScan();
+  }, [library, scanning, onScan]);
+
   // Autofocus search on mount.
   useEffect(() => {
     const input = searchInputRef.current;

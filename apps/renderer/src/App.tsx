@@ -137,6 +137,7 @@ import type {
   TrackPluginChain,
 } from '@producer-player/contracts';
 import { PluginChainStrip } from './lib/PluginChainStrip';
+import { useToast } from './lib/ToastStack';
 import {
   LUFS_LINKS,
   TRUE_PEAK_LINKS,
@@ -2126,6 +2127,11 @@ function parseMigrationInput(
 }
 
 export function App(): JSX.Element {
+  // v3.45 — surface short-lived status updates (plugin scan start/finish,
+  // AI recommendation start/finish) as bottom-left snackbars. No-op
+  // outside the ToastProvider (main.tsx), so tests that render App in
+  // isolation don't crash.
+  const toast = useToast();
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>(EMPTY_SNAPSHOT);
   const [environment, setEnvironment] =
     useState<ProducerPlayerEnvironment>(EMPTY_ENVIRONMENT);
@@ -6996,6 +7002,16 @@ export function App(): JSX.Element {
         requestId,
       });
 
+      toast.show({
+        id: 'ai-recs',
+        kind: 'info',
+        text:
+          source === 'auto'
+            ? 'AI recommendations started…'
+            : 'AI recommendations rerunning…',
+        durationMs: 0, // sticky; replaced by completion toast below
+      });
+
       void window.producerPlayer
         .rendererLog('info', 'AI mastering recommendation run started', {
           songId,
@@ -7165,6 +7181,11 @@ export function App(): JSX.Element {
           setAiRecommendationsGeneration((prev) =>
             prev?.requestId === requestId ? null : prev,
           );
+          toast.show({
+            id: 'ai-recs',
+            kind: 'error',
+            text: 'AI recommendations errored. Click to dismiss.',
+          });
           void window.producerPlayer
             .rendererLog('warn', 'AI mastering recommendation run errored', {
               songId,
@@ -7187,6 +7208,11 @@ export function App(): JSX.Element {
         );
 
         if (!parsed || Object.keys(parsed).length === 0) {
+          toast.show({
+            id: 'ai-recs',
+            kind: 'warning',
+            text: 'AI recommendations finished but produced no suggestions.',
+          });
           void window.producerPlayer
             .rendererLog('warn', 'AI mastering recommendation run parsed nothing', {
               songId,
@@ -7241,6 +7267,14 @@ export function App(): JSX.Element {
           runAiRecommendationFetch(songId, versionNumber);
         }
 
+        toast.show({
+          id: 'ai-recs',
+          kind: 'success',
+          text: `AI recommendations ready (${Object.keys(parsed).length} metric${
+            Object.keys(parsed).length === 1 ? '' : 's'
+          }).`,
+        });
+
         void window.producerPlayer
           .rendererLog('info', 'AI mastering recommendation run completed', {
             songId,
@@ -7260,6 +7294,11 @@ export function App(): JSX.Element {
         setAiRecommendationsGeneration((prev) =>
           prev?.requestId === requestId ? null : prev,
         );
+        toast.show({
+          id: 'ai-recs',
+          kind: 'warning',
+          text: 'AI recommendations timed out.',
+        });
         void window.producerPlayer
           .rendererLog('warn', 'AI mastering recommendation run timed out', {
             songId,
@@ -7286,6 +7325,7 @@ export function App(): JSX.Element {
       computeCurrentAnalysisVersion,
       cancelActiveAiRecAgentRun,
       runAiRecommendationFetch,
+      toast,
       AI_REC_CORE_METRIC_IDS,
       AI_REC_SPECTRUM_BAND_METRIC_IDS,
     ],
@@ -9312,20 +9352,23 @@ export function App(): JSX.Element {
     };
   }, [commitPluginChain, selectedSongId]);
 
-  // v3.40 Phase 1b — Plugin library: load cached library on mount and
-  // kick a background scan if the cache is empty OR older than 7 days.
-  // Rationale: the user won't realistically install plugins more often
-  // than weekly on a dev rig, and the scan is expensive enough (40+
-  // AudioUnits on a typical mac) that we don't want to do it on every
-  // session. Scan failures (missing sidecar binary in a dev build, etc.)
-  // are logged and swallowed — the UI still renders the empty-library
-  // call-to-action so the user can hit "Scan plugins" manually.
+  // v3.45 — Plugin library bootstrap: only load the CACHED library from
+  // disk at startup. Do NOT trigger a background scan here.
   //
-  // E2E tests can suppress the background scan by setting
-  // `window.__producerPlayerDisablePluginLibraryBootstrap = true` before the
-  // App mounts (usually not practical; tests instead flip it ASAP and also
-  // seed a fake library, letting the in-flight scan's "setPluginLibrary" be
-  // skipped via the same flag).
+  // Rationale: running scanPluginLibrary() at app launch spawns the
+  // pp-audio-host sidecar and has JUCE enumerate VST3/AU plugin
+  // directories, which in turn causes macOS to prompt for permission to
+  // access files on network volumes (TCC — network-volumes class) at
+  // every launch even though nothing user-facing requires it yet. This
+  // aligns the implementation with docs/PLUGIN_HOSTING_PLAN.md §4.5
+  // "Lifecycle" — the sidecar only spawns on first real plugin-UI
+  // interaction. A scan is triggered lazily the first time the plugin
+  // browser is opened and the cache is empty (see handlePluginScan call
+  // sites wiring the dialog onOpen).
+  //
+  // E2E tests can suppress this hydration by setting
+  // `window.__producerPlayerDisablePluginLibraryBootstrap = true` before
+  // the App mounts.
   const pluginLibraryBootstrappedRef = useRef(false);
   useEffect(() => {
     if (pluginLibraryBootstrappedRef.current) return;
@@ -9334,36 +9377,11 @@ export function App(): JSX.Element {
       (window as unknown as {
         __producerPlayerDisablePluginLibraryBootstrap?: boolean;
       }).__producerPlayerDisablePluginLibraryBootstrap === true;
-    const STALE_MS = 7 * 24 * 60 * 60 * 1000;
     void window.producerPlayer
       .getPluginLibrary()
       .then((library) => {
-        if (!scanSuppressed()) setPluginLibrary(library);
-        const scannedAt = library ? Date.parse(library.scannedAt) : NaN;
-        const isEmpty = !library || library.plugins.length === 0;
-        const isStale = Number.isFinite(scannedAt)
-          ? Date.now() - scannedAt > STALE_MS
-          : true;
-        if (!isEmpty && !isStale) return;
         if (scanSuppressed()) return;
-        // Fire and forget — the dialog can show a "Scan plugins" CTA if this
-        // fails (sidecar missing in dev, etc.). We never throw into the
-        // renderer tree.
-        setPluginLibraryScanning(true);
-        window.producerPlayer
-          .scanPluginLibrary()
-          .then((freshLibrary) => {
-            if (scanSuppressed()) return;
-            setPluginLibrary(freshLibrary);
-          })
-          .catch((err) => {
-            void window.producerPlayer.rendererLog(
-              'warn',
-              '[plugin-chain] background scan failed',
-              { error: String(err) },
-            );
-          })
-          .finally(() => setPluginLibraryScanning(false));
+        setPluginLibrary(library);
       })
       .catch((err) => {
         void window.producerPlayer.rendererLog(
@@ -9714,16 +9732,37 @@ export function App(): JSX.Element {
   const handlePluginScan = useCallback(() => {
     if (pluginLibraryScanning) return;
     setPluginLibraryScanning(true);
+    toast.show({
+      id: 'plugin-scan',
+      kind: 'info',
+      text: 'Scanning plugins…',
+      durationMs: 0, // sticky until scan finishes (we overwrite on success/fail)
+    });
     void window.producerPlayer
       .scanPluginLibrary()
-      .then((library) => setPluginLibrary(library))
-      .catch((err) =>
-        window.producerPlayer.rendererLog('error', '[plugin-chain] manual scan failed', {
+      .then((library) => {
+        setPluginLibrary(library);
+        const count = library?.plugins.length ?? 0;
+        toast.show({
+          id: 'plugin-scan',
+          kind: 'success',
+          text: count
+            ? `Found ${count} plugin${count === 1 ? '' : 's'}.`
+            : 'Plugin scan finished (no plugins found).',
+        });
+      })
+      .catch((err) => {
+        toast.show({
+          id: 'plugin-scan',
+          kind: 'error',
+          text: 'Plugin scan failed. Click to dismiss.',
+        });
+        return window.producerPlayer.rendererLog('error', '[plugin-chain] manual scan failed', {
           error: String(err),
-        }),
-      )
+        });
+      })
       .finally(() => setPluginLibraryScanning(false));
-  }, [pluginLibraryScanning]);
+  }, [pluginLibraryScanning, toast]);
 
   // Restore per-song live EQ state when song changes
   const autoLoadEqLiveSongIdRef = useRef<string | null>(null);

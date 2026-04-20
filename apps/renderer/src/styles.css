@@ -67,6 +67,12 @@ body,
   min-height: 0 !important;
   padding: 8px 12px !important;
   align-items: center !important;
+  pointer-events: none !important;
+}
+
+[data-sonner-toaster] [data-close-button],
+[data-sonner-toaster] [data-button] {
+  pointer-events: auto !important;
 }
 
 [data-sonner-toaster] [data-sonner-toast] [data-content] {

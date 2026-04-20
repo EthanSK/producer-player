@@ -133,6 +133,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Linux sidecar build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libcurl4-openssl-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxext-dev \
+            libxinerama-dev \
+            libxrandr-dev
+
       - name: Verify unified version configuration
         run: |
           npm run version:sync

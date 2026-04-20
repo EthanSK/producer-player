@@ -71,15 +71,16 @@ interface Pending {
 /**
  * Ordered list of filesystem paths we look at to find the sidecar binary.
  * Dev: built by `bash native/pp-audio-host/scripts/build-sidecar.sh` into
- * `native/pp-audio-host/build/bin/pp-audio-host`.
+ * `native/pp-audio-host/build/bin/pp-audio-host` (`.exe` on Windows).
  * Packaged: copied into `apps/electron/dist/bin/pp-audio-host` by
  * `apps/electron/scripts/build-main.mjs`, then captured by electron-builder's
  * `asarUnpack: ["apps/electron/dist/bin/**"]` rule.
  */
 export function resolveSidecarBinaryCandidates(cwd: string = process.cwd()): string[] {
+  const binaryName = process.platform === 'win32' ? 'pp-audio-host.exe' : 'pp-audio-host';
   return [
-    resolve(cwd, 'native/pp-audio-host/build/bin/pp-audio-host'),
-    resolve(cwd, 'apps/electron/dist/bin/pp-audio-host'),
+    resolve(cwd, 'native/pp-audio-host/build/bin', binaryName),
+    resolve(cwd, 'apps/electron/dist/bin', binaryName),
   ];
 }
 

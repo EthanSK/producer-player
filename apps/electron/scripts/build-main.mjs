@@ -22,8 +22,9 @@ const binaryOutputDirectory = resolve(outputDirectory, 'bin');
 // dist/bin alongside ffmpeg so packaged installs always ship it.
 const sidecarDirectory = resolve(repositoryDirectory, 'native/pp-audio-host');
 const sidecarBuildScript = resolve(sidecarDirectory, 'scripts/build-sidecar.sh');
-const sidecarSourceBinary = resolve(sidecarDirectory, 'build/bin/pp-audio-host');
-const sidecarBundledBinary = resolve(binaryOutputDirectory, 'pp-audio-host');
+const sidecarBinaryName = process.platform === 'win32' ? 'pp-audio-host.exe' : 'pp-audio-host';
+const sidecarSourceBinary = resolve(sidecarDirectory, 'build/bin', sidecarBinaryName);
+const sidecarBundledBinary = resolve(binaryOutputDirectory, sidecarBinaryName);
 
 function parsePositiveInteger(rawValue) {
   if (typeof rawValue !== 'string') {

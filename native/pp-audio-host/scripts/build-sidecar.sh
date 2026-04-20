@@ -76,7 +76,10 @@ echo "→ pp-audio-host: building"
 ) &
 wait_with_ping "$!" "building pp-audio-host"
 
-BIN="$HERE/$BUILD_DIR/bin/pp-audio-host"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) BIN="$HERE/$BUILD_DIR/bin/pp-audio-host.exe" ;;
+  *) BIN="$HERE/$BUILD_DIR/bin/pp-audio-host" ;;
+esac
 if [ ! -x "$BIN" ]; then
   echo "✗ build completed but binary missing at $BIN" >&2
   exit 2

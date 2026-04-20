@@ -11326,6 +11326,13 @@ export function App(): JSX.Element {
     // rendering treats a missing id as a greyed-out "deleted device" chip.
   }
 
+  function handleFocusListeningDeviceInput(): void {
+    document
+      .querySelector<HTMLElement>('.listening-device-strip')
+      ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    document.querySelector<HTMLInputElement>('[data-testid="listening-device-input"]')?.focus();
+  }
+
   function handleToggleChecklistItem(songId: string, itemId: string, completed: boolean): void {
     updateSongChecklistItems(songId, (items) =>
       items.map((item) => (item.id === itemId ? { ...item, completed } : item))
@@ -11815,6 +11822,9 @@ export function App(): JSX.Element {
     }
     return map;
   }, [listeningDevices]);
+  const activeListeningDevice = activeListeningDeviceId
+    ? listeningDevicesById.get(activeListeningDeviceId) ?? null
+    : null;
 
   useEffect(() => {
     if (
@@ -14449,7 +14459,7 @@ export function App(): JSX.Element {
                           onClick={() => handleSelectListeningDevice(device.id)}
                           title={isActive ? `Clear "${device.name}" selection` : `Tag new items with "${device.name}"`}
                         >
-                          {device.name}
+                          {isActive ? `🎧 ${device.name}` : device.name}
                         </button>
                         <button
                           type="button"
@@ -14978,6 +14988,64 @@ export function App(): JSX.Element {
               >
                 Add
               </button>
+            </div>
+
+            <div className="listening-device-reminder">
+              {activeListeningDevice && activeListeningDeviceId ? (() => {
+                const color = getListeningDeviceColor(activeListeningDeviceId);
+                return (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="now-listening-pill is-active"
+                    style={{
+                      color: color.fg,
+                      borderColor: color.border,
+                      background: color.bg,
+                    }}
+                    onClick={handleFocusListeningDeviceInput}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) {
+                        return;
+                      }
+                      if (event.key !== 'Enter' && event.key !== ' ') {
+                        return;
+                      }
+                      event.preventDefault();
+                      handleFocusListeningDeviceInput();
+                    }}
+                    data-testid="checklist-now-listening-pill"
+                    title="Jump to listening devices"
+                  >
+                    <span>🎧 Now listening: {activeListeningDevice.name}</span>
+                    <button
+                      type="button"
+                      className="now-listening-pill-clear"
+                      data-testid="checklist-now-listening-clear"
+                      aria-label="Clear listening device selection"
+                      title="Clear listening device selection"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setActiveListeningDeviceId(null);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })() : (
+                <button
+                  type="button"
+                  className="now-listening-pill is-idle"
+                  onClick={handleFocusListeningDeviceInput}
+                  data-testid="checklist-now-listening-pill"
+                  title="Jump to listening devices"
+                >
+                  {listeningDevices.length > 0
+                    ? '🎧 No listening device selected — pick one above'
+                    : '🎧 Add a listening device above to tag items'}
+                </button>
+              )}
             </div>
 
             {selectedPlaybackVersion ? (

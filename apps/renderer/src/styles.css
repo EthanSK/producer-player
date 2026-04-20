@@ -3242,7 +3242,8 @@ body.is-dragging-checklist-timestamp * {
 }
 
 .listening-device-chip.is-active {
-  box-shadow: 0 0 0 1px currentColor inset;
+  box-shadow: 0 0 0 2px currentColor inset, 0 0 6px -2px currentColor;
+  font-weight: 700;
 }
 
 .listening-device-chip-label {
@@ -3276,6 +3277,65 @@ body.is-dragging-checklist-timestamp * {
 
 .listening-device-chip-delete:hover {
   opacity: 1;
+}
+
+.listening-device-reminder {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 0 2px 0;
+}
+
+.now-listening-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid;
+  transition: transform 0.12s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.now-listening-pill:hover {
+  transform: translateY(-1px);
+}
+
+.now-listening-pill.is-active {
+  /* Filled palette bg supplied inline; add a glow for obvious on-state. */
+  box-shadow: 0 0 0 2px currentColor inset, 0 0 8px -2px currentColor;
+  font-weight: 700;
+}
+
+.now-listening-pill.is-idle {
+  color: var(--text-muted);
+  border-color: var(--border);
+  background: transparent;
+  font-weight: 500;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.now-listening-pill-clear {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0 2px;
+  margin-left: 2px;
+  cursor: pointer;
+  opacity: 0.75;
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.now-listening-pill-clear:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .checklist-listening-device-badge {

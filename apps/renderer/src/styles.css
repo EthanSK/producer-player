@@ -1108,8 +1108,16 @@ input[type='range'] {
 .analysis-overlay-section.drop-target,
 .analysis-draggable-panel-shell.drop-target > .analysis-compact-section,
 .analysis-draggable-panel-shell.drop-target > .analysis-normalization-panel {
-  border-color: rgba(92, 167, 255, 0.8);
-  box-shadow: 0 0 0 1px rgba(92, 167, 255, 0.25);
+  border-color: rgba(92, 167, 255, 0.92);
+  box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.55), 0 0 24px rgba(61, 141, 255, 0.38);
+  background: rgba(92, 167, 255, 0.10);
+  transform: translateY(-1px);
+  transition: box-shadow 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+
+.analysis-overlay-section.is-drag-source {
+  opacity: 0.35;
+  filter: saturate(0.6);
 }
 
 .analysis-normalization-header {
@@ -3076,7 +3084,7 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 }
 
 .checklist-item-text {
-  min-height: 36px;
+  min-height: 76px;
   align-self: stretch;
 }
 

@@ -1243,8 +1243,19 @@ function findNearestScrollableElement(element: Element | null): HTMLElement | nu
 }
 
 function autosizeChecklistTextarea(target: HTMLTextAreaElement): void {
+  // v3.57 — dampen autogrow reflow (voice 5080).
+  // v3.57 bug 5080: dampen reflow while typing short items. We still
+  // autogrow past the CSS min-height so long items wrap, but the CSS
+  // min-height (~3 lines) absorbs the first couple of lines without
+  // shifting sibling rows.
   target.style.height = 'auto';
-  target.style.height = `${target.scrollHeight}px`;
+  const naturalHeight = target.scrollHeight;
+  // Read the effective min-height from computed style so CSS remains the
+  // source of truth — no hardcoded magic number here.
+  const computed = window.getComputedStyle(target);
+  const cssMinHeight = parseFloat(computed.minHeight) || 0;
+  const next = Math.max(naturalHeight, cssMinHeight);
+  target.style.height = `${next}px`;
 }
 
 function formatTrackCount(count: number): string {
@@ -6062,6 +6073,35 @@ export function App(): JSX.Element {
       setCompactMasteringDropTargetPanelId(null);
       event.dataTransfer.effectAllowed = 'move';
       event.dataTransfer.setData('text/plain', panelId);
+
+      // v3.57 bug 5080: keep the compact mastering drag preview consistent
+      // with fullscreen by using a small labeled pill instead of a panel snapshot.
+      try {
+        const label = MASTERING_PANEL_ASK_AI_META[panelId]?.label ?? panelId;
+        const ghost = document.createElement('div');
+        ghost.textContent = `⋮⋮  ${label}`;
+        ghost.style.cssText = [
+          'position: absolute',
+          'top: -1000px',
+          'left: -1000px',
+          'padding: 10px 16px',
+          'border-radius: 12px',
+          'background: rgba(24, 28, 36, 0.96)',
+          'color: #eaf2ff',
+          'font: 600 13px/1 -apple-system, system-ui, sans-serif',
+          'border: 1px solid rgba(92, 167, 255, 0.72)',
+          'box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(92, 167, 255, 0.18)',
+          'pointer-events: none',
+          'white-space: nowrap',
+        ].join(';');
+        document.body.appendChild(ghost);
+        event.dataTransfer.setDragImage(ghost, 20, 20);
+        requestAnimationFrame(() => {
+          ghost.remove();
+        });
+      } catch {
+        // setDragImage unsupported in some contexts — fall back to default.
+      }
     },
     []
   );
@@ -6110,6 +6150,36 @@ export function App(): JSX.Element {
       setFullscreenMasteringDropTargetPanelId(null);
       event.dataTransfer.effectAllowed = 'move';
       event.dataTransfer.setData('text/plain', panelId);
+
+      // v3.57 bug 5080: replace the default ugly full-panel screenshot with a
+      // compact labeled pill. The browser will garbage-collect the element
+      // once the drag starts because we detach it in rAF.
+      try {
+        const label = MASTERING_PANEL_ASK_AI_META[panelId]?.label ?? panelId;
+        const ghost = document.createElement('div');
+        ghost.textContent = `⋮⋮  ${label}`;
+        ghost.style.cssText = [
+          'position: absolute',
+          'top: -1000px',
+          'left: -1000px',
+          'padding: 10px 16px',
+          'border-radius: 12px',
+          'background: rgba(24, 28, 36, 0.96)',
+          'color: #eaf2ff',
+          'font: 600 13px/1 -apple-system, system-ui, sans-serif',
+          'border: 1px solid rgba(92, 167, 255, 0.72)',
+          'box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(92, 167, 255, 0.18)',
+          'pointer-events: none',
+          'white-space: nowrap',
+        ].join(';');
+        document.body.appendChild(ghost);
+        event.dataTransfer.setDragImage(ghost, 20, 20);
+        requestAnimationFrame(() => {
+          ghost.remove();
+        });
+      } catch {
+        // setDragImage unsupported in some contexts — fall back to default.
+      }
     },
     []
   );
@@ -15601,6 +15671,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section analysis-overlay-visualizations${
                     fullscreenMasteringDropTargetPanelId === 'visualizations' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'visualizations' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-overlay-visualizations"
                   style={getFullscreenMasteringPanelStyle('visualizations')}
@@ -15798,6 +15870,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'reference' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'reference' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-overlay-reference-panel"
                   style={getFullscreenMasteringPanelStyle('reference')}
@@ -16059,6 +16133,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'loudness-history' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'loudness-history' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-loudness-history"
                   style={getFullscreenMasteringPanelStyle('loudness-history')}
@@ -16085,6 +16161,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'waveform' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'waveform' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-waveform"
                   style={getFullscreenMasteringPanelStyle('waveform')}
@@ -16112,6 +16190,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'stereo-correlation' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'stereo-correlation' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-stereo-correlation"
                   style={getFullscreenMasteringPanelStyle('stereo-correlation')}
@@ -16154,6 +16234,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'tonal-balance' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'tonal-balance' ? ' is-drag-source' : ''
                   }`}
                   style={getFullscreenMasteringPanelStyle('tonal-balance')}
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'tonal-balance')}
@@ -16210,6 +16292,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'loudness-peaks' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'loudness-peaks' ? ' is-drag-source' : ''
                   }`}
                   style={getFullscreenMasteringPanelStyle('loudness-peaks')}
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'loudness-peaks')}
@@ -16345,6 +16429,8 @@ export function App(): JSX.Element {
                   <section
                     className={`analysis-overlay-section${
                       fullscreenMasteringDropTargetPanelId === 'plugins' ? ' drop-target' : ''
+                    }${
+                      draggingFullscreenMasteringPanelId === 'plugins' ? ' is-drag-source' : ''
                     }`}
                     data-testid="analysis-overlay-plugins-panel"
                     style={getFullscreenMasteringPanelStyle('plugins')}
@@ -16381,6 +16467,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'normalization' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'normalization' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-overlay-normalization-panel"
                   style={getFullscreenMasteringPanelStyle('normalization')}
@@ -16540,6 +16628,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section analysis-comparison-panel${
                     fullscreenMasteringDropTargetPanelId === 'comparison' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'comparison' ? ' is-drag-source' : ''
                   }`}
                   style={getFullscreenMasteringPanelStyle('comparison')}
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'comparison')}
@@ -16625,6 +16715,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'vectorscope' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'vectorscope' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-vectorscope"
                   style={getFullscreenMasteringPanelStyle('vectorscope')}
@@ -16652,6 +16744,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'mid-side-monitoring' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'mid-side-monitoring' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-midside"
                   style={getFullscreenMasteringPanelStyle('mid-side-monitoring')}
@@ -16706,6 +16800,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'k-metering' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'k-metering' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-k-metering"
                   style={getFullscreenMasteringPanelStyle('k-metering')}
@@ -16747,6 +16843,8 @@ export function App(): JSX.Element {
                   <section
                     className={`analysis-overlay-section${
                       fullscreenMasteringDropTargetPanelId === 'pro-indicators' ? ' drop-target' : ''
+                    }${
+                      draggingFullscreenMasteringPanelId === 'pro-indicators' ? ' is-drag-source' : ''
                     }`}
                     data-testid="analysis-pro-indicators"
                     data-pro-indicators-state={isProIndicatorsReady ? 'ready' : 'pending'}
@@ -16829,6 +16927,10 @@ export function App(): JSX.Element {
                     className={`analysis-overlay-section${
                       fullscreenMasteringDropTargetPanelId === 'mastering-checklist'
                         ? ' drop-target'
+                        : ''
+                    }${
+                      draggingFullscreenMasteringPanelId === 'mastering-checklist'
+                        ? ' is-drag-source'
                         : ''
                     }`}
                     data-testid="analysis-mastering-checklist"
@@ -17047,6 +17149,10 @@ export function App(): JSX.Element {
                     fullscreenMasteringDropTargetPanelId === 'crest-factor-history'
                       ? ' drop-target'
                       : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'crest-factor-history'
+                      ? ' is-drag-source'
+                      : ''
                   }`}
                   data-testid="analysis-crest-factor-history"
                   style={getFullscreenMasteringPanelStyle('crest-factor-history')}
@@ -17077,6 +17183,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'mid-side-spectrum' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'mid-side-spectrum' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-mid-side-spectrum"
                   style={getFullscreenMasteringPanelStyle('mid-side-spectrum')}
@@ -17106,6 +17214,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'loudness-histogram' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'loudness-histogram' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-loudness-histogram"
                   style={getFullscreenMasteringPanelStyle('loudness-histogram')}
@@ -17161,6 +17271,8 @@ export function App(): JSX.Element {
                 <section
                   className={`analysis-overlay-section${
                     fullscreenMasteringDropTargetPanelId === 'spectrogram' ? ' drop-target' : ''
+                  }${
+                    draggingFullscreenMasteringPanelId === 'spectrogram' ? ' is-drag-source' : ''
                   }`}
                   data-testid="analysis-spectrogram"
                   style={getFullscreenMasteringPanelStyle('spectrogram')}

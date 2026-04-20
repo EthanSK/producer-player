@@ -41,6 +41,51 @@ body,
   color: var(--text-main);
 }
 
+/* v3.54 — ensure Sonner close button X renders */
+[data-sonner-toaster] [data-close-button] {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  opacity: 1 !important;
+}
+
+[data-sonner-toaster] [data-close-button]::after {
+  content: "×";
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-main, #fff);
+}
+
+/* v3.54 — thinner/wider toasts (single row, full available width) */
+[data-sonner-toaster] {
+  width: min(720px, calc(100vw - 48px)) !important;
+  max-width: min(720px, calc(100vw - 48px)) !important;
+}
+
+[data-sonner-toaster] [data-sonner-toast] {
+  width: 100% !important;
+  min-height: 0 !important;
+  padding: 8px 12px !important;
+  align-items: center !important;
+}
+
+[data-sonner-toaster] [data-sonner-toast] [data-content] {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-height: 0 !important;
+}
+
+[data-sonner-toaster] [data-sonner-toast] [data-title],
+[data-sonner-toaster] [data-sonner-toast] [data-description] {
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
 .app-shell {
   width: 100%;
   height: 100%;
@@ -1257,7 +1302,8 @@ h3 .normalization-preview-header-icon.analysis-platform-icon {
   gap: 2px;
   min-width: 72px;
   padding-left: 4px;
-  color: var(--platform-accent, var(--accent));
+  /* v3.54: neutral white — avoid red/green "danger/safe" reading on dB gain */
+  color: var(--text-main);
   text-align: right;
 }
 
@@ -1276,7 +1322,8 @@ h3 .normalization-preview-header-icon.analysis-platform-icon {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: color-mix(in srgb, var(--platform-accent, var(--accent)) 70%, var(--text-muted));
+  /* v3.54: neutral white — avoid red/green "danger/safe" reading on dB gain */
+  color: var(--text-muted);
   opacity: 0.85;
   white-space: nowrap;
 }
@@ -3116,18 +3163,7 @@ body.is-dragging-checklist-timestamp * {
   color: #8ec5ff;
 }
 
-.checklist-version-badge--current::after {
-  content: '';
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 4px rgba(92, 167, 255, 0.7);
-  pointer-events: none;
-}
+/* v3.54: removed ::after dot — outline alone is enough (Ethan feedback) */
 
 /* Listening-device feature ------------------------------------------------ */
 
@@ -5113,6 +5149,53 @@ button.reference-action.active {
   font-weight: 500;
 }
 
+.ai-rec-why {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  vertical-align: text-bottom;
+}
+
+.ai-rec-why-button {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ai-rec-why-button:hover,
+.ai-rec-why-button:focus-visible {
+  color: var(--accent);
+}
+
+.ai-rec-why-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  width: max-content;
+  max-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(20, 24, 30, 0.96);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  color: var(--text-main);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+  text-align: left;
+}
+
 .ai-rec-caption.ai-rec-stale .ai-rec-caption-value {
   text-decoration: line-through;
   opacity: 0.7;
@@ -5184,15 +5267,16 @@ button.reference-action.active {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--accent);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
-  font-size: 16px;
+  /* v3.54: bump ⟳ icon size — was too small to read/click */
+  font-size: 17px;
   line-height: 1;
 }
 

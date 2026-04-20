@@ -517,6 +517,48 @@ function fileManagerLabel(platform: string): string {
   return 'Finder';
 }
 
+function AiRecommendationWhyButton({ reason }: { reason: string }): ReactNode {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && containerRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleDocumentMouseDown);
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentMouseDown);
+    };
+  }, [open]);
+
+  return (
+    <span className="ai-rec-why" ref={containerRef}>
+      <button
+        type="button"
+        className="ai-rec-why-button"
+        aria-label="Why this recommendation?"
+        aria-expanded={open}
+        title={reason}
+        onClick={() => setOpen((current) => !current)}
+      >
+        ⓘ
+      </button>
+      {open ? (
+        <span className="ai-rec-why-popover" role="tooltip">
+          {reason}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 /**
  * v3.31 — Render the per-metric "AI recommendation" caption under a stat
  * card or checklist row. Returns `null` when:
@@ -559,6 +601,7 @@ function renderAiRecommendationCaption(
     >
       <span className="ai-rec-caption-label">AI recommendation:</span>{' '}
       <span className="ai-rec-caption-value">{rec.recommendedValue}</span>
+      <AiRecommendationWhyButton reason={rec.reason} />
       {isStale ? (
         <span className="ai-rec-caption-stale-suffix">(stale)</span>
       ) : null}
@@ -10702,7 +10745,6 @@ export function App(): JSX.Element {
       versionId === selectedPlaybackVersionId &&
       playbackPreviewMode !== 'reference'
     ) {
-      setVersionSwitcherOpen(false);
       return;
     }
     // If the user was auditioning the reference track when they clicked a
@@ -10723,10 +10765,10 @@ export function App(): JSX.Element {
     // closes the panel. No popup opener in this code path. If the nested-popup
     // behavior returns, look for a useEffect listening to
     // selectedPlaybackVersionId that toggles inspectorDrawerOpen/checklistModalSongId.
-    // Close the panel on a successful switch. Users who want to audition
-    // several versions in a row can re-open it; keeping it open otherwise
-    // obscures the transport controls they're likely about to use.
-    setVersionSwitcherOpen(false);
+    // v3.54: keep the panel open after selecting a version — parity with
+    // the songs popup. Users auditioning versions in a row shouldn't have
+    // to reopen the panel after each click. Press Escape or click the
+    // trigger again to close.
   }
 
   function handleChecklistOverlayWheel(event: WheelEvent<HTMLDivElement>): void {
@@ -15478,6 +15520,7 @@ export function App(): JSX.Element {
                           <h4 data-testid="analysis-overlay-spectrum-heading">Spectrum Analyzer{referenceModeSuffixNode} <HelpTooltip text={"What you're seeing: The Spectrum Analyzer shows a smooth curve of your audio's frequency content from 20 Hz (deep bass, left) to 20 kHz (treble, right) on a logarithmic scale, with amplitude in dB on the vertical axis. It's color-coded from blue (low) to green (high). Hover the spectrum to see a crosshair with the exact frequency and dB at that point.\n\nWhat to look for: Many balanced mixes show a gentle downward tilt from lows to highs, but the exact shape depends on the genre and arrangement. A big hump in the lows can mean excess bass; an exaggerated rise in the highs can mean the mix is too bright or harsh.\n\nInteractions: In the expanded view, click any frequency band (Sub, Low, Low-Mid, Mid, High-Mid, High) to solo it — you'll hear only that range, useful for isolating problems.\n\nEQ Features:\n- Manual EQ sliders: Drag the horizontal sliders on each band to boost or cut that frequency range (±12 dB). Double-click a slider to reset it.\n- EQ On/Off toggle: Bypass the EQ without clearing your slider positions. Click 'EQ On' / 'EQ Off' to toggle.\n- EQ Snapshots: Click 'Save' to store the current EQ settings. Snapshots are per-track. Click a snapshot pill to restore it, or × to delete.\n- AI Recommended EQ (cyan dashed curve): Click 'Get AI EQ' to ask the AI agent for a recommended mastering EQ curve based on your track's analysis. The recommendation appears as a cyan dashed overlay.\n- Use AI EQ button: Apply the AI recommendation to your EQ sliders with one click.\n- Reference Delta (green dotted curve): When a reference track is loaded, toggle 'Ref Δ' to show the tonal balance difference between your mix and the reference as a green dashed curve.\n- Show EQ'd Tonal Balance toggle: When EQ is active, toggle this to see how your tonal balance would change with the current EQ applied.\n- R key shortcut: Press R to quickly toggle between Mix and Reference playback (only when a reference track is loaded).\n\nTip: A/B your spectrum shape against a reference track. If your curve looks very different from a professional mix in the same genre, that's a clue about your tonal balance."} links={SPECTRUM_ANALYZER_LINKS} /><TechnicalInfoPopover text={TECH_INFO_SPECTRUM} /></h4>
                           <p className="analysis-section-subtitle">Real-time frequency content — click a band to solo; Shift+click to replace the selection with just that band.</p>
                         </div>
+                        {/* v3.54: drag handle parity verified — panel is already grid-draggable as 'visualizations'. */}
                         {renderMasteringPanelDragHandle('fullscreen', 'visualizations')}
                       </div>
                       <SpectrumAnalyzer

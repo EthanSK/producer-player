@@ -3,9 +3,9 @@
  *
  * Ethan asked to be able to drag checklist items by grabbing their background
  * (no tiny grab handle) and also reorder them via keyboard. This test is the
- * minimum meaningful proof — three items, drag the first to after the third,
- * assert order, reload, re-assert persistence. No reference-track setup, no
- * DAW-offset tangent — just the reorder contract.
+ * minimum meaningful proof — three items, pointer-drag the first to after the
+ * third, assert order, reload, re-assert persistence. No reference-track setup,
+ * no DAW-offset tangent — just the reorder contract.
  */
 import { expect, test } from '@playwright/test';
 import {
@@ -73,19 +73,22 @@ test('checklist items can be reordered via drag and the new order persists', asy
     // Pre-check rendered order.
     expect(await readOrder()).toEqual(['item-alpha', 'item-bravo', 'item-charlie']);
 
-    // 4. Drag Alpha (first) to after Charlie (third). Native HTML5 DnD is
-    //    wired via draggable=true on the <li>. Aim near Charlie's bottom
-    //    edge so the "after" heuristic triggers.
+    // 4. Drag Alpha (first) to after Charlie (third). dnd-kit uses pointer
+    //    sensors, so exercise the same mousedown -> mousemove -> mouseup path
+    //    a user would take rather than Playwright's native HTML5 drag helper.
     const alphaRow = page.locator('[data-item-id="item-alpha"]');
     const charlieRow = page.locator('[data-item-id="item-charlie"]');
+    const alphaBox = await alphaRow.boundingBox();
     const charlieBox = await charlieRow.boundingBox();
+    if (!alphaBox) throw new Error('Alpha row has no bounding box');
     if (!charlieBox) throw new Error('Charlie row has no bounding box');
-    await alphaRow.dragTo(charlieRow, {
-      targetPosition: {
-        x: Math.max(4, charlieBox.width / 2),
-        y: Math.max(4, charlieBox.height - 4),
-      },
+    await page.mouse.move(alphaBox.x + alphaBox.width / 2, alphaBox.y + alphaBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(alphaBox.x + alphaBox.width / 2, alphaBox.y + alphaBox.height / 2 + 8);
+    await page.mouse.move(charlieBox.x + charlieBox.width / 2, charlieBox.y + charlieBox.height - 4, {
+      steps: 12,
     });
+    await page.mouse.up();
 
     // 5. Assert the new order: Bravo, Charlie, Alpha.
     await expect

@@ -12,6 +12,28 @@ import {
   type ReactNode,
   type WheelEvent,
 } from 'react';
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+  type PointerSensorOptions,
+  type UniqueIdentifier,
+} from '@dnd-kit/core';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type {
   AiRecommendation,
   AiRecommendationSet,
@@ -207,6 +229,123 @@ type FullscreenMasteringPanelId =
 
 type MasteringPanelId = CompactMasteringPanelId | FullscreenMasteringPanelId;
 type MasteringPanelSurface = 'compact' | 'fullscreen';
+
+const CHECKLIST_INTERACTIVE_DRAG_SELECTOR =
+  'textarea, input, button, select, a, [data-no-drag]';
+
+class ChecklistPointerSensor extends PointerSensor {
+  static activators = [
+    {
+      eventName: 'onPointerDown' as const,
+      handler: (
+        { nativeEvent: event }: ReactPointerEvent,
+        { onActivation }: PointerSensorOptions,
+      ): boolean => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest(CHECKLIST_INTERACTIVE_DRAG_SELECTOR)) {
+          return false;
+        }
+        onActivation?.({ event });
+        return true;
+      },
+    },
+  ];
+}
+
+type ChecklistSortableRowProps = {
+  itemId: string;
+  versionNumber: number | null;
+  className: string;
+  style?: CSSProperties;
+  children: ReactNode;
+  isCurrentVersionTag: boolean;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLLIElement>) => void;
+  dropIndicatorPosition: DragOverPosition | null;
+};
+
+function ChecklistSortableRow({
+  itemId,
+  versionNumber,
+  className,
+  style,
+  children,
+  isCurrentVersionTag,
+  onKeyDown,
+  dropIndicatorPosition,
+}: ChecklistSortableRowProps): JSX.Element {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: itemId });
+
+  const sortableStyle: CSSProperties = {
+    ...style,
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      tabIndex={0}
+      aria-grabbed={isDragging}
+      aria-describedby={undefined}
+      data-testid="song-checklist-item-row"
+      data-item-id={itemId}
+      data-item-version-number={versionNumber ?? ''}
+      data-current-version={isCurrentVersionTag ? 'true' : 'false'}
+      onKeyDown={(event) => {
+        listeners?.onKeyDown?.(event);
+        if (!event.defaultPrevented) {
+          onKeyDown(event);
+        }
+      }}
+      className={`${className}${isDragging ? ' is-drag-source' : ''}${
+        dropIndicatorPosition === 'before' ? ' drop-preview-before' : ''
+      }${dropIndicatorPosition === 'after' ? ' drop-preview-after' : ''}`}
+      style={sortableStyle}
+    >
+      {children}
+    </li>
+  );
+}
+
+type ChecklistDragOverlayRowProps = {
+  itemId: string;
+  versionNumber: number | null;
+  className: string;
+  style?: CSSProperties;
+  children: ReactNode;
+  isCurrentVersionTag: boolean;
+};
+
+function ChecklistDragOverlayRow({
+  itemId,
+  versionNumber,
+  className,
+  style,
+  children,
+  isCurrentVersionTag,
+}: ChecklistDragOverlayRowProps): JSX.Element {
+  return (
+    <li
+      aria-hidden="true"
+      data-item-id={itemId}
+      data-item-version-number={versionNumber ?? ''}
+      data-current-version={isCurrentVersionTag ? 'true' : 'false'}
+      className={`${className} checklist-item-row--drag-ghost`}
+      style={style}
+    >
+      {children}
+    </li>
+  );
+}
 
 const MASTERING_PANEL_ASK_AI_META: Record<
   MasteringPanelId,
@@ -2276,16 +2415,11 @@ export function App(): JSX.Element {
   const [activeChecklistTimestampIds, setActiveChecklistTimestampIds] = useState<string[]>([]);
   const [checklistUndoStack, setChecklistUndoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
   const [checklistRedoStack, setChecklistRedoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
-  // Drag-and-drop reorder state for checklist items. Native HTML5 DnD (no
-  // external library) to keep the bundle lean and match the existing
-  // song-row reorder implementation. Dragged item's id lives in
-  // draggingChecklistItemId; the current drop-preview target + position
-  // (before/after) live in the other two pieces. Position uses the rendered
-  // chronological order (top = oldest, bottom = newest) — the reorder logic
-  // reverses back to the storage order when writing.
-  const [draggingChecklistItemId, setDraggingChecklistItemId] = useState<string | null>(null);
-  const [checklistDragOverItemId, setChecklistDragOverItemId] = useState<string | null>(null);
-  const [checklistDragOverPosition, setChecklistDragOverPosition] = useState<'before' | 'after'>('before');
+  const [activeChecklistDragId, setActiveChecklistDragId] = useState<string | null>(null);
+  const [checklistDropIndicator, setChecklistDropIndicator] = useState<{
+    itemId: string;
+    position: DragOverPosition;
+  } | null>(null);
   // Listening-device tags (persistent) + which one is currently active for new items.
   // Also the in-flight name the user is typing in the dialog's device input.
   const [listeningDevices, setListeningDevices] = useState<ListeningDevice[]>([]);
@@ -10967,20 +11101,6 @@ export function App(): JSX.Element {
   // newest at bottom) via [...items].reverse(). The drop-target computation
   // works in the rendered (chronological) order, but the storage writer
   // re-reverses after the reorder so we keep the storage invariant intact.
-  function clearChecklistDragState(): void {
-    setDraggingChecklistItemId(null);
-    setChecklistDragOverItemId(null);
-    setChecklistDragOverPosition('before');
-  }
-
-  function deriveChecklistDragOverPosition(
-    event: DragEvent<HTMLElement>,
-  ): 'before' | 'after' {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const midpoint = rect.top + rect.height / 2;
-    return event.clientY < midpoint ? 'before' : 'after';
-  }
-
   function reorderChecklistItemsChronological(
     chronological: SongChecklistItem[],
     draggedItemId: string,
@@ -11302,6 +11422,90 @@ export function App(): JSX.Element {
   const checklistModalItemsChronological = useMemo(
     () => [...checklistModalItems].reverse(),
     [checklistModalItems]
+  );
+  const checklistSortableItemIds = useMemo<UniqueIdentifier[]>(
+    () => checklistModalItemsChronological.map((item) => item.id),
+    [checklistModalItemsChronological],
+  );
+  const activeChecklistDragItem = useMemo(
+    () =>
+      activeChecklistDragId
+        ? checklistModalItemsChronological.find((item) => item.id === activeChecklistDragId) ?? null
+        : null,
+    [activeChecklistDragId, checklistModalItemsChronological],
+  );
+  const checklistDndSensors = useSensors(
+    useSensor(ChecklistPointerSensor, {
+      activationConstraint: { distance: 4 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  const updateChecklistDropIndicator = useCallback(
+    (draggedId: string, overId: string | null): void => {
+      if (!overId || draggedId === overId) {
+        setChecklistDropIndicator(null);
+        return;
+      }
+      const draggedIndex = checklistModalItemsChronological.findIndex((item) => item.id === draggedId);
+      const overIndex = checklistModalItemsChronological.findIndex((item) => item.id === overId);
+      if (draggedIndex === -1 || overIndex === -1) {
+        setChecklistDropIndicator(null);
+        return;
+      }
+      setChecklistDropIndicator({
+        itemId: overId,
+        position: overIndex > draggedIndex ? 'after' : 'before',
+      });
+    },
+    [checklistModalItemsChronological],
+  );
+
+  const clearChecklistDndState = useCallback((): void => {
+    setActiveChecklistDragId(null);
+    setChecklistDropIndicator(null);
+  }, []);
+
+  const handleChecklistDragStart = useCallback(
+    (event: DragStartEvent): void => {
+      const draggedId = String(event.active.id);
+      setActiveChecklistDragId(draggedId);
+      setChecklistDropIndicator(null);
+    },
+    [],
+  );
+
+  const handleChecklistDragOver = useCallback(
+    (event: DragOverEvent): void => {
+      updateChecklistDropIndicator(
+        String(event.active.id),
+        event.over ? String(event.over.id) : null,
+      );
+    },
+    [updateChecklistDropIndicator],
+  );
+
+  const handleChecklistDragEnd = useCallback(
+    (event: DragEndEvent): void => {
+      const draggedId = String(event.active.id);
+      const overId = event.over ? String(event.over.id) : null;
+      if (checklistModalSong && overId && draggedId !== overId) {
+        const draggedIndex = checklistModalItemsChronological.findIndex((item) => item.id === draggedId);
+        const overIndex = checklistModalItemsChronological.findIndex((item) => item.id === overId);
+        if (draggedIndex !== -1 && overIndex !== -1) {
+          applyChecklistReorder(
+            checklistModalSong.id,
+            draggedId,
+            overId,
+            overIndex > draggedIndex ? 'after' : 'before',
+          );
+        }
+      }
+      clearChecklistDndState();
+    },
+    [checklistModalItemsChronological, checklistModalSong, clearChecklistDndState],
   );
 
   // Scroll-to-bottom after an item is added. Watches the rendered list length
@@ -14100,7 +14304,20 @@ export function App(): JSX.Element {
               data-testid="song-checklist-scroll-region"
             >
               {checklistModalItemsChronological.length > 0 ? (
-                <ul className="checklist-item-list" data-testid="song-checklist-items">
+                <DndContext
+                  sensors={checklistDndSensors}
+                  collisionDetection={closestCenter}
+                  modifiers={[restrictToVerticalAxis]}
+                  onDragStart={handleChecklistDragStart}
+                  onDragOver={handleChecklistDragOver}
+                  onDragEnd={handleChecklistDragEnd}
+                  onDragCancel={clearChecklistDndState}
+                >
+                  <SortableContext
+                    items={checklistSortableItemIds}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <ul className="checklist-item-list" data-testid="song-checklist-items">
                   {checklistModalItemsChronological.map((item) => {
                     const deviceRef = item.listeningDeviceId
                       ? listeningDevicesById.get(item.listeningDeviceId) ?? null
@@ -14137,17 +14354,6 @@ export function App(): JSX.Element {
                           ? 'rgba(170, 170, 170, 0.55)'
                           : null;
 
-                    const isDraggingThisRow = draggingChecklistItemId === item.id;
-                    const showDropBefore =
-                      draggingChecklistItemId !== null &&
-                      draggingChecklistItemId !== item.id &&
-                      checklistDragOverItemId === item.id &&
-                      checklistDragOverPosition === 'before';
-                    const showDropAfter =
-                      draggingChecklistItemId !== null &&
-                      draggingChecklistItemId !== item.id &&
-                      checklistDragOverItemId === item.id &&
-                      checklistDragOverPosition === 'after';
                     // v3.24: "now-playing" marker. The checklist item's
                     // version tag is current only when its v1/v2/... tag
                     // matches the loaded player version and the modal is
@@ -14161,84 +14367,16 @@ export function App(): JSX.Element {
                       selectedPlaybackSongId !== null &&
                       checklistModalSong.id === selectedPlaybackSongId;
                     return (
-                    <li
+                    <ChecklistSortableRow
                       key={item.id}
-                      // Native HTML5 drag-and-drop for reordering checklist
-                      // items. draggable=true on the <li> means clicking +
-                      // dragging anywhere on the row background initiates a
-                      // drag — interactive children (checkbox, textarea,
-                      // remove button) are marked draggable={false} so they
-                      // don't hijack the drag, and their click handlers run
-                      // normally. See Task 2 (2026-04-18).
-                      draggable
-                      tabIndex={0}
-                      aria-grabbed={isDraggingThisRow}
-                      aria-describedby={undefined}
-                      data-testid="song-checklist-item-row"
-                      data-item-id={item.id}
-                      data-item-version-number={item.versionNumber ?? ''}
-                      data-current-version={
-                        isCurrentVersionTag ? 'true' : 'false'
+                      itemId={item.id}
+                      versionNumber={item.versionNumber}
+                      isCurrentVersionTag={isCurrentVersionTag}
+                      dropIndicatorPosition={
+                        checklistDropIndicator?.itemId === item.id
+                          ? checklistDropIndicator.position
+                          : null
                       }
-                      onDragStart={(event) => {
-                        // Cancel drag that starts from interactive descendants
-                        // (textarea selection / input / button) — those need
-                        // the browser's native behaviour (text caret / click).
-                        const target = event.target as HTMLElement | null;
-                        if (
-                          target &&
-                          target.closest(
-                            'textarea, input, button, select, a, [data-no-drag]',
-                          )
-                        ) {
-                          event.preventDefault();
-                          return;
-                        }
-                        setDraggingChecklistItemId(item.id);
-                        setChecklistDragOverItemId(null);
-                        setChecklistDragOverPosition('before');
-                        event.dataTransfer.effectAllowed = 'move';
-                        try {
-                          event.dataTransfer.setData('text/plain', item.id);
-                        } catch {
-                          // Some browsers throw on setData inside tests —
-                          // harmless; the state-based drag tracking handles it.
-                        }
-                      }}
-                      onDragOver={(event) => {
-                        if (!draggingChecklistItemId || draggingChecklistItemId === item.id) {
-                          return;
-                        }
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = 'move';
-                        const nextPosition = deriveChecklistDragOverPosition(event);
-                        if (checklistDragOverItemId !== item.id) {
-                          setChecklistDragOverItemId(item.id);
-                        }
-                        if (checklistDragOverPosition !== nextPosition) {
-                          setChecklistDragOverPosition(nextPosition);
-                        }
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        const draggedId = draggingChecklistItemId;
-                        if (!draggedId || draggedId === item.id) {
-                          clearChecklistDragState();
-                          return;
-                        }
-                        const position = deriveChecklistDragOverPosition(event);
-                        applyChecklistReorder(
-                          checklistModalSong.id,
-                          draggedId,
-                          item.id,
-                          position,
-                        );
-                        clearChecklistDragState();
-                      }}
-                      onDragEnd={() => {
-                        clearChecklistDragState();
-                      }}
                       onKeyDown={(event) => {
                         // Keyboard reorder: Alt+Arrow up/down when the row is
                         // focused. Accessibility affordance so the feature
@@ -14267,9 +14405,7 @@ export function App(): JSX.Element {
                         hasItemMetadata ? ' has-metadata' : ''
                       }${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}${
                         isGroupedHighlight ? ' is-group-highlighted' : ''
-                      }${isDraggingThisRow ? ' is-drag-source' : ''}${
-                        showDropBefore ? ' drop-preview-before' : ''
-                      }${showDropAfter ? ' drop-preview-after' : ''}${
+                      }${
                         isCurrentVersionTag ? ' checklist-item--current-version' : ''
                       }`}
                       style={
@@ -14415,13 +14551,10 @@ export function App(): JSX.Element {
                         className={`checklist-item-text${item.completed ? ' completed' : ''}`}
                         value={item.text}
                         rows={1}
-                        // draggable=false so dragging from inside the textarea
-                        // doesn't start a native text-selection drag; the
-                        // <li> takes the drag instead (pointerdown inside an
-                        // un-selected, un-focused textarea still fires the
-                        // <li>'s onDragStart since the <li> is draggable).
-                        // Click+focus still works for editing. See Task 2
-                        // (2026-04-18).
+                        // Keep textarea editing native. The dnd-kit pointer
+                        // sensor ignores interactive descendants, so click,
+                        // selection, and caret movement still belong to the
+                        // textarea rather than row reorder.
                         draggable={false}
                         onChange={(event) => {
                           autosizeChecklistTextarea(event.currentTarget);
@@ -14458,10 +14591,118 @@ export function App(): JSX.Element {
                       >
                         <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
                       </button>
-                    </li>
+                    </ChecklistSortableRow>
                     );
                   })}
-                </ul>
+                    </ul>
+                  </SortableContext>
+                  <DragOverlay
+                    dropAnimation={{
+                      duration: 180,
+                      easing: 'cubic-bezier(0.2, 0, 0, 1)',
+                    }}
+                  >
+                    {activeChecklistDragItem ? (() => {
+                      const item = activeChecklistDragItem;
+                      const hasItemMetadata =
+                        item.timestampSeconds !== null ||
+                        item.versionNumber !== null ||
+                        item.listeningDeviceId !== null ||
+                        item.fromMastering === true;
+                      const deviceRef = item.listeningDeviceId
+                        ? listeningDevicesById.get(item.listeningDeviceId) ?? null
+                        : null;
+                      const deviceLabel = deviceRef
+                        ? deviceRef.name
+                        : item.listeningDeviceId
+                          ? 'deleted device'
+                          : null;
+                      const deviceColor = item.listeningDeviceId
+                        ? getListeningDeviceColor(item.listeningDeviceId)
+                        : null;
+                      const isCurrentVersionTag =
+                        item.versionNumber !== null &&
+                        currentPlaybackVersionNumber !== null &&
+                        item.versionNumber === currentPlaybackVersionNumber &&
+                        selectedPlaybackSongId !== null &&
+                        checklistModalSong.id === selectedPlaybackSongId;
+                      return (
+                        <ChecklistDragOverlayRow
+                          itemId={item.id}
+                          versionNumber={item.versionNumber}
+                          isCurrentVersionTag={isCurrentVersionTag}
+                          className={`checklist-item-row${
+                            hasItemMetadata ? ' has-metadata' : ''
+                          }${
+                            isCurrentVersionTag ? ' checklist-item--current-version' : ''
+                          }`}
+                        >
+                          <label className="checklist-item-toggle">
+                            <input type="checkbox" checked={item.completed} readOnly tabIndex={-1} />
+                          </label>
+                          {hasItemMetadata ? (
+                            <div className="checklist-item-meta">
+                              {item.timestampSeconds !== null ? (
+                                <span className="checklist-timestamp-badge">
+                                  {formatTime(item.timestampSeconds)}
+                                </span>
+                              ) : null}
+                              {item.versionNumber !== null ? (
+                                <span
+                                  className={`checklist-version-badge${
+                                    isCurrentVersionTag
+                                      ? ' checklist-version-badge--current'
+                                      : ''
+                                  }`}
+                                >
+                                  v{item.versionNumber}
+                                </span>
+                              ) : null}
+                              {item.fromMastering === true ? (
+                                <span className="checklist-from-mastering-badge">
+                                  FROM MASTERING
+                                </span>
+                              ) : null}
+                              {deviceLabel !== null ? (
+                                <span
+                                  className={`checklist-listening-device-badge${
+                                    deviceRef === null ? ' is-deleted' : ''
+                                  }`}
+                                  style={
+                                    deviceColor
+                                      ? {
+                                          color: deviceColor.fg,
+                                          borderColor: deviceColor.border,
+                                          background: deviceColor.bg,
+                                        }
+                                      : undefined
+                                  }
+                                >
+                                  {deviceLabel}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          <textarea
+                            className={`checklist-item-text${item.completed ? ' completed' : ''}`}
+                            value={item.text}
+                            rows={1}
+                            readOnly
+                            tabIndex={-1}
+                          />
+                          <button
+                            type="button"
+                            className="ghost checklist-remove-button"
+                            tabIndex={-1}
+                            aria-hidden="true"
+                          >
+                            <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
+                          </button>
+                        </ChecklistDragOverlayRow>
+                      );
+                    })() : null}
+                  </DragOverlay>
+                </DndContext>
               ) : (
                 <p className="muted checklist-empty-state" data-testid="song-checklist-empty">
                   No checklist items yet.

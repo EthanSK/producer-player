@@ -132,6 +132,13 @@ async function getMockCallCount(page: import('@playwright/test').Page): Promise<
   );
 }
 
+async function closeAgentPanelIfOpen(page: import('@playwright/test').Page): Promise<void> {
+  const agentClose = page.getByTestId('agent-panel-close');
+  if ((await agentClose.count()) > 0 && (await agentClose.isVisible())) {
+    await agentClose.click({ timeout: 5_000 }).catch(() => undefined);
+  }
+}
+
 async function setAgentAutoRecommendEnabled(
   page: import('@playwright/test').Page,
   enabled: boolean,
@@ -253,6 +260,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       }, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await closeAgentPanelIfOpen(page);
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
 
@@ -316,10 +324,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       // pointer events" and times out. `force: true` only skips the
       // actionability check — the click can still land on the panel
       // header. Correct fix: minimize the panel if it's open, then click.
-      const agentClose = page.getByTestId('agent-panel-close');
-      if (await agentClose.count() > 0 && await agentClose.isVisible()) {
-        await agentClose.click({ timeout: 5_000 }).catch(() => undefined);
-      }
+      await closeAgentPanelIfOpen(page);
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();

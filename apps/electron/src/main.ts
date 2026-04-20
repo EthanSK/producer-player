@@ -108,7 +108,7 @@ import {
   UNIFIED_STATE_FILE_NAME,
   migrateStateIfNeeded,
 } from './state-service';
-import { PluginHostService } from './plugin-host-service';
+import { PluginHostService, resolveSidecarBinaryCandidates } from './plugin-host-service';
 import { PluginPresetLibraryStore } from './plugin-preset-library';
 
 declare const __PRODUCER_PLAYER_APP_VERSION__: string;
@@ -4976,12 +4976,32 @@ function registerIpcHandlers(service: FileLibraryService): void {
     if (!userStateService) throw new Error('User state service not initialized');
     if (!pluginHostService) pluginHostService = new PluginHostService();
     ensurePluginHostForwarders(pluginHostService);
-    if (!pluginHostService.isAvailable()) {
+    // v3.50 — log availability + the resolved sidecar path up front so
+    // production logs make the failure mode unambiguous. In v3.46 the
+    // packaged app shipped without the binary and the only error surface
+    // was a generic toast; now `main.log` shows which paths were searched
+    // and which one (if any) resolved.
+    const sidecarAvailable = pluginHostService.isAvailable();
+    const sidecarPath = pluginHostService.getBinaryPath();
+    log.info(
+      `[plugin-host] scan requested (sidecar available=${sidecarAvailable}, path=${sidecarPath ?? 'null'})`,
+    );
+    if (!sidecarAvailable) {
+      const candidatePaths = resolveSidecarBinaryCandidates();
+      log.warn(
+        `[plugin-host] scan unavailable: pp-audio-host sidecar missing. searched=${candidatePaths.join(', ')}`,
+      );
+      if (app.isPackaged) {
+        throw new Error(
+          'pp-audio-host sidecar binary is missing from this Producer Player install. Update to the latest version — if the update is already current, please file a bug so we can reship with the sidecar bundled.',
+        );
+      }
       throw new Error(
         'pp-audio-host sidecar binary is not built yet. Run `bash native/pp-audio-host/scripts/build-sidecar.sh` once to bootstrap it, then retry the scan.',
       );
     }
     const library = await pluginHostService.scanPlugins();
+    log.info(`[plugin-host] scan complete: ${library.plugins.length} plugins`);
     await userStateService.setPluginLibrary(library);
     // Phase 2 (v3.41): keep the service's cached library in sync so
     // subsequent `reconcileTrackChain` calls can resolve pluginId → path

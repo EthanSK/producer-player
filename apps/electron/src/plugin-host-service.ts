@@ -68,15 +68,24 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-/** Resolved path to the built sidecar binary, or null when it isn't present. */
-export function resolveSidecarBinary(cwd: string = process.cwd()): string | null {
-  // Dev: built by `bash native/pp-audio-host/scripts/build-sidecar.sh`.
-  // Packaged: copied into `dist/bin/pp-audio-host` via the electron-builder
-  // `asarUnpack` rule (wired in Phase 2 alongside the real build step).
-  const candidates = [
+/**
+ * Ordered list of filesystem paths we look at to find the sidecar binary.
+ * Dev: built by `bash native/pp-audio-host/scripts/build-sidecar.sh` into
+ * `native/pp-audio-host/build/bin/pp-audio-host`.
+ * Packaged: copied into `apps/electron/dist/bin/pp-audio-host` by
+ * `apps/electron/scripts/build-main.mjs`, then captured by electron-builder's
+ * `asarUnpack: ["apps/electron/dist/bin/**"]` rule.
+ */
+export function resolveSidecarBinaryCandidates(cwd: string = process.cwd()): string[] {
+  return [
     resolve(cwd, 'native/pp-audio-host/build/bin/pp-audio-host'),
     resolve(cwd, 'apps/electron/dist/bin/pp-audio-host'),
   ];
+}
+
+/** Resolved path to the built sidecar binary, or null when it isn't present. */
+export function resolveSidecarBinary(cwd: string = process.cwd()): string | null {
+  const candidates = resolveSidecarBinaryCandidates(cwd);
   for (const candidate of candidates) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -233,6 +242,11 @@ export class PluginHostService {
   /** True when the sidecar binary is present on disk. */
   isAvailable(): boolean {
     return this.binaryPath !== null;
+  }
+
+  /** Path of the sidecar binary we'd spawn, or null if none was found. */
+  getBinaryPath(): string | null {
+    return this.binaryPath;
   }
 
   /** Snapshot of currently loaded instance ids. Exposed for tests. */
@@ -459,7 +473,32 @@ export class PluginHostService {
    * sidecar's built-in defaults on macOS).
    */
   async scanPlugins(opts?: { format?: 'vst3' | 'au' | 'all'; paths?: string[] }): Promise<ScannedPluginLibrary> {
+    log.info(
+      `[plugin-host] scanPlugins starting (format=${opts?.format ?? 'all'}, paths=${
+        opts?.paths ? opts.paths.join('|') : 'os-defaults'
+      })`,
+    );
     const reply = await this.send<Record<string, unknown>>('scan_plugins', opts ?? {}, { timeoutMs: 120_000 });
+    // v3.50 — surface sidecar-reported scan failures in the main log so a
+    // "Plugin scan failed" toast has something to point at beyond the
+    // generic error message. main.cpp's handleScanPlugins fills `failed`
+    // with {path, failureReason} for every plugin file that errored.
+    const failedRaw = Array.isArray(reply.failed) ? (reply.failed as unknown[]) : [];
+    if (failedRaw.length > 0) {
+      const preview = failedRaw.slice(0, 5).map((failure) => {
+        if (!failure || typeof failure !== 'object' || Array.isArray(failure)) return 'unknown failure';
+        const entry = failure as Record<string, unknown>;
+        const path = typeof entry.path === 'string' && entry.path.length > 0 ? entry.path : 'unknown path';
+        const reason =
+          typeof entry.failureReason === 'string' && entry.failureReason.length > 0
+            ? entry.failureReason
+            : 'unknown reason';
+        return `${path} (${reason})`;
+      });
+      log.warn(
+        `[plugin-host] scan reported ${failedRaw.length} failed entries (showing up to 5): ${preview.join('; ')}`,
+      );
+    }
     const pluginsRaw = Array.isArray(reply.plugins) ? (reply.plugins as unknown[]) : [];
     const plugins: PluginInfo[] = pluginsRaw.flatMap((p) => {
       if (!p || typeof p !== 'object' || Array.isArray(p)) return [];

@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import ffmpegStatic from 'ffmpeg-static';
-import { execFile, execFileSync } from 'node:child_process';
-import { chmod, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { access, chmod, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -13,6 +13,17 @@ const appDirectory = resolve(scriptDirectory, '..');
 const repositoryDirectory = resolve(appDirectory, '../..');
 const outputDirectory = resolve(appDirectory, 'dist');
 const binaryOutputDirectory = resolve(outputDirectory, 'bin');
+// v3.50 fix (2026-04-20): production v3.46 shipped without `pp-audio-host`,
+// so the renderer's "Scan plugins" button always hit `isAvailable()=false`
+// and toast-reported "Plugin scan failed". Root cause: this script only
+// copied ffmpeg into dist/bin, so electron-builder's
+// `asarUnpack: ["apps/electron/dist/bin/**"]` rule had nothing sidecar-
+// shaped to capture. We now build (if needed) + copy the JUCE sidecar into
+// dist/bin alongside ffmpeg so packaged installs always ship it.
+const sidecarDirectory = resolve(repositoryDirectory, 'native/pp-audio-host');
+const sidecarBuildScript = resolve(sidecarDirectory, 'scripts/build-sidecar.sh');
+const sidecarSourceBinary = resolve(sidecarDirectory, 'build/bin/pp-audio-host');
+const sidecarBundledBinary = resolve(binaryOutputDirectory, 'pp-audio-host');
 
 function parsePositiveInteger(rawValue) {
   if (typeof rawValue !== 'string') {
@@ -149,12 +160,65 @@ if (resolvedBuildNumber || resolvedCommitSha || resolvedAppSemanticVersion) {
 }
 
 await rm(binaryOutputDirectory, { recursive: true, force: true });
+await mkdir(binaryOutputDirectory, { recursive: true });
 
 const shouldBundleFfmpeg = process.env.PRODUCER_PLAYER_SKIP_BUNDLED_FFMPEG !== 'true';
+const shouldBundleSidecar = process.env.PRODUCER_PLAYER_SKIP_BUNDLED_SIDECAR !== 'true';
 const shouldBuildUniversalMacFfmpeg =
   shouldBundleFfmpeg &&
   process.platform === 'darwin' &&
   process.env.PRODUCER_PLAYER_BUILD_MAC_UNIVERSAL === 'true';
+
+async function fileExists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runSidecarBuild() {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn('bash', [sidecarBuildScript], {
+      cwd: sidecarDirectory,
+      stdio: 'inherit',
+    });
+    child.on('error', rejectPromise);
+    child.on('exit', (code, signal) => {
+      if (code === 0) {
+        resolvePromise();
+      } else {
+        rejectPromise(
+          new Error(
+            `[producer-player/electron] pp-audio-host sidecar build failed (code=${code}, signal=${signal}).`,
+          ),
+        );
+      }
+    });
+  });
+}
+
+if (!shouldBundleSidecar) {
+  console.info('[producer-player/electron] Skipping bundled pp-audio-host sidecar for this build target.');
+} else {
+  // Build the sidecar if it isn't already on disk. This is the path that
+  // was missing in v3.46–v3.49: `npm run build` -> this script -> ffmpeg-only
+  // copy, and the JUCE sidecar never made it into the .app bundle. Rebuild-
+  // on-demand mirrors how other native deps (ffmpeg universal) are handled.
+  if (!(await fileExists(sidecarSourceBinary))) {
+    console.info('[producer-player/electron] pp-audio-host sidecar not built yet — building now.');
+    await runSidecarBuild();
+  }
+  if (!(await fileExists(sidecarSourceBinary))) {
+    throw new Error(
+      `[producer-player/electron] pp-audio-host sidecar build completed but binary is missing at ${sidecarSourceBinary}.`,
+    );
+  }
+  await cp(sidecarSourceBinary, sidecarBundledBinary);
+  await chmod(sidecarBundledBinary, 0o755);
+  console.info(`[producer-player/electron] Bundled pp-audio-host sidecar binary at ${sidecarBundledBinary}.`);
+}
 
 if (!shouldBundleFfmpeg) {
   console.info('[producer-player/electron] Skipping bundled ffmpeg binary for this build target.');
@@ -162,8 +226,6 @@ if (!shouldBundleFfmpeg) {
   if (!ffmpegStatic) {
     throw new Error('ffmpeg-static did not resolve to a binary path.');
   }
-
-  await mkdir(binaryOutputDirectory, { recursive: true });
 
   if (shouldBuildUniversalMacFfmpeg) {
     const hostArch = process.arch;

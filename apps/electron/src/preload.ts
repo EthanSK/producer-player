@@ -16,6 +16,8 @@ import {
   type PlaylistOrderExportV1,
   type ProducerPlayerBridge,
   type ProducerPlayerUserState,
+  type PluginInstanceLoadedListener,
+  type PluginSidecarExitedListener,
   type SnapshotListener,
   type TransportCommand,
   type TransportCommandListener,
@@ -414,6 +416,49 @@ const bridge: ProducerPlayerBridge = {
     ipcRenderer.on(IPC_CHANNELS.PLUGIN_EDITOR_CLOSED_EVENT, wrappedListener);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.PLUGIN_EDITOR_CLOSED_EVENT, wrappedListener);
+    };
+  },
+
+  onPluginInstanceLoaded(listener: PluginInstanceLoadedListener) {
+    const wrappedListener = (_event: unknown, payload: unknown) => {
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+      const record = payload as Record<string, unknown>;
+      if (
+        typeof record.instanceId === 'string' &&
+        record.instanceId.length > 0 &&
+        typeof record.reportedLatencySamples === 'number'
+      ) {
+        listener({
+          instanceId: record.instanceId,
+          reportedLatencySamples: record.reportedLatencySamples,
+        });
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.PLUGIN_INSTANCE_LOADED_EVENT, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PLUGIN_INSTANCE_LOADED_EVENT, wrappedListener);
+    };
+  },
+
+  onPluginSidecarExited(listener: PluginSidecarExitedListener) {
+    const wrappedListener = (_event: unknown, info: unknown) => {
+      if (!info || typeof info !== 'object' || Array.isArray(info)) return;
+      const record = info as Record<string, unknown>;
+      if (
+        (typeof record.code === 'number' || record.code === null) &&
+        (typeof record.signal === 'string' || record.signal === null) &&
+        typeof record.expected === 'boolean'
+      ) {
+        listener({
+          code: record.code,
+          signal: record.signal,
+          expected: record.expected,
+        });
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.PLUGIN_SIDECAR_EXITED_EVENT, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PLUGIN_SIDECAR_EXITED_EVENT, wrappedListener);
     };
   },
 };

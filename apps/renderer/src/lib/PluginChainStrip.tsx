@@ -62,6 +62,7 @@ export interface PluginChainStripProps {
    * (nothing to edit until the sidecar instantiates the plugin).
    */
   loadedInstanceIds?: ReadonlySet<string>;
+  instanceLatencies?: Record<string, number>;
 }
 
 function findPluginInfo(
@@ -98,6 +99,7 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     presetsByPluginId,
     openEditorInstanceIds,
     loadedInstanceIds,
+    instanceLatencies,
   } = props;
 
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -152,6 +154,11 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
           // (legacy behavior: still call onOpenEditor and let the IPC
           // layer surface errors). When provided, we honor it strictly.
           const editDisabled = loadedInstanceIds ? !loadedInstanceIds.has(item.instanceId) : false;
+          const latencySamples = instanceLatencies?.[item.instanceId];
+          const latencyText =
+            typeof latencySamples === 'number' && Number.isFinite(latencySamples)
+              ? `${latencySamples} smp`
+              : null;
           const presetMenuOpen = presetMenuInstanceId === item.instanceId;
           const savedPresets = presetsByPluginId?.[item.pluginId] ?? [];
           return (
@@ -181,6 +188,11 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
                 aria-label={`Open editor for ${displayName}`}
               >
                 <span className="plugin-pill__label">{displayName}</span>
+                {latencyText ? (
+                  <span className="plugin-pill__latency" title="Plugin reported latency">
+                    {latencyText}
+                  </span>
+                ) : null}
                 {!item.enabled ? (
                   <span
                     className="plugin-pill__bypass-badge"

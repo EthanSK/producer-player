@@ -4975,6 +4975,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.PLUGIN_SCAN_LIBRARY, async () => {
     if (!userStateService) throw new Error('User state service not initialized');
     if (!pluginHostService) pluginHostService = new PluginHostService();
+    ensurePluginHostForwarders(pluginHostService);
     if (!pluginHostService.isAvailable()) {
       throw new Error(
         'pp-audio-host sidecar binary is not built yet. Run `bash native/pp-audio-host/scripts/build-sidecar.sh` once to bootstrap it, then retry the scan.',
@@ -5024,6 +5025,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
    */
   const reconcileChainIfPossible = (chain: TrackPluginChain): void => {
     if (!pluginHostService) pluginHostService = new PluginHostService();
+    ensurePluginHostForwarders(pluginHostService);
     if (!pluginHostService.isAvailable()) return; // sidecar not built yet
     const service = pluginHostService;
     // Detached promise on purpose — don't `await` the IPC reply, but still
@@ -5124,6 +5126,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
   // with a clear error.
 
   let editorClosedForwarderRegistered = false;
+  let instanceLoadedForwarderRegistered = false;
+  let sidecarExitedForwarderRegistered = false;
   const ensureEditorClosedForwarder = (service: PluginHostService): void => {
     if (editorClosedForwarderRegistered) return;
     editorClosedForwarderRegistered = true;
@@ -5133,10 +5137,33 @@ function registerIpcHandlers(service: FileLibraryService): void {
       }
     });
   };
+  const ensureInstanceLoadedForwarder = (service: PluginHostService): void => {
+    if (instanceLoadedForwarderRegistered) return;
+    instanceLoadedForwarderRegistered = true;
+    service.onInstanceLoaded((payload) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_CHANNELS.PLUGIN_INSTANCE_LOADED_EVENT, payload);
+      }
+    });
+  };
+  const ensureSidecarExitedForwarder = (service: PluginHostService): void => {
+    if (sidecarExitedForwarderRegistered) return;
+    sidecarExitedForwarderRegistered = true;
+    service.onSidecarExited((info) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_CHANNELS.PLUGIN_SIDECAR_EXITED_EVENT, info);
+      }
+    });
+  };
+  const ensurePluginHostForwarders = (service: PluginHostService): void => {
+    ensureEditorClosedForwarder(service);
+    ensureInstanceLoadedForwarder(service);
+    ensureSidecarExitedForwarder(service);
+  };
 
   const getOrCreatePluginHost = (): PluginHostService => {
     if (!pluginHostService) pluginHostService = new PluginHostService();
-    ensureEditorClosedForwarder(pluginHostService);
+    ensurePluginHostForwarders(pluginHostService);
     return pluginHostService;
   };
 

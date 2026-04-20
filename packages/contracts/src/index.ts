@@ -245,11 +245,22 @@ export const IPC_CHANNELS = {
   // sidecar reports an editor window was closed by the user (OS close
   // button) rather than by an explicit close_editor IPC call.
   PLUGIN_EDITOR_CLOSED_EVENT: 'producer-player:plugin-editor-closed-event',
+  PLUGIN_INSTANCE_LOADED_EVENT: 'producer-player:plugin-instance-loaded-event',
+  PLUGIN_SIDECAR_EXITED_EVENT: 'producer-player:plugin-sidecar-exited-event',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
 export type TransportCommand = 'play-pause' | 'next-track' | 'previous-track' | 'seek-forward' | 'seek-backward';
 export type TransportCommandListener = (command: TransportCommand) => void;
+export type PluginInstanceLoadedListener = (payload: {
+  instanceId: string;
+  reportedLatencySamples: number;
+}) => void;
+export type PluginSidecarExitedListener = (info: {
+  code: number | null;
+  signal: string | null;
+  expected: boolean;
+}) => void;
 
 export interface SongChecklistItem {
   id: string;
@@ -1139,6 +1150,8 @@ export interface ProducerPlayerBridge {
   openPluginEditor(instanceId: string): Promise<{ alreadyOpen: boolean }>;
   closePluginEditor(instanceId: string): Promise<void>;
   onPluginEditorClosed(listener: (instanceId: string) => void): () => void;
+  onPluginInstanceLoaded(listener: PluginInstanceLoadedListener): () => void;
+  onPluginSidecarExited(listener: PluginSidecarExitedListener): () => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -5281,6 +5281,13 @@ button.reference-action.active {
   white-space: nowrap;
 }
 
+.plugin-pill__latency {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
 .plugin-pill__bypass-badge {
   font-size: 10px;
   color: var(--danger);

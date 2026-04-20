@@ -2395,6 +2395,10 @@ export function App(): JSX.Element {
     Record<string, PluginPresetEntry[]>
   >({});
   const loadedPresetPluginIdsRef = useRef<Set<string>>(new Set());
+  const [loadedInstanceIds, setLoadedInstanceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [instanceLatencies, setInstanceLatencies] = useState<Record<string, number>>({});
   // v3.42 Phase 3 — per-slot native-editor open state. Keyed by instanceId.
   // The sidecar is the source of truth; we add on successful open_editor
   // IPC replies and remove on close_editor replies OR on unsolicited
@@ -9424,13 +9428,15 @@ export function App(): JSX.Element {
       void window.producerPlayer
         .addPluginToChain(selectedSongId, pluginId)
         .then((chain) => commitPluginChain(chain))
-        .catch((err) =>
-          window.producerPlayer.rendererLog('error', '[plugin-chain] add failed', {
-            error: String(err),
-          }),
-        );
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(`Could not add plugin: ${message}`);
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] add failed', {
+            error: message,
+          });
+        });
     },
-    [selectedSongId],
+    [commitPluginChain, selectedSongId],
   );
 
   const handlePluginRemove = useCallback(
@@ -9439,13 +9445,15 @@ export function App(): JSX.Element {
       void window.producerPlayer
         .removePluginFromChain(selectedSongId, instanceId)
         .then((chain) => commitPluginChain(chain))
-        .catch((err) =>
-          window.producerPlayer.rendererLog('error', '[plugin-chain] remove failed', {
-            error: String(err),
-          }),
-        );
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(`Could not remove plugin: ${message}`);
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] remove failed', {
+            error: message,
+          });
+        });
     },
-    [selectedSongId],
+    [commitPluginChain, selectedSongId],
   );
 
   const handlePluginToggle = useCallback(
@@ -9458,11 +9466,13 @@ export function App(): JSX.Element {
       void window.producerPlayer
         .togglePluginEnabled(selectedSongId, instanceId, !current.enabled)
         .then((chain) => commitPluginChain(chain))
-        .catch((err) =>
-          window.producerPlayer.rendererLog('error', '[plugin-chain] toggle failed', {
-            error: String(err),
-          }),
-        );
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(`Could not toggle plugin: ${message}`);
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] toggle failed', {
+            error: message,
+          });
+        });
     },
     [selectedSongId, commitPluginChain],
   );
@@ -9473,13 +9483,15 @@ export function App(): JSX.Element {
       void window.producerPlayer
         .reorderPluginChain(selectedSongId, orderedInstanceIds)
         .then((chain) => commitPluginChain(chain))
-        .catch((err) =>
-          window.producerPlayer.rendererLog('error', '[plugin-chain] reorder failed', {
-            error: String(err),
-          }),
-        );
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(`Could not reorder plugins: ${message}`);
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] reorder failed', {
+            error: message,
+          });
+        });
     },
-    [selectedSongId],
+    [commitPluginChain, selectedSongId],
   );
 
   const handlePluginSavePreset = useCallback(
@@ -9572,6 +9584,8 @@ export function App(): JSX.Element {
       void window.producerPlayer
         .closePluginEditor(instanceId)
         .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(`Could not close plugin editor: ${message}`);
           setOpenEditorInstanceIds((prev) => {
             if (prev.has(instanceId)) return prev;
             const stillInCurrentChain = pluginChainRef.current.items.some((item) => item.instanceId === instanceId);
@@ -9582,7 +9596,7 @@ export function App(): JSX.Element {
           });
           void window.producerPlayer.rendererLog('error', '[plugin-chain] close editor failed', {
             instanceId,
-            error: String(err),
+            error: message,
           });
         });
       return;
@@ -9598,6 +9612,8 @@ export function App(): JSX.Element {
     void window.producerPlayer
       .openPluginEditor(instanceId)
       .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(`Could not open plugin editor: ${message}`);
         setOpenEditorInstanceIds((prev) => {
           if (!prev.has(instanceId)) return prev;
           const next = new Set(prev);
@@ -9606,7 +9622,7 @@ export function App(): JSX.Element {
         });
         void window.producerPlayer.rendererLog('error', '[plugin-chain] open editor failed', {
           instanceId,
-          error: String(err),
+          error: message,
         });
       });
   }, [openEditorInstanceIds]);
@@ -9629,6 +9645,32 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    const unsubscribeLoaded = window.producerPlayer.onPluginInstanceLoaded((payload) => {
+      setLoadedInstanceIds((prev) => {
+        if (prev.has(payload.instanceId)) return prev;
+        const next = new Set(prev);
+        next.add(payload.instanceId);
+        return next;
+      });
+      setInstanceLatencies((prev) => ({
+        ...prev,
+        [payload.instanceId]: payload.reportedLatencySamples,
+      }));
+    });
+    const unsubscribeExited = window.producerPlayer.onPluginSidecarExited((info) => {
+      if (info.expected) return;
+      setError('Plugin host crashed — the plugin chain will reload on the next action.');
+      setLoadedInstanceIds(new Set<string>());
+      setInstanceLatencies({});
+      setOpenEditorInstanceIds(new Set<string>());
+    });
+    return () => {
+      unsubscribeLoaded();
+      unsubscribeExited();
+    };
+  }, []);
+
   // v3.42 Phase 3 — if the currently-selected song's chain loses an item
   // (slot removed, chain replaced, song switched), drop any stale
   // editor-open markers that reference items no longer in the chain. The
@@ -9645,6 +9687,29 @@ export function App(): JSX.Element {
     }
     if (changed) setOpenEditorInstanceIds(next);
   }, [pluginChain.items, openEditorInstanceIds]);
+
+  useEffect(() => {
+    const liveIds = new Set(pluginChain.items.map((item) => item.instanceId));
+    setLoadedInstanceIds((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (liveIds.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+    setInstanceLatencies((prev) => {
+      let changed = false;
+      const next: Record<string, number> = {};
+      for (const [id, latency] of Object.entries(prev)) {
+        if (liveIds.has(id)) next[id] = latency;
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [pluginChain.items]);
 
   const handlePluginScan = useCallback(() => {
     if (pluginLibraryScanning) return;
@@ -12879,6 +12944,8 @@ export function App(): JSX.Element {
               onScan={handlePluginScan}
               presetsByPluginId={pluginPresetsByPluginId}
               openEditorInstanceIds={openEditorInstanceIds}
+              loadedInstanceIds={loadedInstanceIds}
+              instanceLatencies={instanceLatencies}
             />
           ) : null}
         </section>
@@ -15755,6 +15822,8 @@ export function App(): JSX.Element {
                     onScan={handlePluginScan}
                     presetsByPluginId={pluginPresetsByPluginId}
                     openEditorInstanceIds={openEditorInstanceIds}
+                    loadedInstanceIds={loadedInstanceIds}
+                    instanceLatencies={instanceLatencies}
                   />
                 ) : null}
 

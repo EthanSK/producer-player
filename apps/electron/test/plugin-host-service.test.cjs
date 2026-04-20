@@ -277,6 +277,23 @@ test('unloadPlugin drops the instance id from the loaded set', async () => {
   assert.deepEqual(service.getLoadedInstanceIds(), []);
 });
 
+test('loadPlugin tracks reported latency and unloadPlugin clears it', async () => {
+  const fake = makeFakeChild({
+    replies: {
+      load_plugin: (req) => ({
+        instanceId: req.params.instanceId,
+        reportedLatencySamples: 128,
+      }),
+      unload_plugin: (req) => ({ instanceId: req.params.instanceId, wasLoaded: true }),
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.loadPlugin({ instanceId: 'latency-slot', pluginPath: '/p', format: 'vst3' });
+  assert.deepEqual(service.getInstanceLatencies(), { 'latency-slot': 128 });
+  await service.unloadPlugin('latency-slot');
+  assert.deepEqual(service.getInstanceLatencies(), {});
+});
+
 test('reconcileTrackChain: loads new slots, unloads removed ones', async () => {
   const calls = { load: [], unload: [] };
   const fake = makeFakeChild({

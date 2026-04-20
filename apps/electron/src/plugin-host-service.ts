@@ -105,6 +105,11 @@ export interface LoadPluginResult {
   alreadyLoaded?: boolean;
 }
 
+export interface PluginInstanceLoadedPayload {
+  instanceId: string;
+  reportedLatencySamples: number;
+}
+
 export interface ProcessBlockItem {
   instanceId: string;
   enabled: boolean;
@@ -133,6 +138,8 @@ export interface OpenEditorResult {
  * to re-click the in-app Edit button.
  */
 export type EditorClosedListener = (instanceId: string) => void;
+export type InstanceLoadedListener = (payload: PluginInstanceLoadedPayload) => void;
+export type SidecarExitedListener = (info: { code: number | null; signal: string | null; expected: boolean }) => void;
 
 /**
  * Plan produced by `diffChainReconciliation`. Split out so tests can
@@ -203,8 +210,12 @@ export class PluginHostService {
    * main.ts registers one listener that forwards to the renderer.
    */
   private editorClosedListeners = new Set<EditorClosedListener>();
+  private instanceLoadedListeners = new Set<InstanceLoadedListener>();
+  private sidecarExitedListeners = new Set<SidecarExitedListener>();
   /** Editor instance ids currently open (tracked from open/close requests + editor_closed events). */
   private openEditorIds = new Set<string>();
+  private instanceLatencies = new Map<string, number>();
+  private expectingExit = false;
 
   constructor(
     binaryPath: string | null = resolveSidecarBinary(),
@@ -227,6 +238,10 @@ export class PluginHostService {
   /** Snapshot of currently loaded instance ids. Exposed for tests. */
   getLoadedInstanceIds(): string[] {
     return Array.from(this.loadedInstances);
+  }
+
+  getInstanceLatencies(): Record<string, number> {
+    return Object.fromEntries(this.instanceLatencies);
   }
 
   /**
@@ -276,10 +291,20 @@ export class PluginHostService {
       // All sidecar-owned state is gone; the diff logic will reload next
       // time the renderer asks for a processed block / reconciles a chain.
       this.loadedInstances.clear();
+      this.instanceLatencies.clear();
       // Surface "editor is no longer open" for every tracked editor so the
       // renderer doesn't get stuck with an open-state badge pointing at a
       // dead sidecar.
       this.notifyTrackedEditorsClosed('during exit');
+      const expected = this.expectingExit;
+      this.expectingExit = false;
+      for (const listener of this.sidecarExitedListeners) {
+        try {
+          listener({ code, signal, expected });
+        } catch (err) {
+          log.warn('[plugin-host] sidecar exit listener threw', err);
+        }
+      }
       this.child = null;
       this.readyPromise = null;
     });
@@ -291,6 +316,7 @@ export class PluginHostService {
       const timer = setTimeout(() => {
         this.readyHandler = null;
         if (this.child && !this.child.killed) {
+          this.expectingExit = true;
           this.child.kill('SIGTERM');
         }
         rejectReady(new Error('pp-audio-host did not signal ready within 10s'));
@@ -401,6 +427,7 @@ export class PluginHostService {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         if (this.child && !this.child.killed) {
+          this.expectingExit = true;
           this.child.kill('SIGTERM');
         }
         rejectPromise(new Error(`pp-audio-host ${method} timed out after ${timeoutMs}ms`));
@@ -483,9 +510,11 @@ export class PluginHostService {
   async loadPlugin(opts: LoadPluginOptions): Promise<LoadPluginResult> {
     const reply = await this.send<Record<string, unknown>>('load_plugin', opts, { timeoutMs: 60_000 });
     this.loadedInstances.add(opts.instanceId);
+    const reportedLatencySamples = Number(reply.reportedLatencySamples) || 0;
+    this.instanceLatencies.set(opts.instanceId, reportedLatencySamples);
     return {
       instanceId: opts.instanceId,
-      reportedLatencySamples: Number(reply.reportedLatencySamples) || 0,
+      reportedLatencySamples,
       numInputs: Number(reply.numInputs) || 2,
       numOutputs: Number(reply.numOutputs) || 2,
       alreadyLoaded: Boolean(reply.alreadyLoaded),
@@ -496,6 +525,7 @@ export class PluginHostService {
   async unloadPlugin(instanceId: string): Promise<void> {
     await this.send('unload_plugin', { instanceId }, { timeoutMs: 10_000 });
     this.loadedInstances.delete(instanceId);
+    this.instanceLatencies.delete(instanceId);
     // The sidecar also closes any open editor for this instance and emits
     // an editor_closed event, which clears openEditorIds via handleLine.
     // Belt-and-suspenders: drop it here too in case the event is in flight.
@@ -553,13 +583,23 @@ export class PluginHostService {
         continue;
       }
       try {
-        await this.loadPlugin({
+        const loaded = await this.loadPlugin({
           instanceId,
           pluginPath: info.path,
           format: info.format,
           sampleRate: opts.sampleRate,
           blockSize: opts.blockSize,
         });
+        for (const listener of this.instanceLoadedListeners) {
+          try {
+            listener({
+              instanceId,
+              reportedLatencySamples: loaded.reportedLatencySamples,
+            });
+          } catch (err) {
+            log.warn('[plugin-host] instance loaded listener threw', err);
+          }
+        }
         // v3.43 Phase 4 — rehydrate persisted preset/plugin state after a
         // cold load so recalled presets survive app relaunches.
         if (typeof state === 'string') await this.setPluginState(instanceId, state);
@@ -683,17 +723,34 @@ export class PluginHostService {
     };
   }
 
+  onInstanceLoaded(listener: InstanceLoadedListener): () => void {
+    this.instanceLoadedListeners.add(listener);
+    return () => {
+      this.instanceLoadedListeners.delete(listener);
+    };
+  }
+
+  onSidecarExited(listener: SidecarExitedListener): () => void {
+    this.sidecarExitedListeners.add(listener);
+    return () => {
+      this.sidecarExitedListeners.delete(listener);
+    };
+  }
+
   /** Tell the sidecar to flush + exit, then kill the process if needed. */
   async stop(): Promise<void> {
     if (!this.child || this.child.killed) return;
+    this.expectingExit = true;
     try {
       await this.send('shutdown').catch(() => undefined);
     } finally {
       if (this.child && !this.child.killed) {
+        this.expectingExit = true;
         this.child.kill('SIGTERM');
         this.child = null;
       }
       this.loadedInstances.clear();
+      this.instanceLatencies.clear();
       this.notifyTrackedEditorsClosed('during stop');
     }
   }

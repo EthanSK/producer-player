@@ -98,7 +98,7 @@ export interface MasteringChecklistRuleMeta {
 export const MASTERING_CHECKLIST_METADATA: Readonly<Record<string, MasteringChecklistRuleMeta>> = {
   // Loudness
   lufs: {
-    importance: 5,
+    importance: 3,
     whyItMatters:
       'Streaming platforms normalize to a target LUFS (-14 on Spotify/YouTube, -16 on Apple/Tidal). Master too loud and they turn you DOWN, flattening transients; master too quiet and you disappear next to other tracks.',
   },
@@ -113,7 +113,7 @@ export const MASTERING_CHECKLIST_METADATA: Readonly<Record<string, MasteringChec
       'A large gap between short-term and integrated loudness means one very loud section is dragging the average around — typically a sign of an uneven master.',
   },
   'momentary-peak': {
-    importance: 2,
+    importance: 1,
     whyItMatters:
       'Very high momentary peaks (drops, impact hits) can trigger aggressive normalization on streaming platforms and make the rest of the master feel quiet by comparison.',
   },
@@ -130,14 +130,14 @@ export const MASTERING_CHECKLIST_METADATA: Readonly<Record<string, MasteringChec
       'Sample-accurate clipping produces audible distortion and harshness no mastering engineer would ship intentionally. If this flags, back off your limiter ceiling before anything else.',
   },
   'isp-risk': {
-    importance: 4,
+    importance: 3,
     whyItMatters:
       'Samples that sit at or just below 0 dBFS often reconstruct above 0 dB between sample points, causing codec clipping even when the raw file looks clean. A true-peak limiter catches these before they leave your DAW.',
   },
 
   // Dynamics
   'crest-factor': {
-    importance: 4,
+    importance: 2,
     whyItMatters:
       'Peak-to-loudness ratio signals how much transient life your master retains. Below ~8 dB the punch is gone; modern pop commonly sits 8-12 dB; dynamic genres (jazz, acoustic, orchestral) sit 14+ dB.',
   },
@@ -149,12 +149,12 @@ export const MASTERING_CHECKLIST_METADATA: Readonly<Record<string, MasteringChec
 
   // Spectrum
   'spectral-bass': {
-    importance: 4,
+    importance: 3,
     whyItMatters:
       'Low-end balance is the single biggest source of translation problems across playback systems. Too much sub and the track turns to mud on laptop speakers; too little and it feels thin in cars and clubs.',
   },
   'spectral-treble': {
-    importance: 3,
+    importance: 2,
     whyItMatters:
       'Excess high end causes listener fatigue on earbuds and can over-drive de-essers on streaming pipelines. Too little and the master sounds dull next to reference tracks.',
   },
@@ -181,7 +181,7 @@ export const MASTERING_CHECKLIST_METADATA: Readonly<Record<string, MasteringChec
       'An elevated noise floor becomes audible hiss between tracks and on loud playback. Usually indicates a missing high-pass on the mix bus or hot gain staging.',
   },
   'truncated-tail': {
-    importance: 3,
+    importance: 2,
     whyItMatters:
       'Reverb/delay tails chopped by a hard edit sound unnatural and amateurish. Always let the last sound decay fully below the noise floor before export.',
   },

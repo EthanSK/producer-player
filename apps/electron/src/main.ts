@@ -56,7 +56,7 @@ async function migrateEncToKey(baseName: string): Promise<void> {
 }
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, statSync, promises as fs, readFileSync } from 'node:fs';
-import { basename, dirname, extname, join, parse, relative, resolve } from 'node:path';
+import { basename, dirname, extname, join, parse, relative, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import log from 'electron-log/main';
 import { autoUpdater } from 'electron-updater';
@@ -5449,6 +5449,61 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.GET_LOG_PATH, async () => {
     return log.transports.file.getFile().path;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LOG_READ_SLICE, async (_event, args: unknown) => {
+    if (
+      typeof args !== 'object' ||
+      args === null ||
+      Array.isArray(args) ||
+      typeof (args as { file?: unknown }).file !== 'string' ||
+      typeof (args as { startLine?: unknown }).startLine !== 'number' ||
+      typeof (args as { endLine?: unknown }).endLine !== 'number'
+    ) {
+      throw new Error('Invalid log slice request.');
+    }
+
+    const request = args as { file: string; startLine: number; endLine: number };
+    const logDir = resolve(getLogDirectoryPath());
+    const requestedFile = resolve(request.file);
+    if (!requestedFile.startsWith(`${logDir}${sep}`)) {
+      throw new Error('Requested log file is outside the log directory.');
+    }
+
+    const raw = await fs.readFile(requestedFile, 'utf8');
+    const lines = raw.length ? raw.split(/\r?\n/) : [];
+    if (lines.length === 0) {
+      return {
+        file: requestedFile,
+        startLine: 1,
+        endLine: 0,
+        lines: [],
+      };
+    }
+
+    let startLine = Math.floor(request.startLine);
+    let endLine = Math.floor(request.endLine);
+    if (
+      !Number.isFinite(startLine) ||
+      !Number.isFinite(endLine) ||
+      startLine < 1 ||
+      endLine < 1
+    ) {
+      throw new Error('Invalid log line range.');
+    }
+
+    startLine = Math.min(Math.max(1, startLine), lines.length);
+    endLine = Math.min(Math.max(startLine, endLine), lines.length);
+    if (endLine - startLine + 1 > 500) {
+      startLine = endLine - 499;
+    }
+
+    return {
+      file: requestedFile,
+      startLine,
+      endLine,
+      lines: lines.slice(startLine - 1, endLine),
+    };
   });
 
   ipcMain.handle(

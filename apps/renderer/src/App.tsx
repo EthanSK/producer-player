@@ -2273,10 +2273,8 @@ function parseMigrationInput(
 }
 
 export function App(): JSX.Element {
-  // v3.45 — surface short-lived status updates (plugin scan start/finish,
-  // AI recommendation start/finish) as bottom-left snackbars. No-op
-  // outside the ToastProvider (main.tsx), so tests that render App in
-  // isolation don't crash.
+  // Surface short-lived status updates (plugin scan start/finish,
+  // AI recommendation start/finish) through the Sonner-backed toast adapter.
   const toast = useToast();
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>(EMPTY_SNAPSHOT);
   const [environment, setEnvironment] =
@@ -9893,14 +9891,30 @@ export function App(): JSX.Element {
         });
       })
       .catch((err) => {
-        toast.show({
-          id: 'plugin-scan',
-          kind: 'error',
-          text: 'Plugin scan failed. Click to dismiss.',
-        });
-        return window.producerPlayer.rendererLog('error', '[plugin-chain] manual scan failed', {
-          error: String(err),
-        });
+        return window.producerPlayer
+          .rendererLog('error', '[plugin-chain] manual scan failed', {
+            error: String(err),
+          })
+          .then(() => window.producerPlayer.getLogPath())
+          .then((file) => {
+            toast.show({
+              id: 'plugin-scan',
+              kind: 'error',
+              text: 'Plugin scan failed.',
+              logRef: {
+                file,
+                startLine: 1,
+                endLine: Number.MAX_SAFE_INTEGER,
+              },
+            });
+          })
+          .catch(() => {
+            toast.show({
+              id: 'plugin-scan',
+              kind: 'error',
+              text: 'Plugin scan failed.',
+            });
+          });
       })
       .finally(() => setPluginLibraryScanning(false));
   }, [pluginLibraryScanning, toast]);

@@ -211,6 +211,7 @@ export const IPC_CHANNELS = {
   AGENT_CLEAR_ASSEMBLYAI_KEY: 'producer-player:agent-clear-assemblyai-key',
   OPEN_LOG_FOLDER: 'producer-player:open-log-folder',
   GET_LOG_PATH: 'producer-player:get-log-path',
+  LOG_READ_SLICE: 'producer-player:log-read-slice',
   RENDERER_LOG: 'producer-player:renderer-log',
   GET_USER_STATE: 'producer-player:get-user-state',
   SET_USER_STATE: 'producer-player:set-user-state',
@@ -1040,6 +1041,19 @@ export interface AgentContext {
 
 export type AgentEventListener = (event: AgentEvent) => void;
 
+export interface LogReadSliceArgs {
+  file: string;
+  startLine: number;
+  endLine: number;
+}
+
+export interface LogReadSliceResult {
+  file: string;
+  startLine: number;
+  endLine: number;
+  lines: string[];
+}
+
 export interface ProducerPlayerBridge {
   getLibrarySnapshot(): Promise<LibrarySnapshot>;
   getEnvironment(): Promise<ProducerPlayerEnvironment>;
@@ -1100,6 +1114,7 @@ export interface ProducerPlayerBridge {
   onAgentEvent(listener: AgentEventListener): () => void;
   openLogFolder(): Promise<void>;
   getLogPath(): Promise<string>;
+  logReadSlice(args: LogReadSliceArgs): Promise<LogReadSliceResult>;
   rendererLog(level: 'error' | 'warn' | 'info', message: string, meta?: Record<string, unknown>): Promise<void>;
   getUserState(): Promise<ProducerPlayerUserState>;
   setUserState(state: ProducerPlayerUserState): Promise<ProducerPlayerUserState>;

@@ -284,6 +284,10 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_LOG_PATH);
   },
 
+  async logReadSlice(args) {
+    return ipcRenderer.invoke(IPC_CHANNELS.LOG_READ_SLICE, args);
+  },
+
   async rendererLog(level: 'error' | 'warn' | 'info', message: string, meta?: Record<string, unknown>) {
     await ipcRenderer.invoke(IPC_CHANNELS.RENDERER_LOG, level, message, meta);
   },

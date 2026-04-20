@@ -1,7 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { Toaster } from 'sonner';
 import { App } from './App';
-import { ToastProvider } from './lib/ToastStack';
+import { LogSliceViewer } from './lib/LogSliceViewer';
 import './styles.css';
 import './agent-chat.css';
 
@@ -51,9 +52,9 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <ToastProvider>
-        <App />
-      </ToastProvider>
+      <App />
+      <Toaster position="top-right" richColors expand closeButton theme="dark" />
+      <LogSliceViewer />
     </ErrorBoundary>
   </React.StrictMode>
 );

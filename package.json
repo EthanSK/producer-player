@@ -52,7 +52,7 @@
     "version:bump:minor": "node ./scripts/bump-version.mjs minor && npm run version:sync",
     "release:desktop:mac": "npm run build:mac",
     "release:desktop:linux": "npm run build && electron-builder --linux zip --publish never",
-    "release:desktop:win": "npm run build && electron-builder --win zip --publish never",
+    "release:desktop:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "icon:build": "./scripts/generate-app-icon.sh",
     "plan:audit": "python3 scripts/plan_verbatim_audit.py --session \"$SESSION_JSONL\" --plan PLAN.md",
     "plan:audit:append": "python3 scripts/plan_verbatim_audit.py --session \"$SESSION_JSONL\" --plan PLAN.md --append-missing"
@@ -119,9 +119,23 @@
     },
     "win": {
       "target": [
-        "zip"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon/png/icon-256.png",
+      "artifactName": "Producer-Player-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
       "artifactName": "Producer-Player-${version}-win-${arch}.${ext}"
     }
   },

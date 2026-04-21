@@ -3,7 +3,7 @@
 This repo ships downloadable desktop artifacts via:
 
 - `.github/workflows/release-desktop.yml`
-- GitHub Releases (macOS/Linux/Windows ZIPs + SHA-256 checksums)
+- GitHub Releases (macOS/Linux ZIPs, Windows installer, and SHA-256 checksums)
 
 ## Version source of truth
 
@@ -22,8 +22,8 @@ Unsigned desktop artifacts for immediate testability:
 
 - `Producer-Player-<version>-mac-<arch>.zip`
 - `Producer-Player-<version>-linux-<arch>.zip`
-- `Producer-Player-<version>-win-<arch>.zip`
-- matching checksum files: `*.zip.sha256`
+- `Producer-Player-<version>-win-<arch>.exe` (NSIS installer)
+- matching checksum files: `*.zip.sha256` and `*.exe.sha256`
 
 Release behavior by trigger:
 
@@ -136,5 +136,5 @@ Unsigned fallback path (today): keep `CSC_IDENTITY_AUTO_DISCOVERY=false` in CI a
 ## Planned next packaging targets (not yet enabled)
 
 - Signed/notarized macOS DMG outside the App Store
-- Signed Windows installer (NSIS/MSIX)
+- Code-signed Windows installer trust chain (NSIS)
 - Linux packages (AppImage/deb)

@@ -200,8 +200,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $files = Get-ChildItem -Path release -Filter "Producer-Player-*-win-*.zip"
-          if (-not $files) { throw "No ZIP artifacts found for win" }
+          $files = Get-ChildItem -Path release -Filter "Producer-Player-*-win-*.exe"
+          if (-not $files) { throw "No installer artifacts found for win" }
           foreach ($file in $files) {
             $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLower()
             "$hash  $($file.Name)" | Out-File -FilePath "$($file.FullName).sha256" -Encoding ascii
@@ -215,6 +215,9 @@ jobs:
             release/Producer-Player-*-${{ matrix.slug }}-*.zip
             release/Producer-Player-*-${{ matrix.slug }}-*.zip.sha256
             release/Producer-Player-*-${{ matrix.slug }}-*.zip.blockmap
+            release/Producer-Player-*-${{ matrix.slug }}-*.exe
+            release/Producer-Player-*-${{ matrix.slug }}-*.exe.sha256
+            release/Producer-Player-*-${{ matrix.slug }}-*.exe.blockmap
             release/latest*.yml
           if-no-files-found: error
 
@@ -254,8 +257,8 @@ jobs:
           shopt -s nullglob
           mac_zips=(release-assets/Producer-Player-*-mac-universal.zip)
           linux_zips=(release-assets/Producer-Player-*-linux-x64.zip)
-          win_zips=(release-assets/Producer-Player-*-win-x64.zip)
-          if [ ${#mac_zips[@]} -eq 0 ] && [ ${#linux_zips[@]} -eq 0 ] && [ ${#win_zips[@]} -eq 0 ]; then
+          win_installers=(release-assets/Producer-Player-*-win-x64.exe)
+          if [ ${#mac_zips[@]} -eq 0 ] && [ ${#linux_zips[@]} -eq 0 ] && [ ${#win_installers[@]} -eq 0 ]; then
             echo "::error title=No platform builds succeeded::Every platform's build job failed; nothing to publish. See the build-desktop job logs."
             exit 1
           fi
@@ -265,8 +268,8 @@ jobs:
           if [ ${#linux_zips[@]} -eq 0 ]; then
             echo "::warning title=Skipping Linux in this release::No linux build artifact present."
           fi
-          if [ ${#win_zips[@]} -eq 0 ]; then
-            echo "::warning title=Skipping Windows in this release::No windows build artifact present."
+          if [ ${#win_installers[@]} -eq 0 ]; then
+            echo "::warning title=Skipping Windows in this release::No windows installer artifact present."
           fi
 
       - name: Create stable latest-download aliases
@@ -279,13 +282,13 @@ jobs:
           patterns=(
             "Producer-Player-*-mac-universal.zip"
             "Producer-Player-*-linux-x64.zip"
-            "Producer-Player-*-win-x64.zip"
+            "Producer-Player-*-win-x64.exe"
           )
 
           aliases=(
             "Producer-Player-latest-mac-universal.zip"
             "Producer-Player-latest-linux-x64.zip"
-            "Producer-Player-latest-win-x64.zip"
+            "Producer-Player-latest-win-x64.exe"
           )
 
           for i in "${!patterns[@]}"; do
@@ -476,7 +479,7 @@ jobs:
             echo "|----------|------------|"
             echo "| macOS (Universal: Apple Silicon + Intel) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-mac-universal.zip\` |"
             echo "| Linux (x64) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-linux-x64.zip\` |"
-            echo "| Windows (x64) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-win-x64.zip\` |"
+            echo "| Windows (x64) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-win-x64.exe\` |"
             echo ""
             echo "Versioned assets are attached below for auditing/reproducibility."
             echo ""

@@ -722,7 +722,7 @@ function getStableDownloadAssetName(
   }
 
   if (platform === 'win32' && arch === 'x64') {
-    return 'Producer-Player-latest-win-x64.zip';
+    return 'Producer-Player-latest-win-x64.exe';
   }
 
   return null;
@@ -754,6 +754,7 @@ function getReleaseAssetNameCandidatesForCurrentPlatform(): string[] {
   }
 
   if (process.platform === 'win32' && process.arch === 'x64') {
+    candidates.push('Producer-Player-latest-win-x64.zip');
     return candidates;
   }
 
@@ -865,7 +866,7 @@ function resolveReleaseDownloadUrl(release: GithubLatestReleasePayload): string 
 
   if (process.platform === 'win32' && process.arch === 'x64') {
     const windowsVersionedAsset = release.assets.find((asset) =>
-      /Producer-Player-.*-win-x64\.zip$/i.test(asset.name)
+      /Producer-Player-.*-win-x64\.(?:exe|zip)$/i.test(asset.name)
     );
 
     if (windowsVersionedAsset) {

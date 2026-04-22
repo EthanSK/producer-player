@@ -13066,8 +13066,11 @@ export function App(): JSX.Element {
                 onDrop={(event) => handleCompactMasteringPanelDrop(event, 'normalization')}
               >
                 <section
-                  className="analysis-normalization-panel"
+                  className={`analysis-normalization-panel${
+                    normalizationPreviewEnabled ? ' normalization-preview-active' : ''
+                  }`}
                   data-testid="analysis-normalization-panel"
+                  style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as CSSProperties}
                 >
                   <div className="analysis-panel-header-row analysis-normalization-header-row-compact">
                     <div className="analysis-panel-header-title-block">
@@ -13110,11 +13113,16 @@ export function App(): JSX.Element {
                         type="button"
                         className={`analysis-platform-button${
                           selectedNormalizationPlatformId === platform.id ? ' selected' : ''
+                        }${
+                          normalizationPreviewEnabled && selectedNormalizationPlatformId === platform.id
+                            ? ' preview-active'
+                            : ''
                         }`}
                         onClick={() => setSelectedNormalizationPlatformId(platform.id)}
                         data-testid={`analysis-platform-${platform.id}`}
                         title={platform.description}
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
+                        style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                       >
                         <span className="analysis-platform-header-row">
                           <span
@@ -16478,9 +16486,14 @@ export function App(): JSX.Element {
                     fullscreenMasteringDropTargetPanelId === 'normalization' ? ' drop-target' : ''
                   }${
                     draggingFullscreenMasteringPanelId === 'normalization' ? ' is-drag-source' : ''
+                  }${
+                    normalizationPreviewEnabled ? ' normalization-preview-active' : ''
                   }`}
                   data-testid="analysis-overlay-normalization-panel"
-                  style={getFullscreenMasteringPanelStyle('normalization')}
+                  style={{
+                    ...getFullscreenMasteringPanelStyle('normalization'),
+                    '--platform-accent': selectedNormalizationPlatform.accentColor,
+                  } as CSSProperties}
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'normalization')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'normalization')}
                 >
@@ -16557,11 +16570,16 @@ export function App(): JSX.Element {
                           type="button"
                           className={`analysis-platform-button analysis-platform-button-overlay${
                             selectedNormalizationPlatformId === platform.id ? ' selected' : ''
+                          }${
+                            normalizationPreviewEnabled && selectedNormalizationPlatformId === platform.id
+                              ? ' preview-active'
+                              : ''
                           }`}
                           onClick={() => setSelectedNormalizationPlatformId(platform.id)}
                           data-testid={`analysis-overlay-platform-${platform.id}`}
                           title={platform.description}
                           aria-pressed={selectedNormalizationPlatformId === platform.id}
+                          style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                         >
                           <span className="analysis-platform-overlay-left">
                             <span className="analysis-platform-header-row">
@@ -17719,6 +17737,25 @@ export function App(): JSX.Element {
           onClick={() => setInspectorDrawerOpen(false)}
           aria-hidden="true"
         />
+      ) : null}
+
+      {normalizationPreviewEnabled ? (
+        <button
+          type="button"
+          className="floating-platform-preview-indicator"
+          onClick={() => setNormalizationPreviewEnabled(false)}
+          data-testid="floating-platform-preview-indicator"
+          title={`${selectedNormalizationPlatform.label} normalization preview active — click to turn it off`}
+          aria-label={`Turn off ${selectedNormalizationPlatform.label} normalization preview`}
+          style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as CSSProperties}
+        >
+          <span className="floating-platform-preview-icon analysis-platform-icon" aria-hidden="true">
+            <PlatformIcon platformId={selectedNormalizationPlatformId} />
+          </span>
+          <span className="floating-platform-preview-dismiss" aria-hidden="true">
+            &times;
+          </span>
+        </button>
       ) : null}
 
       {/*

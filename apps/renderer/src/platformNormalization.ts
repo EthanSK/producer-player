@@ -68,7 +68,7 @@ export const NORMALIZATION_PLATFORM_PROFILES: readonly NormalizationPlatformProf
     targetLufs: -16,
     truePeakCeilingDbtp: -1,
     policy: 'peak-limited-upward',
-    accentColor: '#fa243c',
+    accentColor: '#ff4e6b',
     description: 'Apple Music Sound Check targets -16 LUFS — quieter than Spotify, which preserves more dynamics. Both boosts and cuts are applied, but boosts are limited by the -1 dBTP peak ceiling.',
   },
   {

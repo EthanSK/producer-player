@@ -55,6 +55,10 @@ describe('Platform LUFS targets (verified against authoritative sources)', () =>
     expect(getProfile('appleMusic').targetLufs).toBe(-16);
   });
 
+  it('Apple Music keeps its distinct pink accent', () => {
+    expect(getProfile('appleMusic').accentColor).toBe('#ff4e6b');
+  });
+
   it('YouTube targets -14 LUFS', () => {
     expect(getProfile('youtube').targetLufs).toBe(-14);
   });

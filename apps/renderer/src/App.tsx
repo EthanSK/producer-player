@@ -542,6 +542,8 @@ function fileManagerLabel(platform: string): string {
 function AiRecommendationWhyButton({ reason }: { reason: string }): ReactNode {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLSpanElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [popoverSide, setPopoverSide] = useState<'left' | 'right'>('right');
 
   useEffect(() => {
     if (!open) return;
@@ -560,9 +562,28 @@ function AiRecommendationWhyButton({ reason }: { reason: string }): ReactNode {
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const updatePopoverSide = () => {
+      const triggerRect = buttonRef.current?.getBoundingClientRect();
+      if (!triggerRect) {
+        return;
+      }
+      setPopoverSide(getAiRecommendationTooltipSide(triggerRect, window.innerWidth));
+    };
+
+    updatePopoverSide();
+    window.addEventListener('resize', updatePopoverSide);
+    return () => {
+      window.removeEventListener('resize', updatePopoverSide);
+    };
+  }, [open]);
+
   return (
     <span className="ai-rec-why" ref={containerRef}>
       <button
+        ref={buttonRef}
         type="button"
         className="ai-rec-why-button"
         aria-label="Why this recommendation?"
@@ -573,7 +594,10 @@ function AiRecommendationWhyButton({ reason }: { reason: string }): ReactNode {
         ⓘ
       </button>
       {open ? (
-        <span className="ai-rec-why-popover" role="tooltip">
+        <span
+          className={`ai-rec-why-popover ai-rec-why-popover--${popoverSide}`}
+          role="tooltip"
+        >
           {reason}
         </span>
       ) : null}
@@ -676,6 +700,9 @@ const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
 const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const ALBUM_CHECKLIST_STORAGE_KEY = 'producer-player.album-checklist.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
+const NORMALIZATION_PLATFORM_STORAGE_KEY = 'producer-player.normalization-platform.v1';
+const NORMALIZATION_PREVIEW_FLOATING_VISIBLE_KEY =
+  'producer-player.normalization-preview-floating-visible.v1';
 // v3.20: the inspector side-pane collapses into a right-edge drawer whenever the
 // viewport is narrower than this threshold. Kept in sync with the matching
 // `@media` query in styles.css (`.inspector-toggle-button`, `.app-shell`).
@@ -703,6 +730,24 @@ const FEATURE_REQUEST_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=featur
 const MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION = 1;
 const MASTERING_CACHE_DISCLOSURE_REMINDER =
   'If you reference cached track analyses, explicitly tell the user those values came from the mastering cache.';
+
+function isNormalizationPlatformId(value: string | null): value is NormalizationPlatformId {
+  return NORMALIZATION_PLATFORM_PROFILES.some((platform) => platform.id === value);
+}
+
+function getAiRecommendationTooltipSide(
+  triggerRect: DOMRect,
+  viewportWidth: number,
+): 'left' | 'right' {
+  const availableRight = viewportWidth - triggerRect.left;
+  const availableLeft = triggerRect.right;
+
+  if (availableRight < 292 && availableLeft > availableRight) {
+    return 'left';
+  }
+
+  return triggerRect.left > viewportWidth / 2 ? 'left' : 'right';
+}
 const AI_EQ_PER_SONG_KEY_PREFIX = 'producer-player.ai-eq-recommendation.';
 const EQ_LIVE_STATE_PER_SONG_KEY_PREFIX = 'producer-player.eq-live-state.';
 // v3.32 — Phase 3b. The Spectrum Analyzer's AI EQ recommendations migrate
@@ -2676,8 +2721,18 @@ export function App(): JSX.Element {
   );
   const [referenceError, setReferenceError] = useState<string | null>(null);
   const [selectedNormalizationPlatformId, setSelectedNormalizationPlatformId] =
-    useState<NormalizationPlatformId>('spotify');
+    useState<NormalizationPlatformId>(() => {
+      const stored = window.localStorage.getItem(NORMALIZATION_PLATFORM_STORAGE_KEY);
+      return isNormalizationPlatformId(stored) ? stored : 'spotify';
+    });
   const [normalizationPreviewEnabled, setNormalizationPreviewEnabled] = useState(false);
+  const [normalizationPreviewFloatingVisible, setNormalizationPreviewFloatingVisible] =
+    useState(() => {
+      const stored = window.localStorage.getItem(
+        NORMALIZATION_PREVIEW_FLOATING_VISIBLE_KEY
+      );
+      return stored === 'true';
+    });
   const [midSideMode, setMidSideMode] = useState<'stereo' | 'mid' | 'side'>('stereo');
   const [analyserNodeL, setAnalyserNodeL] = useState<AnalyserNode | null>(null);
   const [analyserNodeR, setAnalyserNodeR] = useState<AnalyserNode | null>(null);
@@ -6037,6 +6092,20 @@ export function App(): JSX.Element {
   const shortTermLufsEstimate = analysis
     ? estimateShortTermLufs(analysis, currentTimeSeconds)
     : null;
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      NORMALIZATION_PLATFORM_STORAGE_KEY,
+      selectedNormalizationPlatformId
+    );
+  }, [selectedNormalizationPlatformId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      NORMALIZATION_PREVIEW_FLOATING_VISIBLE_KEY,
+      String(normalizationPreviewFloatingVisible)
+    );
+  }, [normalizationPreviewFloatingVisible]);
   const referenceShortTermEstimate = referenceTrack
     ? estimateShortTermLufs(referenceTrack.previewAnalysis, 0)
     : null;
@@ -10364,9 +10433,27 @@ export function App(): JSX.Element {
     void runVoidTask(() => window.producerPlayer.openExternalUrl(url));
   }
 
+  function handleSelectNormalizationPlatform(platformId: NormalizationPlatformId): void {
+    setSelectedNormalizationPlatformId(platformId);
+    setNormalizationPreviewFloatingVisible(true);
+  }
+
+  function handleToggleNormalizationPreview(force?: boolean): void {
+    setNormalizationPreviewFloatingVisible(true);
+    setNormalizationPreviewEnabled((current) =>
+      typeof force === 'boolean' ? force : !current
+    );
+  }
+
+  function handleDismissNormalizationPreviewIndicator(): void {
+    setNormalizationPreviewEnabled(false);
+    setNormalizationPreviewFloatingVisible(false);
+  }
+
   function handleResetFullscreenMasteringSession(): void {
     setPlaybackPreviewMode('mix');
     setNormalizationPreviewEnabled(false);
+    setNormalizationPreviewFloatingVisible(false);
     setSelectedNormalizationPlatformId('spotify');
     setReferenceLevelMatchEnabled(false);
     window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, 'false');
@@ -13158,7 +13245,7 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="normalization-preview-header-badge"
-                    onClick={() => setNormalizationPreviewEnabled(false)}
+                    onClick={() => handleToggleNormalizationPreview(false)}
                     title={`${selectedNormalizationPlatform.label} normalization preview active — click to disable`}
                     aria-label={`Platform normalization preview active: ${selectedNormalizationPlatform.label}. Click to disable.`}
                   >
@@ -13330,7 +13417,7 @@ export function App(): JSX.Element {
                       <button
                         type="button"
                         className={normalizationPreviewEnabled ? '' : 'ghost'}
-                        onClick={() => setNormalizationPreviewEnabled((current) => !current)}
+                        onClick={() => handleToggleNormalizationPreview()}
                         data-testid="analysis-normalization-toggle"
                         disabled={normalizationSourceStatus !== 'ready' || !normalizationPreview}
                         title="Apply this platform's loudness adjustment to your playback."
@@ -13365,7 +13452,7 @@ export function App(): JSX.Element {
                             ? ' preview-active'
                             : ''
                         }`}
-                        onClick={() => setSelectedNormalizationPlatformId(platform.id)}
+                        onClick={() => handleSelectNormalizationPlatform(platform.id)}
                         data-testid={`analysis-platform-${platform.id}`}
                         title={platform.description}
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
@@ -15837,7 +15924,7 @@ export function App(): JSX.Element {
                     <button
                       type="button"
                       className="normalization-preview-header-badge"
-                      onClick={() => setNormalizationPreviewEnabled(false)}
+                      onClick={() => handleToggleNormalizationPreview(false)}
                       title={`${selectedNormalizationPlatform.label} normalization preview active — click to disable`}
                       aria-label={`Platform normalization preview active: ${selectedNormalizationPlatform.label}. Click to disable.`}
                     >
@@ -16763,7 +16850,7 @@ export function App(): JSX.Element {
                     <button
                       type="button"
                       className={normalizationPreviewEnabled ? '' : 'ghost'}
-                      onClick={() => setNormalizationPreviewEnabled((current) => !current)}
+                      onClick={() => handleToggleNormalizationPreview()}
                       data-testid="analysis-overlay-normalization-toggle"
                       disabled={normalizationSourceStatus !== 'ready' || !normalizationPreview}
                       title="Apply this platform's loudness adjustment to your playback."
@@ -16824,7 +16911,7 @@ export function App(): JSX.Element {
                               ? ' preview-active'
                               : ''
                           }`}
-                          onClick={() => setSelectedNormalizationPlatformId(platform.id)}
+                          onClick={() => handleSelectNormalizationPlatform(platform.id)}
                           data-testid={`analysis-overlay-platform-${platform.id}`}
                           title={platform.description}
                           aria-pressed={selectedNormalizationPlatformId === platform.id}
@@ -17988,23 +18075,42 @@ export function App(): JSX.Element {
         />
       ) : null}
 
-      {normalizationPreviewEnabled ? (
-        <button
-          type="button"
-          className="floating-platform-preview-indicator"
-          onClick={() => setNormalizationPreviewEnabled(false)}
-          data-testid="floating-platform-preview-indicator"
-          title={`${selectedNormalizationPlatform.label} normalization preview active — click to turn it off`}
-          aria-label={`Turn off ${selectedNormalizationPlatform.label} normalization preview`}
+      {normalizationPreviewFloatingVisible && selectedPlaybackVersion ? (
+        <div
+          className={`floating-platform-preview-indicator${
+            normalizationPreviewEnabled ? ' is-active' : ' is-inactive'
+          }`}
           style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as CSSProperties}
         >
-          <span className="floating-platform-preview-icon analysis-platform-icon" aria-hidden="true">
-            <PlatformIcon platformId={selectedNormalizationPlatformId} />
-          </span>
-          <span className="floating-platform-preview-dismiss" aria-hidden="true">
+          <button
+            type="button"
+            className="floating-platform-preview-toggle"
+            onClick={() => handleToggleNormalizationPreview()}
+            data-testid="floating-platform-preview-indicator"
+            aria-pressed={normalizationPreviewEnabled}
+            disabled={normalizationSourceStatus !== 'ready' || !normalizationPreview}
+            title={`${selectedNormalizationPlatform.label} normalization preview ${
+              normalizationPreviewEnabled ? 'on' : 'off'
+            } — click to turn it ${normalizationPreviewEnabled ? 'off' : 'on'}`}
+            aria-label={`${normalizationPreviewEnabled ? 'Turn off' : 'Turn on'} ${selectedNormalizationPlatform.label} normalization preview`}
+          >
+            <span className="floating-platform-preview-state" aria-hidden="true">
+              {normalizationPreviewEnabled ? 'On' : 'Off'}
+            </span>
+            <span className="floating-platform-preview-icon analysis-platform-icon" aria-hidden="true">
+              <PlatformIcon platformId={selectedNormalizationPlatformId} />
+            </span>
+          </button>
+          <button
+            type="button"
+            className="floating-platform-preview-close"
+            onClick={handleDismissNormalizationPreviewIndicator}
+            aria-label="Hide platform normalization quick toggle"
+            title="Hide quick toggle"
+          >
             &times;
-          </span>
-        </button>
+          </button>
+        </div>
       ) : null}
 
       {/*

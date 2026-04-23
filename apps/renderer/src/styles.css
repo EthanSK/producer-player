@@ -3039,6 +3039,11 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   overflow-y: auto;
   overscroll-behavior: contain;
   overflow-anchor: none;
+  /* v3.66 — tighten the visual gap beneath the listening-device strip.
+   * Ethan wanted the checklist item container almost touching the strip,
+   * without shrinking the controls themselves. A small negative top margin
+   * trims the parent flex gap just for this transition. */
+  margin-top: -8px;
   /* v3.23 — matching left padding so the 2px hover outline on
    * .checklist-item-row.is-group-highlighted (box-shadow: 0 0 0 2px ...)
    * isn't clipped against the scroll region's implicit overflow-x: hidden.

@@ -2927,6 +2927,19 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
+.checklist-add-device-group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 48px;
+  max-width: min(220px, 34vw);
+}
+
+.checklist-add-device-group > button {
+  width: 100%;
+}
+
 .checklist-input-timestamp-preview {
   cursor: pointer;
 }
@@ -3305,22 +3318,32 @@ body.is-dragging-checklist-timestamp * {
 .listening-device-reminder {
   display: flex;
   justify-content: flex-end;
-  padding: 6px 0 2px 0;
+  min-width: 0;
+  padding: 0;
 }
 
 .now-listening-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px 5px 12px;
+  justify-content: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 2px 7px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
   border: 1px solid;
   transition: transform 0.12s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.now-listening-pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .now-listening-pill:hover {
@@ -3348,8 +3371,9 @@ body.is-dragging-checklist-timestamp * {
   border: 0;
   color: inherit;
   font: inherit;
-  padding: 0 2px;
-  margin-left: 2px;
+  flex: 0 0 auto;
+  padding: 0 1px;
+  margin-left: 1px;
   cursor: pointer;
   opacity: 0.75;
   line-height: 1;

@@ -80,6 +80,12 @@ import {
   type NormalizationPlatformId,
 } from './platformNormalization';
 import {
+  shouldAutoplayOnTransportSwitch,
+  shouldAttemptPlaybackOutputRecovery,
+  shouldRestoreAudiblePlaybackGain,
+  type PlaybackContextState,
+} from './audioPlaybackResilience';
+import {
   mergeLegacyAndSharedUserState,
   sanitizeSongChecklists,
   sanitizeSongProjectFilePaths,
@@ -632,6 +638,9 @@ const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
 };
 
 const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
+const PLAYBACK_OUTPUT_RECOVERY_DELAY_MS = 80;
+const PLAYBACK_OUTPUT_RECOVERY_MIN_INTERVAL_MS = 750;
+const PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS = 0.025;
 const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
@@ -2706,6 +2715,7 @@ export function App(): JSX.Element {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
+  const playbackIntentPlayingRef = useRef(false);
   const repeatModeRef = useRef<RepeatMode>('off');
   const isPlayingRef = useRef(isPlaying);
   const currentTimeSecondsRef = useRef(currentTimeSeconds);
@@ -2784,6 +2794,8 @@ export function App(): JSX.Element {
   const playbackAudioContextRef = useRef<AudioContext | null>(null);
   const playbackGainNodeRef = useRef<GainNode | null>(null);
   const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackOutputRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPlaybackOutputRecoveryAtRef = useRef(0);
   const targetGainLinearRef = useRef(DEFAULT_PLAYBACK_VOLUME);
   const playbackAnalyserNodeRef = useRef<AnalyserNode | null>(null);
   const bandSoloFiltersRef = useRef<BiquadFilterNode[]>([]);
@@ -4844,6 +4856,124 @@ export function App(): JSX.Element {
     });
   }
 
+  function restoreAudiblePlaybackGain(reason: string): void {
+    const audio = audioRef.current;
+    const gainNode = playbackGainNodeRef.current;
+    const audioContext = playbackAudioContextRef.current;
+    if (!audio || !gainNode || !audioContext) {
+      return;
+    }
+
+    const currentGainLinear = gainNode.gain.value;
+    const targetGainLinear = targetGainLinearRef.current;
+    if (
+      !shouldRestoreAudiblePlaybackGain({
+        audioPaused: audio.paused,
+        currentGainLinear,
+        targetGainLinear,
+      })
+    ) {
+      return;
+    }
+
+    try {
+      gainNode.gain.cancelScheduledValues(audioContext.currentTime);
+      gainNode.gain.setValueAtTime(currentGainLinear, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(
+        targetGainLinear,
+        audioContext.currentTime + PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS
+      );
+    } catch {
+      gainNode.gain.value = targetGainLinear;
+    }
+
+    logPlaybackEvent('output-gain-restored', {
+      reason,
+      currentGainLinear,
+      targetGainLinear,
+    });
+  }
+
+  async function recoverPlaybackOutput(reason: string): Promise<void> {
+    if (playbackOutputRecoveryTimerRef.current !== null) {
+      clearTimeout(playbackOutputRecoveryTimerRef.current);
+      playbackOutputRecoveryTimerRef.current = null;
+    }
+
+    lastPlaybackOutputRecoveryAtRef.current = Date.now();
+
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    const playbackAudioContext = playbackAudioContextRef.current;
+    const contextState = (playbackAudioContext?.state ?? 'none') as PlaybackContextState;
+    const hasSource = audio.currentSrc.length > 0 || audio.src.length > 0;
+    const sourceReady = playbackSourceReadyRef.current || audio.readyState >= 2;
+    const intendsPlayback =
+      playbackIntentPlayingRef.current || playOnNextLoadRef.current || !audio.paused;
+    const shouldRecoverContext = shouldAttemptPlaybackOutputRecovery({
+      audioPaused: !intendsPlayback,
+      hasSource,
+      sourceReady,
+      contextState,
+    });
+
+    if (contextState === 'closed' && !audio.paused) {
+      logPlaybackEvent('output-context-closed-during-playback', {
+        reason,
+      });
+      return;
+    }
+
+    if (shouldRecoverContext) {
+      logPlaybackEvent('output-recovery-started', {
+        reason,
+        contextState,
+      });
+
+      await resumePlaybackContextIfNeeded();
+    }
+
+    if (intendsPlayback && audio.paused && hasSource && sourceReady) {
+      try {
+        await audio.play();
+      } catch (cause: unknown) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        logPlaybackEvent('output-recovery-play-failed', {
+          reason,
+          message,
+        });
+      }
+    }
+
+    restoreAudiblePlaybackGain(reason);
+  }
+
+  function schedulePlaybackOutputRecovery(reason: string): void {
+    if (playbackOutputRecoveryTimerRef.current !== null) {
+      return;
+    }
+
+    const elapsedMs = Date.now() - lastPlaybackOutputRecoveryAtRef.current;
+    const delayMs =
+      elapsedMs >= PLAYBACK_OUTPUT_RECOVERY_MIN_INTERVAL_MS
+        ? PLAYBACK_OUTPUT_RECOVERY_DELAY_MS
+        : PLAYBACK_OUTPUT_RECOVERY_MIN_INTERVAL_MS - elapsedMs;
+
+    playbackOutputRecoveryTimerRef.current = setTimeout(() => {
+      playbackOutputRecoveryTimerRef.current = null;
+      void recoverPlaybackOutput(reason).catch((cause: unknown) => {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        logPlaybackEvent('output-recovery-failed', {
+          reason,
+          message,
+        });
+      });
+    }, delayMs);
+  }
+
   function clearPlaybackLoadTimeout(): void {
     if (!loadTimeoutRef.current) {
       return;
@@ -4869,6 +4999,7 @@ export function App(): JSX.Element {
       }
 
       playOnNextLoadRef.current = false;
+      playbackIntentPlayingRef.current = false;
 
       const extensionText = source?.extension ? `.${source.extension}` : 'This file';
       const supportText =
@@ -4894,6 +5025,7 @@ export function App(): JSX.Element {
     audio.preload = 'metadata';
     audio.volume = 1;
     audioRef.current = audio;
+    let playbackAudioContextStateChangeHandler: (() => void) | null = null;
 
     const AudioContextConstructor = window.AudioContext;
     if (AudioContextConstructor) {
@@ -4935,6 +5067,17 @@ export function App(): JSX.Element {
         setAnalyserNode(playbackAnalyserNode);
         setAnalyserNodeL(analyserL);
         setAnalyserNodeR(analyserR);
+
+        playbackAudioContextStateChangeHandler = () => {
+          logPlaybackEvent('audio-context-statechange', {
+            state: playbackAudioContext.state,
+          });
+          schedulePlaybackOutputRecovery('audio-context-statechange');
+        };
+        playbackAudioContext.addEventListener(
+          'statechange',
+          playbackAudioContextStateChangeHandler
+        );
       } catch {
         playbackAudioContextRef.current = null;
         playbackGainNodeRef.current = null;
@@ -4976,12 +5119,14 @@ export function App(): JSX.Element {
       clearPlaybackLoadTimeout();
       restorePendingPlayhead(audio);
       logPlaybackEvent('canplay');
+      schedulePlaybackOutputRecovery('canplay');
 
       if (!playOnNextLoadRef.current) {
         return;
       }
 
       playOnNextLoadRef.current = false;
+      playbackIntentPlayingRef.current = true;
 
       void resumePlaybackContextIfNeeded()
         .then(() => audio.play())
@@ -5011,7 +5156,18 @@ export function App(): JSX.Element {
       clearPlaybackLoadTimeout();
       setPlaybackError(null);
       setIsPlaying(true);
+      playbackIntentPlayingRef.current = true;
       logPlaybackEvent('play');
+      schedulePlaybackOutputRecovery('play');
+    };
+
+    const onPlaying = () => {
+      clearPlaybackLoadTimeout();
+      setPlaybackError(null);
+      setIsPlaying(true);
+      playbackIntentPlayingRef.current = true;
+      logPlaybackEvent('playing');
+      schedulePlaybackOutputRecovery('playing');
     };
 
     const onPause = () => {
@@ -5053,6 +5209,7 @@ export function App(): JSX.Element {
         const endedAt = Number.isFinite(audio.duration) ? audio.duration : currentTimeSecondsRef.current;
         setCurrentTimeSeconds(endedAt);
         setIsPlaying(false);
+        playbackIntentPlayingRef.current = false;
         logPlaybackEvent('ended-paused-for-checklist-typing', {
           currentTimeSeconds: endedAt,
         });
@@ -5076,6 +5233,7 @@ export function App(): JSX.Element {
 
       if (!advanced) {
         setIsPlaying(false);
+        playbackIntentPlayingRef.current = false;
       }
     };
 
@@ -5097,6 +5255,7 @@ export function App(): JSX.Element {
 
       setPlaybackSourceReady(false);
       setIsPlaying(false);
+      playbackIntentPlayingRef.current = false;
 
       const detail = code ? `${codeLabel} (code ${code})` : codeLabel;
       const compatibilityHint =
@@ -5117,10 +5276,12 @@ export function App(): JSX.Element {
 
     const onStalled = () => {
       logPlaybackEvent('stalled');
+      schedulePlaybackOutputRecovery('stalled');
     };
 
     const onWaiting = () => {
       logPlaybackEvent('waiting');
+      schedulePlaybackOutputRecovery('waiting');
     };
 
     const onEmptied = () => {
@@ -5131,11 +5292,29 @@ export function App(): JSX.Element {
       logPlaybackEvent('abort');
     };
 
+    const onDeviceChange = () => {
+      logPlaybackEvent('devicechange');
+      schedulePlaybackOutputRecovery('devicechange');
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        logPlaybackEvent('document-visible');
+        schedulePlaybackOutputRecovery('document-visible');
+      }
+    };
+
+    const onWindowPlaybackRecoveryEvent = (event: Event) => {
+      logPlaybackEvent(event.type);
+      schedulePlaybackOutputRecovery(event.type);
+    };
+
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('loadedmetadata', onLoadedMetadata);
     audio.addEventListener('loadstart', onLoadStart);
     audio.addEventListener('canplay', onCanPlay);
     audio.addEventListener('play', onPlay);
+    audio.addEventListener('playing', onPlaying);
     audio.addEventListener('pause', onPause);
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('error', onError);
@@ -5143,6 +5322,10 @@ export function App(): JSX.Element {
     audio.addEventListener('waiting', onWaiting);
     audio.addEventListener('emptied', onEmptied);
     audio.addEventListener('abort', onAbort);
+    navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', onWindowPlaybackRecoveryEvent);
+    window.addEventListener('pageshow', onWindowPlaybackRecoveryEvent);
 
     return () => {
       clearPlaybackLoadTimeout();
@@ -5150,7 +5333,12 @@ export function App(): JSX.Element {
         clearTimeout(crossfadeTimerRef.current);
         crossfadeTimerRef.current = null;
       }
+      if (playbackOutputRecoveryTimerRef.current !== null) {
+        clearTimeout(playbackOutputRecoveryTimerRef.current);
+        playbackOutputRecoveryTimerRef.current = null;
+      }
       playOnNextLoadRef.current = false;
+      playbackIntentPlayingRef.current = false;
 
       audio.pause();
       audio.removeAttribute('src');
@@ -5161,6 +5349,7 @@ export function App(): JSX.Element {
       audio.removeEventListener('loadstart', onLoadStart);
       audio.removeEventListener('canplay', onCanPlay);
       audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('playing', onPlaying);
       audio.removeEventListener('pause', onPause);
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('error', onError);
@@ -5168,6 +5357,18 @@ export function App(): JSX.Element {
       audio.removeEventListener('waiting', onWaiting);
       audio.removeEventListener('emptied', onEmptied);
       audio.removeEventListener('abort', onAbort);
+      navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onWindowPlaybackRecoveryEvent);
+      window.removeEventListener('pageshow', onWindowPlaybackRecoveryEvent);
+
+      const playbackAudioContextForCleanup = playbackAudioContextRef.current;
+      if (playbackAudioContextForCleanup && playbackAudioContextStateChangeHandler) {
+        playbackAudioContextForCleanup.removeEventListener(
+          'statechange',
+          playbackAudioContextStateChangeHandler
+        );
+      }
 
       playbackAnalyserNodeRef.current?.disconnect();
       playbackAnalyserNodeRef.current = null;
@@ -6703,6 +6904,7 @@ export function App(): JSX.Element {
       pendingRestoreTimeRef.current = null;
       lastLoadedSongIdRef.current = null;
       playOnNextLoadRef.current = false;
+      playbackIntentPlayingRef.current = false;
       setPlaybackSource(null);
       setCurrentTimeSeconds(0);
       setDurationSeconds(0);
@@ -6757,6 +6959,8 @@ export function App(): JSX.Element {
     setPlaybackSource(activeSource);
 
     if (!activeSource.exists) {
+      playOnNextLoadRef.current = false;
+      playbackIntentPlayingRef.current = false;
       const message = buildMissingFileMessage(activeSource.filePath);
       setPlaybackError(message);
       logPlaybackEvent('source-missing', {
@@ -6765,9 +6969,16 @@ export function App(): JSX.Element {
       return;
     }
 
-    const wasPlaying = !audio.paused;
-    if (wasPlaying) {
+    const shouldResumeAfterSwitch = shouldAutoplayOnTransportSwitch({
+      audioPaused: audio.paused,
+      playOnNextLoad: playOnNextLoadRef.current,
+      playbackIntentPlaying: playbackIntentPlayingRef.current,
+      reactIsPlaying: isPlayingRef.current,
+    });
+    const shouldCrossfade = !audio.paused;
+    if (shouldResumeAfterSwitch) {
       playOnNextLoadRef.current = true;
+      playbackIntentPlayingRef.current = true;
     }
 
     const gainNode = playbackGainNodeRef.current;
@@ -6797,7 +7008,7 @@ export function App(): JSX.Element {
 
       // Hold gain at 0 during load so the fade-in after canplay is click-free.
       // Only needed when playback was active (crossfade path).
-      if (wasPlaying && gainNode && audioContext) {
+      if (shouldCrossfade && gainNode && audioContext) {
         gainNode.gain.setValueAtTime(0, audioContext.currentTime);
       }
 
@@ -6805,7 +7016,7 @@ export function App(): JSX.Element {
     };
 
     // Micro-crossfade: ramp gain to 0 before switching to avoid an audible click
-    if (wasPlaying && gainNode && audioContext) {
+    if (shouldCrossfade && gainNode && audioContext) {
       gainNode.gain.setValueAtTime(gainNode.gain.value, audioContext.currentTime);
       gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.015);
 
@@ -7002,6 +7213,7 @@ export function App(): JSX.Element {
 
       queueMoveTargetSongIdRef.current = nextVersion.songId;
       playOnNextLoadRef.current = autoplay;
+      playbackIntentPlayingRef.current = autoplay;
       rememberCurrentSongPlayhead();
       setSelectedSongId(nextVersion.songId);
       setSelectedPlaybackVersionId(nextVersion.id);
@@ -8504,10 +8716,15 @@ export function App(): JSX.Element {
   function shouldAutoplayOnTransport(): boolean {
     const audio = audioRef.current;
     if (!audio) {
-      return isPlaying;
+      return isPlaying || playbackIntentPlayingRef.current || playOnNextLoadRef.current;
     }
 
-    return playOnNextLoadRef.current || !audio.paused;
+    return shouldAutoplayOnTransportSwitch({
+      audioPaused: audio.paused,
+      playOnNextLoad: playOnNextLoadRef.current,
+      playbackIntentPlaying: playbackIntentPlayingRef.current,
+      reactIsPlaying: isPlayingRef.current,
+    });
   }
 
   function handleSongRowSelect(songId: string): void {
@@ -8550,10 +8767,12 @@ export function App(): JSX.Element {
     if (audio && canResumeCurrentSelection) {
       if (audio.paused) {
         try {
+          playbackIntentPlayingRef.current = true;
           await resumePlaybackContextIfNeeded();
           await audio.play();
           logPlaybackEvent('song-row-double-click-played-current-selection');
         } catch (cause: unknown) {
+          playbackIntentPlayingRef.current = false;
           const message = cause instanceof Error ? cause.message : String(cause);
           setPlaybackError(
             `Playback couldn't start: ${message}. ${buildPlaybackFallbackGuidance(
@@ -8569,6 +8788,7 @@ export function App(): JSX.Element {
     }
 
     playOnNextLoadRef.current = true;
+    playbackIntentPlayingRef.current = true;
     schedulePlaybackLoadTimeout('song-row-double-click');
   }
 
@@ -8679,6 +8899,7 @@ export function App(): JSX.Element {
     if (!selectedPlaybackVersion && playbackQueue.length > 0) {
       const firstVersion = playbackQueue[0];
       playOnNextLoadRef.current = true;
+      playbackIntentPlayingRef.current = true;
       setSelectedSongId(firstVersion.songId);
       setSelectedPlaybackVersionId(firstVersion.id);
       schedulePlaybackLoadTimeout('queue-prime');
@@ -8701,6 +8922,7 @@ export function App(): JSX.Element {
 
       rememberCurrentSongPlayhead();
       playOnNextLoadRef.current = true;
+      playbackIntentPlayingRef.current = true;
       setSelectedPlaybackVersionId(nextPlaybackVersionId);
       schedulePlaybackLoadTimeout('selected-song-play-request');
       return;
@@ -8720,6 +8942,7 @@ export function App(): JSX.Element {
 
       if (!hasSource || !playbackSourceReadyRef.current) {
         playOnNextLoadRef.current = true;
+        playbackIntentPlayingRef.current = true;
         schedulePlaybackLoadTimeout('awaiting-canplay');
 
         if (hasSource) {
@@ -8741,10 +8964,12 @@ export function App(): JSX.Element {
       }
 
       try {
+        playbackIntentPlayingRef.current = true;
         await resumePlaybackContextIfNeeded();
         await audio.play();
         logPlaybackEvent('play-requested-direct');
       } catch (cause: unknown) {
+        playbackIntentPlayingRef.current = false;
         const message = cause instanceof Error ? cause.message : String(cause);
         setPlaybackError(`Playback couldn't start: ${message}. ${buildPlaybackFallbackGuidance(source)}`);
         logPlaybackEvent('play-rejected', {
@@ -8755,6 +8980,7 @@ export function App(): JSX.Element {
     }
 
     playOnNextLoadRef.current = false;
+    playbackIntentPlayingRef.current = false;
     clearPlaybackLoadTimeout();
     rememberCurrentSongPlayhead();
     audio.pause();
@@ -10808,10 +11034,12 @@ export function App(): JSX.Element {
     if (audio && canResumeCurrentSelection) {
       if (audio.paused) {
         try {
+          playbackIntentPlayingRef.current = true;
           await resumePlaybackContextIfNeeded();
           await audio.play();
           logPlaybackEvent('quick-switcher-played-current-selection');
         } catch (cause: unknown) {
+          playbackIntentPlayingRef.current = false;
           const message = cause instanceof Error ? cause.message : String(cause);
           setPlaybackError(
             `Playback couldn't start: ${message}. ${buildPlaybackFallbackGuidance(
@@ -10825,6 +11053,7 @@ export function App(): JSX.Element {
     }
 
     playOnNextLoadRef.current = true;
+    playbackIntentPlayingRef.current = true;
     schedulePlaybackLoadTimeout('quick-switcher');
   }
 
@@ -10851,6 +11080,7 @@ export function App(): JSX.Element {
     }
     if (shouldAutoplayOnTransport()) {
       playOnNextLoadRef.current = true;
+      playbackIntentPlayingRef.current = true;
       schedulePlaybackLoadTimeout('version-switcher-autoplay');
     }
     setSelectedPlaybackVersionId(versionId);
@@ -10973,6 +11203,7 @@ export function App(): JSX.Element {
       // play-on-load unconditionally to preserve the "click a timestamp →
       // it plays from there" affordance.
       playOnNextLoadRef.current = true;
+      playbackIntentPlayingRef.current = true;
       schedulePlaybackLoadTimeout('checklist-timestamp-cross-song');
       return;
     }
@@ -10981,8 +11212,13 @@ export function App(): JSX.Element {
 
     if (audio.paused) {
       void resumePlaybackContextIfNeeded()
-        .then(() => audio.play())
-        .catch(() => undefined);
+        .then(() => {
+          playbackIntentPlayingRef.current = true;
+          return audio.play();
+        })
+        .catch(() => {
+          playbackIntentPlayingRef.current = false;
+        });
     }
   }
 
@@ -14226,6 +14462,7 @@ export function App(): JSX.Element {
                       onClick={() => {
                         if (shouldAutoplayOnTransport()) {
                           playOnNextLoadRef.current = true;
+                          playbackIntentPlayingRef.current = true;
                           schedulePlaybackLoadTimeout('version-cue-autoplay');
                         }
 

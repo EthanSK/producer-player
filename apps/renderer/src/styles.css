@@ -3234,8 +3234,20 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 
 .checklist-item-toggle {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  flex-shrink: 0;
+  min-width: 28px;
+  min-height: 28px;
+  padding-top: 2px;
+}
+
+.checklist-item-toggle input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .checklist-composer-text,

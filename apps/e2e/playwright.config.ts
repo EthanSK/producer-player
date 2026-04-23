@@ -1,7 +1,10 @@
 import { defineConfig } from '@playwright/test';
 
+// Local macOS Electron runs are intentionally single-worker so one hidden app instance
+// doesn't become several competing launches that keep tugging focus back.
+const defaultWorkers = process.platform === 'darwin' ? '1' : process.env.CI ? '4' : '10';
 const configuredWorkers = Number.parseInt(
-  process.env.PLAYWRIGHT_WORKERS ?? (process.env.CI ? '4' : '10'),
+  process.env.PLAYWRIGHT_WORKERS ?? defaultWorkers,
   10
 );
 

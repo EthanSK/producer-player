@@ -11,6 +11,16 @@ import {
 } from '@playwright/test';
 
 const STATE_FILE_NAME = 'producer-player-electron-state.json';
+const DEFAULT_E2E_WINDOW_MODE = process.platform === 'darwin' ? 'hidden' : 'background';
+
+function resolveE2EWindowMode(extraEnv?: Record<string, string>): string {
+  return (
+    extraEnv?.PRODUCER_PLAYER_E2E_WINDOW_MODE ??
+    process.env.PRODUCER_PLAYER_E2E_WINDOW_MODE ??
+    process.env.PLAYWRIGHT_ELECTRON_WINDOW_MODE ??
+    DEFAULT_E2E_WINDOW_MODE
+  );
+}
 
 interface LaunchedApp {
   electronApp: ElectronApplication;
@@ -88,7 +98,7 @@ async function launchProducerPlayer(
       PRODUCER_PLAYER_USER_DATA_DIR: userDataDirectory,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       PRODUCER_PLAYER_TEST_ID: randomUUID(),
-      PRODUCER_PLAYER_E2E_WINDOW_MODE: 'background',
+      PRODUCER_PLAYER_E2E_WINDOW_MODE: resolveE2EWindowMode(options.env),
       ...(options.env ?? {}),
     },
   });

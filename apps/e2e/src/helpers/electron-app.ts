@@ -8,6 +8,19 @@ import {
   type Page,
 } from '@playwright/test';
 
+// macOS app activation is the main source of local focus-stealing during Electron E2Es,
+// so default to a fully hidden app there unless a spec/debug session overrides it.
+const DEFAULT_E2E_WINDOW_MODE = process.platform === 'darwin' ? 'hidden' : 'background';
+
+function resolveE2EWindowMode(extraEnv?: Record<string, string>): string {
+  return (
+    extraEnv?.PRODUCER_PLAYER_E2E_WINDOW_MODE ??
+    process.env.PRODUCER_PLAYER_E2E_WINDOW_MODE ??
+    process.env.PLAYWRIGHT_ELECTRON_WINDOW_MODE ??
+    DEFAULT_E2E_WINDOW_MODE
+  );
+}
+
 export interface LaunchedApp {
   electronApp: ElectronApplication;
   page: Page;
@@ -50,7 +63,7 @@ export async function launchProducerPlayer(
       PRODUCER_PLAYER_USER_DATA_DIR: userDataDirectory,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       PRODUCER_PLAYER_TEST_ID: randomUUID(),
-      PRODUCER_PLAYER_E2E_WINDOW_MODE: 'background',
+      PRODUCER_PLAYER_E2E_WINDOW_MODE: resolveE2EWindowMode(options.extraEnv),
       ...(options.devMode ? { ELECTRON_DEV: 'true' } : {}),
       ...(options.rendererDevUrl ? { RENDERER_DEV_URL: options.rendererDevUrl } : {}),
       ...(options.extraEnv ?? {}),

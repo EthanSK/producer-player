@@ -146,6 +146,10 @@ const IS_TEST_MODE =
 const TEST_WINDOW_MODE = process.env.PRODUCER_PLAYER_E2E_WINDOW_MODE ?? 'foreground';
 const SHOULD_SHOW_TEST_WINDOW_INACTIVE = IS_TEST_MODE && TEST_WINDOW_MODE === 'background';
 const SHOULD_KEEP_TEST_WINDOW_HIDDEN = IS_TEST_MODE && TEST_WINDOW_MODE === 'hidden';
+const SHOULD_SUPPRESS_TEST_APP_ACTIVATION =
+  process.platform === 'darwin' &&
+  IS_TEST_MODE &&
+  TEST_WINDOW_MODE !== 'foreground';
 
 const TEST_PLAYLIST_EXPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_EXPORT_PATH ?? null;
 const TEST_PLAYLIST_IMPORT_PATH = process.env.PRODUCER_PLAYER_E2E_PLAYLIST_IMPORT_PATH ?? null;
@@ -3870,6 +3874,7 @@ async function createMainWindow(): Promise<void> {
       webviewTag: false,
       backgroundThrottling: IS_TEST_MODE ? false : true,
     },
+    skipTaskbar: SHOULD_SUPPRESS_TEST_APP_ACTIVATION,
     show: IS_TEST_MODE && !SHOULD_SHOW_TEST_WINDOW_INACTIVE && !SHOULD_KEEP_TEST_WINDOW_HIDDEN,
   });
 
@@ -5687,6 +5692,30 @@ function registerIpcHandlers(service: FileLibraryService): void {
     }
   );
 }
+
+function configureMacTestActivationPolicy(): void {
+  // `showInactive()` helps with BrowserWindow focus, but macOS can still activate the
+  // whole Electron app on launch. Accessory mode keeps local E2Es from jumping in front.
+  if (!SHOULD_SUPPRESS_TEST_APP_ACTIVATION) {
+    return;
+  }
+
+  try {
+    app.setActivationPolicy('accessory');
+  } catch (error: unknown) {
+    log.warn('[producer-player:e2e] Failed to set accessory activation policy', error);
+  }
+
+  app.once('ready', () => {
+    try {
+      app.dock?.hide();
+    } catch (error: unknown) {
+      log.warn('[producer-player:e2e] Failed to hide dock icon for background test mode', error);
+    }
+  });
+}
+
+configureMacTestActivationPolicy();
 
 app.whenReady().then(async () => {
   log.info('App ready', {

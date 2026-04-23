@@ -94,6 +94,100 @@ test.describe('Checklist textarea UX', () => {
     }
   });
 
+  test('editing an existing checklist item supports Shift+Enter without starting sortable drag state', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-item-shift-enter-multiline'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkSingleSongAndOpenChecklist(page, directories.fixtureDirectory);
+
+      const composer = page.getByTestId('song-checklist-input');
+      await composer.fill('First note');
+      await composer.press('Enter');
+      await composer.fill('Second note');
+      await composer.press('Enter');
+
+      const itemTexts = page.getByTestId('song-checklist-item-text');
+      await expect(itemTexts).toHaveCount(2);
+      await expect(itemTexts.nth(0)).toHaveValue('First note');
+      await expect(itemTexts.nth(1)).toHaveValue('Second note');
+
+      const firstItem = itemTexts.nth(0);
+      const secondItem = itemTexts.nth(1);
+      await firstItem.focus();
+      await firstItem.evaluate((node) => {
+        const end = node.value.length;
+        node.setSelectionRange(end, end);
+      });
+      await firstItem.press('Shift+Enter');
+      await firstItem.type('continued');
+
+      await expect(firstItem).toBeFocused();
+      await expect(firstItem).toHaveValue('First note\ncontinued');
+      await expect(itemTexts.nth(1)).toHaveValue('Second note');
+
+      const dragStateAfterShiftEnter = await page.evaluate(() => {
+        const rows = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-testid="song-checklist-item-row"]')
+        );
+
+        return {
+          rowCount: rows.length,
+          draggingRows: rows.filter(
+            (row) =>
+              row.classList.contains('is-drag-source') ||
+              row.classList.contains('drop-preview-before') ||
+              row.classList.contains('drop-preview-after') ||
+              row.getAttribute('aria-grabbed') === 'true'
+          ).length,
+          overlayRows: document.querySelectorAll('.checklist-item-row--drag-ghost').length,
+          values: Array.from(
+            document.querySelectorAll<HTMLTextAreaElement>(
+              '[data-testid="song-checklist-item-text"]'
+            )
+          ).map((textarea) => textarea.value),
+        };
+      });
+
+      expect(dragStateAfterShiftEnter).toEqual({
+        rowCount: 2,
+        draggingRows: 0,
+        overlayRows: 0,
+        values: ['First note\ncontinued', 'Second note'],
+      });
+
+      await secondItem.click();
+      await expect(secondItem).toBeFocused();
+      await expect(firstItem).toHaveValue('First note\ncontinued');
+      await expect(secondItem).toHaveValue('Second note');
+
+      const dragStateAfterChangingSelection = await page.evaluate(() => ({
+        draggingRows: document.querySelectorAll([
+          '[data-testid="song-checklist-item-row"].is-drag-source',
+          '[data-testid="song-checklist-item-row"].drop-preview-before',
+          '[data-testid="song-checklist-item-row"].drop-preview-after',
+          '[data-testid="song-checklist-item-row"][aria-grabbed="true"]',
+        ].join(', ')).length,
+        overlayRows: document.querySelectorAll('.checklist-item-row--drag-ghost').length,
+      }));
+
+      expect(dragStateAfterChangingSelection).toEqual({
+        draggingRows: 0,
+        overlayRows: 0,
+      });
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('new checklist input row stays above the checklist mini-player controls', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-input-row-above-mini-player'

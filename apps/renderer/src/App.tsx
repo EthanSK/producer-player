@@ -307,7 +307,14 @@ function ChecklistSortableRow({
       data-item-version-number={versionNumber ?? ''}
       data-current-version={isCurrentVersionTag ? 'true' : 'false'}
       onKeyDown={(event) => {
-        listeners?.onKeyDown?.(event);
+        const target = event.target as HTMLElement | null;
+        const isInteractiveDescendant =
+          target !== null &&
+          target !== event.currentTarget &&
+          target.closest(CHECKLIST_INTERACTIVE_DRAG_SELECTOR) !== null;
+        if (!isInteractiveDescendant) {
+          listeners?.onKeyDown?.(event);
+        }
         if (!event.defaultPrevented) {
           onKeyDown(event);
         }

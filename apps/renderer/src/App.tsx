@@ -13841,7 +13841,7 @@ export function App(): JSX.Element {
                         data-testid="song-checklist-button"
                         title={
                           songChecklistCount > 0
-                            ? `${songChecklistCount} checklist item(s) saved`
+                            ? `${songChecklistRemainingTodoCount}/${songChecklistCount} checklist item(s) remaining`
                             : 'Open checklist for this song.'
                         }
                         aria-label={`${songRowTitle} checklist`}
@@ -13849,7 +13849,9 @@ export function App(): JSX.Element {
                       >
                         <span>Checklist</span>
                         {songChecklistCount > 0 ? (
-                          <span className="song-checklist-count">{songChecklistCount}</span>
+                          <span className="song-checklist-count">
+                            {`${songChecklistRemainingTodoCount}/${songChecklistCount}`}
+                          </span>
                         ) : null}
                       </button>
                       <span className="muted" style={{ opacity: songDateOpacity }}>

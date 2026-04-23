@@ -68,12 +68,12 @@
 }
 
 /* When user has positioned/resized the panel explicitly (v3.25+),
- * the panel uses top/left/width/height and loses bottom/right anchoring.
+ * the panel uses persisted bottom/right/width/height offsets.
  * Keep the bottom border rounded + visible so the panel looks like a
  * floating window rather than a docked-to-edge drawer. */
 .agent-chat-panel--positioned {
-  bottom: auto;
-  right: auto;
+  left: auto;
+  top: auto;
   max-width: 100vw;
   max-height: 100vh;
   border-bottom: 1px solid var(--border);

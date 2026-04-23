@@ -45,8 +45,8 @@ async function openAgentPanel(page: Page): Promise<void> {
 }
 
 async function readStoredBounds(page: Page): Promise<{
-  x: number;
-  y: number;
+  right: number;
+  bottom: number;
   width: number;
   height: number;
 } | null> {
@@ -55,8 +55,8 @@ async function readStoredBounds(page: Page): Promise<{
     if (!raw) return null;
     try {
       return JSON.parse(raw) as {
-        x: number;
-        y: number;
+        right: number;
+        bottom: number;
         width: number;
         height: number;
       };
@@ -76,6 +76,23 @@ async function getPanelRect(page: Page): Promise<{
   const box = await panel.boundingBox();
   if (!box) throw new Error('Could not measure agent-chat-panel');
   return { x: box.x, y: box.y, width: box.width, height: box.height };
+}
+
+async function getViewport(page: Page): Promise<{ width: number; height: number }> {
+  return page.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
+}
+
+function bottomRightOffsetsForRect(
+  rect: { x: number; y: number; width: number; height: number },
+  viewport: { width: number; height: number }
+): { right: number; bottom: number } {
+  return {
+    right: viewport.width - rect.x - rect.width,
+    bottom: viewport.height - rect.y - rect.height,
+  };
 }
 
 async function pointerDrag(
@@ -101,6 +118,7 @@ async function pointerDrag(
 
 test.describe('Agent Chat Panel drag + resize', () => {
   test.skip(!ENABLE_AGENT_FEATURES, 'agent features disabled');
+  test.setTimeout(120_000);
 
   test('dragging the header moves the panel and persists position', async () => {
     const dirs = await createE2ETestDirectories('agent-panel-drag-move');
@@ -133,6 +151,10 @@ test.describe('Agent Chat Panel drag + resize', () => {
 
       const stored = await readStoredBounds(firstRun.page);
       expect(stored).not.toBeNull();
+      const movedViewport = await getViewport(firstRun.page);
+      const movedOffsets = bottomRightOffsetsForRect(movedRect, movedViewport);
+      expect(stored!.right).toBeCloseTo(movedOffsets.right, 0);
+      expect(stored!.bottom).toBeCloseTo(movedOffsets.bottom, 0);
       expect(stored!.width).toBeCloseTo(startRect.width, 0);
       expect(stored!.height).toBeCloseTo(startRect.height, 0);
 
@@ -155,6 +177,67 @@ test.describe('Agent Chat Panel drag + resize', () => {
       if (firstRun) {
         await firstRun.electronApp.close();
       }
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
+
+  test('saved position stays anchored to bottom-right when the window resizes', async () => {
+    const dirs = await createE2ETestDirectories('agent-panel-resize-anchor');
+    const { electronApp, page } = await launchProducerPlayer(
+      dirs.userDataDirectory
+    );
+
+    try {
+      await openAgentPanel(page);
+
+      const headerBox = await page.getByTestId('agent-panel-header').boundingBox();
+      if (!headerBox) throw new Error('no header box');
+
+      const fromX = headerBox.x + Math.min(60, headerBox.width / 3);
+      const fromY = headerBox.y + headerBox.height / 2;
+      await pointerDrag(
+        page,
+        { x: fromX, y: fromY },
+        { x: fromX - 180, y: fromY - 140 }
+      );
+
+      const movedRect = await getPanelRect(page);
+      const stored = await readStoredBounds(page);
+      expect(stored).not.toBeNull();
+
+      const startViewport = await getViewport(page);
+      const startOffsets = bottomRightOffsetsForRect(movedRect, startViewport);
+      expect(stored!.right).toBeCloseTo(startOffsets.right, 0);
+      expect(stored!.bottom).toBeCloseTo(startOffsets.bottom, 0);
+
+      const smallerViewport = {
+        width: Math.max(
+          Math.ceil(stored!.right + movedRect.width + 40),
+          startViewport.width - 160
+        ),
+        height: Math.max(
+          Math.ceil(stored!.bottom + movedRect.height + 40),
+          startViewport.height - 120
+        ),
+      };
+      await page.setViewportSize(smallerViewport);
+      await expect.poll(() => getViewport(page)).toEqual(smallerViewport);
+
+      const resizedRect = await getPanelRect(page);
+      const resizedOffsets = bottomRightOffsetsForRect(
+        resizedRect,
+        smallerViewport
+      );
+      expect(resizedOffsets.right).toBeCloseTo(stored!.right, 0);
+      expect(resizedOffsets.bottom).toBeCloseTo(stored!.bottom, 0);
+      expect(resizedRect.width).toBeCloseTo(movedRect.width, 0);
+      expect(resizedRect.height).toBeCloseTo(movedRect.height, 0);
+
+      const storedAfterResize = await readStoredBounds(page);
+      expect(storedAfterResize!.right).toBeCloseTo(stored!.right, 0);
+      expect(storedAfterResize!.bottom).toBeCloseTo(stored!.bottom, 0);
+    } finally {
+      await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
     }
   });
@@ -259,7 +342,7 @@ test.describe('Agent Chat Panel drag + resize', () => {
     try {
       await openAgentPanel(page);
 
-      // Prime the panel with custom bounds via localStorage + reload.
+      // Prime the panel with legacy top-left bounds via localStorage + reload.
       await page.evaluate((key) => {
         window.localStorage.setItem(
           key,
@@ -272,6 +355,20 @@ test.describe('Agent Chat Panel drag + resize', () => {
       const movedRect = await getPanelRect(page);
       expect(movedRect.x).toBeCloseTo(80, 0);
       expect(movedRect.y).toBeCloseTo(80, 0);
+      await expect
+        .poll(async () => {
+          const bounds = await readStoredBounds(page);
+          return (
+            typeof bounds?.right === 'number' &&
+            typeof bounds?.bottom === 'number'
+          );
+        })
+        .toBe(true);
+      const migratedBounds = (await readStoredBounds(page))!;
+      const viewport = await getViewport(page);
+      const migratedOffsets = bottomRightOffsetsForRect(movedRect, viewport);
+      expect(migratedBounds.right).toBeCloseTo(migratedOffsets.right, 0);
+      expect(migratedBounds.bottom).toBeCloseTo(migratedOffsets.bottom, 0);
 
       const headerBox = await page.getByTestId('agent-panel-header').boundingBox();
       if (!headerBox) throw new Error('no header box');

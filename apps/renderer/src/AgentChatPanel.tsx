@@ -29,6 +29,16 @@ import {
   DEFAULT_AGENT_MODEL_BY_PROVIDER,
   DEFAULT_AGENT_THINKING_BY_PROVIDER,
 } from './agentModels';
+import {
+  AGENT_CHAT_BOUNDS_STORAGE_KEY,
+  AGENT_CHAT_MIN_HEIGHT,
+  AGENT_CHAT_MIN_WIDTH,
+  agentChatRectToAnchoredBounds,
+  clampAgentChatBounds,
+  parseStoredAgentChatBounds,
+  type AgentChatPanelBounds,
+  type AgentChatViewport,
+} from './agentChatPanelBounds';
 
 export interface AgentChatMessage {
   id: string;
@@ -140,30 +150,6 @@ const AGENT_AUTO_OPEN_DELAY_TEST_MS = 1200;
 const AGENT_CHAT_HISTORY_LIMIT = 20;
 const MAX_AGENT_ATTACHMENTS_PER_TURN = 10;
 
-/**
- * v3.25 — drag-to-move + drag-to-resize for the agent chat panel.
- *
- * Bounds are persisted in localStorage under this key. The value is {x, y,
- * width, height}. If unset, the panel falls back to the legacy CSS-driven
- * default position (anchored bottom-right). Once the user drags or resizes,
- * the panel switches into "positioned" mode and uses explicit top/left.
- *
- * Minimum size is intentionally generous enough to show the header plus a
- * line of chat; maximum is the current viewport.
- */
-export const AGENT_CHAT_BOUNDS_STORAGE_KEY = 'producer-player.agent-chat-bounds.v1';
-const AGENT_CHAT_MIN_WIDTH = 280;
-const AGENT_CHAT_MIN_HEIGHT = 200;
-const AGENT_CHAT_DEFAULT_WIDTH = 380;
-const AGENT_CHAT_DEFAULT_HEIGHT = 520;
-
-export interface AgentChatPanelBounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 type AgentChatResizeEdge =
   | 'top'
   | 'right'
@@ -178,26 +164,10 @@ function readStoredAgentChatBounds(): AgentChatPanelBounds | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(AGENT_CHAT_BOUNDS_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<AgentChatPanelBounds>;
-    if (
-      typeof parsed.x !== 'number' ||
-      typeof parsed.y !== 'number' ||
-      typeof parsed.width !== 'number' ||
-      typeof parsed.height !== 'number' ||
-      !Number.isFinite(parsed.x) ||
-      !Number.isFinite(parsed.y) ||
-      !Number.isFinite(parsed.width) ||
-      !Number.isFinite(parsed.height)
-    ) {
-      return null;
-    }
-    return {
-      x: parsed.x,
-      y: parsed.y,
-      width: parsed.width,
-      height: parsed.height,
-    };
+    return parseStoredAgentChatBounds(raw, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
   } catch {
     return null;
   }
@@ -217,31 +187,6 @@ function writeStoredAgentChatBounds(bounds: AgentChatPanelBounds | null): void {
   } catch {
     // Ignore quota / serialization errors — best-effort persistence.
   }
-}
-
-/**
- * Clamp bounds so the panel stays within viewport + respects min size.
- * The panel's top-left corner can never go above/left of 0, and the
- * bottom-right corner can never exceed the viewport's inner width/height.
- */
-function clampAgentChatBounds(
-  bounds: AgentChatPanelBounds,
-  viewportWidth: number,
-  viewportHeight: number
-): AgentChatPanelBounds {
-  const maxWidth = Math.max(AGENT_CHAT_MIN_WIDTH, viewportWidth);
-  const maxHeight = Math.max(AGENT_CHAT_MIN_HEIGHT, viewportHeight);
-  const width = Math.min(
-    maxWidth,
-    Math.max(AGENT_CHAT_MIN_WIDTH, bounds.width)
-  );
-  const height = Math.min(
-    maxHeight,
-    Math.max(AGENT_CHAT_MIN_HEIGHT, bounds.height)
-  );
-  const x = Math.max(0, Math.min(bounds.x, viewportWidth - width));
-  const y = Math.max(0, Math.min(bounds.y, viewportHeight - height));
-  return { x, y, width, height };
 }
 
 export const OPEN_AGENT_SETTINGS_EVENT = 'producer-player:open-agent-settings';
@@ -730,39 +675,27 @@ export function AgentChatPanel({
   const [isDragOver, setIsDragOver] = useState(false);
   const dragEnterCountRef = useRef(0);
 
-  // v3.25 — floating panel bounds. `null` = use default CSS position.
+  // Floating panel bounds. `null` = use default CSS position.
   //
-  // On initial mount we clamp any persisted bounds against the current
-  // viewport — otherwise, if the user saved bounds on a larger monitor
-  // and then opened the app on a smaller one, the panel could land fully
-  // offscreen with no way to grab the header to drag it back. The
-  // `window.addEventListener('resize')` effect below handles post-mount
-  // viewport shrinks; this initializer handles the first paint.
+  // Explicit bounds are saved as bottom-right offsets so resizing the window
+  // preserves the user's distance from the lower-right corner. Legacy
+  // top-left `{x,y,width,height}` storage is converted during read.
   const [panelBounds, setPanelBounds] = useState<AgentChatPanelBounds | null>(
     () => {
       const stored = readStoredAgentChatBounds();
       if (!stored) return null;
-      if (typeof window === 'undefined') return stored;
-      return clampAgentChatBounds(
-        stored,
-        window.innerWidth,
-        window.innerHeight
-      );
+      return stored;
     }
   );
   const [isPanelDragging, setIsPanelDragging] = useState(false);
   const [isPanelResizing, setIsPanelResizing] = useState(false);
-  // Track viewport height in state so the minimized transform for a
-  // positioned panel recomputes on every resize — not only on resizes that
-  // actually re-clamp the bounds (which is what the other effect handles).
-  // Codex-reviewed 2026-04-18.
-  const [viewportHeight, setViewportHeight] = useState<number>(
-    typeof window !== 'undefined' ? window.innerHeight : 0
+  const [viewportSize, setViewportSize] = useState<AgentChatViewport>(
+    typeof window !== 'undefined'
+      ? { width: window.innerWidth, height: window.innerHeight }
+      : { width: 0, height: 0 }
   );
   const panelRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
-  const panelBoundsRef = useRef<AgentChatPanelBounds | null>(panelBounds);
-  panelBoundsRef.current = panelBounds;
 
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const userScrolledUpRef = useRef(false);
@@ -784,28 +717,14 @@ export function AgentChatPanel({
     writeStoredAgentChatBounds(panelBounds);
   }, [panelBounds]);
 
-  // On viewport resize, re-clamp the panel so it can't be stranded offscreen
-  // AND update viewportHeight state so the minimized-positioned transform
-  // recomputes even when the bounds themselves don't change.
+  // Recompute the displayed position on viewport resize. We do not overwrite
+  // the persisted offsets here; if a small window temporarily clamps the panel,
+  // the user's original bottom/right spacing can return when the window grows.
   useEffect(() => {
     function handleWindowResize(): void {
-      setViewportHeight(window.innerHeight);
-      setPanelBounds((current) => {
-        if (!current) return current;
-        const clamped = clampAgentChatBounds(
-          current,
-          window.innerWidth,
-          window.innerHeight
-        );
-        if (
-          clamped.x === current.x &&
-          clamped.y === current.y &&
-          clamped.width === current.width &&
-          clamped.height === current.height
-        ) {
-          return current;
-        }
-        return clamped;
+      setViewportSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
       });
     }
     window.addEventListener('resize', handleWindowResize);
@@ -850,12 +769,17 @@ export function AgentChatPanel({
       // never been moved, this captures the CSS-driven default position so
       // the first drag feels continuous.
       const rect = panel.getBoundingClientRect();
-      const startBounds: AgentChatPanelBounds = {
+      const viewport = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+      const startRect = {
         x: rect.left,
         y: rect.top,
         width: rect.width,
         height: rect.height,
       };
+      const startBounds = agentChatRectToAnchoredBounds(startRect, viewport);
       const startX = event.clientX;
       const startY = event.clientY;
 
@@ -865,15 +789,21 @@ export function AgentChatPanel({
       function onMove(e: PointerEvent): void {
         const dx = e.clientX - startX;
         const dy = e.clientY - startY;
+        const currentViewport = {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        };
         const next = clampAgentChatBounds(
-          {
-            x: startBounds.x + dx,
-            y: startBounds.y + dy,
-            width: startBounds.width,
-            height: startBounds.height,
-          },
-          window.innerWidth,
-          window.innerHeight
+          agentChatRectToAnchoredBounds(
+            {
+              x: startRect.x + dx,
+              y: startRect.y + dy,
+              width: startRect.width,
+              height: startRect.height,
+            },
+            currentViewport
+          ),
+          currentViewport
         );
         setPanelBounds(next);
       }
@@ -894,9 +824,8 @@ export function AgentChatPanel({
 
   /**
    * Begin a resize from one of the eight resize handles. Each edge/corner
-   * adjusts a subset of {x, y, width, height}. The math mirrors the AMVS
-   * prototype — deltas are applied against the starting bounds, then clamped
-   * to the viewport with a min-size floor.
+   * adjusts a subset of the on-screen rect. The result is converted back to
+   * bottom-right anchored bounds before persistence.
    */
   const startResize = useCallback(
     (edge: AgentChatResizeEdge, event: React.PointerEvent<HTMLDivElement>): void => {
@@ -908,12 +837,17 @@ export function AgentChatPanel({
       event.stopPropagation();
 
       const rect = panel.getBoundingClientRect();
-      const startBounds: AgentChatPanelBounds = {
+      const viewport = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+      const startRect = {
         x: rect.left,
         y: rect.top,
         width: rect.width,
         height: rect.height,
       };
+      const startBounds = agentChatRectToAnchoredBounds(startRect, viewport);
       const startX = event.clientX;
       const startY = event.clientY;
 
@@ -924,52 +858,52 @@ export function AgentChatPanel({
         const dx = e.clientX - startX;
         const dy = e.clientY - startY;
 
-        let nx = startBounds.x;
-        let ny = startBounds.y;
-        let nw = startBounds.width;
-        let nh = startBounds.height;
+        let nx = startRect.x;
+        let ny = startRect.y;
+        let nw = startRect.width;
+        let nh = startRect.height;
 
         switch (edge) {
           case 'top': {
-            nh = startBounds.height - dy;
-            ny = startBounds.y + dy;
+            nh = startRect.height - dy;
+            ny = startRect.y + dy;
             break;
           }
           case 'right': {
-            nw = startBounds.width + dx;
+            nw = startRect.width + dx;
             break;
           }
           case 'bottom': {
-            nh = startBounds.height + dy;
+            nh = startRect.height + dy;
             break;
           }
           case 'left': {
-            nw = startBounds.width - dx;
-            nx = startBounds.x + dx;
+            nw = startRect.width - dx;
+            nx = startRect.x + dx;
             break;
           }
           case 'top-left': {
-            nw = startBounds.width - dx;
-            nh = startBounds.height - dy;
-            nx = startBounds.x + dx;
-            ny = startBounds.y + dy;
+            nw = startRect.width - dx;
+            nh = startRect.height - dy;
+            nx = startRect.x + dx;
+            ny = startRect.y + dy;
             break;
           }
           case 'top-right': {
-            nw = startBounds.width + dx;
-            nh = startBounds.height - dy;
-            ny = startBounds.y + dy;
+            nw = startRect.width + dx;
+            nh = startRect.height - dy;
+            ny = startRect.y + dy;
             break;
           }
           case 'bottom-left': {
-            nw = startBounds.width - dx;
-            nh = startBounds.height + dy;
-            nx = startBounds.x + dx;
+            nw = startRect.width - dx;
+            nh = startRect.height + dy;
+            nx = startRect.x + dx;
             break;
           }
           case 'bottom-right': {
-            nw = startBounds.width + dx;
-            nh = startBounds.height + dy;
+            nw = startRect.width + dx;
+            nh = startRect.height + dy;
             break;
           }
         }
@@ -991,10 +925,16 @@ export function AgentChatPanel({
           }
         }
 
+        const currentViewport = {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        };
         const next = clampAgentChatBounds(
-          { x: nx, y: ny, width: nw, height: nh },
-          window.innerWidth,
-          window.innerHeight
+          agentChatRectToAnchoredBounds(
+            { x: nx, y: ny, width: nw, height: nh },
+            currentViewport
+          ),
+          currentViewport
         );
         setPanelBounds(next);
       }
@@ -1873,30 +1813,22 @@ export function AgentChatPanel({
         };
 
   // When the panel has explicit bounds (user dragged/resized), apply them as
-  // inline styles and disable the CSS-driven bottom/right anchoring via the
-  // `agent-chat-panel--positioned` class.
-  //
-  // The closed/minimized transform for the default (bottom-anchored) panel is
-  // `translateY(calc(100% - 4px))`, which slides it below the viewport because
-  // the panel's own bottom edge starts flush with the viewport bottom. For the
-  // positioned case that math doesn't work — e.g. a panel at y=0 on a 900px
-  // viewport would only slide down by its own height, still leaving most of
-  // it visible. Instead we compute the distance needed to push the panel's
-  // top edge to just above the viewport bottom (4px peek).
-  //
-  // Codex-reviewed 2026-04-18: positioned panel minimize bug (translateY of
-  // own-height wasn't enough to push it offscreen).
-  const panelStyle: CSSProperties = panelBounds
+  // inline bottom/right anchored styles. The rendered bounds may clamp to the
+  // current viewport, but the persisted offsets remain unchanged.
+  const visiblePanelBounds = panelBounds
+    ? clampAgentChatBounds(panelBounds, viewportSize)
+    : null;
+  const panelStyle: CSSProperties = visiblePanelBounds
     ? {
-        top: panelBounds.y,
-        left: panelBounds.x,
-        width: panelBounds.width,
-        height: panelBounds.height,
+        right: visiblePanelBounds.right,
+        bottom: visiblePanelBounds.bottom,
+        width: visiblePanelBounds.width,
+        height: visiblePanelBounds.height,
         transform: isOpen
           ? 'translateY(0)'
           : `translateY(${Math.max(
               0,
-              viewportHeight - panelBounds.y - 4
+              visiblePanelBounds.bottom + visiblePanelBounds.height - 4
             )}px)`,
       }
     : {

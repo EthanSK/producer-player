@@ -43,18 +43,13 @@ notarization fails, and (b) lets `publish-release` ship whatever
 platforms DID build, so a single-platform failure no longer blocks the
 others.
 
-## Screenshots & Video
+## Screenshots
 
-**After any UI changes:** Always retake screenshots and update the Remotion video with the latest app version before considering the work done.
+**After visible marketing-surface UI changes:** Retake screenshots before considering the work done.
 
 - Screenshot script: `scripts/take-screenshot.mjs` (uses Playwright Electron API, `enableLargerThanScreen: true` for test mode)
 - Window size: use whatever is set in the script (currently ~1440×900, 16:10 ratio)
 - Screenshots go to: `site/assets/screenshots/app-hero.png`, `app-hero-checklist.png`, `app-hero-readme.png`
-- Remotion project: `/private/tmp/producer-player-remotion-video/projects/producer-player-explainer/`
-- Copy latest screenshot to Remotion's `public/images/app-hero.png` before re-rendering
-- Video outputs: `site/assets/video/producer-player-explainer.mp4` (full-res) + `producer-player-explainer-web.mp4` (720p web)
-- `site/index.html` should reference the web version
-- Always extract a poster frame: `site/assets/video/poster.jpg`
 
 ## Deploy Validation
 

@@ -366,6 +366,76 @@ export interface ParsedMasteringRecommendation {
   reason: string;
 }
 
+function firstStringField(
+  input: Record<string, unknown>,
+  keys: ReadonlyArray<string>,
+): string | null {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function firstNumberField(
+  input: Record<string, unknown>,
+  keys: ReadonlyArray<string>,
+): number | undefined {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeRecommendationEntries(
+  parsed: unknown,
+): Array<[string, Record<string, unknown>]> {
+  if (!parsed || typeof parsed !== 'object') return [];
+  const parsedRecord = parsed as Record<string, unknown>;
+  const rawRecs =
+    parsedRecord.recommendations ??
+    parsedRecord.masteringRecommendations ??
+    parsedRecord.mastering_recommendations ??
+    parsedRecord.results;
+
+  if (rawRecs && typeof rawRecs === 'object' && !Array.isArray(rawRecs)) {
+    return Object.entries(rawRecs as Record<string, unknown>).flatMap(
+      ([metricId, entry]) =>
+        metricId && entry && typeof entry === 'object' && !Array.isArray(entry)
+          ? [[metricId, entry as Record<string, unknown>]]
+          : [],
+    );
+  }
+
+  if (Array.isArray(rawRecs)) {
+    return rawRecs.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+      const entryRecord = entry as Record<string, unknown>;
+      const metricId = firstStringField(entryRecord, [
+        'metricId',
+        'metric_id',
+        'metric',
+        'id',
+        'key',
+      ]);
+      return metricId ? [[metricId, entryRecord]] : [];
+    });
+  }
+
+  // Some models ignore the wrapper and return a top-level metric map:
+  // { "integrated_lufs": { "recommended_value": "-14 LUFS", ... } }.
+  return Object.entries(parsedRecord).flatMap(([metricId, entry]) =>
+    metricId && entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? [[metricId, entry as Record<string, unknown>]]
+      : [],
+  );
+}
+
 /**
  * Extract the `{ "recommendations": { ... } }` JSON block from the agent's
  * accumulated text delta stream. Returns `null` if no valid JSON block was
@@ -446,24 +516,37 @@ export function parseMasteringRecommendationsResponse(
   for (const candidate of candidates) {
     try {
       const parsed = JSON.parse(candidate);
-      const recs = (parsed as { recommendations?: unknown }).recommendations;
-      if (!recs || typeof recs !== 'object' || Array.isArray(recs)) continue;
       const out: Record<string, ParsedMasteringRecommendation> = {};
-      for (const [metricId, entry] of Object.entries(recs as Record<string, unknown>)) {
-        if (!metricId || typeof entry !== 'object' || entry === null) continue;
-        const e = entry as Record<string, unknown>;
-        const recommendedValue =
-          typeof e.recommendedValue === 'string' && e.recommendedValue.length > 0
-            ? e.recommendedValue
-            : null;
-        const reason = typeof e.reason === 'string' ? e.reason : '';
+      for (const [metricId, e] of normalizeRecommendationEntries(parsed)) {
+        const recommendedValue = firstStringField(e, [
+          'recommendedValue',
+          'recommended_value',
+          'targetValue',
+          'target_value',
+          'suggestedValue',
+          'suggested_value',
+          'value',
+          'recommendation',
+        ]);
+        const reason =
+          firstStringField(e, ['reason', 'rationale', 'explanation', 'justification']) ?? '';
         if (!recommendedValue) continue;
         const parsedEntry: ParsedMasteringRecommendation = {
           recommendedValue,
           reason,
         };
-        if (typeof e.recommendedRawValue === 'number' && Number.isFinite(e.recommendedRawValue)) {
-          parsedEntry.recommendedRawValue = e.recommendedRawValue;
+        const recommendedRawValue = firstNumberField(e, [
+          'recommendedRawValue',
+          'recommended_raw_value',
+          'rawValue',
+          'raw_value',
+          'targetRawValue',
+          'target_raw_value',
+          'numericValue',
+          'numeric_value',
+        ]);
+        if (recommendedRawValue !== undefined) {
+          parsedEntry.recommendedRawValue = recommendedRawValue;
         }
         out[metricId] = parsedEntry;
       }

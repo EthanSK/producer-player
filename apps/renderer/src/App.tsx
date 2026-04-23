@@ -307,7 +307,14 @@ function ChecklistSortableRow({
       data-item-version-number={versionNumber ?? ''}
       data-current-version={isCurrentVersionTag ? 'true' : 'false'}
       onKeyDown={(event) => {
-        listeners?.onKeyDown?.(event);
+        const target = event.target as HTMLElement | null;
+        const isInteractiveDescendant =
+          target !== null &&
+          target !== event.currentTarget &&
+          target.closest(CHECKLIST_INTERACTIVE_DRAG_SELECTOR) !== null;
+        if (!isInteractiveDescendant) {
+          listeners?.onKeyDown?.(event);
+        }
         if (!event.defaultPrevented) {
           onKeyDown(event);
         }
@@ -7305,7 +7312,7 @@ export function App(): JSX.Element {
           source: 'auto' | 'manual' | 'tool';
           metricIds: ReadonlyArray<string>;
           spectrumBandMetricIds: ReadonlyArray<string>;
-        }) => Record<string, ParsedMasteringRecommendation> | null;
+        }) => Record<string, ParsedMasteringRecommendation> | string | null;
       }).__producerPlayerAiRecMock;
 
       if (typeof mockFn === 'function') {
@@ -7321,7 +7328,7 @@ export function App(): JSX.Element {
         void Promise.resolve()
           .then(async () => {
             if (aiRecAgentRunIdRef.current !== runId2) return;
-            const parsed = mockFn({
+            const mockResult = mockFn({
               songId: runSongId,
               versionNumber: runVersionNumber,
               analysisVersion: runAnalysisVersion,
@@ -7329,6 +7336,10 @@ export function App(): JSX.Element {
               metricIds: AI_REC_CORE_METRIC_IDS,
               spectrumBandMetricIds: AI_REC_SPECTRUM_BAND_METRIC_IDS,
             });
+            const parsed =
+              typeof mockResult === 'string'
+                ? parseMasteringRecommendationsResponse(mockResult)
+                : mockResult;
 
             setAiRecommendationsGeneration((prev) =>
               prev?.requestId === runRequestId ? null : prev,
@@ -13066,8 +13077,11 @@ export function App(): JSX.Element {
                 onDrop={(event) => handleCompactMasteringPanelDrop(event, 'normalization')}
               >
                 <section
-                  className="analysis-normalization-panel"
+                  className={`analysis-normalization-panel${
+                    normalizationPreviewEnabled ? ' normalization-preview-active' : ''
+                  }`}
                   data-testid="analysis-normalization-panel"
+                  style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as CSSProperties}
                 >
                   <div className="analysis-panel-header-row analysis-normalization-header-row-compact">
                     <div className="analysis-panel-header-title-block">
@@ -13110,11 +13124,16 @@ export function App(): JSX.Element {
                         type="button"
                         className={`analysis-platform-button${
                           selectedNormalizationPlatformId === platform.id ? ' selected' : ''
+                        }${
+                          normalizationPreviewEnabled && selectedNormalizationPlatformId === platform.id
+                            ? ' preview-active'
+                            : ''
                         }`}
                         onClick={() => setSelectedNormalizationPlatformId(platform.id)}
                         data-testid={`analysis-platform-${platform.id}`}
                         title={platform.description}
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
+                        style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                       >
                         <span className="analysis-platform-header-row">
                           <span
@@ -15051,73 +15070,72 @@ export function App(): JSX.Element {
                   </button>
                 </div>
               ) : null}
-              <button
-                type="button"
-                onClick={() => handleAddChecklistItem({ source: 'button' })}
-                disabled={checklistDraftIsEmpty}
-                data-testid="song-checklist-add"
-                title="Add this checklist item."
-              >
-                Add
-              </button>
-            </div>
-
-            <div className="listening-device-reminder">
-              {activeListeningDevice && activeListeningDeviceId ? (() => {
-                const color = getListeningDeviceColor(activeListeningDeviceId);
-                return (
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    className="now-listening-pill is-active"
-                    style={{
-                      color: color.fg,
-                      borderColor: color.border,
-                      background: color.bg,
-                    }}
-                    onClick={handleFocusListeningDeviceInput}
-                    onKeyDown={(event) => {
-                      if (event.target !== event.currentTarget) {
-                        return;
-                      }
-                      if (event.key !== 'Enter' && event.key !== ' ') {
-                        return;
-                      }
-                      event.preventDefault();
-                      handleFocusListeningDeviceInput();
-                    }}
-                    data-testid="checklist-now-listening-pill"
-                    title="Jump to listening devices"
-                  >
-                    <span>🎧 Now listening: {activeListeningDevice.name}</span>
-                    <button
-                      type="button"
-                      className="now-listening-pill-clear"
-                      data-testid="checklist-now-listening-clear"
-                      aria-label="Clear listening device selection"
-                      title="Clear listening device selection"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setActiveListeningDeviceId(null);
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                );
-              })() : (
+              <div className="checklist-add-device-group">
                 <button
                   type="button"
-                  className="now-listening-pill is-idle"
-                  onClick={handleFocusListeningDeviceInput}
-                  data-testid="checklist-now-listening-pill"
-                  title="Jump to listening devices"
+                  onClick={() => handleAddChecklistItem({ source: 'button' })}
+                  disabled={checklistDraftIsEmpty}
+                  data-testid="song-checklist-add"
+                  title="Add this checklist item."
                 >
-                  {listeningDevices.length > 0
-                    ? '🎧 No listening device selected — pick one above'
-                    : '🎧 Add a listening device above to tag items'}
+                  Add
                 </button>
-              )}
+                <div className="listening-device-reminder">
+                  {activeListeningDevice && activeListeningDeviceId ? (() => {
+                    const color = getListeningDeviceColor(activeListeningDeviceId);
+                    return (
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        className="now-listening-pill is-active"
+                        style={{
+                          color: color.fg,
+                          borderColor: color.border,
+                          background: color.bg,
+                        }}
+                        onClick={handleFocusListeningDeviceInput}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) {
+                            return;
+                          }
+                          if (event.key !== 'Enter' && event.key !== ' ') {
+                            return;
+                          }
+                          event.preventDefault();
+                          handleFocusListeningDeviceInput();
+                        }}
+                        data-testid="checklist-now-listening-pill"
+                        title="Jump to listening devices"
+                      >
+                        <span className="now-listening-pill-label">🎧 {activeListeningDevice.name}</span>
+                        <button
+                          type="button"
+                          className="now-listening-pill-clear"
+                          data-testid="checklist-now-listening-clear"
+                          aria-label="Clear listening device selection"
+                          title="Clear listening device selection"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setActiveListeningDeviceId(null);
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })() : (
+                    <button
+                      type="button"
+                      className="now-listening-pill is-idle"
+                      onClick={handleFocusListeningDeviceInput}
+                      data-testid="checklist-now-listening-pill"
+                      title="Jump to listening devices"
+                    >
+                      NA
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             {selectedPlaybackVersion ? (
@@ -16478,9 +16496,14 @@ export function App(): JSX.Element {
                     fullscreenMasteringDropTargetPanelId === 'normalization' ? ' drop-target' : ''
                   }${
                     draggingFullscreenMasteringPanelId === 'normalization' ? ' is-drag-source' : ''
+                  }${
+                    normalizationPreviewEnabled ? ' normalization-preview-active' : ''
                   }`}
                   data-testid="analysis-overlay-normalization-panel"
-                  style={getFullscreenMasteringPanelStyle('normalization')}
+                  style={{
+                    ...getFullscreenMasteringPanelStyle('normalization'),
+                    '--platform-accent': selectedNormalizationPlatform.accentColor,
+                  } as CSSProperties}
                   onDragOver={(event) => handleFullscreenMasteringPanelDragOver(event, 'normalization')}
                   onDrop={(event) => handleFullscreenMasteringPanelDrop(event, 'normalization')}
                 >
@@ -16557,11 +16580,16 @@ export function App(): JSX.Element {
                           type="button"
                           className={`analysis-platform-button analysis-platform-button-overlay${
                             selectedNormalizationPlatformId === platform.id ? ' selected' : ''
+                          }${
+                            normalizationPreviewEnabled && selectedNormalizationPlatformId === platform.id
+                              ? ' preview-active'
+                              : ''
                           }`}
                           onClick={() => setSelectedNormalizationPlatformId(platform.id)}
                           data-testid={`analysis-overlay-platform-${platform.id}`}
                           title={platform.description}
                           aria-pressed={selectedNormalizationPlatformId === platform.id}
+                          style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                         >
                           <span className="analysis-platform-overlay-left">
                             <span className="analysis-platform-header-row">
@@ -17719,6 +17747,25 @@ export function App(): JSX.Element {
           onClick={() => setInspectorDrawerOpen(false)}
           aria-hidden="true"
         />
+      ) : null}
+
+      {normalizationPreviewEnabled ? (
+        <button
+          type="button"
+          className="floating-platform-preview-indicator"
+          onClick={() => setNormalizationPreviewEnabled(false)}
+          data-testid="floating-platform-preview-indicator"
+          title={`${selectedNormalizationPlatform.label} normalization preview active — click to turn it off`}
+          aria-label={`Turn off ${selectedNormalizationPlatform.label} normalization preview`}
+          style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as CSSProperties}
+        >
+          <span className="floating-platform-preview-icon analysis-platform-icon" aria-hidden="true">
+            <PlatformIcon platformId={selectedNormalizationPlatformId} />
+          </span>
+          <span className="floating-platform-preview-dismiss" aria-hidden="true">
+            &times;
+          </span>
+        </button>
       ) : null}
 
       {/*

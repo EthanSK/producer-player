@@ -388,7 +388,7 @@ test.describe('Producer Player desktop shell', () => {
       await expect(firstLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(2);
       await expect(
         firstRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
-      ).toHaveText('2');
+      ).toHaveText('2/2');
 
       const secondChecklistInput = firstLaunch.page.getByTestId('song-checklist-item-text').nth(1);
       await secondChecklistInput.fill('Check vocal ride + mono');
@@ -424,7 +424,7 @@ test.describe('Producer Player desktop shell', () => {
       );
       await expect(
         firstRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
-      ).toHaveText('1');
+      ).toHaveText('1/1');
 
       await firstLaunch.page.locator('.checklist-remove-button').first().click();
       await expect(firstLaunch.page.getByTestId('song-checklist-empty')).toBeVisible();
@@ -439,7 +439,7 @@ test.describe('Producer Player desktop shell', () => {
       );
       await expect(
         firstRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
-      ).toHaveText('1');
+      ).toHaveText('1/1');
 
       await firstLaunch.page
         .getByTestId('song-checklist-modal')
@@ -458,7 +458,7 @@ test.describe('Producer Player desktop shell', () => {
       const reopenedRow = secondLaunch.page.getByTestId('main-list-row').first();
       await expect(
         reopenedRow.getByTestId('song-checklist-button').locator('.song-checklist-count')
-      ).toHaveText('1');
+      ).toHaveText('1/1');
 
       await reopenedRow.getByTestId('song-checklist-button').click();
       await expect(secondLaunch.page.getByTestId('song-checklist-item-text')).toHaveCount(1);
@@ -526,7 +526,7 @@ test.describe('Producer Player desktop shell', () => {
           })
         )
         .toEqual([
-          'https://github.com/EthanSK/producer-player/actions',
+          'https://ethansk.github.io/producer-player/',
           'https://github.com/EthanSK/producer-player/issues/new?template=bug_report.yml',
           'https://github.com/EthanSK/producer-player/issues/new?template=feature_request.yml',
         ]);
@@ -543,7 +543,7 @@ test.describe('Producer Player desktop shell', () => {
         }
       });
 
-      expect(untrustedUrlError).toContain('Only Producer Player GitHub links are allowed.');
+      expect(untrustedUrlError).toContain('This external URL is not in the trusted allowlist.');
     } finally {
       await electronApp.evaluate(() => {
         const globalState = globalThis as typeof globalThis & {
@@ -672,7 +672,7 @@ test.describe('Producer Player desktop shell', () => {
             return globalState.__producerPlayerOpenedExternalUrls?.[0] ?? null;
           })
         )
-        .toBe('https://github.com/EthanSK/producer-player/actions');
+        .toBe('https://ethansk.github.io/producer-player/');
     } finally {
       await electronApp.evaluate(() => {
         const globalState = globalThis as typeof globalThis & {

@@ -103,23 +103,30 @@ async function installAiRecMock(page: import('@playwright/test').Page): Promise<
         songId: input.songId,
         versionNumber: input.versionNumber,
       });
-      return {
-        integrated_lufs: {
-          recommendedValue: '-14.0 LUFS',
-          recommendedRawValue: -14.0,
-          reason: 'Streaming target.',
-        },
-        true_peak: {
-          recommendedValue: '-1.0 dBTP',
-          recommendedRawValue: -1.0,
-          reason: 'Headroom for transcoding.',
-        },
-        crest_factor: {
-          recommendedValue: '10.0 dB',
-          recommendedRawValue: 10,
-          reason: 'Dynamic range.',
-        },
-      };
+      return `\`\`\`json
+{
+  "recommendations": [
+    {
+      "metricId": "integrated_lufs",
+      "recommendedValue": "-14.0 LUFS",
+      "recommendedRawValue": -14.0,
+      "reason": "Streaming target."
+    },
+    {
+      "metric_id": "true_peak",
+      "recommended_value": "-1.0 dBTP",
+      "recommended_raw_value": -1.0,
+      "rationale": "Headroom for transcoding."
+    },
+    {
+      "metricId": "crest_factor",
+      "targetValue": "10.0 dB",
+      "targetRawValue": 10,
+      "explanation": "Dynamic range."
+    }
+  ]
+}
+\`\`\``;
     };
   });
 }
@@ -195,6 +202,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       }, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await setAgentAutoRecommendEnabled(page, true);
       await page.getByTestId('main-list-row').first().click();
 
       // Open fullscreen mastering overlay to satisfy the toggle-ON gate AND
@@ -260,6 +268,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       }, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await setAgentAutoRecommendEnabled(page, true);
       await closeAgentPanelIfOpen(page);
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
@@ -387,6 +396,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       }, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await setAgentAutoRecommendEnabled(page, true);
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
 

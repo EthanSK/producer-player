@@ -7305,7 +7305,7 @@ export function App(): JSX.Element {
           source: 'auto' | 'manual' | 'tool';
           metricIds: ReadonlyArray<string>;
           spectrumBandMetricIds: ReadonlyArray<string>;
-        }) => Record<string, ParsedMasteringRecommendation> | null;
+        }) => Record<string, ParsedMasteringRecommendation> | string | null;
       }).__producerPlayerAiRecMock;
 
       if (typeof mockFn === 'function') {
@@ -7321,7 +7321,7 @@ export function App(): JSX.Element {
         void Promise.resolve()
           .then(async () => {
             if (aiRecAgentRunIdRef.current !== runId2) return;
-            const parsed = mockFn({
+            const mockResult = mockFn({
               songId: runSongId,
               versionNumber: runVersionNumber,
               analysisVersion: runAnalysisVersion,
@@ -7329,6 +7329,10 @@ export function App(): JSX.Element {
               metricIds: AI_REC_CORE_METRIC_IDS,
               spectrumBandMetricIds: AI_REC_SPECTRUM_BAND_METRIC_IDS,
             });
+            const parsed =
+              typeof mockResult === 'string'
+                ? parseMasteringRecommendationsResponse(mockResult)
+                : mockResult;
 
             setAiRecommendationsGeneration((prev) =>
               prev?.requestId === runRequestId ? null : prev,

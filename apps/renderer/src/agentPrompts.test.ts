@@ -61,6 +61,60 @@ describe('parseMasteringRecommendationsResponse', () => {
     expect(parseMasteringRecommendationsResponse(text)).toBeNull();
   });
 
+  it('parses array-form recommendations with metricId fields', () => {
+    const text = `\`\`\`json
+{
+  "recommendations": [
+    {
+      "metricId": "integrated_lufs",
+      "recommendedValue": "-14.0 LUFS",
+      "recommendedRawValue": -14,
+      "reason": "Streaming target."
+    },
+    {
+      "metric_id": "true_peak",
+      "recommended_value": "-1.0 dBTP",
+      "recommended_raw_value": -1,
+      "rationale": "Leave headroom."
+    }
+  ]
+}
+\`\`\``;
+    const out = parseMasteringRecommendationsResponse(text);
+    expect(out).not.toBeNull();
+    expect(out!.integrated_lufs.recommendedValue).toBe('-14.0 LUFS');
+    expect(out!.integrated_lufs.recommendedRawValue).toBe(-14);
+    expect(out!.true_peak.recommendedValue).toBe('-1.0 dBTP');
+    expect(out!.true_peak.recommendedRawValue).toBe(-1);
+    expect(out!.true_peak.reason).toBe('Leave headroom.');
+  });
+
+  it('parses top-level metric maps when the agent omits the recommendations wrapper', () => {
+    const text = `\`\`\`json
+{
+  "integrated_lufs": {
+    "target_value": "-13.5 LUFS",
+    "target_raw_value": -13.5,
+    "explanation": "The current master is quiet for the target."
+  },
+  "crest_factor": {
+    "suggestedValue": "10 dB",
+    "numericValue": 10,
+    "justification": "Keeps punch without over-compression."
+  }
+}
+\`\`\``;
+    const out = parseMasteringRecommendationsResponse(text);
+    expect(out).not.toBeNull();
+    expect(out!.integrated_lufs.recommendedValue).toBe('-13.5 LUFS');
+    expect(out!.integrated_lufs.recommendedRawValue).toBe(-13.5);
+    expect(out!.integrated_lufs.reason).toBe(
+      'The current master is quiet for the target.',
+    );
+    expect(out!.crest_factor.recommendedValue).toBe('10 dB');
+    expect(out!.crest_factor.recommendedRawValue).toBe(10);
+  });
+
   it('drops entries with empty recommendedValue', () => {
     const text = `\`\`\`json\n{"recommendations":{"good":{"recommendedValue":"-14 LUFS","reason":"ok"},"empty":{"recommendedValue":"","reason":"bogus"}}}\n\`\`\``;
     const out = parseMasteringRecommendationsResponse(text);

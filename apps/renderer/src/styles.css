@@ -56,10 +56,12 @@ body,
   color: var(--text-main, #fff);
 }
 
-/* v3.54 — thinner/wider toasts (single row, full available width) */
+/* v3.64 — keep Sonner toasts only as wide as their content needs,
+ * while still capping long messages so they do not overflow the viewport. */
 [data-sonner-toaster] {
-  width: min(720px, calc(100vw - 48px)) !important;
-  max-width: min(720px, calc(100vw - 48px)) !important;
+  --toast-max-width: min(720px, calc(100vw - 48px));
+  width: fit-content !important;
+  max-width: var(--toast-max-width) !important;
 }
 
 /* v3.63 — flush the toaster wrapper to the top-right corner with zero gap.
@@ -72,7 +74,8 @@ body,
 }
 
 [data-sonner-toaster] [data-sonner-toast] {
-  width: 100% !important;
+  width: fit-content !important;
+  max-width: var(--toast-max-width) !important;
   min-height: 0 !important;
   padding: 8px 12px !important;
   align-items: center !important;

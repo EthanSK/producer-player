@@ -3736,7 +3736,10 @@ button.checklist-play-toggle[data-playing='true'] {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: 12px;
+  /* v3.68 — leave enough trailing scroll space so the last inspector card
+   * can clear the floating bottom-right controls (platform preview/version/
+   * inspector toggle) instead of sitting partially underneath them. */
+  padding-bottom: 88px;
 }
 
 /* --------------------------------------------------------------------------

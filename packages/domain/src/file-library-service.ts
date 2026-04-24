@@ -586,30 +586,25 @@ export class FileLibraryService {
     let movedCount = 0;
 
     for (const song of songs) {
-      const nonArchivedVersions = [...song.versions]
-        .filter((version) => {
-          const folder = this.linkedFolders.get(version.folderId);
-          if (!folder) {
-            return false;
-          }
+      const newestVersion = song.versions[0];
+      if (!newestVersion) {
+        continue;
+      }
 
-          return !isInsideOldDirectory(version.filePath, folder.path);
-        })
-        .sort((left, right) => {
-          const modifiedAtDelta =
-            new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime();
+      const newestFolder = this.linkedFolders.get(newestVersion.folderId);
+      if (!newestFolder) {
+        continue;
+      }
 
-          if (modifiedAtDelta !== 0) {
-            return modifiedAtDelta;
-          }
+      // Keep the newest version overall as the current top-level export, even if
+      // it was mistakenly dropped into old/. Everything else belongs in old/.
+      for (const version of song.versions) {
+        if (version.id === newestVersion.id) {
+          continue;
+        }
 
-          return left.filePath.localeCompare(right.filePath);
-        });
-
-      // Keep the newest non-archived version in place, move the rest into old/.
-      for (const version of nonArchivedVersions.slice(1)) {
         const folder = this.linkedFolders.get(version.folderId);
-        if (!folder) {
+        if (!folder || isInsideOldDirectory(version.filePath, folder.path)) {
           continue;
         }
 
@@ -630,6 +625,31 @@ export class FileLibraryService {
         movedCount += 1;
         affectedFolderIds.add(version.folderId);
       }
+
+      if (!isInsideOldDirectory(newestVersion.filePath, newestFolder.path)) {
+        continue;
+      }
+
+      if (!(await pathExists(newestVersion.filePath))) {
+        continue;
+      }
+
+      const promotedPath = path.join(newestFolder.path, path.basename(newestVersion.filePath));
+      const archiveDirectory = path.join(newestFolder.path, 'old');
+      await fs.mkdir(archiveDirectory, { recursive: true });
+
+      if (await pathExists(promotedPath)) {
+        const archivePath = await this.resolveArchivePath(
+          archiveDirectory,
+          path.basename(promotedPath)
+        );
+        await moveFile(promotedPath, archivePath);
+        movedCount += 1;
+      }
+
+      await moveFile(newestVersion.filePath, promotedPath);
+      movedCount += 1;
+      affectedFolderIds.add(newestVersion.folderId);
     }
 
     if (movedCount === 0) {

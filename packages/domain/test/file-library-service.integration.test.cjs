@@ -121,6 +121,56 @@ test('old/ version-history moves are deterministic and avoid timestamp-based arc
   }
 });
 
+test('auto-organize promotes the newest version out of old/ and archives the previous current export', async () => {
+  const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-old-promotion-');
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Pulse v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Pulse v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        relativePath: 'old/Pulse-v3.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:03.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      const firstSnapshot = await service.linkFolder(fixtureDirectory);
+
+      assert.equal(firstSnapshot.songs.length, 1);
+      assert.equal(firstSnapshot.songs[0].versions[0].fileName, 'Pulse-v3.wav');
+      assert.equal(path.dirname(firstSnapshot.songs[0].versions[0].filePath), fixtureDirectory);
+      assert.deepEqual(
+        firstSnapshot.songs[0].versions.map((version) => version.fileName).sort(),
+        ['Pulse v1.wav', 'Pulse v2.wav', 'Pulse-v3.wav'].sort()
+      );
+
+      await service.organizeOldVersions();
+      const rescanned = await service.rescanLibrary();
+
+      assert.equal(rescanned.songs.length, 1);
+      assert.equal(rescanned.songs[0].versions[0].fileName, 'Pulse-v3.wav');
+      assert.equal(path.dirname(rescanned.songs[0].versions[0].filePath), fixtureDirectory);
+    });
+
+    const filesAfterOrganize = await listRelativeFiles(fixtureDirectory);
+
+    assert.deepEqual(filesAfterOrganize, [
+      'Pulse-v3.wav',
+      'old/Pulse v1.wav',
+      'old/Pulse v2.wav',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
 test('actual-song ordering persists after organize + rescan operations', async () => {
   const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-order-');
 

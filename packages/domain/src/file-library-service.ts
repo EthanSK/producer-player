@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { promises as fs, type Dirent } from 'node:fs';
+import { createReadStream, promises as fs, type Dirent, type Stats } from 'node:fs';
 import path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type {
@@ -8,7 +8,14 @@ import type {
   MatcherSettings,
   SongWithVersions,
 } from '@producer-player/contracts';
-import { buildSongsFromFiles, isSupportedAudioFile, type ScannedAudioFile } from './song-model';
+import {
+  buildSongsFromFiles,
+  getVersionNumberFromStem,
+  hasSupportedVersionSuffix,
+  isSupportedAudioFile,
+  normalizeSongStem,
+  type ScannedAudioFile,
+} from './song-model';
 
 const DEFAULT_MATCHER_SETTINGS: MatcherSettings = {
   autoMoveOld: true,
@@ -68,6 +75,81 @@ async function pathExists(absolutePath: string): Promise<boolean> {
   }
 }
 
+function getFileCreatedAt(stats: Stats): Date {
+  if (Number.isFinite(stats.birthtimeMs) && stats.birthtimeMs > 0) {
+    return stats.birthtime;
+  }
+
+  if (Number.isFinite(stats.ctimeMs) && stats.ctimeMs > 0) {
+    return stats.ctime;
+  }
+
+  return stats.mtime;
+}
+
+function getDateMs(date: Date): number {
+  const value = date.getTime();
+  return Number.isFinite(value) ? value : 0;
+}
+
+function isNewerExportCandidate(candidate: ScannedAudioFile, latestKnown: ScannedAudioFile): boolean {
+  return getDateMs(candidate.createdAt) > getDateMs(latestKnown.createdAt);
+}
+
+function compareScannedFileAge(left: ScannedAudioFile, right: ScannedAudioFile): number {
+  const leftTime = Math.max(getDateMs(left.createdAt), getDateMs(left.modifiedAt));
+  const rightTime = Math.max(getDateMs(right.createdAt), getDateMs(right.modifiedAt));
+
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+
+  return left.filePath.localeCompare(right.filePath);
+}
+
+function getFileStem(filePath: string): string {
+  return path.basename(filePath, path.extname(filePath));
+}
+
+async function calculateFileHash(filePath: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const hash = createHash('sha256');
+    const stream = createReadStream(filePath);
+
+    stream.on('data', (chunk) => {
+      hash.update(chunk);
+    });
+
+    stream.on('error', () => {
+      resolve(null);
+    });
+
+    stream.on('end', () => {
+      resolve(hash.digest('hex'));
+    });
+  });
+}
+
+async function hasDifferentFileContents(
+  candidate: ScannedAudioFile,
+  latestKnown: ScannedAudioFile
+): Promise<boolean> {
+  if (candidate.sizeBytes !== latestKnown.sizeBytes) {
+    return true;
+  }
+
+  const [candidateHash, latestKnownHash] = await Promise.all([
+    calculateFileHash(candidate.filePath),
+    calculateFileHash(latestKnown.filePath),
+  ]);
+
+  if (!candidateHash || !latestKnownHash) {
+    return false;
+  }
+
+  return candidateHash !== latestKnownHash;
+}
+
 async function collectAudioFilesInDirectory(
   directoryPath: string,
   folderId: string
@@ -94,6 +176,7 @@ async function collectAudioFilesInDirectory(
         folderId,
         filePath: absolutePath,
         sizeBytes: stats.size,
+        createdAt: getFileCreatedAt(stats),
         modifiedAt: stats.mtime,
       });
     } catch {
@@ -467,7 +550,12 @@ export class FileLibraryService {
       return;
     }
 
-    const files = await collectAudioFiles(folder.path, folderId);
+    let files = await collectAudioFiles(folder.path, folderId);
+    const renamedUnversionedExports = await this.autoVersionUnversionedExports(folder, files);
+
+    if (renamedUnversionedExports > 0) {
+      files = await collectAudioFiles(folder.path, folderId);
+    }
 
     // Guard against unlink races where an in-flight scan completes after folder removal.
     if (!this.linkedFolders.has(folderId)) {
@@ -475,6 +563,101 @@ export class FileLibraryService {
     }
 
     this.folderFiles.set(folderId, files);
+  }
+
+  private async autoVersionUnversionedExports(
+    folder: LinkedFolder,
+    files: ScannedAudioFile[]
+  ): Promise<number> {
+    const filesByPath = new Map(files.map((file) => [file.filePath, file]));
+    const versionedSongs = buildSongsFromFiles(files);
+    const latestByNormalizedTitle = new Map<string, ScannedAudioFile>();
+    const nextVersionByNormalizedTitle = new Map<string, number>();
+
+    for (const song of versionedSongs) {
+      const versionFiles = song.versions
+        .map((version) => filesByPath.get(version.filePath))
+        .filter((file): file is ScannedAudioFile => Boolean(file));
+
+      if (versionFiles.length === 0) {
+        continue;
+      }
+
+      let latestKnown: ScannedAudioFile | null = null;
+      const maxVersionNumber = versionFiles.reduce((max, file) => {
+        const versionNumber = getVersionNumberFromStem(getFileStem(file.filePath));
+        if (versionNumber === null) {
+          return max;
+        }
+
+        if (
+          versionNumber > max ||
+          (versionNumber === max &&
+            latestKnown &&
+            compareScannedFileAge(file, latestKnown) > 0)
+        ) {
+          latestKnown = file;
+        }
+
+        return Math.max(max, versionNumber);
+      }, 0);
+
+      if (!latestKnown || maxVersionNumber < 1) {
+        continue;
+      }
+
+      latestByNormalizedTitle.set(song.normalizedTitle, latestKnown);
+      nextVersionByNormalizedTitle.set(song.normalizedTitle, maxVersionNumber + 1);
+    }
+
+    const candidates = files
+      .filter((file) => {
+        if (isInsideOldDirectory(file.filePath, folder.path)) {
+          return false;
+        }
+
+        return !hasSupportedVersionSuffix(getFileStem(file.filePath));
+      })
+      .sort(compareScannedFileAge);
+
+    let renamedCount = 0;
+
+    for (const candidate of candidates) {
+      const normalizedTitle = normalizeSongStem(getFileStem(candidate.filePath));
+      if (normalizedTitle.length === 0) {
+        continue;
+      }
+
+      const latestKnown = latestByNormalizedTitle.get(normalizedTitle);
+      if (!latestKnown || !isNewerExportCandidate(candidate, latestKnown)) {
+        continue;
+      }
+
+      if (!(await hasDifferentFileContents(candidate, latestKnown))) {
+        continue;
+      }
+
+      const requestedVersion = nextVersionByNormalizedTitle.get(normalizedTitle) ?? 1;
+      const versionedPath = await this.resolveVersionedExportPath(
+        path.dirname(candidate.filePath),
+        getFileStem(candidate.filePath),
+        path.extname(candidate.filePath),
+        requestedVersion
+      );
+
+      await moveFile(candidate.filePath, versionedPath.filePath);
+
+      const renamedFile: ScannedAudioFile = {
+        ...candidate,
+        filePath: versionedPath.filePath,
+      };
+
+      latestByNormalizedTitle.set(normalizedTitle, renamedFile);
+      nextVersionByNormalizedTitle.set(normalizedTitle, versionedPath.versionNumber + 1);
+      renamedCount += 1;
+    }
+
+    return renamedCount;
   }
 
   private collectTrackedFiles(): ScannedAudioFile[] {
@@ -685,6 +868,24 @@ export class FileLibraryService {
     }
 
     return candidatePath;
+  }
+
+  private async resolveVersionedExportPath(
+    directoryPath: string,
+    stem: string,
+    extension: string,
+    startingVersion: number
+  ): Promise<{ filePath: string; versionNumber: number }> {
+    let versionNumber = Math.max(1, Math.trunc(startingVersion));
+
+    while (true) {
+      const filePath = path.join(directoryPath, `${stem} v${versionNumber}${extension}`);
+      if (!(await pathExists(filePath))) {
+        return { filePath, versionNumber };
+      }
+
+      versionNumber += 1;
+    }
   }
 
   private applySongOrder(songs: SongWithVersions[]): SongWithVersions[] {

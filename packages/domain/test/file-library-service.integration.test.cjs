@@ -317,6 +317,105 @@ test('old-only tracks never become album songs, and old/ typos do not fuzzy-matc
   }
 });
 
+test('rescan auto-adds the next version suffix for a newer unversioned export with changed contents', async () => {
+  const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-auto-version-');
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Pulse v1.wav',
+        contents: 'old mix one',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Pulse v2.wav',
+        contents: 'old mix two',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: false }, async (service) => {
+      const linked = await service.linkFolder(fixtureDirectory);
+      assert.equal(linked.songs.length, 1);
+      assert.equal(linked.songs[0].versions[0].fileName, 'Pulse v2.wav');
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await writeFixtureFiles(fixtureDirectory, [
+        {
+          relativePath: 'Pulse.wav',
+          contents: 'new mix three',
+          modifiedAtMs: Date.parse('2026-01-01T00:00:03.000Z'),
+        },
+      ]);
+
+      const rescanned = await service.rescanLibrary();
+
+      assert.equal(rescanned.songs.length, 1);
+      assert.equal(rescanned.songs[0].versions[0].fileName, 'Pulse v3.wav');
+      assert.deepEqual(
+        rescanned.songs[0].versions.map((version) => version.fileName).sort(),
+        ['Pulse v1.wav', 'Pulse v2.wav', 'Pulse v3.wav'].sort()
+      );
+    });
+
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Pulse v1.wav',
+      'Pulse v2.wav',
+      'Pulse v3.wav',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
+test('rescan leaves newer unversioned exports alone when their contents match the latest version', async () => {
+  const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-auto-version-same-');
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Pulse v1.wav',
+        contents: 'old mix one',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Pulse v2.wav',
+        contents: 'same mix',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: false }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await writeFixtureFiles(fixtureDirectory, [
+        {
+          relativePath: 'Pulse.wav',
+          contents: 'same mix',
+          modifiedAtMs: Date.parse('2026-01-01T00:00:03.000Z'),
+        },
+      ]);
+
+      const rescanned = await service.rescanLibrary();
+
+      assert.equal(rescanned.songs.length, 1);
+      assert.deepEqual(
+        rescanned.songs[0].versions.map((version) => version.fileName).sort(),
+        ['Pulse v1.wav', 'Pulse v2.wav'].sort()
+      );
+    });
+
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Pulse v1.wav',
+      'Pulse v2.wav',
+      'Pulse.wav',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
 test('mixed v-suffix naming variants stay grouped, while no-suffix files are ignored', async () => {
   const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-vsuffix-');
 

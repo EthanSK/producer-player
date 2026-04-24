@@ -12,6 +12,7 @@ export interface ScannedAudioFile {
   folderId: string;
   filePath: string;
   sizeBytes: number;
+  createdAt: Date;
   modifiedAt: Date;
 }
 
@@ -38,26 +39,41 @@ function normalizeWhitespace(input: string): string {
   return input.replace(/\s+/g, ' ').trim();
 }
 
-function matchVersionedStem(stem: string): string | null {
+interface VersionedStemMatch {
+  base: string;
+  versionNumber: number;
+}
+
+function matchVersionedStem(stem: string): VersionedStemMatch | null {
   // Supports both "Leaky v5" and "Leakyv5" (and _v5 / -v5), including
   // deterministic archive suffixes such as "Leaky v5-archived-2".
-  const match = stem.match(/^(.*?)(?:[\s_-]?v\d+)(?:[\s_-]*archived[\s_-]*\d+)?$/i);
+  const match = stem.match(/^(.*?)(?:[\s_-]?v(\d+))(?:[\s_-]*archived[\s_-]*\d+)?$/i);
 
   if (!match) {
     return null;
   }
 
   const base = normalizeWhitespace(match[1] ?? '');
-  return base.length > 0 ? base : null;
+  const versionNumber = Number.parseInt(match[2] ?? '', 10);
+
+  if (base.length === 0 || !Number.isFinite(versionNumber) || versionNumber < 1) {
+    return null;
+  }
+
+  return { base, versionNumber };
 }
 
-function hasSupportedVersionSuffix(stem: string): boolean {
+export function hasSupportedVersionSuffix(stem: string): boolean {
   return matchVersionedStem(stem) !== null;
 }
 
+export function getVersionNumberFromStem(stem: string): number | null {
+  return matchVersionedStem(stem)?.versionNumber ?? null;
+}
+
 function stripTrailingVersionSuffix(stem: string): string {
-  const base = matchVersionedStem(stem);
-  return base ?? stem;
+  const match = matchVersionedStem(stem);
+  return match?.base ?? stem;
 }
 
 export function normalizeSongStem(stem: string): string {

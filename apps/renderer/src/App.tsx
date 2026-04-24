@@ -10059,10 +10059,20 @@ export function App(): JSX.Element {
         (item) => item.instanceId === instanceId,
       );
       if (!current) return;
+      const previousChain = pluginChainRef.current;
+      const nextEnabled = !current.enabled;
+      const optimisticChain: TrackPluginChain = {
+        ...previousChain,
+        items: previousChain.items.map((item) =>
+          item.instanceId === instanceId ? { ...item, enabled: nextEnabled } : item
+        ),
+      };
+      commitPluginChain(optimisticChain);
       void window.producerPlayer
-        .togglePluginEnabled(selectedSongId, instanceId, !current.enabled)
+        .togglePluginEnabled(selectedSongId, instanceId, nextEnabled)
         .then((chain) => commitPluginChain(chain))
         .catch((err) => {
+          commitPluginChain(previousChain);
           const message = err instanceof Error ? err.message : String(err);
           setError(`Could not toggle plugin: ${message}`);
           void window.producerPlayer.rendererLog('error', '[plugin-chain] toggle failed', {
@@ -13104,7 +13114,7 @@ export function App(): JSX.Element {
               >
                 Add Folder…
               </button>
-              <HelpTooltip text={"What this is: Folder linking connects Producer Player to a folder on your disk where your exported audio files live (WAV, MP3, AAC/M4A). The app watches this folder and automatically picks up new or updated files.\n\nHow to use it: Click 'Add Folder…' and select the folder where you export your mixes from your DAW. You can link multiple folders (e.g. one per album). Click a folder name to filter the song list. Use the unlink button (×) to remove a folder.\n\nWhy you'd want to: Keep the app in sync with your DAW exports — every time you bounce a new version, it appears automatically.\n\nRequirement: Name your exported files with version suffixes (e.g. 'Track Name v2.wav'). Producer Player relies on this naming pattern to group versions under one song."} />
+              <HelpTooltip text={"What this is: Folder linking connects Producer Player to a folder on your disk where your exported audio files live (WAV, MP3, AAC/M4A). The app watches this folder and automatically picks up new or updated files.\n\nHow to use it: Click 'Add Folder…' and select the folder where you export your mixes from your DAW. You can link multiple folders (e.g. one per album). Click a folder name to filter the song list. Use the unlink button (×) to remove a folder.\n\nWhy you'd want to: Keep the app in sync with your DAW exports — every time you bounce a new version, it appears automatically.\n\nBest practice: Name exports with version suffixes (e.g. 'Track Name v2.wav'). If you forget the suffix on a newer export with the same song name and changed contents, Producer Player can add the next v-number during rescan."} />
             </div>
             {environment.isMacAppStoreSandboxed ? (
               <p
@@ -14644,7 +14654,7 @@ export function App(): JSX.Element {
           )}
 
           <section className="inspector-card">
-            <h3>Version History <HelpTooltip text={`What this is: A timeline of every exported version of this song — each time you bounce/export from your DAW with a version number (e.g. v1, v2, v3), it shows up here.\n\nHow to use it: Click 'Cue' on any version to load it into the player. Click 'Open in ${fileManagerLabel(environment.platform)}' to locate the file on disk. The newest version is selected by default.\n\nWhy you'd want to: Quickly A/B your latest mix against an older version to hear if your changes actually improved the track.\n\nRequirement: Name your exports with version suffixes (e.g. 'My Song v3.wav'). Producer Player relies on this naming pattern to group versions automatically.`} /></h3>
+            <h3>Version History <HelpTooltip text={`What this is: A timeline of every exported version of this song — each time you bounce/export from your DAW with a version number (e.g. v1, v2, v3), it shows up here.\n\nHow to use it: Click 'Cue' on any version to load it into the player. Click 'Open in ${fileManagerLabel(environment.platform)}' to locate the file on disk. The newest version is selected by default.\n\nWhy you'd want to: Quickly A/B your latest mix against an older version to hear if your changes actually improved the track.\n\nBest practice: Name exports with version suffixes (e.g. 'My Song v3.wav'). If a newer unversioned export has the same song name and changed contents, Producer Player can add the next v-number during rescan.`} /></h3>
             <ul className="version-list">
               {inspectorVersions.map((version) => (
                 <li

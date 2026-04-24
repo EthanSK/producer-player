@@ -418,9 +418,10 @@ test.describe('Agent Chat Panel', () => {
 
       await page.getByTestId('agent-provider-codex').click();
       await expect(modelSelect).toHaveValue('gpt-5.4');
-      await expect(modelSelect.locator('option')).toHaveCount(6);
+      await expect(modelSelect.locator('option')).toHaveCount(7);
       await expect(thinkingSelect).toHaveValue('high');
       await expect(modelSelect.locator('option')).toContainText([
+        'GPT-5.5',
         'GPT-5.4',
         'GPT-5.4 Mini',
         'GPT-5.3 Codex',
@@ -801,7 +802,7 @@ test.describe('Agent Chat Panel', () => {
       await page.getByTestId('agent-panel-toggle').click();
       await page.getByTestId('agent-settings-toggle').click();
       await page.getByTestId('agent-provider-codex').click();
-      await page.getByTestId('agent-model-select').selectOption('gpt-5.3-codex');
+      await page.getByTestId('agent-model-select').selectOption('gpt-5.5');
       await page.getByTestId('agent-thinking-select').selectOption('low');
       await page.getByTestId('agent-system-prompt-input').fill(customSystemPrompt);
       await page.getByTestId('agent-settings-toggle').click();
@@ -810,7 +811,7 @@ test.describe('Agent Chat Panel', () => {
       await input.fill('Need codex help');
       await page.getByTestId('agent-send-button').click();
       await expect(page.getByTestId('agent-message-agent').last()).toContainText(
-        'CODEX(gpt-5.3-codex): Need codex help'
+        'CODEX(gpt-5.5): Need codex help'
       );
 
       const codexLogs = await readJsonLines(path.join(fakeCli.logDirectory, 'codex.jsonl'));
@@ -821,7 +822,7 @@ test.describe('Agent Chat Panel', () => {
       expect(codexArgs).toContain('-c');
       expect(codexArgs).toContain('model_reasoning_effort="low"');
       expect(codexArgs).toContain('--json');
-      expect(codexArgs[codexArgs.indexOf('--model') + 1]).toBe('gpt-5.3-codex');
+      expect(codexArgs[codexArgs.indexOf('--model') + 1]).toBe('gpt-5.5');
 
       const codexPrompt = String(codexLogs[0]?.stdin ?? '');
       expect(codexPrompt).toContain('<agent-system-prompt>');

@@ -777,6 +777,7 @@ export interface AgentModelDefinition {
 
 export const AGENT_MODEL_OPTIONS_BY_PROVIDER = {
   codex: [
+    { id: 'gpt-5.5', label: 'GPT-5.5' },
     { id: 'gpt-5.4', label: 'GPT-5.4' },
     { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
     { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },

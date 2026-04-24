@@ -2553,6 +2553,11 @@ export function App(): JSX.Element {
   const [listeningDevices, setListeningDevices] = useState<ListeningDevice[]>([]);
   const [activeListeningDeviceId, setActiveListeningDeviceId] = useState<string | null>(null);
   const [listeningDeviceDraftName, setListeningDeviceDraftName] = useState('');
+  const [listeningDeviceInputMode, setListeningDeviceInputMode] = useState<'add' | 'rename'>(
+    'add'
+  );
+  const [checklistListeningDeviceAssignmentItemId, setChecklistListeningDeviceAssignmentItemId] =
+    useState<string | null>(null);
   // Tracks which tag the cursor is over, used to outline sibling checklist items
   // that share the same tag (listening-device OR version). Cleared on mouseleave.
   const [hoveredChecklistTag, setHoveredChecklistTag] = useState<
@@ -11699,6 +11704,22 @@ export function App(): JSX.Element {
     if (trimmed.length === 0) {
       return;
     }
+
+    if (listeningDeviceInputMode === 'rename') {
+      if (!activeListeningDeviceId) {
+        return;
+      }
+
+      setListeningDevices((prev) =>
+        prev.map((device) =>
+          device.id === activeListeningDeviceId ? { ...device, name: trimmed } : device
+        )
+      );
+      setListeningDeviceDraftName('');
+      setListeningDeviceInputMode('add');
+      return;
+    }
+
     // Case-insensitive match against existing devices — reuse that id instead
     // of creating a duplicate tag for "AirPods" vs "airpods".
     const normalized = trimmed.toLowerCase();
@@ -11719,7 +11740,61 @@ export function App(): JSX.Element {
     setListeningDeviceDraftName('');
   }
 
+  function handleStartListeningDeviceRename(): void {
+    if (!listeningDeviceRenameTarget) {
+      return;
+    }
+
+    setListeningDeviceInputMode('rename');
+    setListeningDeviceDraftName(listeningDeviceRenameTarget.name);
+
+    requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLInputElement>('[data-testid="listening-device-input"]');
+      input?.focus();
+      input?.select();
+    });
+  }
+
+  function handleCancelListeningDeviceRename(): void {
+    setListeningDeviceInputMode('add');
+    setListeningDeviceDraftName('');
+  }
+
+  function handleToggleChecklistListeningDeviceAssignment(itemId: string): void {
+    setChecklistListeningDeviceAssignmentItemId((current) => (current === itemId ? null : itemId));
+    document
+      .querySelector<HTMLElement>('.listening-device-strip')
+      ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  function handleAssignListeningDeviceToChecklistItem(
+    songId: string,
+    itemId: string,
+    listeningDeviceId: string
+  ): void {
+    updateSongChecklistItems(songId, (items) =>
+      items.map((item) =>
+        item.id === itemId ? { ...item, listeningDeviceId } : item
+      )
+    );
+    setChecklistListeningDeviceAssignmentItemId(null);
+  }
+
   function handleSelectListeningDevice(deviceId: string): void {
+    if (checklistListeningDeviceAssignmentItemId && checklistModalSongId) {
+      handleAssignListeningDeviceToChecklistItem(
+        checklistModalSongId,
+        checklistListeningDeviceAssignmentItemId,
+        deviceId
+      );
+      return;
+    }
+
+    if (listeningDeviceInputMode === 'rename') {
+      setListeningDeviceInputMode('add');
+      setListeningDeviceDraftName('');
+    }
+
     // Clicking the already-active chip clears the selection so new items are
     // added without a device tag.
     setActiveListeningDeviceId((current) => (current === deviceId ? null : deviceId));
@@ -11728,6 +11803,10 @@ export function App(): JSX.Element {
   function handleDeleteListeningDevice(deviceId: string): void {
     setListeningDevices((prev) => prev.filter((device) => device.id !== deviceId));
     setActiveListeningDeviceId((current) => (current === deviceId ? null : current));
+    if (activeListeningDeviceId === deviceId) {
+      setListeningDeviceInputMode('add');
+      setListeningDeviceDraftName('');
+    }
     // Historic checklist items that reference this id are left intact —
     // rendering treats a missing id as a greyed-out "deleted device" chip.
   }
@@ -11959,6 +12038,13 @@ export function App(): JSX.Element {
     () => [...checklistModalItems].reverse(),
     [checklistModalItems]
   );
+  const listeningDeviceRenameTarget = useMemo(
+    () =>
+      activeListeningDeviceId
+        ? listeningDevices.find((device) => device.id === activeListeningDeviceId) ?? null
+        : null,
+    [activeListeningDeviceId, listeningDevices],
+  );
   const checklistSortableItemIds = useMemo<UniqueIdentifier[]>(
     () => checklistModalItemsChronological.map((item) => item.id),
     [checklistModalItemsChronological],
@@ -12003,6 +12089,31 @@ export function App(): JSX.Element {
     setActiveChecklistDragId(null);
     setChecklistDropIndicator(null);
   }, []);
+
+  useEffect(() => {
+    if (!checklistListeningDeviceAssignmentItemId) {
+      return;
+    }
+
+    const assignmentItemStillExists = checklistModalItems.some(
+      (item) => item.id === checklistListeningDeviceAssignmentItemId
+    );
+
+    if (!assignmentItemStillExists) {
+      setChecklistListeningDeviceAssignmentItemId(null);
+    }
+  }, [checklistListeningDeviceAssignmentItemId, checklistModalItems]);
+
+  useEffect(() => {
+    if (listeningDeviceInputMode !== 'rename') {
+      return;
+    }
+
+    if (!listeningDeviceRenameTarget) {
+      setListeningDeviceInputMode('add');
+      setListeningDeviceDraftName('');
+    }
+  }, [listeningDeviceInputMode, listeningDeviceRenameTarget]);
 
   const handleChecklistDragStart = useCallback(
     (event: DragStartEvent): void => {
@@ -12231,6 +12342,10 @@ export function App(): JSX.Element {
   const activeListeningDevice = activeListeningDeviceId
     ? listeningDevicesById.get(activeListeningDeviceId) ?? null
     : null;
+  const isListeningDeviceRenameMode = listeningDeviceInputMode === 'rename';
+  const listeningDeviceSubmitDisabled =
+    listeningDeviceDraftName.trim().length === 0 ||
+    (isListeningDeviceRenameMode && listeningDeviceRenameTarget === null);
 
   useEffect(() => {
     if (
@@ -14832,23 +14947,80 @@ export function App(): JSX.Element {
             </div>
 
             <div className="listening-device-strip" data-testid="listening-device-strip">
-              <div className="listening-device-input-wrap">
-                <input
-                  type="text"
-                  className="listening-device-input"
-                  placeholder="Add listening device — type + Enter"
-                  value={listeningDeviceDraftName}
-                  onChange={(event) => setListeningDeviceDraftName(event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      handleSubmitListeningDevice();
+              <div className="listening-device-editor">
+                <div className="listening-device-input-wrap">
+                  <input
+                    type="text"
+                    className="listening-device-input"
+                    placeholder={
+                      isListeningDeviceRenameMode
+                        ? 'Rename selected device — type + Enter'
+                        : 'Add listening device — type + Enter'
                     }
-                  }}
-                  aria-label="Add or select listening device"
-                  data-testid="listening-device-input"
-                  title="Type a device name and press Enter to save it. New items you add will be tagged with the selected device."
-                />
+                    value={listeningDeviceDraftName}
+                    onChange={(event) => setListeningDeviceDraftName(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        handleSubmitListeningDevice();
+                      }
+                    }}
+                    aria-label={
+                      isListeningDeviceRenameMode
+                        ? 'Rename selected listening device'
+                        : 'Add or select listening device'
+                    }
+                    data-testid="listening-device-input"
+                    title={
+                      isListeningDeviceRenameMode
+                        ? 'Rename the currently selected listening device. Press Enter or click submit to save the new name.'
+                        : 'Type a device name and press Enter to save it. New items you add will be tagged with the selected device.'
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="listening-device-submit-button"
+                    onClick={handleSubmitListeningDevice}
+                    disabled={listeningDeviceSubmitDisabled}
+                    aria-label={isListeningDeviceRenameMode ? 'Submit listening device rename' : 'Add listening device'}
+                    data-testid="listening-device-submit"
+                    title={isListeningDeviceRenameMode ? 'Save renamed listening device' : 'Add listening device'}
+                  >
+                    ✓
+                  </button>
+                </div>
+                <div className="listening-device-editor-actions">
+                  <button
+                    type="button"
+                    className={`listening-device-secondary-button${isListeningDeviceRenameMode ? ' is-active' : ''}`}
+                    onClick={
+                      isListeningDeviceRenameMode
+                        ? handleCancelListeningDeviceRename
+                        : handleStartListeningDeviceRename
+                    }
+                    disabled={!isListeningDeviceRenameMode && listeningDeviceRenameTarget === null}
+                    data-testid="listening-device-rename-mode"
+                    title={
+                      isListeningDeviceRenameMode
+                        ? 'Cancel rename mode'
+                        : listeningDeviceRenameTarget
+                          ? `Rename "${listeningDeviceRenameTarget.name}"`
+                          : 'Select a listening device first'
+                    }
+                  >
+                    {isListeningDeviceRenameMode ? 'Cancel rename' : 'Rename selected'}
+                  </button>
+                  {checklistListeningDeviceAssignmentItemId ? (
+                    <span className="listening-device-mode-hint" data-testid="listening-device-assignment-hint">
+                      Click device to add to existing checklist item
+                    </span>
+                  ) : null}
+                  {isListeningDeviceRenameMode && listeningDeviceRenameTarget ? (
+                    <span className="listening-device-mode-hint" data-testid="listening-device-rename-hint">
+                      Renaming {listeningDeviceRenameTarget.name} — press Enter or click ✓
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div
                 className="listening-device-chip-row"
@@ -14930,6 +15102,8 @@ export function App(): JSX.Element {
                     const deviceColor = item.listeningDeviceId
                       ? getListeningDeviceColor(item.listeningDeviceId)
                       : null;
+                    const isListeningDeviceAssignmentTarget =
+                      checklistListeningDeviceAssignmentItemId === item.id;
                     const hasItemMetadata =
                       item.timestampSeconds !== null ||
                       item.versionNumber !== null ||
@@ -15113,15 +15287,18 @@ export function App(): JSX.Element {
                             </span>
                           ) : null}
                           {deviceLabel !== null ? (
-                            <span
+                            <button
+                              type="button"
                               className={`checklist-listening-device-badge${
                                 deviceRef === null ? ' is-deleted' : ''
-                              }`}
+                              }${isListeningDeviceAssignmentTarget ? ' is-awaiting-assignment' : ''}`}
                               data-testid="song-checklist-item-listening-device"
                               title={
-                                deviceRef
-                                  ? `Listening device: ${deviceRef.name}`
-                                  : 'This device has been removed from your saved list'
+                                isListeningDeviceAssignmentTarget
+                                  ? 'Click a saved listening device above to assign it to this checklist item'
+                                  : deviceRef
+                                    ? `Listening device: ${deviceRef.name}. Click to change it.`
+                                    : 'This device has been removed from your saved list. Click to choose a replacement.'
                               }
                               style={
                                 deviceColor
@@ -15132,6 +15309,7 @@ export function App(): JSX.Element {
                                     }
                                   : undefined
                               }
+                              onClick={() => handleToggleChecklistListeningDeviceAssignment(item.id)}
                               onMouseEnter={() => {
                                 if (item.listeningDeviceId) {
                                   setHoveredChecklistTag({
@@ -15142,8 +15320,8 @@ export function App(): JSX.Element {
                               }}
                               onMouseLeave={() => setHoveredChecklistTag(null)}
                             >
-                              {deviceLabel}
-                            </span>
+                              {isListeningDeviceAssignmentTarget ? 'Click device below…' : deviceLabel}
+                            </button>
                           ) : null}
                         </div>
                       ) : null}
@@ -15182,15 +15360,34 @@ export function App(): JSX.Element {
                         ref={handleChecklistItemTextareaRef}
                         data-testid="song-checklist-item-text"
                       />
-                      <button
-                        type="button"
-                        className="ghost checklist-remove-button"
-                        onClick={() => handleRemoveChecklistItem(checklistModalSong.id, item.id)}
-                        aria-label={`Remove ${item.text}`}
-                        title="Remove checklist item"
-                      >
-                        <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
-                      </button>
+                      <div className="checklist-item-actions">
+                        {deviceLabel === null ? (
+                          <button
+                            type="button"
+                            className={`checklist-listening-device-badge checklist-listening-device-badge--assign${
+                              isListeningDeviceAssignmentTarget ? ' is-awaiting-assignment' : ''
+                            }`}
+                            onClick={() => handleToggleChecklistListeningDeviceAssignment(item.id)}
+                            data-testid="song-checklist-item-assign-device"
+                            title={
+                              isListeningDeviceAssignmentTarget
+                                ? 'Click a saved listening device above to assign it to this checklist item'
+                                : 'Assign a listening device to this checklist item'
+                            }
+                          >
+                            {isListeningDeviceAssignmentTarget ? 'Click device below…' : 'Set device'}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="ghost checklist-remove-button"
+                          onClick={() => handleRemoveChecklistItem(checklistModalSong.id, item.id)}
+                          aria-label={`Remove ${item.text}`}
+                          title="Remove checklist item"
+                        >
+                          <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
+                        </button>
+                      </div>
                     </ChecklistSortableRow>
                     );
                   })}

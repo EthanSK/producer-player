@@ -3166,6 +3166,7 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 .checklist-item-row .checklist-item-text,
 .checklist-item-row .checklist-item-toggle,
 .checklist-item-row .checklist-item-meta,
+.checklist-item-row .checklist-item-actions,
 .checklist-item-row .checklist-remove-button,
 .checklist-item-row .checklist-timestamp-badge {
   cursor: auto;
@@ -3379,14 +3380,25 @@ body.is-dragging-checklist-timestamp * {
   margin-top: 2px;
 }
 
+.listening-device-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
 .listening-device-input-wrap {
   display: flex;
+  align-items: stretch;
+  gap: 6px;
   min-width: 0;
   width: 100%;
 }
 
 .listening-device-input {
+  flex: 1 1 auto;
   width: 100%;
+  min-width: 0;
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -3394,6 +3406,70 @@ body.is-dragging-checklist-timestamp * {
   color: var(--text-main);
   font: inherit;
   font-size: 12px;
+}
+
+.listening-device-submit-button {
+  appearance: none;
+  border: 1px solid rgba(92, 167, 255, 0.35);
+  border-radius: 8px;
+  min-width: 30px;
+  padding: 0 8px;
+  background: rgba(92, 167, 255, 0.14);
+  color: #9fd1ff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.listening-device-submit-button:hover:not(:disabled),
+.listening-device-submit-button:focus-visible:not(:disabled) {
+  background: rgba(92, 167, 255, 0.2);
+  border-color: rgba(92, 167, 255, 0.55);
+}
+
+.listening-device-submit-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.listening-device-editor-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.listening-device-secondary-button {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  min-height: 24px;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.listening-device-secondary-button.is-active {
+  color: #9fd1ff;
+  border-color: rgba(92, 167, 255, 0.45);
+  background: rgba(92, 167, 255, 0.12);
+}
+
+.listening-device-secondary-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.listening-device-mode-hint {
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--text-muted);
 }
 
 .listening-device-input::placeholder {
@@ -3548,7 +3624,15 @@ body.is-dragging-checklist-timestamp * {
   background: rgba(0, 0, 0, 0.15);
 }
 
+.checklist-item-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
 .checklist-listening-device-badge {
+  appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3558,12 +3642,37 @@ body.is-dragging-checklist-timestamp * {
   border: 1px solid rgba(170, 170, 170, 0.35);
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-muted);
+  font: inherit;
   font-size: 10px;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
-  cursor: default;
-  transition: box-shadow 0.15s ease;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+}
+
+.checklist-listening-device-badge:hover,
+.checklist-listening-device-badge:focus-visible {
+  box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.14);
+}
+
+.checklist-listening-device-badge.is-awaiting-assignment {
+  border-color: rgba(92, 167, 255, 0.58);
+  box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.18);
+}
+
+.checklist-listening-device-badge--assign {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+}
+
+.checklist-item-row:hover .checklist-listening-device-badge--assign,
+.checklist-item-row:focus-within .checklist-listening-device-badge--assign,
+.checklist-listening-device-badge--assign.is-awaiting-assignment {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .checklist-listening-device-badge.is-deleted {
@@ -3581,7 +3690,7 @@ body.is-dragging-checklist-timestamp * {
 
 .checklist-remove-button {
   white-space: nowrap;
-  align-self: start;
+  align-self: flex-end;
 }
 
 .checklist-empty-state {

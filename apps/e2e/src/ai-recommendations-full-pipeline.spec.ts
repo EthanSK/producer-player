@@ -398,6 +398,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await setAgentAutoRecommendEnabled(page, true);
+      await closeAgentPanelIfOpen(page);
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
 

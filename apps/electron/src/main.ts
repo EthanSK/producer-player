@@ -92,6 +92,7 @@ import type {
   SongWithVersions,
   TrackPluginChain,
   TransportCommand,
+  UiZoomState,
   WindowBounds,
 } from '@producer-player/contracts';
 import {
@@ -111,6 +112,12 @@ import {
 } from './state-service';
 import { PluginHostService, resolveSidecarBinaryCandidates } from './plugin-host-service';
 import { PluginPresetLibraryStore } from './plugin-preset-library';
+import {
+  buildUiZoomState,
+  getNextUiZoomPreference,
+  sanitizeUiZoomPreference,
+  type UiZoomMetrics,
+} from './ui-zoom';
 
 declare const __PRODUCER_PLAYER_APP_VERSION__: string;
 declare const __PRODUCER_PLAYER_BUILD_NUMBER__: string;
@@ -1778,9 +1785,34 @@ function buildApplicationMenu(): void {
         // auto-reloads on dev-mode rebuilds.
         { role: 'toggleDevTools' },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        {
+          label: 'Automatic Zoom',
+          accelerator: 'CommandOrControl+Shift+0',
+          click: () => {
+            void setUiZoomPreference(null);
+          },
+        },
+        {
+          label: 'Actual Size (100%)',
+          accelerator: 'CommandOrControl+0',
+          click: () => {
+            void setUiZoomPreference(1);
+          },
+        },
+        {
+          label: 'Zoom In',
+          accelerator: 'CommandOrControl+=',
+          click: () => {
+            void adjustUiZoomPreference(1);
+          },
+        },
+        {
+          label: 'Zoom Out',
+          accelerator: 'CommandOrControl+-',
+          click: () => {
+            void adjustUiZoomPreference(-1);
+          },
+        },
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
@@ -3649,13 +3681,17 @@ const DEFAULT_MAIN_WINDOW_HEIGHT = 940;
 // slide-out drawer below the INSPECTOR_DRAWER_BREAKPOINT_PX threshold
 // (see apps/renderer/src/styles.css).
 const MIN_MAIN_WINDOW_WIDTH = 720;
-const MIN_MAIN_WINDOW_HEIGHT = 780;
+// 640 keeps 14-inch Windows laptop work areas usable without forcing the
+// window taller than the taskbar-reduced screen. Responsive density below
+// keeps the content usable at this size instead of relying only on zoom.
+const MIN_MAIN_WINDOW_HEIGHT = 640;
 const WINDOW_BOUNDS_SAVE_DEBOUNCE_MS = 400;
 // An on-screen region must be at least this many pixels wide/tall for the
 // saved bounds to be considered "still visible" on the given display — stops
 // windows that are barely peeking over a display edge from being restored in
 // an unreachable position.
 const MIN_VISIBLE_AREA_PX = 100;
+const DEFAULT_WINDOW_WORK_AREA_MARGIN_PX = 32;
 
 let windowBoundsSaveTimer: NodeJS.Timeout | null = null;
 
@@ -3830,6 +3866,87 @@ async function loadRestoredWindowBounds(): Promise<{
   }
 }
 
+function getDefaultMainWindowBounds(): Rect {
+  const workArea = screen.getPrimaryDisplay().workArea;
+  const availableWidth = Math.max(MIN_MAIN_WINDOW_WIDTH, workArea.width - DEFAULT_WINDOW_WORK_AREA_MARGIN_PX);
+  const availableHeight = Math.max(MIN_MAIN_WINDOW_HEIGHT, workArea.height - DEFAULT_WINDOW_WORK_AREA_MARGIN_PX);
+
+  return {
+    x: workArea.x + Math.max(0, Math.round((workArea.width - Math.min(DEFAULT_MAIN_WINDOW_WIDTH, availableWidth)) / 2)),
+    y: workArea.y + Math.max(0, Math.round((workArea.height - Math.min(DEFAULT_MAIN_WINDOW_HEIGHT, availableHeight)) / 2)),
+    width: Math.round(Math.min(DEFAULT_MAIN_WINDOW_WIDTH, availableWidth)),
+    height: Math.round(Math.min(DEFAULT_MAIN_WINDOW_HEIGHT, availableHeight)),
+  };
+}
+
+function buildUiZoomMetrics(bounds?: Rect | null, window?: BrowserWindow | null): UiZoomMetrics {
+  const display = window && !window.isDestroyed()
+    ? screen.getDisplayMatching(window.getBounds())
+    : bounds
+      ? screen.getDisplayMatching(bounds)
+      : screen.getPrimaryDisplay();
+  const windowBounds = window && !window.isDestroyed()
+    ? window.getBounds()
+    : bounds ?? undefined;
+
+  return {
+    platform: process.platform,
+    workArea: {
+      width: display.workArea.width,
+      height: display.workArea.height,
+    },
+    ...(windowBounds
+      ? { windowBounds: { width: windowBounds.width, height: windowBounds.height } }
+      : {}),
+    scaleFactor: display.scaleFactor,
+  };
+}
+
+async function readUiZoomState(bounds?: Rect | null, window?: BrowserWindow | null): Promise<UiZoomState> {
+  const preference = userStateService
+    ? (await userStateService.readUserState()).uiZoomFactor
+    : null;
+  return buildUiZoomState(preference, buildUiZoomMetrics(bounds, window));
+}
+
+function applyUiZoomStateToWindow(window: BrowserWindow, state: UiZoomState): void {
+  if (window.isDestroyed()) return;
+  window.webContents.setZoomFactor(state.factor);
+  log.info('[producer-player] Applied UI zoom', {
+    factor: state.factor,
+    source: state.source,
+    reason: state.reason,
+  });
+}
+
+async function setUiZoomPreference(preference: number | null): Promise<UiZoomState> {
+  if (!userStateService) throw new Error('User state service not initialized');
+
+  const uiZoomFactor = sanitizeUiZoomPreference(preference);
+  const updatedState = await userStateService.patchUserState({ uiZoomFactor });
+  const zoomState = buildUiZoomState(
+    updatedState.uiZoomFactor,
+    buildUiZoomMetrics(null, mainWindow),
+  );
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    applyUiZoomStateToWindow(mainWindow, zoomState);
+    mainWindow.webContents.send(IPC_CHANNELS.USER_STATE_CHANGED, updatedState);
+  }
+
+  return zoomState;
+}
+
+async function adjustUiZoomPreference(direction: 1 | -1): Promise<void> {
+  const currentState = await readUiZoomState(null, mainWindow);
+  const nextPreference = getNextUiZoomPreference(
+    currentState.preference,
+    currentState.factor,
+    direction,
+  );
+  await setUiZoomPreference(nextPreference);
+}
+
 async function createMainWindow(): Promise<void> {
   const productionIndexPath = findProductionIndexPath();
   const developmentMode = isDevelopment();
@@ -3855,11 +3972,13 @@ async function createMainWindow(): Promise<void> {
   const restored = await loadRestoredWindowBounds();
   const restoredBounds = restored.bounds;
   const shouldRestoreMaximized = restored.shouldMaximize;
+  const defaultBounds = restoredBounds ?? getDefaultMainWindowBounds();
+  const initialUiZoomState = await readUiZoomState(defaultBounds);
 
   mainWindow = new BrowserWindow({
     title: 'Producer Player',
-    width: restoredBounds?.width ?? DEFAULT_MAIN_WINDOW_WIDTH,
-    height: restoredBounds?.height ?? DEFAULT_MAIN_WINDOW_HEIGHT,
+    width: defaultBounds.width,
+    height: defaultBounds.height,
     ...(restoredBounds ? { x: restoredBounds.x, y: restoredBounds.y } : { center: true }),
     minWidth: MIN_MAIN_WINDOW_WIDTH,
     minHeight: MIN_MAIN_WINDOW_HEIGHT,
@@ -3905,6 +4024,8 @@ async function createMainWindow(): Promise<void> {
       }
     });
   }
+
+  applyUiZoomStateToWindow(mainWindow, initialUiZoomState);
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
@@ -4271,6 +4392,10 @@ async function loadDataFromICloud(): Promise<ICloudLoadResult> {
 function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.GET_LIBRARY_SNAPSHOT, async () => service.getSnapshot());
   ipcMain.handle(IPC_CHANNELS.GET_ENVIRONMENT, async () => buildEnvironmentInfo());
+  ipcMain.handle(IPC_CHANNELS.GET_UI_ZOOM_STATE, async () => readUiZoomState(null, mainWindow));
+  ipcMain.handle(IPC_CHANNELS.SET_UI_ZOOM_FACTOR, async (_event, factor: number | null) => {
+    return setUiZoomPreference(factor);
+  });
 
   ipcMain.handle(IPC_CHANNELS.LINK_FOLDER_DIALOG, async () => {
     const dialogOptions: OpenDialogOptions = {
@@ -4833,6 +4958,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
       songOrder: existing.songOrder,
       autoMoveOld: existing.autoMoveOld,
       lastFileDialogDirectory: existing.lastFileDialogDirectory,
+      uiZoomFactor: existing.uiZoomFactor,
       // Placeholder — `writeUserStatePreservingAiRecommendations` overwrites
       // this with the latest on-disk value under the AI-rec write lock.
       perTrackAiRecommendations: existing.perTrackAiRecommendations,

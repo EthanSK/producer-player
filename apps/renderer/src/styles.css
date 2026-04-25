@@ -581,6 +581,25 @@ input[type='range'] {
   font-size: 14px;
 }
 
+.ui-zoom-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ui-zoom-control select {
+  min-width: 96px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-main);
+  padding: 4px 8px;
+  font: inherit;
+}
+
 .folder-list,
 .main-list,
 .version-list {
@@ -1921,8 +1940,8 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   bottom: 16px;
   /* Slots to the left of the inspector toggle (120) when it's visible,
      maintaining the 52px rhythm (16 → 68 → 120 → 172). On wider
-     viewports (>1120px) the inspector toggle is hidden, so the rhythm
-     would otherwise break; see the @media (min-width: 1121px) override
+     viewports (>1280px) the inspector toggle is hidden, so the rhythm
+     would otherwise break; see the @media (min-width: 1281px) override
      below which collapses this slot back to right:120px so the trigger
      stays 52px from the song switcher — matching the agent↔song gap.
      (v3.45 UX fix — Ethan flagged the visual inconsistency.) */
@@ -3852,8 +3871,8 @@ button.checklist-play-toggle[data-playing='true'] {
 }
 
 /* --------------------------------------------------------------------------
-   Inspector drawer (v3.20)
-   Below INSPECTOR_DRAWER_BREAKPOINT_PX (1120px) the right-hand inspector pane
+   Inspector drawer (v3.79 compact breakpoint)
+   Below INSPECTOR_DRAWER_BREAKPOINT_PX (1280px) the right-hand inspector pane
    collapses into a slide-in drawer anchored to the right viewport edge.
    Above the breakpoint the drawer classes have no visual effect — the pane
    renders inline as the third grid column of `.app-shell`.
@@ -3908,7 +3927,7 @@ button.checklist-play-toggle[data-playing='true'] {
     transition: none !important;
   }
 }
-/* The @media (max-width: 1120px) block below is defined further down in this
+/* The @media (max-width: 1280px) block below is defined further down in this
    file (after the existing 1360px override) so the narrow-viewport grid
    override wins the cascade. Keep it in sync with
    INSPECTOR_DRAWER_BREAKPOINT_PX in App.tsx. */
@@ -4823,9 +4842,133 @@ button.checklist-play-toggle[data-playing='true'] {
   color: #f87171;
 }
 
-@media (max-width: 1360px) {
+@media (max-width: 1360px), (max-height: 860px) {
   .app-shell {
-    grid-template-columns: 300px 1fr 320px;
+    grid-template-columns: 290px minmax(0, 1fr) 310px;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .panel {
+    border-radius: 10px;
+  }
+
+  .panel-header {
+    padding: 10px 12px;
+  }
+
+  .folder-tools-card {
+    margin: 8px 8px 0;
+  }
+
+  .folder-add-cta {
+    padding: 10px;
+    gap: 6px;
+  }
+
+  .add-folder-primary {
+    min-width: 176px;
+    padding: 8px 16px;
+  }
+
+  .naming-guide {
+    margin: 0 8px 8px;
+    padding: 8px;
+  }
+
+  .naming-guide-copy {
+    font-size: 12px;
+  }
+
+  .sidebar-section-divider {
+    margin: 6px 8px;
+  }
+
+  .sidebar-status {
+    margin: 0 8px 6px;
+    padding: 8px;
+    gap: 5px;
+  }
+
+  .folder-list {
+    max-height: 128px;
+    padding: 6px;
+  }
+
+  .analysis-panel {
+    margin: 0 8px 8px;
+    padding: 8px;
+    gap: 6px;
+    flex-basis: 220px;
+  }
+
+  .analysis-compact-section {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .analysis-draggable-panel-shell,
+  .analysis-panel-layout-grid {
+    gap: 8px;
+  }
+
+  .analysis-stat-card {
+    min-height: 64px;
+    padding: 8px;
+    gap: 4px;
+  }
+
+  .main-list {
+    padding: 5px 6px;
+    gap: 3px;
+  }
+
+  .main-list-item {
+    grid-template-columns: 24px minmax(0, 1fr) 84px;
+    gap: 5px;
+  }
+
+  .main-list-row {
+    min-height: 60px;
+    padding: 6px 8px;
+    gap: 4px;
+  }
+
+  .main-list-row-top,
+  .main-list-row-bottom {
+    gap: 8px;
+  }
+
+  .main-list-row-metadata,
+  .song-project-button,
+  .song-checklist-button {
+    font-size: 10px;
+    padding-inline: 6px;
+  }
+
+  .analysis-overlay {
+    padding: 12px;
+  }
+
+  .analysis-overlay-card {
+    border-radius: 14px;
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .analysis-overlay-grid {
+    gap: 10px;
+  }
+
+  .analysis-overlay-section {
+    border-radius: 12px;
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .analysis-stat-card.loudness-metric--primary strong,
+  .analysis-pro-indicator .indicator-value {
+    font-size: clamp(15px, 1.4vw, 18px);
   }
 
   .analysis-detail-grid,
@@ -5436,14 +5579,14 @@ button.reference-action.active {
 }
 
 /* --------------------------------------------------------------------------
-   v3.20 Inspector drawer narrow-viewport overrides.
+   v3.79 Inspector drawer compact-viewport overrides.
    Placed at the end of the file so this media query wins the cascade over
    the earlier `@media (max-width: 1360px)` rule (which forces a 3-column
-   grid). Keep 1120 in sync with INSPECTOR_DRAWER_BREAKPOINT_PX in App.tsx.
+   grid). Keep 1280 in sync with INSPECTOR_DRAWER_BREAKPOINT_PX in App.tsx.
    -------------------------------------------------------------------------- */
-@media (max-width: 1120px) {
+@media (max-width: 1280px) {
   .app-shell {
-    grid-template-columns: 300px 1fr;
+    grid-template-columns: 280px minmax(0, 1fr);
   }
 
   .inspector-toggle-button {
@@ -5491,7 +5634,7 @@ button.reference-action.active {
    apart, but the version switcher sat 104px from song because it was
    pinned to 172. Collapse the version switcher/panel to the vacated
    120 slot so it mirrors the agent→song spacing exactly. */
-@media (min-width: 1121px) {
+@media (min-width: 1281px) {
   .version-switcher-trigger,
   .version-switcher-panel {
     right: 120px;

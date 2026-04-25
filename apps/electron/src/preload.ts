@@ -21,6 +21,7 @@ import {
   type SnapshotListener,
   type TransportCommand,
   type TransportCommandListener,
+  type UiZoomState,
 } from '@producer-player/contracts';
 
 const bridge: ProducerPlayerBridge = {
@@ -30,6 +31,14 @@ const bridge: ProducerPlayerBridge = {
 
   async getEnvironment() {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_ENVIRONMENT);
+  },
+
+  async getUiZoomState(): Promise<UiZoomState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_UI_ZOOM_STATE);
+  },
+
+  async setUiZoomFactor(factor: number | null): Promise<UiZoomState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.SET_UI_ZOOM_FACTOR, factor);
   },
 
   async linkFolderWithDialog() {

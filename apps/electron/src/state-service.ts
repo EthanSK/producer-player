@@ -27,6 +27,7 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import log from 'electron-log/main';
+import { sanitizeUiZoomPreference } from './ui-zoom';
 import type {
   AiRecommendation,
   AiRecommendationSet,
@@ -601,6 +602,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     referenceLevelMatchEnabled: true,
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
+    uiZoomFactor: null,
     showAiRecommendationsFullscreen: true,
     // v3.33 Phase 4 — auto-run on track open.
     // v3.63 — default OFF. Users opt in via AgentSettings. Ethan's call:
@@ -676,6 +678,7 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.iCloudBackupEnabled === 'boolean' ? raw.iCloudBackupEnabled : fallback.iCloudBackupEnabled,
     autoUpdateEnabled:
       typeof raw.autoUpdateEnabled === 'boolean' ? raw.autoUpdateEnabled : fallback.autoUpdateEnabled,
+    uiZoomFactor: sanitizeUiZoomPreference(raw.uiZoomFactor),
     showAiRecommendationsFullscreen:
       typeof raw.showAiRecommendationsFullscreen === 'boolean'
         ? raw.showAiRecommendationsFullscreen

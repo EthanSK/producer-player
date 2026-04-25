@@ -56,6 +56,7 @@ import type {
   SongVersion,
   SongWithVersions,
   TransportCommand,
+  UiZoomState,
   UpdateCheckResult,
 } from '@producer-player/contracts';
 import {
@@ -497,6 +498,16 @@ const EMPTY_ENVIRONMENT: ProducerPlayerEnvironment = {
   },
 };
 
+const FALLBACK_UI_ZOOM_FACTOR_OPTIONS = [0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15];
+
+const EMPTY_UI_ZOOM_STATE: UiZoomState = {
+  factor: 1,
+  preference: null,
+  source: 'auto',
+  reason: 'initializing',
+  options: [...FALLBACK_UI_ZOOM_FACTOR_OPTIONS],
+};
+
 /**
  * Render the persistent "updater status" footer line in the Settings panel.
  * Format: "Installed vX.Y · Latest vZ.W · Last checked HH:MM:SS" so a silent
@@ -703,10 +714,10 @@ const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
 const NORMALIZATION_PLATFORM_STORAGE_KEY = 'producer-player.normalization-platform.v1';
 const NORMALIZATION_PREVIEW_FLOATING_VISIBLE_KEY =
   'producer-player.normalization-preview-floating-visible.v1';
-// v3.20: the inspector side-pane collapses into a right-edge drawer whenever the
-// viewport is narrower than this threshold. Kept in sync with the matching
-// `@media` query in styles.css (`.inspector-toggle-button`, `.app-shell`).
-const INSPECTOR_DRAWER_BREAKPOINT_PX = 1120;
+// v3.79: collapse the inspector earlier on compact laptop viewports so the
+// main/left columns keep enough room. Kept in sync with the matching `@media`
+// query in styles.css (`.inspector-toggle-button`, `.app-shell`).
+const INSPECTOR_DRAWER_BREAKPOINT_PX = 1280;
 const INSPECTOR_DRAWER_OPEN_KEY = 'producer-player.inspector-drawer-open.v1';
 const COMPACT_MASTERING_PANEL_LAYOUT_KEY = 'producer-player.mastering-layout.compact.v1';
 const REFERENCE_LEVEL_MATCH_KEY = 'producer-player.reference-level-match.v1';
@@ -2406,6 +2417,8 @@ export function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>(EMPTY_SNAPSHOT);
   const [environment, setEnvironment] =
     useState<ProducerPlayerEnvironment>(EMPTY_ENVIRONMENT);
+  const [uiZoomState, setUiZoomState] = useState<UiZoomState>(EMPTY_UI_ZOOM_STATE);
+  const [uiZoomSaving, setUiZoomSaving] = useState(false);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
   const [searchText, setSearchText] = useState('');
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
@@ -4319,6 +4332,7 @@ export function App(): JSX.Element {
         referenceLevelMatchEnabled,
         iCloudBackupEnabled,
         autoUpdateEnabled,
+        uiZoomFactor: null, // managed by main process — ignored on renderer sync
         showAiRecommendationsFullscreen,
         agentAutoRecommendEnabled,
         songDawOffsets,
@@ -4463,6 +4477,11 @@ export function App(): JSX.Element {
         setAutoUpdateEnabled(userState.autoUpdateEnabled);
         window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, userState.autoUpdateEnabled ? 'true' : 'false');
       }
+
+      void window.producerPlayer
+        .getUiZoomState()
+        .then(setUiZoomState)
+        .catch(() => undefined);
 
       if (typeof userState.showAiRecommendationsFullscreen === 'boolean') {
         setShowAiRecommendationsFullscreen(userState.showAiRecommendationsFullscreen);
@@ -5464,14 +5483,16 @@ export function App(): JSX.Element {
     Promise.all([
       window.producerPlayer.getLibrarySnapshot(),
       window.producerPlayer.getEnvironment(),
+      window.producerPlayer.getUiZoomState(),
     ])
-      .then(([initialSnapshot, environmentInfo]) => {
+      .then(([initialSnapshot, environmentInfo, zoomState]) => {
         if (!mounted) {
           return;
         }
 
         setSnapshot(initialSnapshot);
         setEnvironment(environmentInfo);
+        setUiZoomState(zoomState);
         setLoading(false);
       })
       .catch((cause: unknown) => {
@@ -12944,6 +12965,22 @@ export function App(): JSX.Element {
     currentTimeSeconds,
   ]);
 
+  const handleUiZoomChange = useCallback((value: string) => {
+    const nextPreference = value === 'auto' ? null : Number(value);
+    setUiZoomSaving(true);
+    void window.producerPlayer
+      .setUiZoomFactor(nextPreference)
+      .then(setUiZoomState)
+      .catch((cause: unknown) => {
+        void window.producerPlayer.rendererLog('warn', 'Failed to update UI zoom', {
+          error: cause instanceof Error ? cause.message : String(cause),
+        });
+      })
+      .finally(() => {
+        setUiZoomSaving(false);
+      });
+  }, []);
+
   const statusCardHelpText = useMemo(
     () => buildStatusCardHelpText(snapshot.linkedFolders, iCloudAvailability, environment),
     [iCloudAvailability, snapshot.linkedFolders, environment],
@@ -13197,6 +13234,28 @@ export function App(): JSX.Element {
               title="Toggle automatic organize behavior for old versions."
             />
             Auto-organize old versions
+          </label>
+
+          <label
+            className="ui-zoom-control"
+            title={uiZoomState.source === 'auto'
+              ? `Automatic UI zoom is using ${Math.round(uiZoomState.factor * 100)}% (${uiZoomState.reason}).`
+              : `UI zoom is fixed at ${Math.round(uiZoomState.factor * 100)}%.`}
+          >
+            <span>UI zoom</span>
+            <select
+              value={uiZoomState.preference === null ? 'auto' : String(uiZoomState.preference)}
+              onChange={(event) => handleUiZoomChange(event.target.value)}
+              disabled={uiZoomSaving}
+              data-testid="ui-zoom-select"
+            >
+              <option value="auto">Auto ({Math.round(uiZoomState.factor * 100)}%)</option>
+              {uiZoomState.options.map((factor) => (
+                <option key={factor} value={String(factor)}>
+                  {Math.round(factor * 100)}%
+                </option>
+              ))}
+            </select>
           </label>
 
           {iCloudAvailability === null || iCloudAvailability.available ? (

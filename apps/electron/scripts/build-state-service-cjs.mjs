@@ -63,4 +63,16 @@ await build({
   plugins: [shimElectronLog],
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs');
+// App UI zoom helpers are pure and can be unit-tested outside Electron.
+await build({
+  entryPoints: [resolve(appDir, 'src/ui-zoom.ts')],
+  outfile: resolve(appDir, 'dist/ui-zoom.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+});
+
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs');

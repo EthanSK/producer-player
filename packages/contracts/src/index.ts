@@ -119,6 +119,21 @@ export interface ProducerPlayerEnvironment {
   appVersion: ProducerPlayerAppVersion;
 }
 
+export const UI_ZOOM_FACTOR_OPTIONS = [0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15] as const;
+
+export type UiZoomSource = 'auto' | 'user';
+
+export interface UiZoomState {
+  /** Effective Electron webContents zoom factor currently applied. */
+  factor: number;
+  /** Persisted user preference. null means the app should choose automatically. */
+  preference: number | null;
+  source: UiZoomSource;
+  /** Short diagnostic reason for the automatic choice, useful in the UI/logs. */
+  reason: string;
+  options: number[];
+}
+
 export interface PlaylistOrderExportSelection {
   selectedFolderId: string | null;
   selectedFolderPath: string | null;
@@ -157,6 +172,8 @@ export const ENABLE_AGENT_FEATURES = true;
 export const IPC_CHANNELS = {
   GET_LIBRARY_SNAPSHOT: 'producer-player:get-library-snapshot',
   GET_ENVIRONMENT: 'producer-player:get-environment',
+  GET_UI_ZOOM_STATE: 'producer-player:get-ui-zoom-state',
+  SET_UI_ZOOM_FACTOR: 'producer-player:set-ui-zoom-factor',
   LINK_FOLDER_DIALOG: 'producer-player:link-folder-dialog',
   LINK_FOLDER_PATH: 'producer-player:link-folder-path',
   UNLINK_FOLDER: 'producer-player:unlink-folder',
@@ -577,6 +594,12 @@ export interface ProducerPlayerUserState {
   referenceLevelMatchEnabled: boolean;
   iCloudBackupEnabled: boolean;
   autoUpdateEnabled: boolean;
+
+  // App UI zoom. null means automatic; otherwise one of
+  // UI_ZOOM_FACTOR_OPTIONS. Applied in Electron via webContents.setZoomFactor
+  // so the preference persists across launches without relying on transient
+  // Chromium menu-role zoom state.
+  uiZoomFactor: number | null;
 
   // v3.31 — fullscreen Mastering: show per-metric AI recommendation text.
   // Default ON (auto-run preference). When OFF, the UI hides rendered AI
@@ -1103,6 +1126,8 @@ export interface ProducerPlayerBridge {
   autoUpdateRecheck(): Promise<AutoUpdateRecheckResult>;
   autoUpdateInstall(): Promise<void>;
   setAutoUpdateEnabled(enabled: boolean): Promise<void>;
+  getUiZoomState(): Promise<UiZoomState>;
+  setUiZoomFactor(factor: number | null): Promise<UiZoomState>;
   onAutoUpdateStateChanged(listener: AutoUpdateStateListener): () => void;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
   onTransportCommand(listener: TransportCommandListener): () => void;

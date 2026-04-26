@@ -75,4 +75,16 @@ await build({
   logLevel: 'warning',
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs');
+// Auto-update signature gate: tiny pure helper; bundle for hermetic Node tests.
+await build({
+  entryPoints: [resolve(appDir, 'src/auto-update-signature.ts')],
+  outfile: resolve(appDir, 'dist/auto-update-signature.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+});
+
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs');

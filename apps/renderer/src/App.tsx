@@ -174,6 +174,7 @@ import {
   MasteringChecklistRowHelp,
 } from './lib/MasteringChecklistImportance';
 import { useToast } from './lib/ToastStack';
+import { ErrorDetailsDialog } from './lib/ErrorDetailsDialog';
 import {
   LUFS_LINKS,
   TRUE_PEAK_LINKS,
@@ -2433,6 +2434,9 @@ export function App(): JSX.Element {
   // Tests link folders via page.evaluate(() => window.producerPlayer.linkFolder(path)).
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<{ title: string; message: string } | null>(
+    null,
+  );
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [playbackSource, setPlaybackSource] = useState<PlaybackSourceInfo | null>(null);
   const [mixPlaybackSource, setMixPlaybackSource] = useState<PlaybackSourceInfo | null>(null);
@@ -13404,7 +13408,21 @@ export function App(): JSX.Element {
           </button>
 
           {loading && <p className="muted">Loading snapshot…</p>}
-          {error && <p className="error">{error}</p>}
+          {error && (
+            <p className="error error-line">
+              <button
+                type="button"
+                className="update-status-clickable"
+                onClick={() =>
+                  setErrorDetails({ title: 'Error details', message: error })
+                }
+                data-testid="sidebar-error-details"
+                title="Click to see the full error"
+              >
+                {error.length > 140 ? `${error.slice(0, 140)}…` : error}
+              </button>
+            </p>
+          )}
         </section>
 
         <ul className="folder-list">
@@ -14963,13 +14981,33 @@ export function App(): JSX.Element {
               </div>
             ) : null}
 
-            {/* Single unified status line — no more duplicate text. */}
+            {/* Single unified status line — no more duplicate text.
+                On error, the line is clickable and opens a scrollable dialog
+                with the full payload so long Authenticode / cert-dump style
+                errors no longer get horizontally clipped in the side pane. */}
             {unifiedUpdateStatusText ? (
               <p
-                className={unifiedUpdateIsError ? 'error' : 'muted'}
+                className={`${unifiedUpdateIsError ? 'error' : 'muted'} error-line`}
                 data-testid="support-feedback-update-status"
               >
-                {unifiedUpdateStatusText}
+                {unifiedUpdateIsError ? (
+                  <button
+                    type="button"
+                    className="update-status-clickable"
+                    onClick={() =>
+                      setErrorDetails({
+                        title: 'Update failed',
+                        message: unifiedUpdateStatusText,
+                      })
+                    }
+                    data-testid="support-feedback-update-status-details"
+                    title="Click to see the full error"
+                  >
+                    Update failed — click for details
+                  </button>
+                ) : (
+                  unifiedUpdateStatusText
+                )}
               </p>
             ) : null}
             {/* Persistent "what is the updater actually doing" footer line.
@@ -18676,6 +18714,12 @@ export function App(): JSX.Element {
           />
         </div>
       ) : null}
+      <ErrorDetailsDialog
+        open={errorDetails !== null}
+        title={errorDetails?.title ?? 'Error details'}
+        message={errorDetails?.message ?? ''}
+        onClose={() => setErrorDetails(null)}
+      />
     </div>
   );
 }

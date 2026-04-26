@@ -6319,6 +6319,113 @@ button.reference-action.active {
   border-style: solid;
 }
 
+/* Error details dialog — scrollable, monospace, never horizontally clipped */
+
+.error-details-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 10, 16, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1300;
+  padding: 24px;
+}
+
+.error-details-dialog {
+  width: min(720px, 100%);
+  max-height: min(720px, 90vh);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  padding: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.error-details-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.error-details-dialog__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.error-details-dialog__close {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.error-details-dialog__close:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.error-details-dialog__body {
+  margin: 0;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-main);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 60vh;
+}
+
+.error-details-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.update-status-clickable {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.update-status-clickable:hover {
+  filter: brightness(1.1);
+}
+
+/* Sidebar global error: wrap so cert-dump style payloads never overflow.
+   This is a defensive layer — IPC handlers should ideally produce friendly
+   short strings, but if a long payload slips through we never want a
+   horizontal-cut status pane again. */
+.app-sidebar .error,
+.error-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
 /* Plugin browser dialog */
 
 .plugin-browser-dialog__backdrop {

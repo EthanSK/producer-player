@@ -60,6 +60,7 @@ import { basename, dirname, extname, join, parse, relative, resolve, sep } from 
 import { Readable } from 'node:stream';
 import log from 'electron-log/main';
 import { autoUpdater } from 'electron-updater';
+import { shouldVerifyInstallerSignature } from './auto-update-signature';
 import type {
   AgentAttachment,
   AgentContext,
@@ -1176,6 +1177,15 @@ function friendlyUpdateErrorMessage(error: unknown): string {
     return "Couldn't check for updates. Check your internet connection and try again.";
   }
 
+  // electron-updater's signature verification failure ("is not signed by the
+  // application owner") shows up here when the installer's embedded cert
+  // doesn't match the publisherName written into app-update.yml. On Windows
+  // we now skip that check (see configureAutoUpdater), but keep a friendly
+  // mapping in case a future build path re-introduces the failure.
+  if (text.includes('is not signed by') || text.includes('err_updater_invalid_signature')) {
+    return "This update couldn't be verified. Please download the latest version from the website.";
+  }
+
   return "Couldn't check for updates right now. Please try again later.";
 }
 
@@ -1219,6 +1229,25 @@ function configureAutoUpdater(): void {
     owner: 'EthanSK',
     repo: 'producer-player',
   });
+
+  // BUG FIX (2026-04-26, v3.83): the Windows release uploader inherits
+  // `CSC_LINK` from the macOS notarization secrets, so electron-builder's
+  // `computedPublisherName` lazily extracts the Apple Developer ID CN from
+  // that .p12 and writes it into `app-update.yml`. The Windows installer
+  // itself stays unsigned (Apple cert can't drive `signtool`), so on Windows
+  // electron-updater's `Get-AuthenticodeSignature` rejects every update with
+  // the macOS Developer ID dump in the error payload. Until we ship a real
+  // Windows code-signing cert, skip the publisher check off-darwin. macOS
+  // keeps validating the notarized .app via electron-updater's mac path.
+  if (!shouldVerifyInstallerSignature(process.platform)) {
+    const nsisUpdater = autoUpdater as unknown as {
+      verifyUpdateCodeSignature?: (
+        publisherNames: string[],
+        path: string,
+      ) => Promise<string | null>;
+    };
+    nsisUpdater.verifyUpdateCodeSignature = async () => null;
+  }
 
   if (autoUpdaterConfigured) {
     return;
@@ -4837,7 +4866,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
       log.warn('[producer-player:auto-update] renderer download failed', {
         error: error instanceof Error ? error.message : String(error),
       });
-      throw error;
+      // Re-throw a friendly Error so the renderer's `runVoidTask` doesn't
+      // surface electron-updater's raw cert dump / stack trace into the UI.
+      throw new Error(friendlyUpdateErrorMessage(error));
     }
   });
 

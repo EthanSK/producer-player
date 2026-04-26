@@ -164,6 +164,15 @@ body,
 
 .panel-header h2 {
   margin: 0;
+  font-size: 13px;
+}
+
+/* Bug fix 2026-04-26 (commit pending): the album panel's main header carries
+   .panel-main-header alongside .panel-header, but its <h2 class="album-title-text">
+   is the album-title hero text and should keep the larger size — even after we
+   shrunk the generic .panel-header h2 rule down to 13px for sidebar/inspector
+   density on small Windows screens. Don't drop this override. */
+.panel-main-header h2 {
   font-size: 16px;
 }
 
@@ -407,7 +416,7 @@ input[type='range'] {
 .sidebar-branding-button {
   width: calc(100% - 20px);
   text-align: left;
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .sidebar-branding-button:hover:not(:disabled) {
@@ -420,11 +429,11 @@ input[type='range'] {
 }
 
 .sidebar-branding-logo {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   border: 1px solid rgba(125, 228, 255, 0.42);
-  box-shadow: 0 8px 18px rgba(2, 9, 19, 0.36);
+  box-shadow: 0 6px 14px rgba(2, 9, 19, 0.32);
   object-fit: cover;
 }
 
@@ -443,7 +452,7 @@ input[type='range'] {
 }
 
 .sidebar-branding-copy strong {
-  font-size: 18px;
+  font-size: 14px;
   line-height: 1.1;
   letter-spacing: 0.015em;
 }
@@ -488,11 +497,11 @@ input[type='range'] {
 }
 
 .folder-add-cta {
-  padding: 14px;
+  padding: 10px;
   display: grid;
   justify-items: center;
   text-align: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .folder-add-row {
@@ -503,11 +512,12 @@ input[type='range'] {
 }
 
 .add-folder-primary {
-  min-width: 200px;
-  padding: 10px 20px;
+  min-width: 180px;
+  padding: 8px 16px;
   border-color: var(--accent-strong);
   background: rgba(92, 167, 255, 0.24);
   font-weight: 700;
+  font-size: 13px;
 }
 
 .add-folder-primary:hover:not(:disabled) {
@@ -536,7 +546,7 @@ input[type='range'] {
 
 .naming-guide-copy {
   margin: 0;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   color: #84f1b5;
   line-height: 1.3;
@@ -546,7 +556,7 @@ input[type='range'] {
 }
 
 .naming-guide-icon {
-  font-size: 16px;
+  font-size: 13px;
   line-height: 1;
   display: inline-flex;
   flex-shrink: 0;
@@ -578,7 +588,11 @@ input[type='range'] {
 
 .sidebar-status h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 .ui-zoom-control {
@@ -5281,6 +5295,72 @@ button.checklist-play-toggle[data-playing='true'] {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+/* Compact +/- UI zoom cluster pinned to the right of .album-header-row.
+   Mirrors the existing sidebar <select> control but is always visible at the
+   top of the album panel. Uses .icon-button for ± hover affordance and a
+   small label that resets to auto on click. */
+.album-header-zoom-cluster {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  flex-shrink: 0;
+}
+
+.album-header-zoom-cluster .album-header-zoom-button.icon-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.album-header-zoom-cluster .album-header-zoom-button.icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.album-header-zoom-label {
+  min-width: 38px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.album-header-zoom-label:hover:not(:disabled) {
+  background: rgba(92, 167, 255, 0.12);
+  color: var(--text-main);
+}
+
+.album-header-zoom-label:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Hide the cluster on very narrow widths — the existing sidebar <select>
+   remains the canonical zoom control there. */
+@media (max-width: 900px) {
+  .album-header-zoom-cluster {
+    display: none;
+  }
 }
 
 .album-art-trigger {

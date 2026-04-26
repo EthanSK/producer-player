@@ -12981,6 +12981,43 @@ export function App(): JSX.Element {
       });
   }, []);
 
+  // Compact +/- controls in album header step through uiZoomState.options.
+  // Index lookup is by closest factor (auto-mode reports a factor that may not
+  // exactly land on a configured step), then ±1, clamped at array bounds.
+  const uiZoomCurrentIndex = useMemo(() => {
+    const options = uiZoomState.options;
+    if (!options || options.length === 0) return -1;
+    let bestIdx = 0;
+    let bestDelta = Math.abs(options[0] - uiZoomState.factor);
+    for (let i = 1; i < options.length; i += 1) {
+      const delta = Math.abs(options[i] - uiZoomState.factor);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }, [uiZoomState.options, uiZoomState.factor]);
+
+  const handleUiZoomStep = useCallback(
+    (direction: 1 | -1) => {
+      const options = uiZoomState.options;
+      if (!options || options.length === 0) return;
+      const nextIndex = Math.max(
+        0,
+        Math.min(options.length - 1, uiZoomCurrentIndex + direction),
+      );
+      if (nextIndex === uiZoomCurrentIndex) return;
+      const nextFactor = options[nextIndex];
+      handleUiZoomChange(String(nextFactor));
+    },
+    [uiZoomState.options, uiZoomCurrentIndex, handleUiZoomChange],
+  );
+
+  const handleUiZoomReset = useCallback(() => {
+    handleUiZoomChange('auto');
+  }, [handleUiZoomChange]);
+
   const statusCardHelpText = useMemo(
     () => buildStatusCardHelpText(snapshot.linkedFolders, iCloudAvailability, environment),
     [iCloudAvailability, snapshot.linkedFolders, environment],
@@ -14067,6 +14104,54 @@ export function App(): JSX.Element {
                 </div>
                 <HelpTooltip text={"What this is: Your song list — all the tracks in the currently linked folder, organized as an album. Songs are auto-grouped by name, with versions nested under each title.\n\nHow to use it: Click a song to select it. Double-click to start playback. Drag songs up or down to reorder the tracklist. Use the search bar to filter by name.\n\nWhy you'd want to: Arrange your album's running order and keep all your mixes organized in one place.\n\nTip: The order you set here is preserved across sessions and used when you export — so arrange it like your final tracklist."} />
               </div>
+            </div>
+            <div
+              className="album-header-zoom-cluster"
+              data-testid="album-header-zoom-cluster"
+              role="group"
+              aria-label="UI zoom controls"
+            >
+              <button
+                type="button"
+                className="icon-button album-header-zoom-button"
+                onClick={() => handleUiZoomStep(-1)}
+                disabled={uiZoomSaving || uiZoomCurrentIndex <= 0}
+                data-testid="album-header-zoom-out"
+                aria-label="Zoom out UI"
+                title="Zoom out UI (smaller)"
+              >
+                <span aria-hidden="true">−</span>
+              </button>
+              <button
+                type="button"
+                className="album-header-zoom-label"
+                onClick={handleUiZoomReset}
+                disabled={uiZoomSaving}
+                data-testid="album-header-zoom-label"
+                aria-label="Reset UI zoom to automatic"
+                title={
+                  uiZoomState.source === 'auto'
+                    ? `Automatic UI zoom (${Math.round(uiZoomState.factor * 100)}%). Click to keep auto.`
+                    : `UI zoom fixed at ${Math.round(uiZoomState.factor * 100)}%. Click to reset to automatic.`
+                }
+              >
+                {Math.round(uiZoomState.factor * 100)}%
+              </button>
+              <button
+                type="button"
+                className="icon-button album-header-zoom-button"
+                onClick={() => handleUiZoomStep(1)}
+                disabled={
+                  uiZoomSaving ||
+                  uiZoomCurrentIndex < 0 ||
+                  uiZoomCurrentIndex >= uiZoomState.options.length - 1
+                }
+                data-testid="album-header-zoom-in"
+                aria-label="Zoom in UI"
+                title="Zoom in UI (larger)"
+              >
+                <span aria-hidden="true">+</span>
+              </button>
             </div>
           </div>
           <div className="actions">

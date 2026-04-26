@@ -119,7 +119,7 @@ export interface ProducerPlayerEnvironment {
   appVersion: ProducerPlayerAppVersion;
 }
 
-export const UI_ZOOM_FACTOR_OPTIONS = [0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15] as const;
+export const UI_ZOOM_FACTOR_OPTIONS = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15] as const;
 
 export type UiZoomSource = 'auto' | 'user';
 

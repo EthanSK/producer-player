@@ -1,6 +1,6 @@
 import type { UiZoomState } from '@producer-player/contracts';
 
-export const UI_ZOOM_FACTOR_OPTIONS = [0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15] as const;
+export const UI_ZOOM_FACTOR_OPTIONS = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15] as const;
 export const DEFAULT_UI_ZOOM_FACTOR = 1;
 
 const UI_ZOOM_FACTOR_SET = new Set<number>(UI_ZOOM_FACTOR_OPTIONS);
@@ -71,19 +71,24 @@ export function resolveAutomaticUiZoomFactor(metrics: UiZoomMetrics): {
   const effectiveWidth = metrics.workArea.width;
   const effectiveHeight = metrics.workArea.height;
 
+  // Thresholds shifted one step lower in v3.82.0 after testing on a Dell 14"
+  // Windows laptop where 0.85 was still too cramped. Each band now zooms one
+  // step further out than before; large Windows screens land at 0.95 instead
+  // of 1.0 so the chrome and side panels stay readable on typical 1080p+ work
+  // areas without forcing the user to step the zoom down manually.
   if (effectiveWidth <= 1366 || effectiveHeight <= 820) {
-    return { factor: 0.85, reason: 'windows-small-work-area' };
+    return { factor: 0.8, reason: 'windows-small-work-area' };
   }
 
   if (effectiveWidth <= 1440 || effectiveHeight <= 900) {
-    return { factor: 0.9, reason: 'windows-compact-work-area' };
+    return { factor: 0.85, reason: 'windows-compact-work-area' };
   }
 
   if (effectiveWidth <= 1680 || effectiveHeight <= 1050) {
-    return { factor: 0.95, reason: 'windows-medium-work-area' };
+    return { factor: 0.9, reason: 'windows-medium-work-area' };
   }
 
-  return { factor: DEFAULT_UI_ZOOM_FACTOR, reason: 'windows-large-work-area' };
+  return { factor: 0.95, reason: 'windows-large-work-area' };
 }
 
 export function buildUiZoomState(

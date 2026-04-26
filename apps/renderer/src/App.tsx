@@ -498,7 +498,7 @@ const EMPTY_ENVIRONMENT: ProducerPlayerEnvironment = {
   },
 };
 
-const FALLBACK_UI_ZOOM_FACTOR_OPTIONS = [0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15];
+const FALLBACK_UI_ZOOM_FACTOR_OPTIONS = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15];
 
 const EMPTY_UI_ZOOM_STATE: UiZoomState = {
   factor: 1,

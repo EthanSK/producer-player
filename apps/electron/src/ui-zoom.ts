@@ -72,11 +72,15 @@ export function resolveAutomaticUiZoomFactor(metrics: UiZoomMetrics): {
   const effectiveHeight = metrics.workArea.height;
 
   if (effectiveWidth <= 1366 || effectiveHeight <= 820) {
-    return { factor: 0.9, reason: 'windows-small-work-area' };
+    return { factor: 0.85, reason: 'windows-small-work-area' };
   }
 
   if (effectiveWidth <= 1440 || effectiveHeight <= 900) {
-    return { factor: 0.95, reason: 'windows-compact-work-area' };
+    return { factor: 0.9, reason: 'windows-compact-work-area' };
+  }
+
+  if (effectiveWidth <= 1680 || effectiveHeight <= 1050) {
+    return { factor: 0.95, reason: 'windows-medium-work-area' };
   }
 
   return { factor: DEFAULT_UI_ZOOM_FACTOR, reason: 'windows-large-work-area' };

@@ -10,7 +10,14 @@ const {
 
 const LARGE_WINDOWS = {
   platform: 'win32',
-  workArea: { width: 1920, height: 1040 },
+  workArea: { width: 1920, height: 1080 },
+  windowBounds: { width: 1380, height: 940 },
+  scaleFactor: 1,
+};
+
+const MEDIUM_WINDOWS = {
+  platform: 'win32',
+  workArea: { width: 1600, height: 1000 },
   windowBounds: { width: 1380, height: 940 },
   scaleFactor: 1,
 };
@@ -34,7 +41,7 @@ test('sanitizeUiZoomPreference accepts only supported zoom options or auto', () 
 
 test('automatic zoom only shrinks compact Windows work areas', () => {
   assert.deepEqual(resolveAutomaticUiZoomFactor(SMALL_WINDOWS), {
-    factor: 0.9,
+    factor: 0.85,
     reason: 'windows-small-work-area',
   });
   assert.deepEqual(resolveAutomaticUiZoomFactor({
@@ -42,8 +49,12 @@ test('automatic zoom only shrinks compact Windows work areas', () => {
     workArea: { width: 1440, height: 860 },
     windowBounds: { width: 1400, height: 840 },
   }), {
-    factor: 0.95,
+    factor: 0.9,
     reason: 'windows-compact-work-area',
+  });
+  assert.deepEqual(resolveAutomaticUiZoomFactor(MEDIUM_WINDOWS), {
+    factor: 0.95,
+    reason: 'windows-medium-work-area',
   });
   assert.deepEqual(resolveAutomaticUiZoomFactor(LARGE_WINDOWS), {
     factor: 1,
@@ -68,7 +79,7 @@ test('explicit zoom preference overrides automatic Windows default', () => {
   });
 
   assert.deepEqual(buildUiZoomState(null, SMALL_WINDOWS), {
-    factor: 0.9,
+    factor: 0.85,
     preference: null,
     source: 'auto',
     reason: 'windows-small-work-area',

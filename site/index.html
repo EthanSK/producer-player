@@ -956,9 +956,37 @@
 
             (function syncSiteVersionLabel() {
               var versionLabel = document.getElementById('site-version-label');
-              if (!versionLabel) {
-                return;
-              }
+
+              // Hero download buttons. Their static href points at the stable
+              // `Producer-Player-latest-*` alias (so the page still works if
+              // version.json is missing or stale). Once we know the real
+              // semver, we rewrite the href to point at the versioned asset
+              // name — e.g. `Producer-Player-3.83.0-mac-universal.zip` —
+              // which GitHub still resolves under `/releases/latest/download/`
+              // because the latest release contains an asset with that exact
+              // name. End result: clicking the button downloads a file whose
+              // NAME includes the version, while the link itself stays
+              // pinned to "latest". (Ethan voice 5461, 2026-04-26.)
+              var DOWNLOAD_TARGETS = [
+                {
+                  id: 'hero-download-primary',
+                  versioned: function (v) {
+                    return 'https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-' + v + '-mac-universal.zip';
+                  },
+                },
+                {
+                  id: 'hero-download-win',
+                  versioned: function (v) {
+                    return 'https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-' + v + '-win-x64.exe';
+                  },
+                },
+                {
+                  id: 'hero-download-linux',
+                  versioned: function (v) {
+                    return 'https://github.com/EthanSK/producer-player/releases/latest/download/Producer-Player-' + v + '-linux-x64.zip';
+                  },
+                },
+              ];
 
               fetch('./version.json', { cache: 'no-store' })
                 .then(function (response) {
@@ -969,17 +997,27 @@
                 })
                 .then(function (payload) {
                   var display = (payload && payload.displayVersion) || '';
-                  if (!display && payload && typeof payload.version === 'string' && payload.version.length > 0) {
-                    display = 'v' + payload.version.replace(/^v/i, '');
-                  }
-                  if (!display) {
-                    return;
+                  var semver = (payload && typeof payload.version === 'string') ? payload.version.replace(/^v/i, '') : '';
+                  if (!display && semver) {
+                    display = 'v' + semver;
                   }
 
-                  versionLabel.textContent = display.charAt(0) === 'v' ? display : 'v' + display;
+                  if (versionLabel && display) {
+                    versionLabel.textContent = display.charAt(0) === 'v' ? display : 'v' + display;
+                  }
+
+                  // Rewrite hero download hrefs to versioned filenames.
+                  if (semver && /^[0-9]+\.[0-9]+\.[0-9]+/.test(semver)) {
+                    DOWNLOAD_TARGETS.forEach(function (target) {
+                      var el = document.getElementById(target.id);
+                      if (el) {
+                        el.setAttribute('href', target.versioned(semver));
+                      }
+                    });
+                  }
                 })
                 .catch(function () {
-                  // Keep placeholder if metadata is unavailable.
+                  // Keep placeholder + latest-alias hrefs if metadata is unavailable.
                 });
             })();
           </script>

@@ -1400,7 +1400,8 @@ function configureAutoUpdater(): void {
         error: null,
       });
       try {
-        autoUpdater.quitAndInstall(false, true);
+        // UX: hold the "Installing…" state on screen for 750ms so the user can read it before the window dies.
+        setTimeout(() => autoUpdater.quitAndInstall(false, true), 750);
       } catch (error: unknown) {
         log.warn('[producer-player:auto-update] quitAndInstall failed', {
           error: error instanceof Error ? error.message : String(error),
@@ -4948,7 +4949,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
       progress: null,
       error: null,
     });
-    autoUpdater.quitAndInstall(false, true);
+    // UX: hold the "Installing…" state on screen for 750ms so the user can read it before the window dies.
+    setTimeout(() => autoUpdater.quitAndInstall(false, true), 750);
   });
 
   ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_SET_ENABLED, async (_event, enabled: boolean) => {

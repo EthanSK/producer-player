@@ -2786,7 +2786,6 @@ export function App(): JSX.Element {
   );
   const [albumChecklistDraftText, setAlbumChecklistDraftText] = useState('');
   const albumChecklistComposerRef = useRef<HTMLTextAreaElement | null>(null);
-  const albumChecklistScrollRef = useRef<HTMLDivElement | null>(null);
   const albumArtInputRef = useRef<HTMLInputElement | null>(null);
   const albumTitleInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -11048,9 +11047,7 @@ export function App(): JSX.Element {
     setAlbumChecklistDraftText('');
     requestAnimationFrame(() => {
       albumChecklistComposerRef.current?.focus();
-      if (albumChecklistScrollRef.current) {
-        albumChecklistScrollRef.current.scrollTop = albumChecklistScrollRef.current.scrollHeight;
-      }
+      // v3.89.0: removed scroll-to-bottom on add — caused snap-back on user scroll (parity with per-track fix in 3fc5320).
     });
   }
 
@@ -16175,7 +16172,6 @@ export function App(): JSX.Element {
             </div>
 
             <div
-              ref={albumChecklistScrollRef}
               className="checklist-item-scroll-region"
               data-testid="album-checklist-scroll-region"
             >

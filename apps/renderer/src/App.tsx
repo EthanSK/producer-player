@@ -15076,7 +15076,7 @@ export function App(): JSX.Element {
               <div>
                 <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Tag new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to tag subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
                 <p className="muted">
-                  {checklistCompletedCount}/{checklistModalItems.length} completed
+                  {checklistCompletedCount}/{checklistModalItems.length} completed · {checklistModalItems.length - checklistCompletedCount} left
                 </p>
               </div>
               <div
@@ -16169,7 +16169,7 @@ export function App(): JSX.Element {
               <div>
                 <h2>{albumTitle} Checklist <HelpTooltip text={"What this is: An album-wide to-do list for high-level tasks that apply to the whole project — not individual songs.\n\nHow to use it: Type a task in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item.\n\nWhy you'd want to: Track project-level tasks like finalizing album art, checking track gaps, exporting final files, or uploading to a distributor — things that don't belong on any single song's checklist."} /></h2>
                 <p className="muted">
-                  {albumChecklistCompletedCount}/{albumChecklistItems.length} completed
+                  {albumChecklistCompletedCount}/{albumChecklistItems.length} completed · {albumChecklistItems.length - albumChecklistCompletedCount} left
                 </p>
               </div>
               <button type="button" className="checklist-header-done-button" onClick={handleCloseAlbumChecklist} title="Close album checklist." data-testid="album-checklist-done-header">

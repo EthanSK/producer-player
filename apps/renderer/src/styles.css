@@ -3121,6 +3121,13 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 
 .checklist-input-timestamp-preview {
   cursor: pointer;
+  /* v3.87 — compress vertical height of the timestamp display in the
+   * "Add a checklist item" composer so the row takes less vertical space.
+   * Font size stays the same (readability); only padding + line-height
+   * shrink. (Ethan voice 5553) */
+  padding: 0 7px;
+  line-height: 1.15;
+  min-height: 15px;
 }
 
 .checklist-timestamp-preview-group {
@@ -3133,15 +3140,20 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 .checklist-set-now-button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 2px 7px;
+  /* v3.87 — match the Add button's compact height (min-height 15px,
+   * padding 1px 8px, line-height 1.2) so the Set Now button doesn't tower
+   * over the rest of the input row (Ethan voice 5553). */
+  min-height: 15px;
+  padding: 1px 8px;
   border-radius: 6px;
   border: 1px solid rgba(92, 167, 255, 0.25);
   background: rgba(92, 167, 255, 0.08);
   color: #8ec5ff;
   font-size: 10px;
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
@@ -3470,21 +3482,31 @@ body.is-dragging-checklist-timestamp * {
 .listening-device-editor-actions {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  /* v3.87 — right-align so the slim "Rename selected" button hugs the right
+   * edge of its container, sitting closer to the saved device chips on the
+   * other side of the strip. (Ethan voice 5553) */
+  align-items: flex-end;
   gap: 4px;
 }
 
 .listening-device-secondary-button {
   appearance: none;
   border: 1px solid var(--border);
-  border-radius: 7px;
-  min-height: 24px;
-  padding: 0 8px;
+  border-radius: 6px;
+  /* v3.87 — slimmed to match the "now listening" pill / Add button height
+   * so it stops dominating the strip vertically (Ethan voice 5553). */
+  min-height: 16px;
+  padding: 1px 8px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-muted);
   font: inherit;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
+  line-height: 1.2;
+  /* Push the button to the right edge of its row even if a sibling hint span
+   * sits next to it; combined with align-items: flex-end above this also
+   * right-aligns the button when stacked vertically. */
+  margin-left: auto;
   cursor: pointer;
 }
 

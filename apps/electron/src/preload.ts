@@ -2,11 +2,17 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
   type AgentAttachment,
+  type AgentDomSnapshotPayload,
+  type AgentDomSnapshotResult,
   type AgentEvent,
   type AgentEventListener,
   type AgentProviderId,
   type AgentRespondApprovalPayload,
+  type AgentRunJsPayload,
+  type AgentRunJsResult,
   type AgentSaveAttachmentPayload,
+  type AgentScreenshotPayload,
+  type AgentScreenshotResult,
   type AgentSendTurnPayload,
   type AgentStartSessionPayload,
   type AiRecommendation,
@@ -275,6 +281,18 @@ const bridge: ProducerPlayerBridge = {
 
   async agentClearAssemblyAiKey() {
     await ipcRenderer.invoke(IPC_CHANNELS.AGENT_CLEAR_ASSEMBLYAI_KEY);
+  },
+
+  async agentRunJs(payload: AgentRunJsPayload): Promise<AgentRunJsResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AGENT_RUN_JS, payload);
+  },
+
+  async agentScreenshot(payload?: AgentScreenshotPayload): Promise<AgentScreenshotResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AGENT_SCREENSHOT, payload ?? {});
+  },
+
+  async agentDomSnapshot(payload?: AgentDomSnapshotPayload): Promise<AgentDomSnapshotResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AGENT_DOM_SNAPSHOT, payload ?? {});
   },
 
   onAgentEvent(listener: AgentEventListener) {

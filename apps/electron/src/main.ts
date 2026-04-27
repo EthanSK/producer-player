@@ -64,8 +64,11 @@ import { shouldVerifyInstallerSignature } from './auto-update-signature';
 import type {
   AgentAttachment,
   AgentContext,
+  AgentDomSnapshotPayload,
   AgentProviderId,
+  AgentRunJsPayload,
   AgentSaveAttachmentPayload,
+  AgentScreenshotPayload,
   AgentStartSessionPayload,
   AgentSendTurnPayload,
   AgentRespondApprovalPayload,
@@ -104,6 +107,15 @@ import {
 } from '@producer-player/contracts';
 import { FileLibraryService } from '@producer-player/domain';
 import * as agentService from './agent-service';
+import {
+  domSnapshot as agentUiDomSnapshot,
+  logDomSnapshot as agentUiLogDomSnapshot,
+  logRunJs as agentUiLogRunJs,
+  logScreenshot as agentUiLogScreenshot,
+  makeRunJsDeps as agentUiMakeRunJsDeps,
+  runJs as agentUiRunJs,
+  screenshot as agentUiScreenshot,
+} from './agent-ui-control';
 import {
   UserStateService,
   parseUserState,
@@ -5636,6 +5648,19 @@ function registerIpcHandlers(service: FileLibraryService): void {
       // No-op while the feature is disabled.
     });
 
+    ipcMain.handle(IPC_CHANNELS.AGENT_RUN_JS, async () => ({
+      ok: false as const,
+      error: AGENT_FEATURES_DISABLED_MESSAGE,
+    }));
+    ipcMain.handle(IPC_CHANNELS.AGENT_SCREENSHOT, async () => ({
+      ok: false as const,
+      error: AGENT_FEATURES_DISABLED_MESSAGE,
+    }));
+    ipcMain.handle(IPC_CHANNELS.AGENT_DOM_SNAPSHOT, async () => ({
+      ok: false as const,
+      error: AGENT_FEATURES_DISABLED_MESSAGE,
+    }));
+
     return;
   }
 
@@ -5708,6 +5733,61 @@ function registerIpcHandlers(service: FileLibraryService): void {
     async (_event, provider: AgentProviderId) => {
       return agentService.isProviderAvailable(provider);
     }
+  );
+
+  // ---- Producee Boy UI control surface (v3.90) -----------------------------
+  // Lets the embedded agent eval JS / take screenshots / pull a structured DOM
+  // snapshot from the renderer. All three resolve with a discriminated
+  // {ok:true,...}|{ok:false,error} envelope so failures don't break the IPC
+  // channel. Each call is logged to electron-log under `[pp:agent-ui]`.
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_RUN_JS,
+    async (_event, payload: AgentRunJsPayload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return { ok: false as const, error: 'No active window.' };
+      }
+      const deps = agentUiMakeRunJsDeps(mainWindow);
+      const result = await agentUiRunJs(payload ?? { code: '' }, deps);
+      try {
+        agentUiLogRunJs(payload?.code ?? '', result);
+      } catch {
+        // Logging must never break the IPC reply.
+      }
+      return result;
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_SCREENSHOT,
+    async (_event, payload: AgentScreenshotPayload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return { ok: false as const, error: 'No active window.' };
+      }
+      const result = await agentUiScreenshot(payload ?? {}, mainWindow);
+      try {
+        agentUiLogScreenshot(result);
+      } catch {
+        // Logging must never break the IPC reply.
+      }
+      return result;
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_DOM_SNAPSHOT,
+    async (_event, payload: AgentDomSnapshotPayload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return { ok: false as const, error: 'No active window.' };
+      }
+      const deps = agentUiMakeRunJsDeps(mainWindow);
+      const result = await agentUiDomSnapshot(payload ?? {}, deps);
+      try {
+        agentUiLogDomSnapshot(result);
+      } catch {
+        // Logging must never break the IPC reply.
+      }
+      return result;
+    },
   );
 
   // Migrate old safeStorage keys on first access (fire-and-forget; get handlers

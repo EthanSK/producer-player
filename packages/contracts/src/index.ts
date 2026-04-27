@@ -227,6 +227,12 @@ export const IPC_CHANNELS = {
   AGENT_STORE_ASSEMBLYAI_KEY: 'producer-player:agent-store-assemblyai-key',
   AGENT_GET_ASSEMBLYAI_KEY: 'producer-player:agent-get-assemblyai-key',
   AGENT_CLEAR_ASSEMBLYAI_KEY: 'producer-player:agent-clear-assemblyai-key',
+  // v3.90 — Agent UI control surface for Producee Boy. Lets the agent eval
+  // JS in the renderer, capture a screenshot, or pull a structured DOM
+  // snapshot of visible interactive elements. All gated by ENABLE_AGENT_FEATURES.
+  AGENT_RUN_JS: 'producer-player:agent-run-js',
+  AGENT_SCREENSHOT: 'producer-player:agent-screenshot',
+  AGENT_DOM_SNAPSHOT: 'producer-player:agent-dom-snapshot',
   OPEN_LOG_FOLDER: 'producer-player:open-log-folder',
   GET_LOG_PATH: 'producer-player:get-log-path',
   LOG_READ_SLICE: 'producer-player:log-read-slice',
@@ -1072,6 +1078,52 @@ export interface AgentContext {
 
 export type AgentEventListener = (event: AgentEvent) => void;
 
+// ---------------------------------------------------------------------------
+// v3.90 — Agent UI control surface (pp_run_js / pp_screenshot / pp_dom_snapshot)
+// ---------------------------------------------------------------------------
+export interface AgentRunJsPayload {
+  /** JS source string evaluated in the renderer. Use `(async () => { ... })()` to await inside. */
+  code: string;
+  /** Optional per-call timeout. Default 5000ms, max 30000ms. */
+  timeoutMs?: number;
+}
+
+export type AgentRunJsResult =
+  | { ok: true; value: unknown }
+  | { ok: false; error: string };
+
+export interface AgentScreenshotPayload {
+  /** 'window' (default) captures the full BrowserWindow client area. */
+  region?: 'window' | 'visible';
+}
+
+export type AgentScreenshotResult =
+  | { ok: true; dataUrl: string; width: number; height: number; byteLength: number }
+  | { ok: false; error: string };
+
+export interface AgentDomSnapshotPayload {
+  /** Optional CSS selector for the root. Defaults to body. */
+  rootSelector?: string;
+  /** Soft cap on emitted nodes (default 500, hard max 2000). */
+  maxNodes?: number;
+}
+
+export interface AgentDomNode {
+  tag: string;
+  testid: string | null;
+  role: string | null;
+  label: string | null;
+  text: string | null;
+  type: string | null;
+  disabled: boolean;
+  bounds: { x: number; y: number; w: number; h: number } | null;
+  children: AgentDomNode[];
+}
+
+export type AgentDomSnapshotResult =
+  | { ok: true; root: unknown; nodeCount: number; truncated: boolean }
+  | { ok: false; error: string };
+
 export interface LogReadSliceArgs {
   file: string;
   startLine: number;
@@ -1145,6 +1197,10 @@ export interface ProducerPlayerBridge {
   agentStoreAssemblyAiKey(key: string): Promise<void>;
   agentGetAssemblyAiKey(): Promise<string | null>;
   agentClearAssemblyAiKey(): Promise<void>;
+  // v3.90 — Producee Boy UI control primitives.
+  agentRunJs(payload: AgentRunJsPayload): Promise<AgentRunJsResult>;
+  agentScreenshot(payload?: AgentScreenshotPayload): Promise<AgentScreenshotResult>;
+  agentDomSnapshot(payload?: AgentDomSnapshotPayload): Promise<AgentDomSnapshotResult>;
   onAgentEvent(listener: AgentEventListener): () => void;
   openLogFolder(): Promise<void>;
   getLogPath(): Promise<string>;

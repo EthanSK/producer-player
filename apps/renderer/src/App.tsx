@@ -7348,6 +7348,71 @@ export function App(): JSX.Element {
     });
   }, []);
 
+  // Hardware media keys (next-track / previous-track) on macOS Sonoma+ are
+  // routed exclusively to whichever app owns the system MPRemoteCommandCenter
+  // session. Electron's `globalShortcut.register('MediaNextTrack', ...)`
+  // registers successfully but never fires because the OS never delivers the
+  // event. Wiring `navigator.mediaSession.setActionHandler` from the renderer
+  // claims a Now Playing session for our <audio> element, which makes
+  // hardware ⏭ / ⏮ / ⏯ / fast-forward / rewind keys flow back into the app.
+  // Keep the globalShortcut path too — on Windows/Linux it's the primary
+  // delivery channel, and on macOS it's the fallback for play/pause when
+  // nothing claims the media session yet.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.mediaSession) {
+      return;
+    }
+
+    const session = navigator.mediaSession;
+    const SKIP_SECONDS = 10;
+
+    try {
+      session.setActionHandler('play', () => {
+        transportActionRef.current.toggle();
+      });
+      session.setActionHandler('pause', () => {
+        transportActionRef.current.toggle();
+      });
+      session.setActionHandler('nexttrack', () => {
+        transportActionRef.current.next();
+      });
+      session.setActionHandler('previoustrack', () => {
+        transportActionRef.current.previous();
+      });
+      session.setActionHandler('seekforward', () => {
+        handleSkipSecondsRef.current(SKIP_SECONDS);
+      });
+      session.setActionHandler('seekbackward', () => {
+        handleSkipSecondsRef.current(-SKIP_SECONDS);
+      });
+    } catch {
+      // Older browsers/Electron builds may throw on unsupported actions —
+      // silently ignore and rely on globalShortcut as the fallback path.
+    }
+
+    return () => {
+      try {
+        session.setActionHandler('play', null);
+        session.setActionHandler('pause', null);
+        session.setActionHandler('nexttrack', null);
+        session.setActionHandler('previoustrack', null);
+        session.setActionHandler('seekforward', null);
+        session.setActionHandler('seekbackward', null);
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
+
+  // Keep mediaSession.playbackState in sync with the player so macOS's Now
+  // Playing UI reflects reality and routes hardware keys appropriately.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.mediaSession) {
+      return;
+    }
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }, [isPlaying]);
+
   useEffect(() => {
     return window.producerPlayer.onAutoUpdateStateChanged((state) => {
       setAutoUpdateState(state);

@@ -15512,7 +15512,7 @@ export function App(): JSX.Element {
                               }}
                               onMouseLeave={() => setHoveredChecklistTag(null)}
                             >
-                              {isListeningDeviceAssignmentTarget ? 'Click device below…' : deviceLabel}
+                              {isListeningDeviceAssignmentTarget ? 'Select listening device…' : deviceLabel}
                             </button>
                           ) : null}
                         </div>
@@ -15567,7 +15567,7 @@ export function App(): JSX.Element {
                                 : 'Assign a listening device to this checklist item'
                             }
                           >
-                            {isListeningDeviceAssignmentTarget ? 'Click device below…' : 'Set device'}
+                            {isListeningDeviceAssignmentTarget ? 'Select listening device…' : 'Set device'}
                           </button>
                         ) : null}
                         <button

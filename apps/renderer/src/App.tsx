@@ -13444,6 +13444,7 @@ export function App(): JSX.Element {
                       event.stopPropagation();
                       void runVoidTask(() => window.producerPlayer.openFolder(folder.path));
                     }}
+                    data-testid="linked-folder-open-button"
                     title={`Open this watched folder in ${fileManagerLabel(environment.platform)}.`}
                   >
                     {`Open in ${fileManagerLabel(environment.platform)}`}
@@ -13456,6 +13457,7 @@ export function App(): JSX.Element {
                     event.stopPropagation();
                     void handleUnlinkFolder(folder.id, folder.name);
                   }}
+                  data-testid="linked-folder-unlink-button"
                   title="Unlink this folder from the app. Files on disk are not deleted."
                 >
                   Unlink
@@ -14571,6 +14573,7 @@ export function App(): JSX.Element {
                     void window.producerPlayer.revealFile(activePlaybackFilePath);
                   }
                 }}
+                data-testid="player-reveal-version-button"
                 title={`Open this version in ${fileManagerLabel(environment.platform)}.`}
               >
                 {`Open in ${fileManagerLabel(environment.platform)}`}
@@ -14585,6 +14588,7 @@ export function App(): JSX.Element {
                       void window.producerPlayer.revealFile(projectPath);
                     }
                   }}
+                  data-testid="player-reveal-project-button"
                   title={`Open this song's project file in ${fileManagerLabel(environment.platform)}.`}
                 >
                   {`Open project in ${fileManagerLabel(environment.platform)}`}
@@ -14841,6 +14845,7 @@ export function App(): JSX.Element {
 
                         setSelectedPlaybackVersionId(version.id);
                       }}
+                      data-testid="inspector-version-cue-button"
                       title="Cue this version into the player."
                     >
                       Cue
@@ -14850,6 +14855,7 @@ export function App(): JSX.Element {
                       onClick={() => {
                         void window.producerPlayer.revealFile(version.filePath);
                       }}
+                      data-testid="inspector-version-reveal-button"
                       title={`Open this version in ${fileManagerLabel(environment.platform)}.`}
                     >
                       {`Open in ${fileManagerLabel(environment.platform)}`}
@@ -16652,6 +16658,7 @@ export function App(): JSX.Element {
                       type="button"
                       className="ghost"
                       onClick={handleClearReferenceTrack}
+                      data-testid="analysis-overlay-clear-reference"
                       disabled={!referenceTrack && referenceStatus !== 'error'}
                       title="Clear the reference."
                     >
@@ -16775,6 +16782,7 @@ export function App(): JSX.Element {
                               setMixRefShortcut(DEFAULT_MIX_REF_SHORTCUT);
                               persistStoredShortcut(DEFAULT_MIX_REF_SHORTCUT);
                             }}
+                            data-testid="shortcut-reset-button"
                             title="Reset to default shortcut"
                           >
                             Reset
@@ -17516,6 +17524,7 @@ export function App(): JSX.Element {
                         type="button"
                         className={midSideMode === 'stereo' ? '' : 'ghost'}
                         onClick={() => setMidSideMode('stereo')}
+                        data-testid="mid-side-mode-stereo"
                         title="Normal stereo playback."
                       >
                         Stereo
@@ -17524,6 +17533,7 @@ export function App(): JSX.Element {
                         type="button"
                         className={midSideMode === 'mid' ? '' : 'ghost'}
                         onClick={() => setMidSideMode('mid')}
+                        data-testid="mid-side-mode-mid"
                         title="Listen to just the center (mid) channel."
                       >
                         Mid
@@ -17532,6 +17542,7 @@ export function App(): JSX.Element {
                         type="button"
                         className={midSideMode === 'side' ? '' : 'ghost'}
                         onClick={() => setMidSideMode('side')}
+                        data-testid="mid-side-mode-side"
                         title="Listen to just the side (stereo width) channel."
                       >
                         Side
@@ -18239,7 +18250,7 @@ export function App(): JSX.Element {
                   Import checklist items from other note apps using an LLM to parse your notes.
                 </p>
               </div>
-              <button type="button" className="ghost" onClick={handleCloseMigrationModal} title="Close the migration dialog.">
+              <button type="button" className="ghost" onClick={handleCloseMigrationModal} data-testid="migration-modal-close" title="Close the migration dialog.">
                 Close
               </button>
             </div>
@@ -18395,6 +18406,7 @@ export function App(): JSX.Element {
                       setMigrationPreview(null);
                       setMigrationParseError(null);
                     }}
+                    data-testid="migration-cancel-preview"
                     title="Cancel the import and go back to editing."
                   >
                     Cancel
@@ -18540,6 +18552,7 @@ export function App(): JSX.Element {
               type="button"
               className="quick-switcher-close"
               onClick={() => setQuickSwitcherOpen(false)}
+              data-testid="quick-switcher-close"
               aria-label="Close song switcher"
               title="Close"
             >
@@ -18624,6 +18637,7 @@ export function App(): JSX.Element {
                   type="button"
                   className="version-switcher-close"
                   onClick={() => setVersionSwitcherOpen(false)}
+                  data-testid="version-switcher-close"
                   aria-label="Close version switcher"
                   title="Close"
                 >
@@ -18698,6 +18712,7 @@ export function App(): JSX.Element {
             type="button"
             className="album-art-lightbox-close"
             onClick={() => setAlbumArtFullscreen(false)}
+            data-testid="album-art-lightbox-close"
             aria-label="Close"
           >
             &times;

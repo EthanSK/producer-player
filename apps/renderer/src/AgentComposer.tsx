@@ -7,8 +7,12 @@ import {
 } from 'react';
 import type { AgentAttachment } from '@producer-player/contracts';
 import {
+  AGENT_MIC_CHANNEL_MODE_LABELS,
   AGENT_VOICE_SETTINGS_UPDATED_EVENT,
+  readStoredAgentMicChannelMode,
+  readStoredAgentMicDeviceId,
   readStoredAgentSttProvider,
+  type AgentMicChannelMode,
   type AgentSttProviderId,
 } from './agentVoiceSettings';
 
@@ -37,7 +41,7 @@ function formatAttachmentSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type MicState = 'idle' | 'recording' | 'processing' | 'error';
+type MicState = 'idle' | 'arming' | 'recording' | 'processing' | 'error';
 
 interface ToastMessage {
   id: number;
@@ -241,10 +245,70 @@ function errorToMessage(error: unknown): string {
   if (error instanceof DOMException && error.name === 'NotFoundError') {
     return 'No microphone found. Please connect a microphone and try again.';
   }
+  if (error instanceof DOMException && error.name === 'OverconstrainedError') {
+    return 'Selected microphone is unavailable. Pick another microphone in Producey Boy settings.';
+  }
   if (error instanceof Error) {
     return error.message;
   }
   return 'An unknown error occurred.';
+}
+
+function stopMediaStream(stream: MediaStream | null): void {
+  stream?.getTracks().forEach((track) => track.stop());
+}
+
+function getAudioConstraints(
+  deviceId: string,
+  channelMode: AgentMicChannelMode
+): MediaStreamConstraints {
+  const audioConstraints: MediaTrackConstraints = {};
+
+  if (deviceId !== 'default') {
+    audioConstraints.deviceId = { exact: deviceId };
+  }
+
+  if (channelMode === 'mono') {
+    audioConstraints.channelCount = { ideal: 1 };
+  } else if (
+    channelMode === 'stereo' ||
+    channelMode === 'left' ||
+    channelMode === 'right'
+  ) {
+    audioConstraints.channelCount = { ideal: 2 };
+  }
+
+  return Object.keys(audioConstraints).length > 0
+    ? { audio: audioConstraints }
+    : { audio: true };
+}
+
+function buildRecordingGraph(
+  inputStream: MediaStream,
+  channelMode: AgentMicChannelMode
+): {
+  audioContext: AudioContext;
+  analyser: AnalyserNode;
+  recordingStream: MediaStream;
+} {
+  const audioContext = new AudioContext();
+  const source = audioContext.createMediaStreamSource(inputStream);
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.7;
+
+  if (channelMode === 'left' || channelMode === 'right') {
+    const splitter = audioContext.createChannelSplitter(2);
+    const destination = audioContext.createMediaStreamDestination();
+    const outputIndex = channelMode === 'left' ? 0 : 1;
+    source.connect(splitter);
+    splitter.connect(analyser, outputIndex);
+    splitter.connect(destination, outputIndex);
+    return { audioContext, analyser, recordingStream: destination.stream };
+  }
+
+  source.connect(analyser);
+  return { audioContext, analyser, recordingStream: inputStream };
 }
 
 /* ── Toast component ────────────────────────────────────────── */
@@ -363,18 +427,26 @@ export function AgentComposer({
   const [sttProvider, setSttProvider] = useState<AgentSttProviderId>(() =>
     readStoredAgentSttProvider()
   );
+  const [micDeviceId, setMicDeviceId] = useState(() =>
+    readStoredAgentMicDeviceId()
+  );
+  const [micChannelMode, setMicChannelMode] = useState<AgentMicChannelMode>(() =>
+    readStoredAgentMicChannelMode()
+  );
   const [hasSelectedProviderKey, setHasSelectedProviderKey] = useState(false);
   const voiceSettingsCheckedRef = useRef(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const errorFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const isArming = micState === 'arming';
   const isRecording = micState === 'recording';
   const isProcessing = micState === 'processing';
 
@@ -401,6 +473,8 @@ export function AgentComposer({
     try {
       const provider = readStoredAgentSttProvider();
       setSttProvider(provider);
+      setMicDeviceId(readStoredAgentMicDeviceId());
+      setMicChannelMode(readStoredAgentMicChannelMode());
       const key = await readKeyForProvider(provider);
       setHasSelectedProviderKey(Boolean(key));
     } catch {
@@ -438,10 +512,10 @@ export function AgentComposer({
         try { mediaRecorderRef.current.stop(); } catch { /* ignore */ }
         mediaRecorderRef.current = null;
       }
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-        mediaStreamRef.current = null;
-      }
+      stopMediaStream(recordingStreamRef.current);
+      recordingStreamRef.current = null;
+      stopMediaStream(mediaStreamRef.current);
+      mediaStreamRef.current = null;
       if (audioContextRef.current) {
         void audioContextRef.current.close().catch(() => {});
         audioContextRef.current = null;
@@ -504,33 +578,7 @@ export function AgentComposer({
   }, []);
 
   const handleMicToggle = useCallback(async () => {
-    if (disabled || isStreaming || isProcessing) {
-      return;
-    }
-
-    // Lazy-check the API key on first mic interaction to avoid
-    // reading the stored key file on app startup.
-    if (!voiceSettingsCheckedRef.current) {
-      voiceSettingsCheckedRef.current = true;
-      await refreshVoiceSettings();
-      // Re-read current provider after refresh
-      const currentProvider = readStoredAgentSttProvider();
-      const key = await readKeyForProvider(currentProvider);
-      if (!key) {
-        const providerName = getProviderDisplayName(currentProvider);
-        showToast(
-          `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
-        );
-        flashError();
-        return;
-      }
-      // Key exists — fall through to start recording
-    } else if (!hasSelectedProviderKey) {
-      const providerName = getProviderDisplayName(sttProvider);
-      showToast(
-        `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
-      );
-      flashError();
+    if (disabled || isStreaming || isArming || isProcessing) {
       return;
     }
 
@@ -542,19 +590,58 @@ export function AgentComposer({
       return;
     }
 
+    setMicState('arming');
+    setRecordingDuration(0);
+
+    const activeProvider = readStoredAgentSttProvider();
+    const activeDeviceId = readStoredAgentMicDeviceId();
+    const activeChannelMode = readStoredAgentMicChannelMode();
+    setSttProvider(activeProvider);
+    setMicDeviceId(activeDeviceId);
+    setMicChannelMode(activeChannelMode);
+
+    // Lazy-check the API key on first mic interaction to avoid
+    // reading the stored key file on app startup.
+    let key: string | null = null;
+    if (!voiceSettingsCheckedRef.current) {
+      voiceSettingsCheckedRef.current = true;
+      await refreshVoiceSettings();
+      key = await readKeyForProvider(activeProvider);
+      if (!key) {
+        const providerName = getProviderDisplayName(activeProvider);
+        showToast(
+          `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
+        );
+        flashError();
+        return;
+      }
+      // Key exists — fall through to start recording
+    } else if (!hasSelectedProviderKey) {
+      const providerName = getProviderDisplayName(activeProvider);
+      showToast(
+        `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
+      );
+      flashError();
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia(
+        getAudioConstraints(activeDeviceId, activeChannelMode)
+      );
       mediaStreamRef.current = stream;
 
-      // Set up Web Audio API analyser for waveform
-      const audioContext = new AudioContext();
+      const { audioContext, analyser, recordingStream } = buildRecordingGraph(
+        stream,
+        activeChannelMode
+      );
       audioContextRef.current = audioContext;
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.7;
-      source.connect(analyser);
       analyserRef.current = analyser;
+      recordingStreamRef.current = recordingStream;
+
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume().catch(() => undefined);
+      }
 
       const preferredMimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
@@ -563,12 +650,11 @@ export function AgentComposer({
           : null;
 
       const mediaRecorder = preferredMimeType
-        ? new MediaRecorder(stream, { mimeType: preferredMimeType })
-        : new MediaRecorder(stream);
+        ? new MediaRecorder(recordingStream, { mimeType: preferredMimeType })
+        : new MediaRecorder(recordingStream);
 
       audioChunksRef.current = [];
       mediaRecorderRef.current = mediaRecorder;
-      const activeProvider = sttProvider;
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -577,7 +663,9 @@ export function AgentComposer({
       };
 
       mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
+        stopMediaStream(recordingStream);
+        recordingStreamRef.current = null;
+        stopMediaStream(stream);
         mediaStreamRef.current = null;
         mediaRecorderRef.current = null;
         cleanupAudioContext();
@@ -588,7 +676,7 @@ export function AgentComposer({
         });
         audioChunksRef.current = [];
 
-        const key = await readKeyForProvider(activeProvider);
+        key ??= await readKeyForProvider(activeProvider);
         if (!key) {
           await refreshVoiceSettings();
           showToast(
@@ -625,6 +713,10 @@ export function AgentComposer({
       startDurationTimer();
     } catch (error) {
       console.error('Failed to start recording:', error);
+      stopMediaStream(recordingStreamRef.current);
+      recordingStreamRef.current = null;
+      stopMediaStream(mediaStreamRef.current);
+      mediaStreamRef.current = null;
       cleanupAudioContext();
       showToast(errorToMessage(error));
       flashError();
@@ -634,6 +726,7 @@ export function AgentComposer({
     disabled,
     flashError,
     hasSelectedProviderKey,
+    isArming,
     isProcessing,
     isRecording,
     isStreaming,
@@ -641,7 +734,6 @@ export function AgentComposer({
     showToast,
     startDurationTimer,
     stopDurationTimer,
-    sttProvider,
   ]);
 
   const canSend = (text.trim().length > 0 || hasAttachments) && !disabled;
@@ -650,20 +742,27 @@ export function AgentComposer({
     typeof navigator.mediaDevices?.getUserMedia === 'function' &&
     typeof MediaRecorder !== 'undefined';
   const showMic = !isStreaming;
-  const micClickable = voiceSupported && !disabled && !isProcessing;
+  const micClickable = voiceSupported && !disabled && !isArming && !isProcessing;
   const providerDisplayName = getProviderDisplayName(sttProvider);
+  const micInputTitle = [
+    micDeviceId === 'default' ? 'default microphone' : 'selected microphone',
+    AGENT_MIC_CHANNEL_MODE_LABELS[micChannelMode].toLowerCase(),
+  ].join(' · ');
   const micTitle = voiceSettingsCheckedRef.current && !hasSelectedProviderKey
     ? `Add ${providerDisplayName} API key in Settings to enable voice input`
     : !voiceSupported
       ? 'Voice input is not supported in this environment'
-      : isProcessing
-        ? `Transcribing with ${providerDisplayName}...`
-        : isRecording
-          ? `Stop recording (${providerDisplayName})`
-          : `Record voice message (${providerDisplayName})`;
+      : isArming
+        ? `Opening ${micInputTitle}...`
+        : isProcessing
+          ? `Transcribing with ${providerDisplayName}...`
+          : isRecording
+            ? `Stop recording (${providerDisplayName})`
+            : `Record voice message (${providerDisplayName}; ${micInputTitle})`;
 
   const micButtonClass = [
     'agent-mic-button',
+    isArming ? 'agent-mic-button--arming' : '',
     isRecording ? 'agent-mic-button--recording' : '',
     isProcessing ? 'agent-mic-button--processing' : '',
     micState === 'error' ? 'agent-mic-button--error' : '',
@@ -757,6 +856,14 @@ export function AgentComposer({
         />
       ) : null}
 
+      {/* Instant microphone feedback */}
+      {isArming ? (
+        <div className="agent-processing-overlay" data-testid="agent-mic-arming-overlay">
+          <div className="agent-processing-spinner" />
+          <span className="agent-processing-label">Opening microphone...</span>
+        </div>
+      ) : null}
+
       {/* Processing indicator */}
       {isProcessing ? (
         <div className="agent-processing-overlay" data-testid="agent-processing-overlay">
@@ -786,7 +893,7 @@ export function AgentComposer({
                 ? 'Add a note to send with your attachments (optional)...'
                 : 'Ask Producey Boy about your master — or drag a file here to attach it.'
           }
-          disabled={disabled || isRecording || isProcessing}
+          disabled={disabled || isRecording || isArming || isProcessing}
           rows={MIN_ROWS}
           data-testid="agent-composer-input"
         />
@@ -800,7 +907,7 @@ export function AgentComposer({
               title={micTitle}
               disabled={!micClickable}
             >
-              {isProcessing ? (
+              {isArming || isProcessing ? (
                 <div className="agent-mic-spinner" />
               ) : (
                 <svg

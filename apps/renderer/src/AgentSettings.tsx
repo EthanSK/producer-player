@@ -8,10 +8,16 @@ import type {
 } from '@producer-player/contracts';
 import { AGENT_PROVIDER_LABELS } from './agentModels';
 import {
+  AGENT_MIC_CHANNEL_MODE_LABELS,
   AGENT_STT_PROVIDER_LABELS,
+  type AgentMicChannelMode,
   type AgentSttProviderId,
   notifyAgentVoiceSettingsUpdated,
+  readStoredAgentMicChannelMode,
+  readStoredAgentMicDeviceId,
   readStoredAgentSttProvider,
+  writeStoredAgentMicChannelMode,
+  writeStoredAgentMicDeviceId,
   writeStoredAgentSttProvider,
 } from './agentVoiceSettings';
 
@@ -61,6 +67,15 @@ export function AgentSettings({
   const [sttProvider, setSttProvider] = useState<AgentSttProviderId>(() =>
     readStoredAgentSttProvider()
   );
+  const [selectedMicDeviceId, setSelectedMicDeviceId] = useState(() =>
+    readStoredAgentMicDeviceId()
+  );
+  const [micChannelMode, setMicChannelMode] = useState<AgentMicChannelMode>(() =>
+    readStoredAgentMicChannelMode()
+  );
+  const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [micDevicesLoading, setMicDevicesLoading] = useState(false);
+  const [micDevicesError, setMicDevicesError] = useState<string | null>(null);
 
   const [deepgramKey, setDeepgramKey] = useState('');
   const [deepgramKeySet, setDeepgramKeySet] = useState(false);
@@ -69,6 +84,31 @@ export function AgentSettings({
   const [assemblyAiKey, setAssemblyAiKey] = useState('');
   const [assemblyAiKeySet, setAssemblyAiKeySet] = useState(false);
   const [assemblyAiKeyError, setAssemblyAiKeyError] = useState<string | null>(null);
+
+  const refreshMicDevices = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
+      setAudioInputDevices([]);
+      setMicDevicesError('Microphone device selection is not supported here.');
+      return;
+    }
+
+    setMicDevicesLoading(true);
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((device) => device.kind === 'audioinput');
+      setAudioInputDevices(inputs);
+      setMicDevicesError(
+        inputs.length > 0 ? null : 'No microphones found. Connect one, then refresh.'
+      );
+    } catch (error: unknown) {
+      setAudioInputDevices([]);
+      setMicDevicesError(
+        error instanceof Error ? error.message : 'Could not list microphones.'
+      );
+    } finally {
+      setMicDevicesLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,6 +138,23 @@ export function AgentSettings({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    void refreshMicDevices();
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.addEventListener) {
+      return undefined;
+    }
+
+    const handleDeviceChange = () => {
+      void refreshMicDevices();
+    };
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+    };
+  }, [refreshMicDevices]);
 
   const handleSaveDeepgramKey = useCallback(async () => {
     const trimmed = deepgramKey.trim();
@@ -164,6 +221,16 @@ export function AgentSettings({
     writeStoredAgentSttProvider(nextProvider);
   }, []);
 
+  const handleMicDeviceChange = useCallback((deviceId: string) => {
+    setSelectedMicDeviceId(deviceId);
+    writeStoredAgentMicDeviceId(deviceId);
+  }, []);
+
+  const handleMicChannelModeChange = useCallback((channelMode: AgentMicChannelMode) => {
+    setMicChannelMode(channelMode);
+    writeStoredAgentMicChannelMode(channelMode);
+  }, []);
+
   const handleNewChatClick = useCallback(() => {
     onNewChat();
     onClose();
@@ -173,6 +240,20 @@ export function AgentSettings({
     onOpenHistory();
     onClose();
   }, [onClose, onOpenHistory]);
+
+  const listedAudioInputDevices = audioInputDevices.filter(
+    (device) => device.deviceId !== 'default'
+  );
+  const selectedMicMissing =
+    selectedMicDeviceId !== 'default' &&
+    !listedAudioInputDevices.some((device) => device.deviceId === selectedMicDeviceId);
+  const micChannelModes: AgentMicChannelMode[] = [
+    'default',
+    'mono',
+    'stereo',
+    'left',
+    'right',
+  ];
 
   return (
     <div className="agent-settings" data-testid="agent-settings">
@@ -298,6 +379,92 @@ export function AgentSettings({
           Save both keys if you want, then switch between providers any time.
         </p>
       </div>
+
+      <details
+        className="agent-settings-section agent-settings-expander"
+        data-testid="agent-mic-settings-expander"
+      >
+        <summary className="agent-settings-expander-summary">
+          <span>Microphone input</span>
+          <span className="agent-settings-expander-value">
+            {selectedMicDeviceId === 'default' ? 'System default' : 'Custom'} ·{' '}
+            {AGENT_MIC_CHANNEL_MODE_LABELS[micChannelMode]}
+          </span>
+        </summary>
+
+        <div className="agent-settings-expander-body">
+          <div className="agent-settings-section">
+            <label className="agent-settings-label" htmlFor="agent-mic-device-select">
+              Microphone
+            </label>
+            <div className="agent-settings-key-row">
+              <select
+                id="agent-mic-device-select"
+                className="agent-settings-model-select"
+                value={selectedMicDeviceId}
+                onChange={(event) => handleMicDeviceChange(event.target.value)}
+                disabled={controlsDisabled || micDevicesLoading}
+                data-testid="agent-mic-device-select"
+              >
+                <option value="default">System default microphone</option>
+                {selectedMicMissing ? (
+                  <option value={selectedMicDeviceId}>Saved microphone unavailable</option>
+                ) : null}
+                {listedAudioInputDevices.map((device, index) => (
+                  <option key={device.deviceId || `mic-${index}`} value={device.deviceId}>
+                    {device.label || `Microphone ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="agent-settings-key-clear"
+                onClick={() => void refreshMicDevices()}
+                disabled={controlsDisabled || micDevicesLoading}
+                data-testid="agent-mic-refresh"
+                title="Refresh microphone list"
+              >
+                {micDevicesLoading ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+            <p className="agent-settings-key-help" data-testid="agent-mic-device-help">
+              Pick the exact input Producey Boy should record from. If names are blank,
+              click the mic button once to grant permission, then refresh this list.
+            </p>
+            {micDevicesError ? (
+              <p className="agent-settings-key-error" data-testid="agent-mic-device-error">
+                {micDevicesError}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="agent-settings-section">
+            <label className="agent-settings-label" htmlFor="agent-mic-channel-select">
+              Channel
+            </label>
+            <select
+              id="agent-mic-channel-select"
+              className="agent-settings-model-select"
+              value={micChannelMode}
+              onChange={(event) =>
+                handleMicChannelModeChange(event.target.value as AgentMicChannelMode)
+              }
+              disabled={controlsDisabled}
+              data-testid="agent-mic-channel-select"
+            >
+              {micChannelModes.map((channelMode) => (
+                <option key={channelMode} value={channelMode}>
+                  {AGENT_MIC_CHANNEL_MODE_LABELS[channelMode]}
+                </option>
+              ))}
+            </select>
+            <p className="agent-settings-key-help" data-testid="agent-mic-channel-help">
+              Use mono/stereo when the device supports it, or force only the left/right
+              channel when an interface is wired to one side.
+            </p>
+          </div>
+        </div>
+      </details>
 
       <div className="agent-settings-section">
         <label className="agent-settings-label">Deepgram API key</label>

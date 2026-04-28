@@ -17,7 +17,8 @@ test('shouldVerifyInstallerSignature: win32 skips the signature check', () => {
   assert.equal(shouldVerifyInstallerSignature('win32'), false);
 });
 
-// Linux (zip) has no installer to verify; check stays off.
+// Linux AppImage/.deb/.zip packages do not use the Windows publisher-name
+// gate; AppImage update integrity comes from latest-linux.yml sha512 metadata.
 test('shouldVerifyInstallerSignature: linux skips the signature check', () => {
   assert.equal(shouldVerifyInstallerSignature('linux'), false);
 });

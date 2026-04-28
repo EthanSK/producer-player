@@ -87,6 +87,19 @@ await build({
   logLevel: 'warning',
 });
 
+// Release asset naming/resolution is pure logic and covers Linux AppImage
+// update targeting without loading Electron.
+await build({
+  entryPoints: [resolve(appDir, 'src/release-assets.ts')],
+  outfile: resolve(appDir, 'dist/release-assets.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+});
+
 // v3.90 — agent UI control primitives. Pure logic (no electron runtime
 // needed) once electron-log and `electron` types are stripped at build time.
 await build({
@@ -102,4 +115,4 @@ await build({
   plugins: [shimElectronLog],
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/agent-ui-control.test.cjs');
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/agent-ui-control.test.cjs');

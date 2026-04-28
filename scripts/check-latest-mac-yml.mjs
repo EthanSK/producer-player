@@ -8,6 +8,8 @@
  *   - `path` not matching `files[0].url`
  *   - `version` not matching the repo `package.json` version (when that
  *     env-pinning is enabled via `EXPECTED_VERSION`)
+ *   - `path` not matching an expected artifact regex (when enabled via
+ *     `EXPECTED_PATH_REGEX`, used to guarantee Linux AppImage update feeds)
  *
  * Usage (CI):
  *   node scripts/check-latest-mac-yml.mjs path/to/latest-mac.yml
@@ -125,6 +127,24 @@ function main() {
     problems.push(
       `version mismatch: yml says "${top.version}", EXPECTED_VERSION says "${expectedVersion}"`,
     );
+  }
+
+  const expectedPathRegex = process.env.EXPECTED_PATH_REGEX;
+  if (expectedPathRegex && top.path) {
+    let pathPattern;
+    try {
+      pathPattern = new RegExp(expectedPathRegex);
+    } catch (error) {
+      problems.push(
+        `EXPECTED_PATH_REGEX is invalid (${expectedPathRegex}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (pathPattern && !pathPattern.test(top.path)) {
+      problems.push(
+        `path mismatch: yml says "${top.path}", EXPECTED_PATH_REGEX is /${expectedPathRegex}/`,
+      );
+    }
   }
 
   if (problems.length > 0) {

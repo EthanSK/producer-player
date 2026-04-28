@@ -61,6 +61,12 @@ import { Readable } from 'node:stream';
 import log from 'electron-log/main';
 import { autoUpdater } from 'electron-updater';
 import { shouldVerifyInstallerSignature } from './auto-update-signature';
+import {
+  GITHUB_RELEASES_LATEST_API_URL,
+  PUBLIC_RELEASES_URL,
+  getStableDownloadUrl,
+  resolveReleaseDownloadUrl as resolveReleaseDownloadUrlForPlatform,
+} from './release-assets';
 import type {
   AgentAttachment,
   AgentContext,
@@ -180,12 +186,6 @@ const TEST_REFERENCE_IMPORT_PATH =
 const TEST_PROJECT_FILE_PICK_PATH =
   process.env.PRODUCER_PLAYER_E2E_PROJECT_FILE_PICK_PATH ?? null;
 const ANALYSIS_DELAY_MS = Number(process.env.PRODUCER_PLAYER_ANALYSIS_DELAY_MS ?? '0');
-const PUBLIC_REPOSITORY_ORIGIN = 'https://github.com';
-const PUBLIC_REPOSITORY_PATH = '/EthanSK/producer-player';
-const PUBLIC_RELEASES_URL = `${PUBLIC_REPOSITORY_ORIGIN}${PUBLIC_REPOSITORY_PATH}/releases`;
-const PUBLIC_RELEASES_LATEST_DOWNLOAD_BASE_URL =
-  `${PUBLIC_REPOSITORY_ORIGIN}${PUBLIC_REPOSITORY_PATH}/releases/latest/download`;
-const GITHUB_RELEASES_LATEST_API_URL = 'https://api.github.com/repos/EthanSK/producer-player/releases/latest';
 const UPDATE_CHECK_TIMEOUT_MS = 12_000;
 // Delay the first update check ~3s after window create so the UI is visible
 // before any banner can appear. (Prior 9s was chosen to debounce renderer
@@ -733,56 +733,12 @@ function toComparableVersion(value: string): ParsedSemver | null {
   return parseSemver(value);
 }
 
-function getStableDownloadAssetName(
-  platform: NodeJS.Platform,
-  arch: NodeJS.Architecture
-): string | null {
-  if (platform === 'darwin') {
-    return 'Producer-Player-latest-mac-universal.zip';
-  }
-
-  if (platform === 'linux' && arch === 'x64') {
-    return 'Producer-Player-latest-linux-x64.zip';
-  }
-
-  if (platform === 'win32' && arch === 'x64') {
-    return 'Producer-Player-latest-win-x64.exe';
-  }
-
-  return null;
-}
-
 function getStableDownloadUrlForCurrentPlatform(): string | null {
-  const assetName = getStableDownloadAssetName(process.platform, process.arch);
-  if (!assetName) {
-    return null;
-  }
-
-  return `${PUBLIC_RELEASES_LATEST_DOWNLOAD_BASE_URL}/${assetName}`;
+  return getStableDownloadUrl(process.platform, process.arch);
 }
 
-function getReleaseAssetNameCandidatesForCurrentPlatform(): string[] {
-  const stableAssetName = getStableDownloadAssetName(process.platform, process.arch);
-  const candidates = stableAssetName ? [stableAssetName] : [];
-
-  if (process.platform === 'darwin') {
-    candidates.push(
-      'Producer-Player-latest-mac-arm64.zip',
-      'Producer-Player-latest-mac-x64.zip'
-    );
-    return candidates;
-  }
-
-  if (process.platform === 'linux' && process.arch === 'x64') {
-    return candidates;
-  }
-
-  if (process.platform === 'win32' && process.arch === 'x64') {
-    candidates.push('Producer-Player-latest-win-x64.zip');
-    return candidates;
-  }
-
-  return candidates;
+function resolveReleaseDownloadUrl(release: GithubLatestReleasePayload): string | null {
+  return resolveReleaseDownloadUrlForPlatform(release, process.platform, process.arch);
 }
 
 function parseGithubLatestReleasePayload(payload: unknown): GithubLatestReleasePayload {
@@ -856,49 +812,6 @@ async function fetchLatestGithubRelease(): Promise<GithubLatestReleasePayload> {
 
   const payload = (await response.json()) as unknown;
   return parseGithubLatestReleasePayload(payload);
-}
-
-function resolveReleaseDownloadUrl(release: GithubLatestReleasePayload): string | null {
-  const candidateAssetNames = getReleaseAssetNameCandidatesForCurrentPlatform();
-
-  for (const assetName of candidateAssetNames) {
-    const matchedAsset = release.assets.find((asset) => asset.name === assetName);
-    if (matchedAsset) {
-      return matchedAsset.browserDownloadUrl;
-    }
-  }
-
-  if (process.platform === 'darwin') {
-    const macVersionedAsset = release.assets.find((asset) =>
-      /Producer-Player-.*-mac-(?:universal|arm64|x64)\.zip$/i.test(asset.name)
-    );
-
-    if (macVersionedAsset) {
-      return macVersionedAsset.browserDownloadUrl;
-    }
-  }
-
-  if (process.platform === 'linux' && process.arch === 'x64') {
-    const linuxVersionedAsset = release.assets.find((asset) =>
-      /Producer-Player-.*-linux-x64\.zip$/i.test(asset.name)
-    );
-
-    if (linuxVersionedAsset) {
-      return linuxVersionedAsset.browserDownloadUrl;
-    }
-  }
-
-  if (process.platform === 'win32' && process.arch === 'x64') {
-    const windowsVersionedAsset = release.assets.find((asset) =>
-      /Producer-Player-.*-win-x64\.(?:exe|zip)$/i.test(asset.name)
-    );
-
-    if (windowsVersionedAsset) {
-      return windowsVersionedAsset.browserDownloadUrl;
-    }
-  }
-
-  return getStableDownloadUrlForCurrentPlatform();
 }
 
 function buildUpdateResultMessage(result: {
@@ -1081,6 +994,7 @@ function getAutoUpdateDisabledReason(): AutoUpdateState['disabledReason'] {
   if (IS_MAC_APP_STORE_SANDBOX) return 'mac-app-store';
   if (IS_TEST_MODE) return 'test-mode';
   if (!app.isPackaged) return 'not-packaged';
+  if (process.platform === 'linux' && !process.env.APPIMAGE) return 'linux-non-appimage';
   return null;
 }
 
@@ -1106,6 +1020,10 @@ function getAutoUpdateDisabledMessage(reason: NonNullable<AutoUpdateState['disab
 
   if (reason === 'not-packaged') {
     return 'Updates require a packaged build. This copy is a development/dev-unpacked run.';
+  }
+
+  if (reason === 'linux-non-appimage') {
+    return 'Automatic Linux updates require the AppImage build. Download the latest Linux AppImage from the website.';
   }
 
   return 'Updates are not available in test mode.';
@@ -1157,6 +1075,7 @@ function friendlyUpdateErrorMessage(error: unknown): string {
   if (
     text.includes('cannot find latest') ||
     text.includes('latest-mac.yml') ||
+    text.includes('latest-linux.yml') ||
     text.includes('latest.yml') ||
     text.includes('404') ||
     text.includes('not found') ||
@@ -1643,7 +1562,9 @@ async function checkForUpdatesInteractive(): Promise<void> {
             ? 'Producer Player was installed from the Mac App Store — updates come through the App Store app.'
             : disabledReason === 'not-packaged'
               ? 'Updates require a packaged build. This copy is a development/dev-unpacked run.'
-              : 'Updates are not available in test mode.',
+              : disabledReason === 'linux-non-appimage'
+                ? 'Automatic Linux updates require the AppImage build. Download the latest Linux AppImage from the website.'
+                : 'Updates are not available in test mode.',
         buttons: ['OK'],
       });
     }

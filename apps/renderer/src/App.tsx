@@ -522,7 +522,7 @@ function renderUpdateFooterLine(args: {
   installedVersion: string;
   latestKnown: string | null;
   lastCheckedAt: string | null;
-  disabledReason: 'not-packaged' | 'mac-app-store' | 'test-mode' | null;
+  disabledReason: 'not-packaged' | 'mac-app-store' | 'test-mode' | 'linux-non-appimage' | null;
 }): string {
   if (args.disabledReason === 'mac-app-store') {
     return `Installed v${args.installedVersion} · Updates come through the Mac App Store.`;
@@ -532,6 +532,9 @@ function renderUpdateFooterLine(args: {
   }
   if (args.disabledReason === 'test-mode') {
     return `Installed v${args.installedVersion} · Auto-updates disabled (test mode).`;
+  }
+  if (args.disabledReason === 'linux-non-appimage') {
+    return `Installed v${args.installedVersion} · Auto-updates require the Linux AppImage build.`;
   }
 
   const latest = args.latestKnown ? `v${args.latestKnown}` : 'fetching…';

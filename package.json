@@ -1,6 +1,6 @@
 {
   "name": "producer-player",
-  "version": "3.92.0",
+  "version": "3.94.0",
   "private": true,
   "description": "Producer Player desktop app for producers managing album tracks, exports, and ordering.",
   "author": "EthanSK",
@@ -51,7 +51,7 @@
     "version:bump:patch": "node ./scripts/bump-version.mjs && npm run version:sync",
     "version:bump:minor": "node ./scripts/bump-version.mjs minor && npm run version:sync",
     "release:desktop:mac": "npm run build:mac",
-    "release:desktop:linux": "npm run build && electron-builder --linux zip --publish never",
+    "release:desktop:linux": "node ./scripts/build-linux.mjs",
     "release:desktop:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "icon:build": "./scripts/generate-app-icon.sh",
     "plan:audit": "python3 scripts/plan_verbatim_audit.py --session \"$SESSION_JSONL\" --plan PLAN.md",
@@ -112,10 +112,16 @@
     },
     "linux": {
       "target": [
+        "AppImage",
+        "deb",
         "zip"
       ],
       "icon": "assets/icon/png",
-      "artifactName": "Producer-Player-${version}-linux-${arch}.${ext}"
+      "artifactName": "Producer-Player-${version}-linux-x64.${ext}",
+      "category": "AudioVideo;Audio",
+      "synopsis": "Producer workflow player for managing bounced mixes, album order, and mastering checks.",
+      "description": "Producer Player helps producers manage bounced mixes, compare versions, export album-ordered latest tracks, and run mastering workflow checks.",
+      "maintainer": "EthanSK <EthanSK@users.noreply.github.com>"
     },
     "win": {
       "target": [

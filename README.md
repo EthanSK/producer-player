@@ -93,6 +93,8 @@ Free and source-available. macOS, Windows, and Linux.
 
 **[Latest release](https://github.com/EthanSK/producer-player/releases)**
 
+Linux users should prefer the `.AppImage` build for automatic updates; `.deb` and portable `.zip` artifacts are also published.
+
 > Current builds are unsigned preview releases. Signed/notarized macOS distribution is pending.
 
 ## Development

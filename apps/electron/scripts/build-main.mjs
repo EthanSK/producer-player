@@ -164,12 +164,13 @@ await rm(binaryOutputDirectory, { recursive: true, force: true });
 await mkdir(binaryOutputDirectory, { recursive: true });
 
 const shouldBundleFfmpeg = process.env.PRODUCER_PLAYER_SKIP_BUNDLED_FFMPEG !== 'true';
-// Producer Player is macOS-only (VST3/AU via JUCE). The pp-audio-host sidecar
-// only builds on macOS; on Linux + Windows CI runners it fails with missing
-// deps / toolchain differences and breaks the whole Release Desktop workflow,
-// stranding macOS users (see 2026-04-20 v3.57-v3.59 stuck run). Gate the
-// sidecar step on darwin so cross-platform matrix legs still produce a valid
-// Electron bundle. The explicit opt-out env var still works for parity.
+// The core Electron app is cross-platform, but the optional JUCE
+// pp-audio-host sidecar is still bundled only on macOS. Linux/Windows runners
+// have historically failed here on native audio/plugin-host dependencies,
+// which broke the whole Release Desktop workflow and stranded released users
+// (see 2026-04-20 v3.57-v3.59 stuck run). Gate the sidecar step on darwin so
+// Linux/Windows still produce valid core Electron bundles. The explicit
+// opt-out env var still works for parity.
 const shouldBundleSidecar =
   process.platform === 'darwin' &&
   process.env.PRODUCER_PLAYER_SKIP_BUNDLED_SIDECAR !== 'true';
@@ -306,6 +307,9 @@ if (!shouldBundleFfmpeg) {
 
     console.info('[producer-player/electron] Bundled universal ffmpeg binary for macOS builds.');
   } else {
-    await cp(ffmpegStatic, resolve(binaryOutputDirectory, basename(ffmpegStatic)));
+    const bundledFfmpegPath = resolve(binaryOutputDirectory, basename(ffmpegStatic));
+    await cp(ffmpegStatic, bundledFfmpegPath);
+    await chmod(bundledFfmpegPath, 0o755);
+    console.info(`[producer-player/electron] Bundled ffmpeg binary at ${bundledFfmpegPath}.`);
   }
 }

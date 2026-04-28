@@ -1,6 +1,6 @@
 {
   "name": "producer-player",
-  "version": "3.93.0",
+  "version": "3.94.0",
   "private": true,
   "description": "Producer Player desktop app for producers managing album tracks, exports, and ordering.",
   "author": "EthanSK",
@@ -117,10 +117,11 @@
         "zip"
       ],
       "icon": "assets/icon/png",
-      "artifactName": "Producer-Player-${version}-linux-${arch}.${ext}",
+      "artifactName": "Producer-Player-${version}-linux-x64.${ext}",
       "category": "AudioVideo;Audio",
       "synopsis": "Producer workflow player for managing bounced mixes, album order, and mastering checks.",
-      "description": "Producer Player helps producers manage bounced mixes, compare versions, export album-ordered latest tracks, and run mastering workflow checks."
+      "description": "Producer Player helps producers manage bounced mixes, compare versions, export album-ordered latest tracks, and run mastering workflow checks.",
+      "maintainer": "EthanSK <EthanSK@users.noreply.github.com>"
     },
     "win": {
       "target": [

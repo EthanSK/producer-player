@@ -3,7 +3,7 @@
 This repo ships downloadable desktop artifacts via:
 
 - `.github/workflows/release-desktop.yml`
-- GitHub Releases (macOS/Linux ZIPs, Windows installer, and SHA-256 checksums)
+- GitHub Releases (macOS ZIP, Linux AppImage/.deb/ZIP, Windows installer, and SHA-256 checksums)
 
 ## Version source of truth
 
@@ -21,7 +21,9 @@ In-app display format: `<semver>+build.<n>.<sha>` (for example `2.0.0+build.412.
 Unsigned desktop artifacts for immediate testability:
 
 - `Producer-Player-<version>-mac-<arch>.zip`
-- `Producer-Player-<version>-linux-<arch>.zip`
+- `Producer-Player-<version>-linux-<arch>.AppImage` (recommended Linux build; self-updating via `latest-linux.yml`)
+- `Producer-Player-<version>-linux-<arch>.deb`
+- `Producer-Player-<version>-linux-<arch>.zip` (portable fallback; no self-update)
 - `Producer-Player-<version>-win-<arch>.exe` (NSIS installer)
 - matching checksum files: `*.zip.sha256` and `*.exe.sha256`
 
@@ -133,8 +135,13 @@ If you later enable signing/notarization for outside-the-store distribution, con
 
 Unsigned fallback path (today): keep `CSC_IDENTITY_AUTO_DISCOVERY=false` in CI and run the existing unsigned release workflow as-is.
 
+## Linux release expectations
+
+`npm run release:desktop:linux` is intentionally Linux-host-only. The app bundles `ffmpeg-static`, which installs a host-platform binary, so a macOS/Windows cross-build would silently ship the wrong ffmpeg into the Linux app. Run the Linux target on Ubuntu (CI does this) unless `PRODUCER_PLAYER_ALLOW_LINUX_CROSS_BUILD=true` is set for non-shipping metadata experiments.
+
+A valid Linux release must include exactly one x64 AppImage, `.deb`, ZIP, and `latest-linux.yml`. The publish workflow refuses to mark a release latest without those Linux artifacts, because Linux AppImage users need `latest-linux.yml` to update and ZIP/.deb users need a visible fallback download.
+
 ## Planned next packaging targets (not yet enabled)
 
 - Signed/notarized macOS DMG outside the App Store
 - Code-signed Windows installer trust chain (NSIS)
-- Linux packages (AppImage/deb)

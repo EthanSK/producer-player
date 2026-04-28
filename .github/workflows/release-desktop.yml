@@ -133,6 +133,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Linux package build dependencies
+        if: matrix.slug == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libarchive-tools rpm fakeroot
+          if apt-cache show libfuse2 >/dev/null 2>&1; then
+            sudo apt-get install -y --no-install-recommends libfuse2
+          else
+            sudo apt-get install -y --no-install-recommends libfuse2t64
+          fi
+
       # Note: the pp-audio-host JUCE sidecar is macOS-only and is gated to
       # darwin inside apps/electron/scripts/build-main.mjs. Linux/Windows
       # runners skip the native build entirely, so their APT/MSVC sidecar
@@ -193,8 +206,12 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           files=(release/Producer-Player-*-${{ matrix.slug }}-*.zip)
+          if [ "${{ matrix.slug }}" = "linux" ]; then
+            files+=(release/Producer-Player-*-linux-x64.AppImage)
+            files+=(release/Producer-Player-*-linux-x64.deb)
+          fi
           if [ ${#files[@]} -eq 0 ]; then
-            echo "No ZIP artifacts found for ${{ matrix.slug }}"
+            echo "No checksum-able artifacts found for ${{ matrix.slug }}"
             exit 1
           fi
           for f in "${files[@]}"; do
@@ -220,6 +237,11 @@ jobs:
             release/Producer-Player-*-${{ matrix.slug }}-*.zip
             release/Producer-Player-*-${{ matrix.slug }}-*.zip.sha256
             release/Producer-Player-*-${{ matrix.slug }}-*.zip.blockmap
+            release/Producer-Player-*-${{ matrix.slug }}-*.AppImage
+            release/Producer-Player-*-${{ matrix.slug }}-*.AppImage.sha256
+            release/Producer-Player-*-${{ matrix.slug }}-*.AppImage.blockmap
+            release/Producer-Player-*-${{ matrix.slug }}-*.deb
+            release/Producer-Player-*-${{ matrix.slug }}-*.deb.sha256
             release/Producer-Player-*-${{ matrix.slug }}-*.exe
             release/Producer-Player-*-${{ matrix.slug }}-*.exe.sha256
             release/Producer-Player-*-${{ matrix.slug }}-*.exe.blockmap
@@ -229,11 +251,10 @@ jobs:
   publish-release:
     name: Publish release
     # Run as long as compute-version succeeded — even if some build-desktop
-    # matrix legs failed. This way a single-platform failure (typically mac
-    # notarization waiting on an Apple agreement re-acceptance) does not
-    # strand the OTHER platforms' users on stale versions. The macOS users
-    # remain stranded until the agreement is fixed and the workflow is
-    # re-run, but linux/win users continue to receive updates.
+    # matrix legs failed. This way a macOS notarization/account failure can
+    # still publish Linux/Windows. The publish job below now treats Linux
+    # AppImage + latest-linux.yml as required so Linux users never get a
+    # latest release with a missing/broken update feed.
     if: |
       always() &&
       needs.compute-version.result == 'success' &&
@@ -253,25 +274,30 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      # Bail clearly if NO platform built. Otherwise continue and only ship
-      # the platforms that did build.
-      - name: Verify at least one platform built
+      # Linux is now a first-class release platform. macOS can still be
+      # skipped when notarization/account state is broken, but publishing a
+      # latest release without Linux AppImage + latest-linux.yml would strand
+      # Linux users on a broken/missing update feed.
+      - name: Verify required platform artifacts
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
           mac_zips=(release-assets/Producer-Player-*-mac-universal.zip)
+          linux_appimages=(release-assets/Producer-Player-*-linux-x64.AppImage)
+          linux_debs=(release-assets/Producer-Player-*-linux-x64.deb)
           linux_zips=(release-assets/Producer-Player-*-linux-x64.zip)
+          linux_feeds=(release-assets/latest-linux.yml)
           win_installers=(release-assets/Producer-Player-*-win-x64.exe)
-          if [ ${#mac_zips[@]} -eq 0 ] && [ ${#linux_zips[@]} -eq 0 ] && [ ${#win_installers[@]} -eq 0 ]; then
-            echo "::error title=No platform builds succeeded::Every platform's build job failed; nothing to publish. See the build-desktop job logs."
+
+          if [ ${#linux_appimages[@]} -ne 1 ] || [ ${#linux_debs[@]} -ne 1 ] || [ ${#linux_zips[@]} -ne 1 ] || [ ${#linux_feeds[@]} -ne 1 ]; then
+            echo "::error title=Linux release incomplete::Expected exactly one Linux AppImage, deb, zip, and latest-linux.yml. Refusing to publish a latest release that Linux users cannot install/update."
+            ls -lah release-assets || true
             exit 1
           fi
+
           if [ ${#mac_zips[@]} -eq 0 ]; then
             echo "::warning title=Skipping macOS in this release::No mac build artifact present (mac job likely failed). Existing macOS users will stay on the last successfully published macOS version. Re-run this workflow once mac notarization is restored."
-          fi
-          if [ ${#linux_zips[@]} -eq 0 ]; then
-            echo "::warning title=Skipping Linux in this release::No linux build artifact present."
           fi
           if [ ${#win_installers[@]} -eq 0 ]; then
             echo "::warning title=Skipping Windows in this release::No windows installer artifact present."
@@ -286,12 +312,16 @@ jobs:
 
           patterns=(
             "Producer-Player-*-mac-universal.zip"
+            "Producer-Player-*-linux-x64.AppImage"
+            "Producer-Player-*-linux-x64.deb"
             "Producer-Player-*-linux-x64.zip"
             "Producer-Player-*-win-x64.exe"
           )
 
           aliases=(
             "Producer-Player-latest-mac-universal.zip"
+            "Producer-Player-latest-linux-x64.AppImage"
+            "Producer-Player-latest-linux-x64.deb"
             "Producer-Player-latest-linux-x64.zip"
             "Producer-Player-latest-win-x64.exe"
           )
@@ -345,7 +375,11 @@ jobs:
             exit 0
           fi
           for f in "${ymls[@]}"; do
-            node scripts/check-latest-mac-yml.mjs "$f"
+            if [ "$(basename "$f")" = "latest-linux.yml" ]; then
+              EXPECTED_PATH_REGEX='^Producer-Player-.*-linux-x64\.AppImage$' node scripts/check-latest-mac-yml.mjs "$f"
+            else
+              node scripts/check-latest-mac-yml.mjs "$f"
+            fi
           done
 
       - name: Generate changelog from commits
@@ -483,7 +517,9 @@ jobs:
             echo "| Platform | Stable URL |"
             echo "|----------|------------|"
             echo "| macOS (Universal: Apple Silicon + Intel) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-mac-universal.zip\` |"
-            echo "| Linux (x64) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-linux-x64.zip\` |"
+            echo "| Linux AppImage (x64, recommended/self-updating) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-linux-x64.AppImage\` |"
+            echo "| Linux .deb (x64) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-linux-x64.deb\` |"
+            echo "| Linux portable ZIP (x64) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-linux-x64.zip\` |"
             echo "| Windows (x64) | \`https://github.com/${repo}/releases/latest/download/Producer-Player-latest-win-x64.exe\` |"
             echo ""
             echo "Versioned assets are attached below for auditing/reproducibility."

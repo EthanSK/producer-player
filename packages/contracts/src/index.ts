@@ -781,11 +781,12 @@ export interface AutoUpdateState {
   nextRetryInMs?: number | null;
   /**
    * True while an auto-update prerequisite ruled out any check (not
-   * packaged, sandboxed Mac App Store, test mode). When true the UI should
-   * render a dim "Updates managed by the Mac App Store" / "Dev build —
-   * updates disabled" note so silent no-ops are visible.
+   * packaged, sandboxed Mac App Store, test mode, or a Linux package format
+   * that cannot self-update). When true the UI should render a dim
+   * "Updates managed by the Mac App Store" / "Dev build — updates disabled"
+   * note so silent no-ops are visible.
    */
-  disabledReason?: 'not-packaged' | 'mac-app-store' | 'test-mode' | null;
+  disabledReason?: 'not-packaged' | 'mac-app-store' | 'test-mode' | 'linux-non-appimage' | null;
 }
 
 export type AutoUpdateRecheckResult =

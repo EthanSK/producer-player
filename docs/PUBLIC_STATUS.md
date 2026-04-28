@@ -16,8 +16,8 @@ _Last updated: 2026-03-16_
 
 - Baseline tagged release: `v0.1.0`
 - Rolling snapshot prereleases from `main`/`master` pushes (`desktop-snapshot-*`)
-- Snapshot assets currently publish for macOS and Linux ZIPs plus a Windows NSIS installer
-- SHA-256 checksum files are published alongside ZIP/installer assets
+- Release assets publish a macOS ZIP, Linux AppImage/.deb/ZIP, and a Windows NSIS installer
+- SHA-256 checksum files are published alongside ZIP/AppImage/.deb/installer assets
 
 ## Public workflow/features currently represented on main
 

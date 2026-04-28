@@ -14,7 +14,7 @@
 
 ## Current State (as of 2026-03-31)
 
-The app is fully functional and publicly downloadable. macOS universal builds ship via GitHub Releases with auto-update support (electron-updater). Linux and Windows CI smoke tests run, but primary target is macOS. The app is NOT on the Mac App Store yet (signing/provisioning pending).
+The app is fully functional and publicly downloadable. macOS universal builds ship via GitHub Releases with auto-update support (electron-updater). Linux is supported through an AppImage-first release path with `.deb` and ZIP fallbacks; CI/release guards require Linux AppImage update metadata before a release can be marked latest. Windows CI smoke tests and NSIS installer builds also run. The app is NOT on the Mac App Store yet (signing/provisioning pending).
 
 ### Architecture
 
@@ -54,7 +54,7 @@ producer-player/
 - Per-song playhead memory (session-only, resets on near-end/finish)
 - Previous/back button: first press restarts current track, second press goes to previous
 - Double-click song row to play immediately
-- Global Space shortcut for play/pause; macOS media key support (play/pause, next, prev)
+- Global Space shortcut for play/pause; media key support (play/pause, next, prev, seek on supported keys)
 - Global left/right arrow keys for 5-second seek
 - +5s/-5s and +1s/-1s skip buttons on transport
 - Search across tracks and older versions (matches filename + path + extension)

@@ -454,6 +454,40 @@ body.agent-chat-panel-dragging * {
   cursor: not-allowed;
 }
 
+.agent-settings-expander {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-1) 78%, transparent);
+  padding: 0;
+}
+
+.agent-settings-expander-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 600;
+  list-style-position: inside;
+}
+
+.agent-settings-expander-value {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-align: right;
+}
+
+.agent-settings-expander-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 10px 10px;
+}
+
 .agent-settings-system-prompt {
   width: 100%;
   min-height: 132px;
@@ -1083,10 +1117,15 @@ body.agent-chat-panel-dragging * {
   animation: agent-mic-pulse 1.5s ease-in-out infinite;
 }
 
+.agent-mic-button--arming,
 .agent-mic-button--processing {
   background: var(--bg-2);
   color: var(--accent);
   cursor: wait;
+}
+
+.agent-mic-button--arming {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent);
 }
 
 .agent-mic-button--error {

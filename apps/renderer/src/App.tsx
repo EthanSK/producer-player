@@ -75,11 +75,11 @@ import {
 } from './masteringChecklistRules';
 import {
   computePlatformNormalizationPreview,
-  gainDbToLinear,
   getNormalizationPlatformProfile,
   NORMALIZATION_PLATFORM_PROFILES,
   type NormalizationPlatformId,
 } from './platformNormalization';
+import { computePlaybackGainState } from './playbackGainModel';
 import {
   shouldAutoplayOnTransportSwitch,
   shouldAttemptPlaybackOutputRecovery,
@@ -2904,11 +2904,13 @@ export function App(): JSX.Element {
   });
   const handleSkipSecondsRef = useRef<(offsetSeconds: number) => void>(() => undefined);
   const playbackAudioContextRef = useRef<AudioContext | null>(null);
+  const playbackTransformGainNodeRef = useRef<GainNode | null>(null);
   const playbackGainNodeRef = useRef<GainNode | null>(null);
   const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playbackOutputRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPlaybackOutputRecoveryAtRef = useRef(0);
   const targetGainLinearRef = useRef(DEFAULT_PLAYBACK_VOLUME);
+  const targetTransformGainLinearRef = useRef(1);
   const playbackAnalyserNodeRef = useRef<AnalyserNode | null>(null);
   const bandSoloFiltersRef = useRef<BiquadFilterNode[]>([]);
   const handleChecklistItemTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
@@ -2974,15 +2976,21 @@ export function App(): JSX.Element {
   const applyPlaybackGain = useCallback(
     (nextVolume: number, nextNormalizationGainDb: number) => {
       const audio = audioRef.current;
-      const totalGainLinear = Math.max(
-        0,
-        nextVolume * gainDbToLinear(nextNormalizationGainDb)
-      );
-      targetGainLinearRef.current = totalGainLinear;
-      const gainNode = playbackGainNodeRef.current;
+      const gainState = computePlaybackGainState({
+        baseVolume: nextVolume,
+        transformGainDb: nextNormalizationGainDb,
+      });
+      targetGainLinearRef.current = gainState.monitorVolumeLinear;
+      targetTransformGainLinearRef.current = gainState.transformGainLinear;
 
+      const transformGainNode = playbackTransformGainNodeRef.current;
+      if (transformGainNode) {
+        transformGainNode.gain.value = gainState.transformGainLinear;
+      }
+
+      const gainNode = playbackGainNodeRef.current;
       if (gainNode) {
-        gainNode.gain.value = totalGainLinear;
+        gainNode.gain.value = gainState.monitorVolumeLinear;
         if (audio) {
           audio.volume = 1;
         }
@@ -2990,7 +2998,7 @@ export function App(): JSX.Element {
       }
 
       if (audio) {
-        audio.volume = Math.max(0, Math.min(totalGainLinear, 1));
+        audio.volume = Math.max(0, Math.min(gainState.audibleGainLinear, 1));
       }
     },
     []
@@ -4993,9 +5001,18 @@ export function App(): JSX.Element {
   function restoreAudiblePlaybackGain(reason: string): void {
     const audio = audioRef.current;
     const gainNode = playbackGainNodeRef.current;
+    const transformGainNode = playbackTransformGainNodeRef.current;
     const audioContext = playbackAudioContextRef.current;
     if (!audio || !gainNode || !audioContext) {
       return;
+    }
+
+    if (transformGainNode) {
+      try {
+        transformGainNode.gain.value = targetTransformGainLinearRef.current;
+      } catch {
+        transformGainNode.gain.value = targetTransformGainLinearRef.current;
+      }
     }
 
     const currentGainLinear = gainNode.gain.value;
@@ -5165,6 +5182,7 @@ export function App(): JSX.Element {
     if (AudioContextConstructor) {
       try {
         const playbackAudioContext = new AudioContextConstructor();
+        const playbackTransformGainNode = playbackAudioContext.createGain();
         const playbackGainNode = playbackAudioContext.createGain();
         const playbackSourceNode = playbackAudioContext.createMediaElementSource(audio);
 
@@ -5184,9 +5202,14 @@ export function App(): JSX.Element {
         analyserR.fftSize = 2048;
         analyserR.smoothingTimeConstant = 0.8;
 
-        // Audio chain: source → analyser → gain → destination
+        // Audio chain:
+        // source → analyser/meters → preview gain (normalization / level match)
+        // → monitor processing (mid-side / EQ / solo)
+        // → monitor volume trim → destination
         playbackSourceNode.connect(playbackAnalyserNode);
-        playbackAnalyserNode.connect(playbackGainNode);
+        playbackAnalyserNode.connect(playbackTransformGainNode);
+        playbackTransformGainNode.connect(playbackGainNode);
+        playbackTransformGainNode.gain.value = 1;
         playbackGainNode.connect(playbackAudioContext.destination);
         playbackGainNode.gain.value = DEFAULT_PLAYBACK_VOLUME;
 
@@ -5196,6 +5219,7 @@ export function App(): JSX.Element {
         channelSplitter.connect(analyserR, 1);
 
         playbackAudioContextRef.current = playbackAudioContext;
+        playbackTransformGainNodeRef.current = playbackTransformGainNode;
         playbackGainNodeRef.current = playbackGainNode;
         playbackAnalyserNodeRef.current = playbackAnalyserNode;
         setAnalyserNode(playbackAnalyserNode);
@@ -5214,6 +5238,7 @@ export function App(): JSX.Element {
         );
       } catch {
         playbackAudioContextRef.current = null;
+        playbackTransformGainNodeRef.current = null;
         playbackGainNodeRef.current = null;
         playbackAnalyserNodeRef.current = null;
         setAnalyserNode(null);
@@ -5521,6 +5546,8 @@ export function App(): JSX.Element {
       }
       eqFiltersRef.current = [];
 
+      playbackTransformGainNodeRef.current?.disconnect();
+      playbackTransformGainNodeRef.current = null;
       playbackGainNodeRef.current?.disconnect();
       playbackGainNodeRef.current = null;
 
@@ -6865,14 +6892,15 @@ export function App(): JSX.Element {
     applyPlaybackGain(volume, appliedNormalizationGainDb);
   }, [appliedNormalizationGainDb, applyPlaybackGain, volume]);
 
-  // Consolidated output chain: gain → [mid/side processor] → [EQ filters] → [band solo filters | destination]
-  // This single effect coordinates mid/side monitoring, EQ gain, AND band soloing so they
-  // never conflict, and re-runs when the playback source changes (mix ↔ reference)
-  // to ensure the ScriptProcessorNode stays connected.
+  // Consolidated monitor chain:
+  // preview gain → [mid/side processor] → [EQ filters] → [band solo filters] → monitor volume
+  // Meters tap before both preview gain and monitor volume so their semantics stay stable.
+  // The slider is the final monitor trim; normalization / level-match stay explicit transforms.
   useEffect(() => {
     const audioContext = playbackAudioContextRef.current;
+    const transformGainNode = playbackTransformGainNodeRef.current;
     const gainNode = playbackGainNodeRef.current;
-    if (!audioContext || !gainNode) return;
+    if (!audioContext || !transformGainNode || !gainNode) return;
 
     // --- Tear down previous chain ---
     if (midSideProcessorRef.current) {
@@ -6887,10 +6915,10 @@ export function App(): JSX.Element {
       try { f.disconnect(); } catch { /* ignore */ }
     }
     eqFiltersRef.current = [];
-    try { gainNode.disconnect(); } catch { /* ignore */ }
+    try { transformGainNode.disconnect(); } catch { /* ignore */ }
 
-    // --- Determine the node that feeds into the final stage (solo filters or destination) ---
-    let outputNode: AudioNode = gainNode;
+    // --- Determine the node that feeds into the final monitor trim ---
+    let outputNode: AudioNode = transformGainNode;
 
     if (midSideMode !== 'stereo') {
       const bufferSize = 4096;
@@ -6914,7 +6942,7 @@ export function App(): JSX.Element {
         }
       };
 
-      gainNode.connect(processor);
+      transformGainNode.connect(processor);
       midSideProcessorRef.current = processor;
       outputNode = processor;
     }
@@ -6942,11 +6970,11 @@ export function App(): JSX.Element {
         if (!band) continue;
         const filter = createBandSoloFilter(audioContext, band);
         outputNode.connect(filter);
-        filter.connect(audioContext.destination);
+        filter.connect(gainNode);
         bandSoloFiltersRef.current.push(filter);
       }
     } else {
-      outputNode.connect(audioContext.destination);
+      outputNode.connect(gainNode);
     }
 
     return () => {
@@ -6963,8 +6991,8 @@ export function App(): JSX.Element {
       }
       eqFiltersRef.current = [];
       try {
-        gainNode.disconnect();
-        gainNode.connect(audioContext.destination);
+        transformGainNode.disconnect();
+        transformGainNode.connect(gainNode);
       } catch { /* ignore */ }
     };
   }, [midSideMode, soloedBands, eqBandGains, eqEnabled, desiredPlaybackKey, playbackPreviewMode]);

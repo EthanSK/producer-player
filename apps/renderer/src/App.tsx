@@ -895,6 +895,7 @@ interface InspectorVersionSampleRateState {
   cacheKey: string;
   status: 'idle' | 'loading' | 'ready' | 'error';
   sampleRateHz: number | null;
+  integratedLufs: number | null;
   error: string | null;
 }
 
@@ -5810,23 +5811,33 @@ export function App(): JSX.Element {
       for (const version of inspectorVersions) {
         const cacheKey = buildMasteringCacheKey(version);
         const cachedEntry = masteringCacheByVersionId[version.id];
-        const cachedSampleRateHz = isMasteringCacheEntryFresh(cachedEntry, version)
-          ? cachedEntry.staticAnalysis.sampleRateHz
+        const cachedStaticAnalysis = isMasteringCacheEntryFresh(cachedEntry, version)
+          ? cachedEntry.staticAnalysis
           : null;
+        const cachedSampleRateHz = cachedStaticAnalysis?.sampleRateHz ?? null;
+        const cachedIntegratedLufs = cachedStaticAnalysis?.integratedLufs ?? null;
         const existing = next[version.id];
 
-        if (cachedSampleRateHz !== null && Number.isFinite(cachedSampleRateHz)) {
+        if (cachedStaticAnalysis) {
           if (
             !existing ||
             existing.cacheKey !== cacheKey ||
             existing.status !== 'ready' ||
             existing.sampleRateHz !== cachedSampleRateHz ||
+            existing.integratedLufs !== cachedIntegratedLufs ||
             existing.error !== null
           ) {
             next[version.id] = {
               cacheKey,
               status: 'ready',
-              sampleRateHz: cachedSampleRateHz,
+              sampleRateHz:
+                cachedSampleRateHz !== null && Number.isFinite(cachedSampleRateHz)
+                  ? cachedSampleRateHz
+                  : null,
+              integratedLufs:
+                cachedIntegratedLufs !== null && Number.isFinite(cachedIntegratedLufs)
+                  ? cachedIntegratedLufs
+                  : null,
               error: null,
             };
             changed = true;
@@ -5839,6 +5850,7 @@ export function App(): JSX.Element {
             cacheKey,
             status: 'idle',
             sampleRateHz: null,
+            integratedLufs: null,
             error: null,
           };
           changed = true;
@@ -5894,6 +5906,7 @@ export function App(): JSX.Element {
                 cacheKey,
                 status: 'loading',
                 sampleRateHz: null,
+                integratedLufs: null,
                 error: null,
               },
             };
@@ -5935,6 +5948,10 @@ export function App(): JSX.Element {
                   measured.sampleRateHz !== null && Number.isFinite(measured.sampleRateHz)
                     ? measured.sampleRateHz
                     : null,
+                integratedLufs:
+                  measured.integratedLufs !== null && Number.isFinite(measured.integratedLufs)
+                    ? measured.integratedLufs
+                    : null,
                 error: null,
               },
             };
@@ -5956,8 +5973,9 @@ export function App(): JSX.Element {
                 ...existing,
                 status: 'error',
                 sampleRateHz: null,
+                integratedLufs: null,
                 error:
-                  error instanceof Error ? error.message : 'Could not load sample rate yet.',
+                  error instanceof Error ? error.message : 'Could not load version analysis yet.',
               },
             };
           });
@@ -12881,6 +12899,34 @@ export function App(): JSX.Element {
 
     return byVersionId;
   }, [inspectorVersionSampleRateByVersionId, inspectorVersions, masteringCacheByVersionId]);
+  const inspectorVersionIntegratedLufsTextByVersionId = useMemo(() => {
+    const byVersionId: Record<string, string> = {};
+
+    for (const version of inspectorVersions) {
+      const cachedEntry = masteringCacheByVersionId[version.id];
+      const cachedIntegratedLufs = isMasteringCacheEntryFresh(cachedEntry, version)
+        ? cachedEntry.staticAnalysis.integratedLufs
+        : null;
+
+      if (cachedIntegratedLufs !== null && Number.isFinite(cachedIntegratedLufs)) {
+        byVersionId[version.id] = formatMeasuredStat(cachedIntegratedLufs, 'LUFS');
+        continue;
+      }
+
+      const statusState = inspectorVersionSampleRateByVersionId[version.id];
+      byVersionId[version.id] = buildAnalysisValue(
+        statusState?.status ?? 'idle',
+        formatMeasuredStat(statusState?.integratedLufs, 'LUFS'),
+        {
+          loading: 'Loading…',
+          error: 'Unavailable',
+          empty: '—',
+        }
+      );
+    }
+
+    return byVersionId;
+  }, [inspectorVersionSampleRateByVersionId, inspectorVersions, masteringCacheByVersionId]);
   const checklistDraftIsEmpty = checklistDraftText.trim().length === 0;
   // Derived update-UI helpers — single source of truth for every state.
   const canDownloadAndInstallUpdate = autoUpdateState.status === 'available';
@@ -15095,6 +15141,10 @@ export function App(): JSX.Element {
                     <strong>{version.fileName}</strong>
                     <p className="muted">{formatDate(version.modifiedAt)}</p>
                     <p className="muted">{formatFileSize(version.sizeBytes)}</p>
+                    <p className="muted" data-testid="inspector-version-integrated-lufs">
+                      Integrated LUFS:{' '}
+                      {inspectorVersionIntegratedLufsTextByVersionId[version.id] ?? '—'}
+                    </p>
                     <p className="muted" data-testid="inspector-version-sample-rate">
                       Sample rate: {inspectorVersionSampleRateTextByVersionId[version.id] ?? '—'}
                     </p>

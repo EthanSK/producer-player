@@ -2638,7 +2638,6 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 }
 
 .main-list-row-metadata:hover .main-list-row-metadata-popover,
-.main-list-row-metadata:focus .main-list-row-metadata-popover,
 .main-list-row-metadata:focus-visible .main-list-row-metadata-popover {
   opacity: 1;
   transform: translateY(0);

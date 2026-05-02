@@ -2520,19 +2520,61 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   flex-wrap: wrap;
 }
 
+.main-list-row-metadata-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.main-list-row-lufs,
 .main-list-row-metadata {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
   font-size: 11px;
   line-height: 1.2;
   font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.main-list-row-lufs {
+  min-width: 68px;
+  text-align: center;
+  color: #dceeff;
+  border: 1px solid rgba(154, 182, 211, 0.42);
+  background: rgba(154, 182, 211, 0.1);
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+.main-list-row-lufs[data-status='ready'] {
+  color: #f0f8ff;
+  border-color: rgba(92, 167, 255, 0.62);
+  background: rgba(92, 167, 255, 0.16);
+}
+
+.main-list-row-lufs[data-status='pending'] {
+  color: #9ab6d3;
+  border-color: rgba(154, 182, 211, 0.28);
+  background: rgba(154, 182, 211, 0.06);
+}
+
+.main-list-row-lufs[data-status='error'] {
+  color: #ffc7c7;
+  border-color: rgba(255, 120, 120, 0.42);
+  background: rgba(255, 120, 120, 0.08);
+}
+
+.main-list-row-metadata {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #9ab6d3;
   border: 1px solid rgba(154, 182, 211, 0.36);
-  border-radius: 999px;
   background: rgba(92, 167, 255, 0.12);
-  padding: 2px 8px;
 }
 
 .song-project-button,
@@ -4980,11 +5022,16 @@ button.checklist-play-toggle[data-playing='true'] {
     gap: 8px;
   }
 
+  .main-list-row-lufs,
   .main-list-row-metadata,
   .song-project-button,
   .song-checklist-button {
     font-size: 10px;
     padding-inline: 6px;
+  }
+
+  .main-list-row-lufs {
+    min-width: 60px;
   }
 
   .analysis-overlay {

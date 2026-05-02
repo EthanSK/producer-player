@@ -14459,6 +14459,41 @@ export function App(): JSX.Element {
               : `${song.versions.length} version(s)`;
             const songRowTitle = getSongDisplayTitle(song);
             const songRowMetadataLabel = getSongRowMetadataLabel(song);
+            const activeSongVersion = getActiveSongVersion(song);
+            const activeSongCacheEntry = activeSongVersion
+              ? masteringCacheByVersionId[activeSongVersion.id]
+              : undefined;
+            const activeSongCacheStatus = activeSongVersion
+              ? masteringCacheStatusByVersionId[activeSongVersion.id]?.status
+              : undefined;
+            const activeSongCacheFresh = activeSongVersion
+              ? isMasteringCacheEntryFresh(activeSongCacheEntry, activeSongVersion)
+              : false;
+            const activeSongIntegratedLufs = activeSongCacheFresh && activeSongCacheEntry
+              ? activeSongCacheEntry.staticAnalysis.integratedLufs
+              : null;
+            const activeSongIntegratedLufsText =
+              activeSongIntegratedLufs !== null && Number.isFinite(activeSongIntegratedLufs)
+                ? formatMeasuredStat(activeSongIntegratedLufs, 'LUFS')
+                : activeSongCacheStatus === 'pending'
+                  ? '… LUFS'
+                  : '— LUFS';
+            const activeSongIntegratedLufsStatus =
+              activeSongIntegratedLufs !== null && Number.isFinite(activeSongIntegratedLufs)
+                ? 'ready'
+                : activeSongCacheStatus === 'pending'
+                  ? 'pending'
+                  : activeSongCacheStatus === 'error'
+                    ? 'error'
+                    : 'empty';
+            const activeSongIntegratedLufsTitle =
+              activeSongIntegratedLufsStatus === 'ready'
+                ? `Integrated loudness: ${activeSongIntegratedLufsText}\nVersion: ${activeSongVersion?.fileName ?? songRowTitle}\nMeasured across the full file. Less negative is louder; more negative is quieter.`
+                : activeSongIntegratedLufsStatus === 'pending'
+                  ? `Analysing integrated loudness for ${activeSongVersion?.fileName ?? songRowTitle}…`
+                  : activeSongIntegratedLufsStatus === 'error'
+                    ? `Could not analyse integrated loudness for ${activeSongVersion?.fileName ?? songRowTitle} yet.`
+                    : `Integrated loudness will appear here after Producer Player analyses ${activeSongVersion?.fileName ?? songRowTitle}.`;
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
             const songChecklistItems = songChecklists[song.id] ?? [];
             const songChecklistCount = songChecklistItems.length;
@@ -14539,8 +14574,18 @@ export function App(): JSX.Element {
                     <strong className="main-list-row-title" data-testid="main-list-row-title">
                       {songRowTitle}
                     </strong>
-                    <span className="main-list-row-metadata" data-testid="main-list-row-metadata">
-                      {songRowMetadataLabel}
+                    <span className="main-list-row-metadata-group">
+                      <span
+                        className="main-list-row-lufs"
+                        data-testid="main-list-row-integrated-lufs"
+                        data-status={activeSongIntegratedLufsStatus}
+                        title={activeSongIntegratedLufsTitle}
+                      >
+                        {activeSongIntegratedLufsText}
+                      </span>
+                      <span className="main-list-row-metadata" data-testid="main-list-row-metadata">
+                        {songRowMetadataLabel}
+                      </span>
                     </span>
                   </div>
                   <div className="main-list-row-bottom">

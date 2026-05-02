@@ -2548,7 +2548,6 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   border: 1px solid rgba(154, 182, 211, 0.42);
   background: rgba(154, 182, 211, 0.1);
   font-variant-numeric: tabular-nums;
-  cursor: help;
 }
 
 .main-list-row-lufs[data-status='ready'] {
@@ -2557,10 +2556,22 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   background: rgba(92, 167, 255, 0.16);
 }
 
-.main-list-row-lufs[data-status='pending'] {
+.main-list-row-lufs[data-status='loading'] {
   color: #9ab6d3;
   border-color: rgba(154, 182, 211, 0.28);
   background: rgba(154, 182, 211, 0.06);
+  animation: lufs-chip-loading-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes lufs-chip-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.62;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 .main-list-row-lufs[data-status='error'] {

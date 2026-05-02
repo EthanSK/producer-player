@@ -5967,6 +5967,13 @@ export function App(): JSX.Element {
         ),
     [albumSongs]
   );
+  const albumActiveVersionAnalysisKey = useMemo(
+    () =>
+      albumActiveVersions
+        .map(({ version }) => `${version.id}:${buildMasteringCacheKey(version)}`)
+        .join('|'),
+    [albumActiveVersions]
+  );
 
   useEffect(() => {
     if (!selectedSong) {
@@ -6064,7 +6071,7 @@ export function App(): JSX.Element {
     playbackPreviewMode === 'reference' ? null : selectedPlaybackVersionId;
 
   useEffect(() => {
-    if (!selectedFolderId || albumActiveVersions.length === 0) {
+    if (albumActiveVersions.length === 0) {
       return;
     }
 
@@ -6138,9 +6145,9 @@ export function App(): JSX.Element {
       cancelled = true;
     };
   }, [
+    albumActiveVersionAnalysisKey,
     albumActiveVersions,
     createMasteringCacheEntry,
-    selectedFolderId,
     upsertMasteringCacheEntry,
   ]);
 
@@ -14472,28 +14479,22 @@ export function App(): JSX.Element {
             const activeSongIntegratedLufs = activeSongCacheFresh && activeSongCacheEntry
               ? activeSongCacheEntry.staticAnalysis.integratedLufs
               : null;
-            const activeSongIntegratedLufsText =
-              activeSongIntegratedLufs !== null && Number.isFinite(activeSongIntegratedLufs)
-                ? formatMeasuredStat(activeSongIntegratedLufs, 'LUFS')
-                : activeSongCacheStatus === 'pending'
-                  ? '… LUFS'
-                  : '— LUFS';
             const activeSongIntegratedLufsStatus =
               activeSongIntegratedLufs !== null && Number.isFinite(activeSongIntegratedLufs)
                 ? 'ready'
-                : activeSongCacheStatus === 'pending'
-                  ? 'pending'
-                  : activeSongCacheStatus === 'error'
-                    ? 'error'
+                : activeSongCacheStatus === 'error'
+                  ? 'error'
+                  : activeSongVersion
+                    ? 'loading'
                     : 'empty';
-            const activeSongIntegratedLufsTitle =
+            const activeSongIntegratedLufsText =
               activeSongIntegratedLufsStatus === 'ready'
-                ? `Integrated loudness: ${activeSongIntegratedLufsText}\nVersion: ${activeSongVersion?.fileName ?? songRowTitle}\nMeasured across the full file. Less negative is louder; more negative is quieter.`
-                : activeSongIntegratedLufsStatus === 'pending'
-                  ? `Analysing integrated loudness for ${activeSongVersion?.fileName ?? songRowTitle}…`
-                  : activeSongIntegratedLufsStatus === 'error'
-                    ? `Could not analyse integrated loudness for ${activeSongVersion?.fileName ?? songRowTitle} yet.`
-                    : `Integrated loudness will appear here after Producer Player analyses ${activeSongVersion?.fileName ?? songRowTitle}.`;
+                ? formatMeasuredStat(activeSongIntegratedLufs, 'LUFS')
+                : activeSongIntegratedLufsStatus === 'error'
+                  ? 'Error'
+                  : activeSongIntegratedLufsStatus === 'loading'
+                    ? 'Loading'
+                    : 'No LUFS';
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
             const songChecklistItems = songChecklists[song.id] ?? [];
             const songChecklistCount = songChecklistItems.length;
@@ -14579,7 +14580,6 @@ export function App(): JSX.Element {
                         className="main-list-row-lufs"
                         data-testid="main-list-row-integrated-lufs"
                         data-status={activeSongIntegratedLufsStatus}
-                        title={activeSongIntegratedLufsTitle}
                       >
                         {activeSongIntegratedLufsText}
                       </span>

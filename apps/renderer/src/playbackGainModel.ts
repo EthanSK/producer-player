@@ -6,7 +6,7 @@ export interface PlaybackGainStateInput {
 }
 
 export interface PlaybackGainState {
-  monitorVolumeLinear: number;
+  playerVolumeLinear: number;
   transformGainLinear: number;
   audibleGainLinear: number;
 }
@@ -14,14 +14,14 @@ export interface PlaybackGainState {
 export function computePlaybackGainState(
   input: PlaybackGainStateInput
 ): PlaybackGainState {
-  const monitorVolumeLinear = Number.isFinite(input.baseVolume)
+  const playerVolumeLinear = Number.isFinite(input.baseVolume)
     ? Math.max(0, Math.min(input.baseVolume, 1))
     : 1;
   const transformGainLinear = Math.max(0, gainDbToLinear(input.transformGainDb));
 
   return {
-    monitorVolumeLinear,
+    playerVolumeLinear,
     transformGainLinear,
-    audibleGainLinear: monitorVolumeLinear * transformGainLinear,
+    audibleGainLinear: playerVolumeLinear * transformGainLinear,
   };
 }

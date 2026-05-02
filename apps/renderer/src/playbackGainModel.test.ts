@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { computePlaybackGainState } from './playbackGainModel';
 
 describe('computePlaybackGainState', () => {
-  it('keeps base monitor volume separate from preview transforms', () => {
+  it('keeps the final player volume separate from preview transforms', () => {
     const result = computePlaybackGainState({
       baseVolume: 0.25,
       transformGainDb: 6,
     });
 
-    expect(result.monitorVolumeLinear).toBe(0.25);
+    expect(result.playerVolumeLinear).toBe(0.25);
     expect(result.transformGainLinear).toBeCloseTo(1.9953, 3);
     expect(result.audibleGainLinear).toBeCloseTo(0.4988, 3);
   });
@@ -19,7 +19,7 @@ describe('computePlaybackGainState', () => {
       transformGainDb: -6,
     });
 
-    expect(result.monitorVolumeLinear).toBe(1);
+    expect(result.playerVolumeLinear).toBe(1);
     expect(result.transformGainLinear).toBeCloseTo(0.5012, 3);
     expect(result.audibleGainLinear).toBeCloseTo(0.5012, 3);
   });
@@ -30,7 +30,7 @@ describe('computePlaybackGainState', () => {
       transformGainDb: 0,
     });
 
-    expect(result.monitorVolumeLinear).toBe(1);
+    expect(result.playerVolumeLinear).toBe(1);
     expect(result.transformGainLinear).toBe(1);
     expect(result.audibleGainLinear).toBe(1);
   });

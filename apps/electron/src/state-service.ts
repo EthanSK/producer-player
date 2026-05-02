@@ -599,6 +599,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     agentSttProvider: '',
     listeningDevices: [],
     activeListeningDeviceId: null,
+    playbackVolume: 1,
     referenceLevelMatchEnabled: true,
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
@@ -672,6 +673,10 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.activeListeningDeviceId === 'string' && raw.activeListeningDeviceId.trim().length > 0
         ? raw.activeListeningDeviceId
         : null,
+    playbackVolume:
+      typeof raw.playbackVolume === 'number' && Number.isFinite(raw.playbackVolume)
+        ? Math.max(0, Math.min(raw.playbackVolume, 1))
+        : fallback.playbackVolume,
     referenceLevelMatchEnabled:
       typeof raw.referenceLevelMatchEnabled === 'boolean' ? raw.referenceLevelMatchEnabled : fallback.referenceLevelMatchEnabled,
     iCloudBackupEnabled:

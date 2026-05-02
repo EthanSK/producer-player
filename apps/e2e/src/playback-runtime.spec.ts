@@ -1651,6 +1651,59 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
+  test('persists playback volume across restart', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playback-volume-persistence-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-playback-volume-persistence-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=420:duration=4',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Volume Persist v1.wav'),
+    ]);
+
+    let firstLaunch: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+    let secondLaunch: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+
+    try {
+      firstLaunch = await launchProducerPlayer(userDataDirectory);
+      await linkFixtureFolder(firstLaunch.page, fixtureDirectory);
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await firstLaunch.page.getByTestId('player-volume-slider').evaluate((element) => {
+        const input = element as HTMLInputElement;
+        input.value = '25';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      await expect(firstLaunch.page.getByTestId('player-volume-slider')).toHaveValue('25');
+      await expect(firstLaunch.page.getByTestId('player-volume-control')).toContainText('Vol 25%');
+
+      await firstLaunch.page.waitForTimeout(1200);
+      await firstLaunch.electronApp.close();
+      firstLaunch = null;
+
+      secondLaunch = await launchProducerPlayer(userDataDirectory);
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(secondLaunch.page.getByTestId('player-volume-slider')).toHaveValue('25');
+      await expect(secondLaunch.page.getByTestId('player-volume-control')).toContainText('Vol 25%');
+    } finally {
+      await firstLaunch?.electronApp.close();
+      await secondLaunch?.electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('plays multiple AIFF variants by preparing them into local WAV cache', async () => {
     test.skip(!hasFfprobe(), 'ffprobe is required for codec verification in AIFF preparation tests.');
 

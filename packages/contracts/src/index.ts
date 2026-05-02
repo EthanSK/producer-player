@@ -597,6 +597,7 @@ export interface ProducerPlayerUserState {
   activeListeningDeviceId: string | null;
 
   // Preferences
+  playbackVolume: number;
   referenceLevelMatchEnabled: boolean;
   iCloudBackupEnabled: boolean;
   autoUpdateEnabled: boolean;

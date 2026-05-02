@@ -689,6 +689,7 @@ const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
 const SONG_PROJECT_FILE_PATHS_STORAGE_KEY = 'producer-player.song-project-file-paths.v1';
+const PLAYBACK_VOLUME_STORAGE_KEY = 'producer-player.playback-volume.v1';
 const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
 const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
@@ -1847,6 +1848,37 @@ function persistSongProjectFilePaths(projectFilePaths: Record<string, string>): 
   );
 }
 
+function readStoredPlaybackVolume(): number {
+  if (typeof window === 'undefined') {
+    return DEFAULT_PLAYBACK_VOLUME;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PLAYBACK_VOLUME_STORAGE_KEY);
+    if (raw === null) {
+      return DEFAULT_PLAYBACK_VOLUME;
+    }
+
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) {
+      return DEFAULT_PLAYBACK_VOLUME;
+    }
+
+    return Math.max(0, Math.min(parsed, 1));
+  } catch {
+    return DEFAULT_PLAYBACK_VOLUME;
+  }
+}
+
+function persistPlaybackVolume(volume: number): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const normalizedVolume = Math.max(0, Math.min(volume, 1));
+  window.localStorage.setItem(PLAYBACK_VOLUME_STORAGE_KEY, String(normalizedVolume));
+}
+
 function readICloudBackupEnabled(): boolean {
   if (typeof window === 'undefined') {
     return false;
@@ -2454,7 +2486,8 @@ export function App(): JSX.Element {
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [playbackSourceReady, setPlaybackSourceReady] = useState(false);
-  const [volume, setVolume] = useState(DEFAULT_PLAYBACK_VOLUME);
+  const [volume, setVolume] = useState(() => readStoredPlaybackVolume());
+  const initialPlaybackVolumeRef = useRef(volume);
   const [songRatings, setSongRatings] = useState<Record<string, number>>(() =>
     readStoredSongRatings()
   );
@@ -3976,6 +4009,10 @@ export function App(): JSX.Element {
           setReferenceLevelMatchEnabled(userState.referenceLevelMatchEnabled);
         }
 
+        if (typeof userState.playbackVolume === 'number' && Number.isFinite(userState.playbackVolume)) {
+          setVolume(Math.max(0, Math.min(userState.playbackVolume, 1)));
+        }
+
         if (typeof userState.iCloudBackupEnabled === 'boolean') {
           setICloudBackupEnabled(userState.iCloudBackupEnabled);
         }
@@ -4335,6 +4372,7 @@ export function App(): JSX.Element {
         agentSttProvider: '',
         listeningDevices,
         activeListeningDeviceId,
+        playbackVolume: volume,
         referenceLevelMatchEnabled,
         iCloudBackupEnabled,
         autoUpdateEnabled,
@@ -4422,7 +4460,12 @@ export function App(): JSX.Element {
     dawOffsetDefault,
     listeningDevices,
     activeListeningDeviceId,
+    volume,
   ]);
+
+  useEffect(() => {
+    persistPlaybackVolume(volume);
+  }, [volume]);
 
   // -----------------------------------------------------------------------
   // Unified state: listen for changes pushed from main process (e.g. import)
@@ -4472,6 +4515,12 @@ export function App(): JSX.Element {
       if (typeof userState.referenceLevelMatchEnabled === 'boolean') {
         setReferenceLevelMatchEnabled(userState.referenceLevelMatchEnabled);
         window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(userState.referenceLevelMatchEnabled));
+      }
+
+      if (typeof userState.playbackVolume === 'number' && Number.isFinite(userState.playbackVolume)) {
+        const nextPlaybackVolume = Math.max(0, Math.min(userState.playbackVolume, 1));
+        setVolume(nextPlaybackVolume);
+        persistPlaybackVolume(nextPlaybackVolume);
       }
 
       if (typeof userState.iCloudBackupEnabled === 'boolean') {
@@ -5173,7 +5222,7 @@ export function App(): JSX.Element {
       }
     }
 
-    applyPlaybackGain(DEFAULT_PLAYBACK_VOLUME, 0);
+    applyPlaybackGain(initialPlaybackVolumeRef.current, 0);
 
     const onTimeUpdate = () => {
       const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
@@ -14794,7 +14843,7 @@ export function App(): JSX.Element {
               <label
                 className="player-volume-control"
                 data-testid="player-volume-control"
-                title="Adjust playback volume for this app session."
+                title="Adjust playback volume."
               >
                 <span className="muted">Vol {Math.round(volume * 100)}%</span>
                 <input

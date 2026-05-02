@@ -4363,22 +4363,6 @@ button.checklist-play-toggle[data-playing='true'] {
   background: rgba(120, 220, 120, 0.15);
 }
 
-/* Level Match override — visually "off" while Platform Preview is on */
-.level-match--overridden,
-.level-match--overridden:hover {
-  opacity: 0.4;
-  cursor: not-allowed;
-  color: rgba(170, 170, 170, 0.7) !important;
-  border-color: rgba(170, 170, 170, 0.25) !important;
-  background: rgba(170, 170, 170, 0.05) !important;
-  text-decoration: line-through;
-  filter: grayscale(1);
-}
-
-.level-match-overridden-note {
-  opacity: 0.55;
-  font-style: italic;
-}
 
 /* EQ on/off toggle button */
 .eq-toggle-button {

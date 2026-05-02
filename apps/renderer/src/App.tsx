@@ -5203,17 +5203,21 @@ export function App(): JSX.Element {
         analyserR.smoothingTimeConstant = 0.8;
 
         // Audio chain:
-        // source → analyser/meters → preview gain (normalization / level match)
+        // source → preview gain (platform normalization / reference level match)
         // → monitor processing (mid-side / EQ / solo)
-        // → monitor volume trim → destination
-        playbackSourceNode.connect(playbackAnalyserNode);
-        playbackAnalyserNode.connect(playbackTransformGainNode);
-        playbackTransformGainNode.connect(playbackGainNode);
+        // → analyser/meters → monitor volume trim → destination
+        //
+        // Static mastering stats still come from file analysis. The live
+        // analyser should represent the preview bus the user is actually
+        // hearing, while remaining before the final monitor volume trim.
+        playbackSourceNode.connect(playbackTransformGainNode);
+        playbackTransformGainNode.connect(playbackAnalyserNode);
+        playbackAnalyserNode.connect(playbackGainNode);
         playbackTransformGainNode.gain.value = 1;
         playbackGainNode.connect(playbackAudioContext.destination);
         playbackGainNode.gain.value = DEFAULT_PLAYBACK_VOLUME;
 
-        // Stereo split branch (tapped after analyser, before gain)
+        // Stereo split branch (post-preview/post-monitor-processing, pre-volume)
         playbackAnalyserNode.connect(channelSplitter);
         channelSplitter.connect(analyserL, 0);
         channelSplitter.connect(analyserR, 1);
@@ -6307,17 +6311,16 @@ export function App(): JSX.Element {
   //    referenceLevelMatchGainDb = mixLufs - refLufs.
   //    This adjusts reference playback so it sounds equally loud as the mix.
   //
-  // 2. Platform Norm ON + Reference playing:
-  //    normalizationSourceAnalysis switches to the reference track's measured
-  //    LUFS (see ~10 lines above), so normalization is computed from the
-  //    reference's own loudness — i.e. "how would the platform treat this
-  //    reference track?". The mix is normalized from its own measured LUFS.
-  //    Both tracks therefore already land at the platform target loudness.
+  // 2. Platform Norm ON:
+  //    normalizationSourceAnalysis switches to whichever source is audible.
+  //    The mix and reference are each normalized from their own measured LUFS,
+  //    matching platform playback behavior rather than mutating the master.
   //
   // 3. Both ON (Platform Norm + Level Match):
-  //    Level Match is forced to 0 because Platform Norm already equalizes
-  //    both tracks to the target loudness. Level Match only has an effect
-  //    when Platform Norm is off.
+  //    Do not blindly stack the raw level-match gain on top of platform gain.
+  //    Use only the residual post-platform LUFS delta. This is 0 when both
+  //    sources truly converge to the platform target, but still correct for
+  //    down-only / headroom-capped cases where they do not converge.
   // ---------------------------------------------------------------------------
   const referenceLevelMatchGainDb = (() => {
     if (
@@ -6893,14 +6896,16 @@ export function App(): JSX.Element {
   }, [appliedNormalizationGainDb, applyPlaybackGain, volume]);
 
   // Consolidated monitor chain:
-  // preview gain → [mid/side processor] → [EQ filters] → [band solo filters] → monitor volume
-  // Meters tap before both preview gain and monitor volume so their semantics stay stable.
-  // The slider is the final monitor trim; normalization / level-match stay explicit transforms.
+  // preview gain → [mid/side processor] → [EQ filters] → [band solo filters]
+  // → live analyser/meters → monitor volume.
+  // The slider is the final monitor trim; normalization / level-match stay
+  // explicit preview transforms; static file-analysis readouts remain raw.
   useEffect(() => {
     const audioContext = playbackAudioContextRef.current;
     const transformGainNode = playbackTransformGainNodeRef.current;
     const gainNode = playbackGainNodeRef.current;
-    if (!audioContext || !transformGainNode || !gainNode) return;
+    const playbackAnalyserNode = playbackAnalyserNodeRef.current;
+    if (!audioContext || !transformGainNode || !gainNode || !playbackAnalyserNode) return;
 
     // --- Tear down previous chain ---
     if (midSideProcessorRef.current) {
@@ -6963,18 +6968,18 @@ export function App(): JSX.Element {
       }
     }
 
-    // --- Connect band solo filters (or direct to destination) ---
+    // --- Connect band solo filters (or direct to live analyser) ---
     if (soloedBands.size > 0) {
       for (const bandIndex of soloedBands) {
         const band = FREQUENCY_BANDS[bandIndex];
         if (!band) continue;
         const filter = createBandSoloFilter(audioContext, band);
         outputNode.connect(filter);
-        filter.connect(gainNode);
+        filter.connect(playbackAnalyserNode);
         bandSoloFiltersRef.current.push(filter);
       }
     } else {
-      outputNode.connect(gainNode);
+      outputNode.connect(playbackAnalyserNode);
     }
 
     return () => {
@@ -6992,7 +6997,7 @@ export function App(): JSX.Element {
       eqFiltersRef.current = [];
       try {
         transformGainNode.disconnect();
-        transformGainNode.connect(gainNode);
+        transformGainNode.connect(playbackAnalyserNode);
       } catch { /* ignore */ }
     };
   }, [midSideMode, soloedBands, eqBandGains, eqEnabled, desiredPlaybackKey, playbackPreviewMode]);
@@ -13961,7 +13966,7 @@ export function App(): JSX.Element {
                   <div className="analysis-panel-header-stack">
                     <div className="analysis-panel-header-row">
                       <div className="analysis-panel-header-title-block">
-                        <strong>Reference <HelpTooltip text={"Load a professional track you want your mix to sound like, then click A/B to instantly switch between your mix and the reference. This lets you compare EQ balance, dynamics, and overall vibe. When you switch to the reference, the app swaps the entire audio chain to play the reference file instead of your mix. All the analysis meters update to show the reference track's stats so you can compare numbers side by side.\n\nLevel Match adjusts the reference track's volume to match your mix's perceived loudness (LUFS-based). This removes the 'louder sounds better' bias so you can judge quality, not volume.\n\nLevel Match vs Platform Normalization: Level Match makes two tracks the same loudness as each other. Platform normalization targets a specific loudness level (e.g., Spotify's -14 LUFS). They use the same measurement (LUFS) but serve different purposes.\n\nCan you trust Level Match? Yes — if your mix sounds similar to the reference with Level Match on, they'll sound similarly balanced on streaming platforms.\n\nBest workflow:\n• Use Level Match ON for A/B referencing (removes volume bias)\n• Use Platform Normalization OFF while referencing (one variable at a time)\n• Check Platform Normalization separately to preview streaming loudness\n• Press \u2318R (customizable) to quickly toggle between mix and reference\n\nKeyboard shortcut: Press the customizable shortcut (default \u2318R) to toggle between Mix and Reference playback."} links={REFERENCE_TRACK_LINKS} /></strong>
+                        <strong>Reference <HelpTooltip text={"Load a professional track you want your mix to sound like, then click A/B to instantly switch between your mix and the reference. This lets you compare EQ balance, dynamics, and overall vibe. When you switch to the reference, the app swaps the entire audio chain to play the reference file instead of your mix. All the analysis meters update to show the reference track's stats so you can compare numbers side by side.\n\nLevel Match adjusts the reference track's volume to match your mix's perceived loudness (LUFS-based). This removes the 'louder sounds better' bias so you can judge quality, not volume.\n\nLevel Match vs Platform Normalization: Level Match makes two tracks the same loudness as each other. Platform normalization targets a specific loudness level (e.g., Spotify's -14 LUFS). They use the same measurement (LUFS) but serve different purposes.\n\nCan you trust Level Match? Yes — it applies reference gain as a monitor-only audition transform, after platform preview when needed, without changing the master file.\n\nBest workflow:\n• Use Level Match ON for A/B referencing (removes volume bias)\n• Use Platform Normalization separately when you want to audition streaming playback loudness\n• If both are on, Level Match applies only any residual difference left after platform gain\n• Press \u2318R (customizable) to quickly toggle between mix and reference\n\nKeyboard shortcut: Press the customizable shortcut (default \u2318R) to toggle between Mix and Reference playback."} links={REFERENCE_TRACK_LINKS} /></strong>
                         <p className="muted" data-testid="analysis-reference-summary">
                           {referenceTrack
                             ? `${referenceTrack.fileName} · ${
@@ -16625,16 +16630,15 @@ export function App(): JSX.Element {
                             </div>
                             <button
                               type="button"
-                              className={`ghost eq-inline-level-match${referenceLevelMatchEnabled && !normalizationPreviewEnabled ? ' eq-inline-level-match--active' : ''}${normalizationPreviewEnabled ? ' level-match--overridden' : ''}`}
+                              className={`ghost eq-inline-level-match${referenceLevelMatchEnabled ? ' eq-inline-level-match--active' : ''}`}
                               onClick={() => setReferenceLevelMatchEnabled((v) => {
                                 const next = !v;
                                 window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                                 return next;
                               })}
                               data-testid="eq-inline-level-match"
-                              aria-disabled={normalizationPreviewEnabled || undefined}
                               title={normalizationPreviewEnabled && referenceLevelMatchEnabled
-                                ? 'Level Match On (overridden while Platform Preview is on — platform normalization already equalizes both tracks)'
+                                ? `Level Match On (${effectiveReferenceLevelMatchGainDb > 0 ? '+' : ''}${effectiveReferenceLevelMatchGainDb.toFixed(1)} dB residual after Platform Preview)`
                                 : referenceLevelMatchEnabled
                                 ? `Level Match On${referenceLevelMatchGainDb !== 0 ? ` (${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB)` : ''}`
                                 : 'Level Match Off — enable to match reference volume to your mix'}
@@ -16769,7 +16773,7 @@ export function App(): JSX.Element {
                 >
                   <div className="analysis-panel-header-row">
                     <div className="analysis-section-header">
-                    <h4>Reference Track <HelpTooltip text={"Load a professional track you want your mix to sound like, then use the A/B toggle to flip between your mix and the reference. When you click 'Reference', the player switches to the reference file and all meters update to show its analysis. Click 'Mix' to switch back. This makes it easy to spot differences in loudness, EQ, and dynamics without losing your place.\n\nLevel Match adjusts the reference track's volume to match your mix's perceived loudness (LUFS-based). This removes the 'louder sounds better' bias so you can judge quality, not volume.\n\nLevel Match vs Platform Normalization: Level Match makes two tracks the same loudness as each other. Platform normalization targets a specific loudness level (e.g., Spotify's -14 LUFS). They use the same measurement (LUFS) but serve different purposes.\n\nCan you trust Level Match? Yes — if your mix sounds similar to the reference with Level Match on, they'll sound similarly balanced on streaming platforms.\n\nBest workflow:\n• Use Level Match ON for A/B referencing (removes volume bias)\n• Use Platform Normalization OFF while referencing (one variable at a time)\n• Check Platform Normalization separately to preview streaming loudness\n• Press \u2318R (customizable) to quickly toggle between mix and reference\n\nKeyboard shortcut: Press the customizable shortcut (default \u2318R) to toggle between Mix and Reference playback."} links={REFERENCE_TRACK_LINKS} /></h4>
+                    <h4>Reference Track <HelpTooltip text={"Load a professional track you want your mix to sound like, then use the A/B toggle to flip between your mix and the reference. When you click 'Reference', the player switches to the reference file and all meters update to show its analysis. Click 'Mix' to switch back. This makes it easy to spot differences in loudness, EQ, and dynamics without losing your place.\n\nLevel Match adjusts the reference track's volume to match your mix's perceived loudness (LUFS-based). This removes the 'louder sounds better' bias so you can judge quality, not volume.\n\nLevel Match vs Platform Normalization: Level Match makes two tracks the same loudness as each other. Platform normalization targets a specific loudness level (e.g., Spotify's -14 LUFS). They use the same measurement (LUFS) but serve different purposes.\n\nCan you trust Level Match? Yes — it applies reference gain as a monitor-only audition transform, after platform preview when needed, without changing the master file.\n\nBest workflow:\n• Use Level Match ON for A/B referencing (removes volume bias)\n• Use Platform Normalization separately when you want to audition streaming playback loudness\n• If both are on, Level Match applies only any residual difference left after platform gain\n• Press \u2318R (customizable) to quickly toggle between mix and reference\n\nKeyboard shortcut: Press the customizable shortcut (default \u2318R) to toggle between Mix and Reference playback."} links={REFERENCE_TRACK_LINKS} /></h4>
                     <p className="analysis-section-subtitle">Load a reference track to A/B against your mix</p>
                     </div>
                     {renderMasteringPanelDragHandle('fullscreen', 'reference')}
@@ -16862,22 +16866,21 @@ export function App(): JSX.Element {
                     </div>
                   </div>
 
-                  <div className={`analysis-ab-toggle${normalizationPreviewEnabled ? ' level-match--overridden' : ''}`}>
+                  <div className="analysis-ab-toggle">
                     <span className="analysis-ab-label">Level Match <HelpTooltip text="Without level matching, the louder track almost always sounds better to your ears — it's a psychoacoustic trick, not a quality difference. Level Match evens the playing field by calculating the loudness gap between your mix and the reference (mix LUFS minus reference LUFS) and applying that gain offset to the reference during playback. Now both tracks play at roughly the same perceived volume, so you can compare actual quality — EQ, dynamics, stereo image — not just who's louder." links={REFERENCE_TRACK_LINKS} /><TechnicalInfoPopover text={TECH_INFO_LEVEL_MATCH} /></span>
                     <div className="analysis-ab-actions" role="group" aria-label="Level match toggle">
                       <button
                         type="button"
-                        className={referenceLevelMatchEnabled && !normalizationPreviewEnabled ? 'active' : 'ghost'}
+                        className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
                         onClick={() => setReferenceLevelMatchEnabled((v) => {
                           const next = !v;
                           window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                           return next;
                         })}
                         disabled={!referenceTrack}
-                        aria-disabled={normalizationPreviewEnabled || undefined}
                         title={
                           normalizationPreviewEnabled && referenceLevelMatchEnabled
-                            ? 'Overridden while Platform Preview is on — platform normalization already equalizes both tracks to the target loudness'
+                            ? 'While Platform Preview is on, Level Match applies only the residual LUFS difference after platform gain; when both sources land at the target, that residual is 0 dB.'
                             : "Automatically adjust reference playback gain to match your mix's integrated LUFS"
                         }
                         data-testid="analysis-level-match-toggle"
@@ -16887,7 +16890,7 @@ export function App(): JSX.Element {
                       {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
                           {normalizationPreviewEnabled
-                            ? '(overridden by Platform Preview)'
+                            ? `${effectiveReferenceLevelMatchGainDb > 0 ? '+' : ''}${effectiveReferenceLevelMatchGainDb.toFixed(1)} dB residual after Platform Preview`
                             : `${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
                         </span>
                       ) : null}
@@ -18342,19 +18345,18 @@ export function App(): JSX.Element {
                   Reference
                 </button>
               </div>
-              <div className={`floating-ab-level-match${normalizationPreviewEnabled ? ' level-match--overridden' : ''}`}>
+              <div className="floating-ab-level-match">
                 <button
                   type="button"
-                  className={referenceLevelMatchEnabled && !normalizationPreviewEnabled ? 'active' : 'ghost'}
+                  className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
                   onClick={() => setReferenceLevelMatchEnabled((v) => {
                     const next = !v;
                     window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                     return next;
                   })}
-                  aria-disabled={normalizationPreviewEnabled || undefined}
                   title={
                     normalizationPreviewEnabled && referenceLevelMatchEnabled
-                      ? 'Overridden while Platform Preview is on — platform normalization already equalizes both tracks to the target loudness'
+                      ? 'While Platform Preview is on, Level Match applies only the residual LUFS difference after platform gain; when both sources land at the target, that residual is 0 dB.'
                       : 'Match playback levels between mix and reference'
                   }
                   data-testid="floating-ab-level-match"
@@ -18364,7 +18366,7 @@ export function App(): JSX.Element {
                 {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                   <span className="muted">
                     {normalizationPreviewEnabled
-                      ? '(overridden by Platform Preview)'
+                      ? `${effectiveReferenceLevelMatchGainDb > 0 ? '+' : ''}${effectiveReferenceLevelMatchGainDb.toFixed(1)} dB residual after Platform Preview`
                       : `${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB`}
                   </span>
                 ) : null}

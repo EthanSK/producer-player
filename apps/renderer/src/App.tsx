@@ -14553,8 +14553,11 @@ export function App(): JSX.Element {
             const activeSongNextExportFileName = activeSongVersion
               ? buildNextVersionExportFileName(activeSongVersion.fileName)
               : null;
-            const songRowMetadataTitle = activeSongNextExportFileName
-              ? `Click to copy new export filename: ${activeSongNextExportFileName}`
+            const songRowMetadataPopoverId = activeSongVersion
+              ? `main-list-row-metadata-popover-${activeSongVersion.id}`
+              : undefined;
+            const songRowMetadataAriaLabel = activeSongNextExportFileName
+              ? `Copy next export filename: ${activeSongNextExportFileName}`
               : undefined;
             const activeSongCacheEntry = activeSongVersion
               ? masteringCacheByVersionId[activeSongVersion.id]
@@ -14677,8 +14680,8 @@ export function App(): JSX.Element {
                         data-testid="main-list-row-metadata"
                         role="button"
                         tabIndex={activeSongVersion ? 0 : -1}
-                        title={songRowMetadataTitle}
-                        aria-label={songRowMetadataTitle}
+                        aria-label={songRowMetadataAriaLabel}
+                        aria-describedby={songRowMetadataPopoverId}
                         draggable={false}
                         onClick={(event) => {
                           if (!activeSongVersion) {
@@ -14696,6 +14699,20 @@ export function App(): JSX.Element {
                         }}
                       >
                         {songRowMetadataLabel}
+                        {activeSongNextExportFileName && songRowMetadataPopoverId ? (
+                          <span
+                            id={songRowMetadataPopoverId}
+                            className="main-list-row-metadata-popover"
+                            role="tooltip"
+                          >
+                            <span className="main-list-row-metadata-popover-label">
+                              Click to copy new export filename
+                            </span>
+                            <span className="main-list-row-metadata-popover-filename">
+                              {activeSongNextExportFileName}
+                            </span>
+                          </span>
+                        ) : null}
                       </span>
                     </span>
                   </div>

@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type WheelEvent,
@@ -1513,6 +1514,23 @@ function getVersionNumberFromFileName(fileName: string): number | null {
 function getVersionTagFromFileName(fileName: string): string | null {
   const versionNumber = getVersionNumberFromFileName(fileName);
   return versionNumber === null ? null : `v${versionNumber}`;
+}
+
+function buildNextVersionExportFileName(fileName: string): string {
+  const extensionMatch = fileName.match(/(\.[^./\\]+)$/);
+  const extension = extensionMatch?.[1] ?? '';
+  const stem = extension ? fileName.slice(0, -extension.length) : fileName;
+  const versionMatch = stem.match(/^(.*?)([\s_-]?v)(\d+)(?:[\s_-]*archived[\s_-]*\d+)?$/i);
+
+  if (versionMatch) {
+    const currentVersion = Number.parseInt(versionMatch[3] ?? '', 10);
+    const nextVersion = Number.isFinite(currentVersion) && currentVersion >= 1
+      ? currentVersion + 1
+      : 2;
+    return `${versionMatch[1] ?? ''}${versionMatch[2] ?? ' v'}${nextVersion}${extension}`;
+  }
+
+  return `${stem} v2${extension}`;
 }
 
 function getSongRowMetadataLabel(song: SongWithVersions): string {
@@ -5973,6 +5991,25 @@ export function App(): JSX.Element {
         .map(({ version }) => `${version.id}:${buildMasteringCacheKey(version)}`)
         .join('|'),
     [albumActiveVersions]
+  );
+  const handleCopyNextVersionExportFileName = useCallback(
+    (
+      event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+      version: SongVersion
+    ) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const nextFileName = buildNextVersionExportFileName(version.fileName);
+      window.producerPlayer.copyTextToClipboard(nextFileName).catch((error: unknown) => {
+        void window.producerPlayer.rendererLog('warn', 'Could not copy next export filename', {
+          error: error instanceof Error ? error.message : String(error),
+          fileName: version.fileName,
+          nextFileName,
+        });
+      });
+    },
+    []
   );
 
   useEffect(() => {
@@ -14467,6 +14504,12 @@ export function App(): JSX.Element {
             const songRowTitle = getSongDisplayTitle(song);
             const songRowMetadataLabel = getSongRowMetadataLabel(song);
             const activeSongVersion = getActiveSongVersion(song);
+            const activeSongNextExportFileName = activeSongVersion
+              ? buildNextVersionExportFileName(activeSongVersion.fileName)
+              : null;
+            const songRowMetadataTitle = activeSongNextExportFileName
+              ? `Click to copy new export filename: ${activeSongNextExportFileName}`
+              : undefined;
             const activeSongCacheEntry = activeSongVersion
               ? masteringCacheByVersionId[activeSongVersion.id]
               : undefined;
@@ -14583,7 +14626,29 @@ export function App(): JSX.Element {
                       >
                         {activeSongIntegratedLufsText}
                       </span>
-                      <span className="main-list-row-metadata" data-testid="main-list-row-metadata">
+                      <span
+                        className="main-list-row-metadata"
+                        data-testid="main-list-row-metadata"
+                        role="button"
+                        tabIndex={activeSongVersion ? 0 : -1}
+                        title={songRowMetadataTitle}
+                        aria-label={songRowMetadataTitle}
+                        draggable={false}
+                        onClick={(event) => {
+                          if (!activeSongVersion) {
+                            return;
+                          }
+                          handleCopyNextVersionExportFileName(event, activeSongVersion);
+                        }}
+                        onKeyDown={(event) => {
+                          if (!activeSongVersion) {
+                            return;
+                          }
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            handleCopyNextVersionExportFileName(event, activeSongVersion);
+                          }
+                        }}
+                      >
                         {songRowMetadataLabel}
                       </span>
                     </span>

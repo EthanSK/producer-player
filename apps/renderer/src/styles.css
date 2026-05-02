@@ -2587,6 +2587,20 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   color: #9ab6d3;
   border: 1px solid rgba(154, 182, 211, 0.36);
   background: rgba(92, 167, 255, 0.12);
+  cursor: pointer;
+  user-select: none;
+}
+
+.main-list-row-metadata:hover,
+.main-list-row-metadata:focus-visible {
+  color: #ecf6ff;
+  border-color: rgba(92, 167, 255, 0.68);
+  background: rgba(92, 167, 255, 0.2);
+}
+
+.main-list-row-metadata:focus-visible {
+  outline: 2px solid rgba(92, 167, 255, 0.55);
+  outline-offset: 2px;
 }
 
 .song-project-button,

@@ -12765,6 +12765,12 @@ export function App(): JSX.Element {
       empty: 'Applied change —',
     }
   );
+  const floatingNormalizationGainText =
+    normalizationSourceStatus === 'loading'
+      ? '… dB'
+      : normalizationSourceStatus === 'ready' && typeof normalizationPreview?.appliedGainDb === 'number'
+        ? formatSignedLevel(normalizationPreview.appliedGainDb)
+        : '— dB';
   const normalizationProjectedText = buildAnalysisValue(
     normalizationSourceStatus,
     formatMeasuredStat(normalizationPreview?.projectedIntegratedLufs, 'LUFS'),
@@ -18635,14 +18641,17 @@ export function App(): JSX.Element {
             disabled={normalizationSourceStatus !== 'ready' || !normalizationPreview}
             title={`${selectedNormalizationPlatform.label} normalization preview ${
               normalizationPreviewEnabled ? 'on' : 'off'
-            } — click to turn it ${normalizationPreviewEnabled ? 'off' : 'on'}`}
-            aria-label={`${normalizationPreviewEnabled ? 'Turn off' : 'Turn on'} ${selectedNormalizationPlatform.label} normalization preview`}
+            } · ${floatingNormalizationGainText} — click to turn it ${normalizationPreviewEnabled ? 'off' : 'on'}`}
+            aria-label={`${normalizationPreviewEnabled ? 'Turn off' : 'Turn on'} ${selectedNormalizationPlatform.label} normalization preview (${floatingNormalizationGainText})`}
           >
             <span className="floating-platform-preview-state" aria-hidden="true">
               {normalizationPreviewEnabled ? 'On' : 'Off'}
             </span>
             <span className="floating-platform-preview-icon analysis-platform-icon" aria-hidden="true">
               <PlatformIcon platformId={selectedNormalizationPlatformId} />
+            </span>
+            <span className="floating-platform-preview-gain" aria-hidden="true">
+              {floatingNormalizationGainText}
             </span>
           </button>
           <button

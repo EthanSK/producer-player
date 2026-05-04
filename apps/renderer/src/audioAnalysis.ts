@@ -103,6 +103,19 @@ export function promotePreviewAnalysis(
   previewAnalysisQueue.promote(key, priority);
 }
 
+/**
+ * v3.115 Windows-CI diagnostic: expose preview queue stats so e2e specs can
+ * dump them on failure.
+ */
+export function getPreviewAnalysisQueueStats(): {
+  active: number;
+  pending: number;
+  concurrency: number;
+  label: string;
+} {
+  return previewAnalysisQueue.stats();
+}
+
 function createMonoData(buffer: AudioBuffer): Float32Array {
   const mono = new Float32Array(buffer.length);
   const channelCount = buffer.numberOfChannels;

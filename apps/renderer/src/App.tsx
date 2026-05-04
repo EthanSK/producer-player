@@ -65,6 +65,7 @@ import {
   ANALYSIS_PRIORITY_BACKGROUND,
   ANALYSIS_PRIORITY_USER_SELECTED,
   estimateShortTermLufs,
+  getPreviewAnalysisQueueStats,
   promotePreviewAnalysis,
   type TrackAnalysisResult,
 } from './audioAnalysis';
@@ -8709,6 +8710,11 @@ export function App(): JSX.Element {
             __producerPlayerAiRecMockCallCount?: number;
           }
         ).__producerPlayerAiRecMockCallCount ?? 0,
+      // v3.115 Windows-CI diagnostic: queue stats. If a test sees "stuck
+      // loading" with active>=1 here, the queue is mid-flight — likely
+      // ffmpeg / decodeAudioData hung, not a queue logic bug.
+      previewQueueStats: getPreviewAnalysisQueueStats(),
+      measuredQueueStats: MEASURED_ANALYSIS_QUEUE.stats(),
     });
     return () => {
       delete (window as unknown as {

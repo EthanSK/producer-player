@@ -1018,16 +1018,21 @@ export class UserStateService {
   }
 
   /**
-   * Write a full user state while preserving the latest on-disk
-   * `perTrackAiRecommendations` value. Used by the renderer's debounced
-   * full-state sync, which sends `{}` as a placeholder for AI recs.
+   * Write a full user state while preserving main-process-owned storage slices
+   * that the renderer's debounced full-state sync sends as placeholders or does
+   * not know about at all.
    *
-   * Codex-found (2026-04-18, round 2): without going through the AI-rec
-   * write queue, a `SET_USER_STATE` invocation can race with a concurrent
+   * Codex-found (2026-04-18, round 2): without going through the shared write
+   * queue, a `SET_USER_STATE` invocation can race with a concurrent
    * `setAiRecommendation` — the full-state handler read `existing.perTrack...`
    * before the rec write flipped state, then writes that stale slice back.
-   * Routing the preserve-and-write through the AI queue forces a happens-
-   * after on any concurrent rec mutation.
+   * Routing the preserve-and-write through the same queue forces a happens-
+   * after on concurrent state mutations.
+   *
+   * v3.121 regression guard: pluginLibrary/perTrackPluginChains are also owned
+   * by dedicated main-process IPC handlers. If the renderer's debounced sync is
+   * allowed to publish its missing/default values, it wipes the scanned plugin
+   * cache and per-song insert chains during ordinary UI state saves.
    */
   async writeUserStatePreservingAiRecommendations(
     incoming: ProducerPlayerUserState,
@@ -1037,6 +1042,8 @@ export class UserStateService {
       const merged: ProducerPlayerUserState = {
         ...incoming,
         perTrackAiRecommendations: current.perTrackAiRecommendations,
+        pluginLibrary: current.pluginLibrary,
+        perTrackPluginChains: current.perTrackPluginChains,
       };
       return this.writeUserState(merged);
     });

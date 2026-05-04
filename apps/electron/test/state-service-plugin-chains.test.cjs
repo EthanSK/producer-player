@@ -196,6 +196,53 @@ test('setPluginLibrary / getPluginLibrary round-trip through disk', async () => 
   }
 });
 
+test('renderer full-state sync preserves plugin library and per-track chains', async () => {
+  const tmp = mktmp();
+  try {
+    migrateStateIfNeeded(tmp);
+    const service = new UserStateService(tmp);
+
+    const library = {
+      plugins: [
+        {
+          id: 'vst3:critical-preserve',
+          name: 'Critical Preserve',
+          vendor: 'Regression Audio',
+          format: 'vst3',
+          version: '1.0.0',
+          path: '/Library/Audio/Plug-Ins/VST3/Critical Preserve.vst3',
+          categories: ['Fx'],
+          isSupported: true,
+          failureReason: null,
+        },
+      ],
+      scannedAt: new Date().toISOString(),
+      scanVersion: 1,
+    };
+    await service.setPluginLibrary(library);
+    await service.addPluginToChain('song-critical', 'vst3:critical-preserve');
+
+    const syncPayload = JSON.parse(JSON.stringify(await service.readUserState()));
+    syncPayload.pluginLibrary = undefined;
+    syncPayload.perTrackPluginChains = {};
+    syncPayload.albumTitle = 'Renderer sync payload';
+
+    await service.writeUserStatePreservingAiRecommendations(syncPayload);
+
+    const reader = await reload(tmp);
+    const preservedLibrary = await reader.getPluginLibrary();
+    const preservedChain = await reader.getTrackPluginChain('song-critical');
+
+    assert.ok(preservedLibrary);
+    assert.equal(preservedLibrary.plugins[0].id, 'vst3:critical-preserve');
+    assert.equal(preservedChain.items.length, 1);
+    assert.equal(preservedChain.items[0].pluginId, 'vst3:critical-preserve');
+    assert.equal((await reader.readUserState()).albumTitle, 'Renderer sync payload');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('getPluginLibrary returns null when nothing has been scanned yet', async () => {
   const tmp = mktmp();
   try {

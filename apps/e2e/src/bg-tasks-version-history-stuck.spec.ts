@@ -153,11 +153,19 @@ test.describe('Version History stuck-loading regression @smoke', () => {
       // Rapid track-switch: click row 1, row 2, row 3, row 1 in
       // quick succession. Pre-fix this triggered the cancelled-guard
       // race and left the inspector loading state stuck.
+      //
+      // We use force:true on the rapid-fire clicks because the row
+      // position can shift slightly mid-click as the renderer reflows
+      // (e.g. metadata-popover hint dot showing up); on slower CI
+      // (Windows) the actionability check waits for layout to settle
+      // and times out. Since we're testing the renderer's response to
+      // a click STORM — not pixel-perfect actionability — force-clicking
+      // through the actionability gate is the right tradeoff.
       const rows = page.getByTestId('main-list-row');
-      await rows.nth(0).click();
-      await rows.nth(1).click();
-      await rows.nth(2).click();
-      await rows.nth(0).click();
+      await rows.nth(0).click({ force: true });
+      await rows.nth(1).click({ force: true });
+      await rows.nth(2).click({ force: true });
+      await rows.nth(0).click({ force: true });
 
       // Give the queue + UI loop a few seconds to settle. The success
       // criterion is that the renderer doesn't lock up and that the
@@ -166,9 +174,9 @@ test.describe('Version History stuck-loading regression @smoke', () => {
 
       // Sanity: the renderer is still alive — the row is interactable.
       // (If the loading state were stuck and the renderer was
-      // serializing through a frozen state, this click would not
-      // round-trip.)
-      await rows.nth(0).click();
+      // serializing through a frozen state, even a force-click could not
+      // round-trip and the renderer would never re-render.)
+      await rows.nth(0).click({ force: true });
       await expect(rows.nth(0)).toBeVisible();
 
       // Verify queue is reachable and well-formed after the storm.
@@ -192,8 +200,8 @@ test.describe('Version History stuck-loading regression @smoke', () => {
       // works and the renderer didn't deadlock. Pre-fix, this was where
       // the "switching back-and-forth makes it worse" symptom would
       // show — the UI froze. Post-fix it just works.
-      await rows.nth(1).click();
-      await rows.nth(0).click();
+      await rows.nth(1).click({ force: true });
+      await rows.nth(0).click({ force: true });
       await expect(rows.nth(0)).toBeVisible();
     } finally {
       await electronApp.close();

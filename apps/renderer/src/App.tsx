@@ -6301,21 +6301,28 @@ export function App(): JSX.Element {
     // ffmpeg time before the user could rapid-switch without spinners. Now
     // the pool keeps up to 2 ffmpeg jobs in flight; the user-selected track
     // still jumps the queue via the selected-effect promotion below.
+    //
+    // Cancellation policy: we DO NOT bail the upsert path on `cancelled`.
+    // The mastering cache is renderer-global state, and writing the analysis
+    // to it (idempotent under cacheKey) is always desirable even if the
+    // album view re-rendered mid-flight (e.g. the snapshot updated from a
+    // file-watcher rescan). We only skip the renderer-state setters that
+    // belong to the current render cycle. This avoids a race where rapid
+    // snapshot updates kept cancelling the in-flight analysis runs and the
+    // cache never got populated for non-selected tracks.
     void (async () => {
       const tasks = albumActiveVersions.map(async (entry) => {
-        if (cancelled) {
-          return;
-        }
-
         const { song, version } = entry;
         const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
         const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
 
         if (isFresh) {
-          setMasteringCacheStatusByVersionId((previous) => ({
-            ...previous,
-            [version.id]: { status: 'fresh', error: null },
-          }));
+          if (!cancelled) {
+            setMasteringCacheStatusByVersionId((previous) => ({
+              ...previous,
+              [version.id]: { status: 'fresh', error: null },
+            }));
+          }
           return;
         }
 
@@ -6324,13 +6331,15 @@ export function App(): JSX.Element {
         }
 
         masteringCachePendingVersionIdsRef.current.add(version.id);
-        setMasteringCacheStatusByVersionId((previous) => ({
-          ...previous,
-          [version.id]: {
-            status: 'pending',
-            error: null,
-          },
-        }));
+        if (!cancelled) {
+          setMasteringCacheStatusByVersionId((previous) => ({
+            ...previous,
+            [version.id]: {
+              status: 'pending',
+              error: null,
+            },
+          }));
+        }
 
         try {
           const cacheKey = buildMasteringCacheKey(version);
@@ -6339,10 +6348,7 @@ export function App(): JSX.Element {
             cacheKey,
           });
 
-          if (cancelled) {
-            return;
-          }
-
+          // Always upsert to the global cache — idempotent under cacheKey.
           upsertMasteringCacheEntry(
             createMasteringCacheEntry({
               source: 'background-preload',

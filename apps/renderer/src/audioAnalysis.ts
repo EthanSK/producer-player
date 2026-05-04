@@ -1,3 +1,10 @@
+import {
+  AnalysisQueue,
+  ANALYSIS_PRIORITY_BACKGROUND,
+  ANALYSIS_PRIORITY_USER_SELECTED,
+  type AnalysisPriority,
+} from './audioAnalysisQueue';
+
 export interface TonalBalanceSnapshot {
   low: number;
   mid: number;
@@ -25,9 +32,20 @@ const LOW_BAND_CUTOFF_HZ = 250;
 const HIGH_BAND_CUTOFF_HZ = 4_000;
 
 // Full-track decode can be very memory-hungry for long WAV/AIFF files.
-// Keep preview analyses serialized so rapid track switches do not stack
-// multiple huge decode jobs in parallel and blow up renderer memory.
-let analysisQueueTail: Promise<void> = Promise.resolve();
+// We keep concurrency=1 here so we never have two huge decoded AudioBuffers
+// alive at the same moment. The priority queue lets a user-selected track
+// jump ahead of pending background-preload jobs (item #10, v3.110). Re-export
+// the queue priorities so callers don't need a second import.
+const previewAnalysisQueue = new AnalysisQueue({
+  concurrency: 1,
+  label: 'preview-analysis',
+});
+
+export {
+  ANALYSIS_PRIORITY_BACKGROUND,
+  ANALYSIS_PRIORITY_USER_SELECTED,
+} from './audioAnalysisQueue';
+export type { AnalysisPriority } from './audioAnalysisQueue';
 
 function createAbortError(): Error {
   return new DOMException('The analysis request was aborted.', 'AbortError');
@@ -63,21 +81,26 @@ function amplitudeToDbfs(value: number): number {
   return Math.max(MIN_DECIBELS, 20 * Math.log10(value));
 }
 
-async function runSerializedAnalysis<T>(task: () => Promise<T>): Promise<T> {
-  const previous = analysisQueueTail.catch(() => undefined);
-  let release: () => void = () => undefined;
+// Internal: enqueue a preview-analysis task with the shared priority queue.
+function runPreviewAnalysis<T>(
+  task: () => Promise<T>,
+  options: { priority?: AnalysisPriority; key?: string } = {}
+): Promise<T> {
+  return previewAnalysisQueue.enqueue(task, options);
+}
 
-  analysisQueueTail = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-
-  await previous;
-
-  try {
-    return await task();
-  } finally {
-    release();
-  }
+/**
+ * Reprioritize a queued preview analysis (item #10). Useful when the user
+ * clicks a track that was already enqueued at background priority — we want
+ * it to jump ahead of the rest of the preload queue without re-decoding.
+ *
+ * No-op when the task is already running, has settled, or was never enqueued.
+ */
+export function promotePreviewAnalysis(
+  key: string,
+  priority: AnalysisPriority = ANALYSIS_PRIORITY_USER_SELECTED
+): void {
+  previewAnalysisQueue.promote(key, priority);
 }
 
 function createMonoData(buffer: AudioBuffer): Float32Array {
@@ -254,9 +277,10 @@ function computeWaveformPeaks(mono: Float32Array, bucketCount: number): Float32A
 
 export async function analyzeTrackFromUrl(
   url: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: { priority?: AnalysisPriority; key?: string } = {}
 ): Promise<TrackAnalysisResult> {
-  return runSerializedAnalysis(async () => {
+  return runPreviewAnalysis(async () => {
     ensureNotAborted(signal);
 
     const response = await fetch(url, { signal });
@@ -304,7 +328,7 @@ export async function analyzeTrackFromUrl(
     } finally {
       void context.close().catch(() => undefined);
     }
-  });
+  }, options);
 }
 
 export function estimateShortTermLufs(

@@ -62,9 +62,13 @@ import type {
 } from '@producer-player/contracts';
 import {
   analyzeTrackFromUrl,
+  ANALYSIS_PRIORITY_BACKGROUND,
+  ANALYSIS_PRIORITY_USER_SELECTED,
   estimateShortTermLufs,
+  promotePreviewAnalysis,
   type TrackAnalysisResult,
 } from './audioAnalysis';
+import { AnalysisQueue, type AnalysisPriority } from './audioAnalysisQueue';
 import {
   getMasteringChecklistRuleById,
   getMasteringChecklistRuleMeta,
@@ -117,6 +121,7 @@ import { FREQUENCY_BANDS, createBandSoloFilter, createPeakingEqFilter, computeEq
 import { EqGainSliders, EQ_GAIN_DEFAULT_DB } from './EqGainSliders';
 import { HelpTooltip } from './HelpTooltip';
 import { TechnicalInfoPopover } from './TechnicalInfoPopover';
+import { KWeightingCurveModal } from './KWeightingCurveModal';
 import {
   TECH_INFO_INTEGRATED_LUFS,
   TECH_INFO_TRUE_PEAK,
@@ -1058,6 +1063,59 @@ function cacheMasteringAnalysisValue<T>(
     }
     cache.delete(oldestKey);
   }
+}
+
+// Item #10 (v3.110) — track-switch precompute / cache.
+//
+// Renderer-side priority pool for `window.producerPlayer.analyzeAudioFile`
+// (main-process ffmpeg ebur128). Concurrency=2 so two ffmpeg jobs can chew at
+// the bg-preload backlog in parallel without spiking CPU on the user's
+// machine. The user-selected track is enqueued at priority 0 so it always
+// jumps ahead of pending background-preload jobs.
+//
+// Module-level (not per-instance) because the IPC endpoint and the OS-level
+// CPU budget are shared regardless of how many App.tsx mounts exist.
+const MEASURED_ANALYSIS_QUEUE = new AnalysisQueue({
+  concurrency: 2,
+  label: 'measured-analysis',
+});
+
+interface RunMeasuredAnalysisOptions {
+  priority?: AnalysisPriority;
+  /** Enables de-dup: identical key returns the in-flight result. */
+  cacheKey?: string;
+}
+
+/**
+ * Throttled wrapper around the ffmpeg-backed `analyzeAudioFile` IPC.
+ * Centralizing the call site lets us:
+ *   - cap concurrent ffmpeg processes at 2 (modest CPU + IPC budget)
+ *   - prioritize the user-selected track over background preloads
+ *   - dedupe simultaneous requests for the same version (cache key)
+ */
+function runMeasuredAnalysis(
+  filePath: string,
+  options: RunMeasuredAnalysisOptions = {}
+): Promise<AudioFileAnalysis> {
+  return MEASURED_ANALYSIS_QUEUE.enqueue(
+    () => window.producerPlayer.analyzeAudioFile(filePath),
+    {
+      priority: options.priority ?? ANALYSIS_PRIORITY_BACKGROUND,
+      key: options.cacheKey,
+    }
+  );
+}
+
+/**
+ * Re-prioritize an already-queued measured-analysis job. No-op if the job
+ * is running or already settled. Used when the user selects a track whose
+ * background preload is still pending.
+ */
+function promoteMeasuredAnalysis(
+  cacheKey: string,
+  priority: AnalysisPriority = ANALYSIS_PRIORITY_USER_SELECTED
+): void {
+  MEASURED_ANALYSIS_QUEUE.promote(cacheKey, priority);
 }
 
 function PlatformIcon({ platformId }: { platformId: NormalizationPlatformId }): JSX.Element {
@@ -2592,6 +2650,12 @@ export function App(): JSX.Element {
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
+  // v3.110 — K-weighting / LUFS frequency-weighting curve modal. Triggered
+  // from the button immediately to the LEFT of the ✨ AI Stars button in
+  // the fullscreen mastering header. Shows the ITU-R BS.1770-4 K-weighting
+  // shape so producers can see the per-frequency weight LUFS applies
+  // before integrating loudness.
+  const [kWeightingModalOpen, setKWeightingModalOpen] = useState(false);
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
   const [checklistTimestampMode, setChecklistTimestampMode] = useState<'live' | 'frozen'>('live');
@@ -3024,21 +3088,60 @@ export function App(): JSX.Element {
     []
   );
 
-  const persistMasteringCache = useCallback(
-    async (nextEntriesByVersionId: Record<string, MasteringCacheEntry>) => {
-      const payload: MasteringAnalysisCachePayload = {
-        schemaVersion: MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
-        updatedAt: new Date().toISOString(),
-        entries: Object.values(nextEntriesByVersionId),
-      };
+  // Item #10 (v3.110) — single-flight write with re-trigger.
+  //
+  // With the album-active background preload now fanning out at concurrency=2
+  // through MEASURED_ANALYSIS_QUEUE, multiple `upsertMasteringCacheEntry`
+  // calls fire in quick succession. Each one used to schedule its own
+  // `writeMasteringAnalysisCache` IPC, and the IPC responses could arrive at
+  // main out of order — a stale "earlier snapshot" write could land AFTER a
+  // newer one and clobber freshly-cached entries. We serialize via a single
+  // in-flight write and a "dirty" bit: while a write is running, additional
+  // upserts mark the cache dirty; when the write finishes, if dirty was set
+  // we run another write (which always reads the LATEST in-memory snapshot).
+  // This guarantees: (a) at most one IPC in flight at any time, (b) the
+  // final on-disk state reflects the final in-memory state, (c) we never
+  // burn IPCs scheduling redundant writes during a burst.
+  const persistMasteringCacheRunningRef = useRef<boolean>(false);
+  const persistMasteringCacheDirtyRef = useRef<boolean>(false);
 
-      const nextState = await window.producerPlayer.writeMasteringAnalysisCache(payload);
-      setMasteringCacheFilePath(nextState.cacheFilePath);
-      setMasteringCacheDirectoryPath(nextState.cacheDirectoryPath);
-      setMasteringCacheUpdatedAt(nextState.payload.updatedAt);
-    },
-    []
-  );
+  const persistMasteringCache = useCallback(async (): Promise<void> => {
+    if (persistMasteringCacheRunningRef.current) {
+      // A write is in flight; mark dirty so it re-runs once it finishes.
+      persistMasteringCacheDirtyRef.current = true;
+      return;
+    }
+
+    persistMasteringCacheRunningRef.current = true;
+    persistMasteringCacheDirtyRef.current = false;
+
+    try {
+      // Loop until no further upserts arrive during the in-flight write.
+      // Each iteration always reads the LATEST snapshot from the ref.
+      // eslint-disable-next-line no-constant-condition -- loop exits via break
+      while (true) {
+        const snapshot = masteringCacheByVersionIdRef.current;
+        const payload: MasteringAnalysisCachePayload = {
+          schemaVersion: MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
+          updatedAt: new Date().toISOString(),
+          entries: Object.values(snapshot),
+        };
+
+        // eslint-disable-next-line no-await-in-loop -- intentional: serialize IPCs
+        const nextState = await window.producerPlayer.writeMasteringAnalysisCache(payload);
+        setMasteringCacheFilePath(nextState.cacheFilePath);
+        setMasteringCacheDirectoryPath(nextState.cacheDirectoryPath);
+        setMasteringCacheUpdatedAt(nextState.payload.updatedAt);
+
+        if (!persistMasteringCacheDirtyRef.current) {
+          break;
+        }
+        persistMasteringCacheDirtyRef.current = false;
+      }
+    } finally {
+      persistMasteringCacheRunningRef.current = false;
+    }
+  }, []);
 
   const upsertMasteringCacheEntry = useCallback(
     (entry: MasteringCacheEntry) => {
@@ -3058,7 +3161,10 @@ export function App(): JSX.Element {
         ...previous,
         [entry.versionId]: { status: 'fresh', error: null },
       }));
-      void persistMasteringCache(nextEntriesByVersionId).catch(() => undefined);
+      // Item #10 — persistMasteringCache() always reads the latest ref at
+      // write time and serializes via a tail promise, so callers don't have
+      // to pass the snapshot through.
+      void persistMasteringCache().catch(() => undefined);
     },
     [persistMasteringCache]
   );
@@ -3240,12 +3346,25 @@ export function App(): JSX.Element {
     setAnalysisStatus('loading');
     setAnalysisError(null);
 
+    // Item #10 — promote any already-queued background preload for this
+    // version to user-selected priority so it jumps ahead of the rest of the
+    // backlog. If the version isn't in the queue (cache hit, or never
+    // enqueued), promote() is a no-op.
+    promotePreviewAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
+    promoteMeasuredAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
+
     const previewPromise = cached.previewAnalysis
       ? Promise.resolve(cached.previewAnalysis)
-      : analyzeTrackFromUrl(mixPlaybackSource.url, controller.signal);
+      : analyzeTrackFromUrl(mixPlaybackSource.url, controller.signal, {
+          priority: ANALYSIS_PRIORITY_USER_SELECTED,
+          key: analysisCacheKey,
+        });
     const measuredPromise = cached.measuredAnalysis
       ? Promise.resolve(cached.measuredAnalysis)
-      : window.producerPlayer.analyzeAudioFile(analysisFilePath);
+      : runMeasuredAnalysis(analysisFilePath, {
+          priority: ANALYSIS_PRIORITY_USER_SELECTED,
+          cacheKey: analysisCacheKey,
+        });
 
     void Promise.all([previewPromise, measuredPromise])
       .then(([previewResult, measuredResult]) => {
@@ -3322,7 +3441,14 @@ export function App(): JSX.Element {
     // overlay. Runs globally because the switchers are available from any
     // view, not just the mastering fullscreen. Order: version switcher
     // (innermost control) → song/quick switcher → mastering overlay.
+    //
+    // v3.110 — when the K-weighting curve modal is open, it owns Escape
+    // (its own handler dismisses it). Skip this handler entirely so the
+    // mastering overlay isn't co-dismissed underneath the modal.
     if (!analysisExpanded && !quickSwitcherOpen && !versionSwitcherOpen) {
+      return;
+    }
+    if (kWeightingModalOpen) {
       return;
     }
 
@@ -3342,7 +3468,7 @@ export function App(): JSX.Element {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [analysisExpanded, quickSwitcherOpen, versionSwitcherOpen]);
+  }, [analysisExpanded, quickSwitcherOpen, versionSwitcherOpen, kWeightingModalOpen]);
 
   // Track viewport width so the inspector collapses into a drawer at narrow
   // widths. The threshold matches the matching CSS media query in styles.css.
@@ -5869,15 +5995,19 @@ export function App(): JSX.Element {
 
     let cancelled = false;
 
+    // Item #10 (v3.110) — fan inspector-version analyses out through the
+    // shared MEASURED_ANALYSIS_QUEUE at background priority. Concurrency is
+    // capped inside the pool (currently 2). The selected-track effect promotes
+    // its own job to user-priority, so this loop never starves a click.
     void (async () => {
-      for (const version of inspectorVersions) {
+      const tasks = inspectorVersions.map(async (version) => {
         if (cancelled) {
           return;
         }
 
         const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
         if (isMasteringCacheEntryFresh(cachedEntry, version)) {
-          continue;
+          return;
         }
 
         const cacheKey = buildMasteringCacheKey(version);
@@ -5888,11 +6018,11 @@ export function App(): JSX.Element {
           statusState.cacheKey === cacheKey &&
           (statusState.status === 'ready' || statusState.status === 'loading')
         ) {
-          continue;
+          return;
         }
 
         if (inspectorVersionSampleRatePendingVersionIdsRef.current.has(version.id)) {
-          continue;
+          return;
         }
 
         inspectorVersionSampleRatePendingVersionIdsRef.current.add(version.id);
@@ -5928,7 +6058,10 @@ export function App(): JSX.Element {
         });
 
         try {
-          const measured = await window.producerPlayer.analyzeAudioFile(version.filePath);
+          const measured = await runMeasuredAnalysis(version.filePath, {
+            priority: ANALYSIS_PRIORITY_BACKGROUND,
+            cacheKey,
+          });
 
           if (cancelled) {
             return;
@@ -5983,7 +6116,9 @@ export function App(): JSX.Element {
         } finally {
           inspectorVersionSampleRatePendingVersionIdsRef.current.delete(version.id);
         }
-      }
+      });
+
+      await Promise.allSettled(tasks);
     })();
 
     return () => {
@@ -6133,8 +6268,14 @@ export function App(): JSX.Element {
 
     let cancelled = false;
 
+    // Item #10 (v3.110) — fan album-active-version preloads through the
+    // shared MEASURED_ANALYSIS_QUEUE at background priority. Previously this
+    // ran sequentially per album, so a 30-track album took 30× single-track
+    // ffmpeg time before the user could rapid-switch without spinners. Now
+    // the pool keeps up to 2 ffmpeg jobs in flight; the user-selected track
+    // still jumps the queue via the selected-effect promotion below.
     void (async () => {
-      for (const entry of albumActiveVersions) {
+      const tasks = albumActiveVersions.map(async (entry) => {
         if (cancelled) {
           return;
         }
@@ -6148,11 +6289,11 @@ export function App(): JSX.Element {
             ...previous,
             [version.id]: { status: 'fresh', error: null },
           }));
-          continue;
+          return;
         }
 
         if (masteringCachePendingVersionIdsRef.current.has(version.id)) {
-          continue;
+          return;
         }
 
         masteringCachePendingVersionIdsRef.current.add(version.id);
@@ -6165,7 +6306,11 @@ export function App(): JSX.Element {
         }));
 
         try {
-          const measured = await window.producerPlayer.analyzeAudioFile(version.filePath);
+          const cacheKey = buildMasteringCacheKey(version);
+          const measured = await runMeasuredAnalysis(version.filePath, {
+            priority: ANALYSIS_PRIORITY_BACKGROUND,
+            cacheKey,
+          });
 
           if (cancelled) {
             return;
@@ -6194,7 +6339,9 @@ export function App(): JSX.Element {
         } finally {
           masteringCachePendingVersionIdsRef.current.delete(version.id);
         }
-      }
+      });
+
+      await Promise.allSettled(tasks);
     })();
 
     return () => {
@@ -9692,13 +9839,19 @@ export function App(): JSX.Element {
       const previewAnalysis =
         options.previewAnalysis ??
         cached.previewAnalysis ??
-        (await analyzeTrackFromUrl(selection.playbackSource.url));
+        (await analyzeTrackFromUrl(selection.playbackSource.url, undefined, {
+          priority: ANALYSIS_PRIORITY_USER_SELECTED,
+          key: `reference::${selection.filePath}`,
+        }));
       if (isStale()) return;
 
       const nextMeasuredAnalysis =
         options.measuredAnalysis ??
         cached.measuredAnalysis ??
-        (await window.producerPlayer.analyzeAudioFile(selection.filePath));
+        (await runMeasuredAnalysis(selection.filePath, {
+          priority: ANALYSIS_PRIORITY_USER_SELECTED,
+          cacheKey: `reference::${selection.filePath}`,
+        }));
       if (isStale()) return;
 
       cacheMasteringAnalysis(selection.filePath, previewAnalysis, nextMeasuredAnalysis);
@@ -16624,6 +16777,26 @@ export function App(): JSX.Element {
               <div className="analysis-overlay-header-controls">
                 <div className="analysis-overlay-header-actions">
                   {/*
+                   * v3.110 — K-weighting (LUFS frequency-weighting) curve
+                   * button. Sits to the LEFT of the ✨ AI Stars button by
+                   * Ethan's spec. Opens a modal that plots the ITU-R
+                   * BS.1770-4 K-weighting shape — the fixed perceptual
+                   * weight LUFS applies to each frequency before
+                   * integrating loudness. Honest copy: this is the WEIGHT
+                   * applied at each frequency, not a per-frequency LUFS
+                   * reading of the user's track.
+                   */}
+                  <button
+                    type="button"
+                    className="ai-rec-regenerate k-weighting-button"
+                    data-testid="k-weighting-open"
+                    onClick={() => setKWeightingModalOpen(true)}
+                    aria-label="View LUFS frequency-weighting curve"
+                    title="View the LUFS / BS.1770 K-weighting curve — the per-frequency weight applied during loudness measurement."
+                  >
+                    <span aria-hidden="true" className="k-weighting-button-glyph">f(w)</span>
+                  </button>
+                  {/*
                    * v3.63 — ✨ AI Stars button hoisted to the top of the
                    * mastering fullscreen header. Always visible (not gated by
                    * the "Show AI recommendations" toggle), because this is
@@ -19034,6 +19207,16 @@ export function App(): JSX.Element {
         title={errorDetails?.title ?? 'Error details'}
         message={errorDetails?.message ?? ''}
         onClose={() => setErrorDetails(null)}
+      />
+      {/*
+       * v3.110 — K-weighting / LUFS frequency-weighting curve modal.
+       * Triggered from the new f(w) button in the fullscreen mastering
+       * header (left of the ✨ AI Stars button). Rendered at the App root
+       * so it can sit above the analysis overlay.
+       */}
+      <KWeightingCurveModal
+        open={kWeightingModalOpen}
+        onClose={() => setKWeightingModalOpen(false)}
       />
     </div>
   );

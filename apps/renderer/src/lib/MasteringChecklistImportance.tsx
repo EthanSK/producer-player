@@ -7,9 +7,8 @@
  * Checklist panel in App.tsx).
  *
  * - `<MasteringChecklistImportanceMeter />` — a read-only 1-5 dot
- *   indicator. Colour-coded (green / yellow / red) by band. Subtle: the
- *   dots are small, muted, and sit inline next to the rule label so
- *   they don't shout.
+ *   indicator. Colour-neutral: row colour is reserved for pass/warn/fail
+ *   health, while the dot count communicates importance.
  *
  * - `<MasteringChecklistRowHelp />` — a (?) button that reveals a small
  *   popover showing the authored `whyItMatters` blurb plus the

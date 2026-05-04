@@ -4949,37 +4949,11 @@ button.checklist-play-toggle[data-playing='true'] {
   background: rgba(248, 113, 113, 0.04);
 }
 
-/* v3.108 — importance===5 rules (true-peak, clipping) get a strong red
-   accent regardless of pass/warn/fail so deal-breaker rows are always
-   impossible to miss. 5/5 + pass uses a moderate red (reminder); 5/5 +
-   warn / fail stacks with a stronger red wash. Authored after Ethan
-   asked for "5/5 importance → strong red background." */
+/* v3.124 — row colour means health only. Importance is still shown by the
+   inline dot meter + (?) explanation, but it must not tint a passing critical
+   row red. A safe True Peak check should read as green/pass, not broken. */
 .mastering-checklist-row.high-importance {
-  border-color: rgba(248, 113, 113, 0.55);
-  background: rgba(248, 113, 113, 0.1);
-  box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 0.65);
-}
-
-.mastering-checklist-row.high-importance.pass {
-  /* Still flag the importance but tone it slightly so a passing 5/5 row
-     doesn't read as broken — the user can see it's critical AND clean. */
-  border-color: rgba(248, 113, 113, 0.42);
-  background: rgba(248, 113, 113, 0.06);
-  box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 0.55);
-}
-
-.mastering-checklist-row.high-importance.warn {
-  border-color: rgba(248, 113, 113, 0.62);
-  background: rgba(248, 113, 113, 0.14);
-  box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 0.75);
-}
-
-.mastering-checklist-row.high-importance.fail {
-  /* Strongest red — 5/5 importance + failing = the absolute top-priority
-     row to fix before exporting. */
-  border-color: rgba(248, 113, 113, 0.85);
-  background: rgba(248, 113, 113, 0.22);
-  box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 1);
+  box-shadow: none;
 }
 
 /*
@@ -7144,19 +7118,10 @@ button.reference-action.active {
   transition: background 0.15s ease;
 }
 
-.mastering-checklist-importance-meter.importance-low
-  .mastering-checklist-importance-dot.is-filled {
-  background: var(--success, #5fd28f);
-}
-
-.mastering-checklist-importance-meter.importance-mid
-  .mastering-checklist-importance-dot.is-filled {
-  background: var(--warning, #f0c150);
-}
-
-.mastering-checklist-importance-meter.importance-high
-  .mastering-checklist-importance-dot.is-filled {
-  background: var(--danger, #e35d5d);
+.mastering-checklist-importance-meter .mastering-checklist-importance-dot.is-filled {
+  /* Importance is quantity (1–5), not health. Keep it neutral so green/red
+     remain reserved for pass/fail row status. */
+  background: color-mix(in srgb, var(--accent, #5ca7ff) 72%, #ffffff);
 }
 
 .mastering-checklist-row-help {

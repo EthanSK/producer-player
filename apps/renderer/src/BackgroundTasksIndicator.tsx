@@ -14,6 +14,16 @@
 // Stats source:
 //   - dumpPreviewAnalysisQueue() — preview WAV decoder
 //   - measured queue dump passed via prop (App.tsx owns the singleton)
+//
+// v3.120 (Item #14 follow-up) — pause/stop button next to the pill.
+//   Clicking flips `agentBackgroundPrecomputeEnabled` in user state. When
+//   paused: the pill stays mounted (so the button is always reachable) and
+//   renders in a muted "paused" treatment with a "paused" label. The
+//   bg-preload effects in App.tsx short-circuit while paused, so no new
+//   priority-2 jobs flow through the queues. In-flight bg jobs keep going
+//   until they finish naturally (no abort signal — letting them finish
+//   matches the queue's existing cancellation policy and avoids partial-
+//   write artifacts in the mastering cache).
 import { useEffect, useState } from 'react';
 import { dumpPreviewAnalysisQueue } from './audioAnalysis';
 
@@ -29,6 +39,18 @@ export interface BackgroundTasksIndicatorProps {
     pending: number;
     pendingByPriority: { user: number; neighbor: number; background: number };
   };
+  /**
+   * v3.120 — current pause state. When true, the indicator renders in the
+   * muted "paused" treatment regardless of queue activity. Bound to user
+   * state's `agentBackgroundPrecomputeEnabled` (inverted) in App.tsx.
+   */
+  paused?: boolean;
+  /**
+   * v3.120 — fired when the user clicks the pause/play button. App.tsx
+   * uses this to flip `agentBackgroundPrecomputeEnabled`. Optional so the
+   * indicator can still mount in legacy callsites without the toggle.
+   */
+  onTogglePaused?: () => void;
 }
 
 interface AggregateSnapshot {
@@ -54,7 +76,7 @@ const POLL_INTERVAL_MS = 500;
 export function BackgroundTasksIndicator(
   props: BackgroundTasksIndicatorProps
 ): JSX.Element | null {
-  const { getMeasuredDump } = props;
+  const { getMeasuredDump, paused = false, onTogglePaused } = props;
   const [snapshot, setSnapshot] = useState<AggregateSnapshot>(() =>
     aggregate(dumpPreviewAnalysisQueue(), getMeasuredDump())
   );
@@ -87,27 +109,90 @@ export function BackgroundTasksIndicator(
     };
   }, [getMeasuredDump]);
 
-  if (snapshot.active === 0 && snapshot.pending === 0) {
+  // v3.120 — pre-3.120 we returned null when both queues were idle. Now
+  // we keep the pill mounted whenever the user has paused precompute so
+  // the resume button is always reachable. The pill is still hidden in
+  // the steady state (idle + not paused) to avoid visual noise.
+  const idle = snapshot.active === 0 && snapshot.pending === 0;
+  if (idle && !paused) {
     return null;
   }
 
-  const tooltip =
-    `Background analysis: ${snapshot.active} processing` +
-    (snapshot.pending > 0 ? `, ${snapshot.pending} queued` : '');
+  const tooltip = paused
+    ? 'Background analysis paused. Click ▶ to resume.'
+    : `Background analysis: ${snapshot.active} processing` +
+      (snapshot.pending > 0 ? `, ${snapshot.pending} queued` : '');
+
+  const buttonLabel = paused
+    ? 'Resume background analysis'
+    : 'Pause background analysis';
 
   return (
     <span
-      className="bg-tasks-indicator"
+      className={
+        paused ? 'bg-tasks-indicator bg-tasks-indicator-paused' : 'bg-tasks-indicator'
+      }
       role="status"
       aria-live="polite"
       title={tooltip}
       data-testid="bg-tasks-indicator"
+      data-paused={paused ? 'true' : 'false'}
     >
-      <span className="bg-tasks-indicator-dot" aria-hidden="true" />
+      <span
+        className={
+          paused
+            ? 'bg-tasks-indicator-dot bg-tasks-indicator-dot-paused'
+            : 'bg-tasks-indicator-dot'
+        }
+        aria-hidden="true"
+      />
       <span className="bg-tasks-indicator-label">
-        {snapshot.active > 0 ? snapshot.active : '·'}
-        {snapshot.pending > 0 ? ` / ${snapshot.pending}` : ''}
+        {paused
+          ? 'paused'
+          : `${snapshot.active > 0 ? snapshot.active : '·'}${
+              snapshot.pending > 0 ? ` / ${snapshot.pending}` : ''
+            }`}
       </span>
+      {onTogglePaused ? (
+        <button
+          type="button"
+          className="bg-tasks-indicator-toggle"
+          onClick={(event) => {
+            // Stop the click from bubbling to anything that wraps the pill
+            // (e.g. focus stealers in the sidebar header).
+            event.stopPropagation();
+            onTogglePaused();
+          }}
+          aria-label={buttonLabel}
+          title={buttonLabel}
+          data-testid="bg-tasks-indicator-toggle"
+        >
+          {paused ? (
+            // Play triangle (▶) — resume
+            <svg
+              viewBox="0 0 12 12"
+              width="9"
+              height="9"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M3 1.5 L10 6 L3 10.5 Z" fill="currentColor" />
+            </svg>
+          ) : (
+            // Pause bars (⏸) — stop new bg jobs
+            <svg
+              viewBox="0 0 12 12"
+              width="9"
+              height="9"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <rect x="2.5" y="1.5" width="2.5" height="9" fill="currentColor" />
+              <rect x="7" y="1.5" width="2.5" height="9" fill="currentColor" />
+            </svg>
+          )}
+        </button>
+      ) : null}
     </span>
   );
 }

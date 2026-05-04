@@ -634,6 +634,17 @@ export interface ProducerPlayerUserState {
   // app-server bridge), adapted to PP's direct-CLI-spawn architecture.
   agentDangerouslyBypassPermissions: boolean;
 
+  // v3.120 (Item #14 follow-up) — kill-switch for the album/inspector
+  // background analysis precompute. Default ON. When OFF, the bg-preload
+  // effects in App.tsx do NOT enqueue any priority-2 (BACKGROUND) measured
+  // analysis jobs; user-priority (selected-track) jobs still flow through
+  // the queue normally. Surfaced as a pause/resume button next to the
+  // BackgroundTasksIndicator in the status sidebar header. Persisted in
+  // unified state so a paused state survives app relaunch (Ethan's
+  // explicit ask: "if it stops, it should just stay stopped until they
+  // turn it on, and it should persist throughout that pre-start").
+  agentBackgroundPrecomputeEnabled: boolean;
+
   // Checklist DAW offset — when enabled, checklist timestamps are rendered
   // with a per-song offset added to their raw stored value so the
   // displayed time lines up with the user's digital audio workstation

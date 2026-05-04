@@ -611,7 +611,7 @@ input[type='range'] {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 1px 7px 1px 6px;
+  padding: 1px 5px 1px 6px;
   border-radius: 9999px;
   background: rgba(92, 167, 255, 0.10);
   border: 1px solid rgba(92, 167, 255, 0.28);
@@ -623,6 +623,15 @@ input[type='range'] {
   cursor: default;
 }
 
+/* v3.120 — paused treatment. Drop the blue accent for a muted neutral so
+   the pill reads as "stopped" at a glance. */
+.bg-tasks-indicator-paused {
+  background: rgba(140, 140, 150, 0.12);
+  border-color: rgba(140, 140, 150, 0.32);
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
 .bg-tasks-indicator-dot {
   width: 6px;
   height: 6px;
@@ -632,9 +641,51 @@ input[type='range'] {
   animation: bg-tasks-indicator-pulse 1.4s ease-in-out infinite;
 }
 
+.bg-tasks-indicator-dot-paused {
+  background: rgba(160, 160, 170, 0.7);
+  box-shadow: none;
+  animation: none;
+}
+
 .bg-tasks-indicator-label {
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum';
+}
+
+/* v3.120 — pause/resume button. Tiny, inline, button-shaped so it reads
+   as interactive without dominating the pill. */
+.bg-tasks-indicator-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 1px;
+  padding: 0;
+  border-radius: 9999px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: inherit;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease;
+}
+
+.bg-tasks-indicator-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text-strong, #fff);
+}
+
+.bg-tasks-indicator-toggle:focus-visible {
+  outline: 2px solid rgba(92, 167, 255, 0.55);
+  outline-offset: 1px;
+}
+
+.bg-tasks-indicator-toggle:active {
+  background: rgba(255, 255, 255, 0.10);
 }
 
 @keyframes bg-tasks-indicator-pulse {

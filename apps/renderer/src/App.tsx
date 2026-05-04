@@ -2661,6 +2661,20 @@ export function App(): JSX.Element {
   // intentionally.
   const [agentDangerouslyBypassPermissions, setAgentDangerouslyBypassPermissions] =
     useState<boolean>(false);
+  // v3.120 (Item #14 follow-up) — kill-switch for album/inspector
+  // background-priority audio analysis precompute. Default ON so behavior
+  // matches every prior version on first launch. Toggled via the
+  // pause/resume button next to the BackgroundTasksIndicator. When OFF:
+  //   - the bg-preload effects below SKIP enqueueing any priority-2 jobs
+  //   - foreground (priority-0) work still flows through both queues, so
+  //     the user-selected track always analyses normally
+  //   - in-flight bg jobs are NOT cancelled (no abort signal — let them
+  //     finish naturally; the foreground bypass already protects the
+  //     selected track from waiting on them)
+  // Persisted in unified state as `agentBackgroundPrecomputeEnabled` so a
+  // paused state survives app relaunch.
+  const [agentBackgroundPrecomputeEnabled, setAgentBackgroundPrecomputeEnabled] =
+    useState<boolean>(true);
   // v3.33 Phase 4 — in-flight generation status for the current request.
   // `null` = idle. `{ source, songId, versionNumber, requestId }` during a
   // run. Used to block concurrent runs for the same pair and to expose the
@@ -4243,6 +4257,13 @@ export function App(): JSX.Element {
           );
         }
 
+        // v3.120 (Item #14 follow-up) — bg precompute pause hydration.
+        if (typeof userState.agentBackgroundPrecomputeEnabled === 'boolean') {
+          setAgentBackgroundPrecomputeEnabled(
+            userState.agentBackgroundPrecomputeEnabled,
+          );
+        }
+
         if (userState.songDawOffsets && typeof userState.songDawOffsets === 'object') {
           const sanitized: Record<string, { seconds: number; enabled: boolean }> = {};
           for (const [songId, entry] of Object.entries(userState.songDawOffsets)) {
@@ -4595,6 +4616,9 @@ export function App(): JSX.Element {
         // Item #13 (v3.113) — DANGEROUS-bypass toggle. Persists in unified
         // state so it survives relaunch.
         agentDangerouslyBypassPermissions,
+        // v3.120 (Item #14 follow-up) — bg precompute pause toggle.
+        // Persists in unified state so a paused state survives relaunch.
+        agentBackgroundPrecomputeEnabled,
         songDawOffsets,
         checklistDawOffsetDefaultSeconds: dawOffsetDefault.seconds,
         checklistDawOffsetDefaultEnabled: dawOffsetDefault.enabled,
@@ -4673,6 +4697,7 @@ export function App(): JSX.Element {
     showAiRecommendationsFullscreen,
     agentAutoRecommendEnabled,
     agentDangerouslyBypassPermissions,
+    agentBackgroundPrecomputeEnabled,
     songDawOffsets,
     dawOffsetDefault,
     listeningDevices,
@@ -4774,6 +4799,13 @@ export function App(): JSX.Element {
       if (typeof userState.agentDangerouslyBypassPermissions === 'boolean') {
         setAgentDangerouslyBypassPermissions(
           userState.agentDangerouslyBypassPermissions,
+        );
+      }
+
+      // v3.120 (Item #14 follow-up) — bg precompute toggle import-path hydration.
+      if (typeof userState.agentBackgroundPrecomputeEnabled === 'boolean') {
+        setAgentBackgroundPrecomputeEnabled(
+          userState.agentBackgroundPrecomputeEnabled,
         );
       }
 
@@ -6062,6 +6094,13 @@ export function App(): JSX.Element {
     if (inspectorVersions.length === 0) {
       return;
     }
+    // v3.120 (Item #14 follow-up) — bg precompute is paused. Skip enqueueing
+    // any priority-2 inspector-version preloads. Foreground (user-priority)
+    // analysis on the selected track still flows through the queue
+    // unaffected because the selected-track effect uses USER_SELECTED.
+    if (!agentBackgroundPrecomputeEnabled) {
+      return;
+    }
 
     let cancelled = false;
 
@@ -6194,7 +6233,7 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [inspectorVersions]);
+  }, [inspectorVersions, agentBackgroundPrecomputeEnabled]);
 
   const albumActiveVersions = useMemo(
     () =>
@@ -6335,6 +6374,13 @@ export function App(): JSX.Element {
     if (albumActiveVersions.length === 0) {
       return;
     }
+    // v3.120 (Item #14 follow-up) — bg precompute is paused. Skip enqueueing
+    // any priority-2 album-active preloads. Existing fresh cache entries
+    // remain visible; we just don't proactively fill the rest. Foreground
+    // (user-priority) analysis on the selected track still flows.
+    if (!agentBackgroundPrecomputeEnabled) {
+      return;
+    }
 
     let cancelled = false;
 
@@ -6428,6 +6474,7 @@ export function App(): JSX.Element {
     albumActiveVersions,
     createMasteringCacheEntry,
     upsertMasteringCacheEntry,
+    agentBackgroundPrecomputeEnabled,
   ]);
 
   const activeMixPlaybackSource =
@@ -8709,6 +8756,22 @@ export function App(): JSX.Element {
     }).__producerPlayerSetAutoRecommend = (enabled: boolean) => {
       setAgentAutoRecommendEnabled(enabled);
     };
+    // v3.120 (Item #14 follow-up) — test hook so e2e specs can flip the
+    // bg-precompute kill-switch without driving the UI button. Mirrors the
+    // pause/resume click. The button itself is exercised in the e2e spec
+    // via getByTestId; this hook just makes assertions about the OFF
+    // state quicker to set up in tests that don't focus on the toggle UI.
+    (window as unknown as {
+      __producerPlayerSetBackgroundPrecomputeEnabled?: (enabled: boolean) => void;
+    }).__producerPlayerSetBackgroundPrecomputeEnabled = (enabled: boolean) => {
+      setAgentBackgroundPrecomputeEnabled(enabled);
+    };
+    // v3.120 — read-only snapshot of the bg-precompute flag; simpler than
+    // querying the persisted state file mid-test.
+    (window as unknown as {
+      __producerPlayerGetBackgroundPrecomputeEnabled?: () => boolean;
+    }).__producerPlayerGetBackgroundPrecomputeEnabled = () =>
+      agentBackgroundPrecomputeEnabled;
     (window as unknown as {
       __producerPlayerGetAnalysisVersion?: () => string | null;
     }).__producerPlayerGetAnalysisVersion = () =>
@@ -8768,6 +8831,12 @@ export function App(): JSX.Element {
       delete (window as unknown as {
         __producerPlayerAutoRunGateState?: unknown;
       }).__producerPlayerAutoRunGateState;
+      delete (window as unknown as {
+        __producerPlayerSetBackgroundPrecomputeEnabled?: unknown;
+      }).__producerPlayerSetBackgroundPrecomputeEnabled;
+      delete (window as unknown as {
+        __producerPlayerGetBackgroundPrecomputeEnabled?: unknown;
+      }).__producerPlayerGetBackgroundPrecomputeEnabled;
     };
   }, [
     computeCurrentAnalysisVersion,
@@ -8783,6 +8852,7 @@ export function App(): JSX.Element {
     aiRecFetchCompletedKey,
     aiRecommendationsForCurrentTrack,
     aiRecommendationsGeneration,
+    agentBackgroundPrecomputeEnabled,
   ]);
 
   useEffect(() => {
@@ -13758,8 +13828,18 @@ export function App(): JSX.Element {
             <div className="sidebar-status-heading-row">
               <h3>Status</h3>
               {/* Item #14 (v3.118) — Rekordbox-style background-tasks pill.
-                  Hidden when both queues are idle so it never adds noise. */}
-              <BackgroundTasksIndicator getMeasuredDump={getMeasuredQueueDump} />
+                  Hidden when both queues are idle so it never adds noise.
+                  v3.120 — pause/resume button next to the pill toggles
+                  `agentBackgroundPrecomputeEnabled`; when paused the pill
+                  is rendered in a muted "paused" state and bg precompute
+                  effects skip enqueueing. */}
+              <BackgroundTasksIndicator
+                getMeasuredDump={getMeasuredQueueDump}
+                paused={!agentBackgroundPrecomputeEnabled}
+                onTogglePaused={() => {
+                  setAgentBackgroundPrecomputeEnabled((previous) => !previous);
+                }}
+              />
             </div>
             <HelpTooltip text={statusCardHelpText} />
           </div>

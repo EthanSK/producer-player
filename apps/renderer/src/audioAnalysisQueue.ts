@@ -75,6 +75,67 @@ export interface AnalysisQueueOptions {
    * jobs without letting a click-storm OOM the WAV decode pool.
    */
   maxUserBypassSlots?: number;
+  /**
+   * v3.120 (Item #14 follow-up) — per-task wall-clock timeout in
+   * milliseconds. If a task neither resolves nor rejects within this
+   * window, the queue rejects the caller's promise with an
+   * `AnalysisTaskTimeoutError` and frees the slot so subsequent work can
+   * proceed.
+   *
+   * Why we need this: the underlying analysis paths each have a
+   * theoretical "stuck forever" mode that the queue would otherwise inherit:
+   *   - `AudioContext.decodeAudioData` can hang on certain malformed
+   *     files (no error, no resolve)
+   *   - the ffmpeg ebur128 child can deadlock on broken WAV headers
+   *   - the IPC roundtrip itself can stall if the main process is busy
+   * Letting one stuck job freeze the queue would block every other
+   * pending analysis indefinitely — that's the symptom Ethan observed
+   * ("It might just be failing because it's literally just stuck
+   * forever").
+   *
+   * Behavior on timeout:
+   *   - the original task keeps running in the background; we do NOT try
+   *     to abort it (item #14 explicitly avoided AbortController-style
+   *     mid-decode kill paths). The slot is freed immediately so the
+   *     queue keeps moving.
+   *   - the caller's promise rejects with `AnalysisTaskTimeoutError` so
+   *     UI code can show a clear error rather than spinning indefinitely.
+   *   - if the underlying task eventually settles after the timeout, its
+   *     result is dropped silently (no late state writes).
+   *
+   * Default: 60_000 ms (60 seconds). Set to `0` or `Number.POSITIVE_INFINITY`
+   * to disable the timeout for this queue (tests use `0` to stay
+   * deterministic without artificial delays).
+   */
+  taskTimeoutMs?: number;
+}
+
+/**
+ * v3.120 — error thrown when a queued task exceeds `taskTimeoutMs`. UI code
+ * can `instanceof`-check this to show a "analysis timed out" toast rather
+ * than the generic "analysis failed" path used for ffmpeg / decode errors.
+ */
+export class AnalysisTaskTimeoutError extends Error {
+  public readonly key: string | null;
+  public readonly priority: AnalysisPriority;
+  public readonly label: string;
+  public readonly timeoutMs: number;
+
+  constructor(params: {
+    key: string | null;
+    priority: AnalysisPriority;
+    label: string;
+    timeoutMs: number;
+  }) {
+    super(
+      `Analysis task timed out after ${params.timeoutMs}ms (queue=${params.label}, priority=${params.priority}, key=${params.key ?? '<none>'})`
+    );
+    this.name = 'AnalysisTaskTimeoutError';
+    this.key = params.key;
+    this.priority = params.priority;
+    this.label = params.label;
+    this.timeoutMs = params.timeoutMs;
+  }
 }
 
 export interface EnqueueOptions {
@@ -94,6 +155,7 @@ export class AnalysisQueue {
   private readonly concurrency: number;
   private readonly label: string;
   private readonly maxUserBypassSlots: number;
+  private readonly taskTimeoutMs: number;
   private readonly pending: QueuedTask<unknown>[] = [];
   private readonly runningKeys = new Set<string>();
   // In-flight + pending dedupe map: key -> the resolved promise the caller can
@@ -122,6 +184,11 @@ export class AnalysisQueue {
     this.concurrency = Math.floor(options.concurrency);
     this.label = options.label ?? 'analysis-queue';
     this.maxUserBypassSlots = Math.max(0, Math.floor(options.maxUserBypassSlots ?? 3));
+    // v3.120 — per-task timeout. 0 / non-finite / negative disables the
+    // timer (tests + hot loops); otherwise default to 60s.
+    const rawTimeout = options.taskTimeoutMs ?? 60_000;
+    this.taskTimeoutMs =
+      Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.floor(rawTimeout) : 0;
   }
 
   /**
@@ -302,31 +369,82 @@ export class AnalysisQueue {
       this.runningKeys.add(next.key);
     }
 
+    // v3.120 — track-once-and-settle. The timeout path and the natural
+    // settle path can race; whichever fires first wins, the other is a
+    // silent no-op. Without this guard a task that finishes a hair after
+    // the timeout would double-decrement the active counters and confuse
+    // the queue.
+    let settled = false;
+    const settle = (action: () => void): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      action();
+
+      if (isUserBypass) {
+        this.userBypassActive -= 1;
+      } else {
+        this.active -= 1;
+        if (isNonUser) {
+          this.nonUserActive -= 1;
+        }
+      }
+      if (next.key !== null) {
+        this.runningKeys.delete(next.key);
+        this.inflightByKey.delete(next.key);
+      }
+      this.maybeStart();
+    };
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    if (this.taskTimeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        const error = new AnalysisTaskTimeoutError({
+          key: next.key,
+          priority: next.priority,
+          label: this.label,
+          timeoutMs: this.taskTimeoutMs,
+        });
+        // Surface the timeout so the queue's runtime is observable in
+        // production. Use console.warn (not error) so it doesn't poison
+        // the renderer error reporter; the caller's promise rejects with
+        // the same error shape and that's where the user-visible
+        // surfacing happens.
+        try {
+          // eslint-disable-next-line no-console
+          console.warn('[AnalysisQueue] task timeout', {
+            label: this.label,
+            priority: next.priority,
+            key: next.key,
+            timeoutMs: this.taskTimeoutMs,
+          });
+        } catch {
+          /* ignore — console.warn shouldn't ever throw, but be safe */
+        }
+        settle(() => next.reject(error));
+      }, this.taskTimeoutMs);
+    }
+
     Promise.resolve()
       .then(() => next.task())
       .then(
         (value) => {
-          next.resolve(value);
+          if (timeoutHandle !== null) {
+            clearTimeout(timeoutHandle);
+          }
+          settle(() => next.resolve(value));
         },
         (reason) => {
-          next.reject(reason);
-        }
-      )
-      .finally(() => {
-        if (isUserBypass) {
-          this.userBypassActive -= 1;
-        } else {
-          this.active -= 1;
-          if (isNonUser) {
-            this.nonUserActive -= 1;
+          if (timeoutHandle !== null) {
+            clearTimeout(timeoutHandle);
           }
+          settle(() => next.reject(reason));
         }
-        if (next.key !== null) {
-          this.runningKeys.delete(next.key);
-          this.inflightByKey.delete(next.key);
-        }
-        this.maybeStart();
-      });
+      );
   }
 
   private maybeStart(): void {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AnalysisQueue,
+  AnalysisTaskTimeoutError,
   ANALYSIS_PRIORITY_BACKGROUND,
   ANALYSIS_PRIORITY_NEIGHBOR,
   ANALYSIS_PRIORITY_USER_SELECTED,
@@ -478,6 +479,195 @@ describe('AnalysisQueue', () => {
     while (queue.stats().active > 0 || queue.stats().pending > 0) {
       // eslint-disable-next-line no-await-in-loop
       await flushMicrotasks();
+    }
+  });
+
+  // --- v3.120 (Item #14 follow-up) — task timeout tests ---
+
+  it('rejects a stuck task after taskTimeoutMs and frees the slot', async () => {
+    // Simulates the "stuck forever" mode: a task that never resolves or
+    // rejects (decodeAudioData hang, ffmpeg deadlock). The queue must NOT
+    // wait forever — after taskTimeoutMs it rejects the caller and frees
+    // the slot so the next task can run.
+    vi.useFakeTimers();
+    try {
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        label: 'test-timeout',
+        taskTimeoutMs: 1000,
+      });
+
+      let stuckSettled = false;
+      const stuckPromise = queue.enqueue(
+        () =>
+          new Promise<void>(() => {
+            // Never settles. If the queue waited on this, the test would hang.
+          })
+      );
+      stuckPromise.catch(() => {
+        stuckSettled = true;
+      });
+
+      // After 999ms still pending.
+      await vi.advanceTimersByTimeAsync(999);
+      expect(stuckSettled).toBe(false);
+
+      // At taskTimeoutMs the queue rejects.
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(stuckPromise).rejects.toBeInstanceOf(AnalysisTaskTimeoutError);
+
+      // Slot is freed — a new task runs immediately.
+      let nextRan = false;
+      const nextPromise = queue.enqueue(async () => {
+        nextRan = true;
+        return 'ok';
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      // Drain microtasks so the next task can run.
+      await Promise.resolve();
+      await Promise.resolve();
+      await expect(nextPromise).resolves.toBe('ok');
+      expect(nextRan).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT reject a task that resolves before the timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        taskTimeoutMs: 1000,
+      });
+
+      let settledValue: string | null = null;
+      const promise = queue.enqueue(async () => 'fast');
+      promise.then((v) => {
+        settledValue = v;
+      });
+
+      // Resolve before timeout fires.
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      await Promise.resolve();
+      await expect(promise).resolves.toBe('fast');
+      expect(settledValue).toBe('fast');
+
+      // Advancing past the timeout must not throw or double-settle.
+      await vi.advanceTimersByTimeAsync(2000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('preserves task error path for tasks that reject before timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        taskTimeoutMs: 1000,
+      });
+
+      const promise = queue.enqueue(async () => {
+        throw new Error('underlying failure');
+      });
+      // Attach a .catch synchronously so the rejection isn't reported as
+      // an unhandled rejection before the awaiting expect runs.
+      promise.catch(() => undefined);
+
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      await Promise.resolve();
+      await expect(promise).rejects.toThrow('underlying failure');
+
+      // Make sure the timeout path doesn't fire afterwards and emit a
+      // second rejection for the same task.
+      await vi.advanceTimersByTimeAsync(2000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('disables the timer when taskTimeoutMs is 0', async () => {
+    // Tests in this file assume no timeout unless explicitly configured;
+    // this regression test pins that behavior.
+    vi.useFakeTimers();
+    try {
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        taskTimeoutMs: 0,
+      });
+
+      const blocker = deferred<string>();
+      const slowPromise = queue.enqueue(async () => {
+        return blocker.promise;
+      });
+
+      // Advance way past any reasonable timeout. With taskTimeoutMs=0 the
+      // queue must NOT reject.
+      await vi.advanceTimersByTimeAsync(120_000);
+      blocker.resolve('eventually');
+      await expect(slowPromise).resolves.toBe('eventually');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('frees a bypass slot when a user-priority task times out', async () => {
+    // Regression: the bypass-slot accounting must also be cleaned up by
+    // the timeout path. Otherwise userBypassActive could leak past the
+    // cap and starve subsequent user clicks.
+    vi.useFakeTimers();
+    try {
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        maxUserBypassSlots: 1,
+        taskTimeoutMs: 500,
+      });
+
+      // BG task holds the regular slot — perpetual. Attach a .catch so
+      // its eventual timeout rejection is handled (we don't care about
+      // the bg task's resolution; only that it occupies the slot long
+      // enough for the user-priority bypass case below).
+      const bgPromise = queue.enqueue(
+        () => new Promise<void>(() => {}),
+        { priority: ANALYSIS_PRIORITY_BACKGROUND }
+      );
+      bgPromise.catch(() => undefined);
+      await Promise.resolve();
+      expect(queue.stats().userBypassActive).toBe(0);
+
+      // User-priority task takes the bypass slot — also perpetual.
+      const stuck = queue.enqueue(
+        () => new Promise<void>(() => {}),
+        { priority: ANALYSIS_PRIORITY_USER_SELECTED }
+      );
+      stuck.catch(() => {});
+      await Promise.resolve();
+      expect(queue.stats().userBypassActive).toBe(1);
+
+      // Trigger timeout for the stuck user task.
+      await vi.advanceTimersByTimeAsync(500);
+      await expect(stuck).rejects.toBeInstanceOf(AnalysisTaskTimeoutError);
+      expect(queue.stats().userBypassActive).toBe(0);
+
+      // Another user-priority click must now bypass successfully (cap
+      // wasn't permanently consumed).
+      let secondRan = false;
+      const second = queue.enqueue(
+        async () => {
+          secondRan = true;
+        },
+        { priority: ANALYSIS_PRIORITY_USER_SELECTED }
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      await Promise.resolve();
+      await expect(second).resolves.toBeUndefined();
+      expect(secondRan).toBe(true);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

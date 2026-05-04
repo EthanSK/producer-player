@@ -617,6 +617,11 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     // unrestricted file-system + shell access. User opts in via the
     // explicitly-labeled-DANGEROUS toggle in AgentSettings.
     agentDangerouslyBypassPermissions: false,
+    // v3.120 (Item #14 follow-up) — bg analysis precompute kill-switch.
+    // Default ON so the precompute behavior matches every prior version.
+    // Toggled OFF when the user clicks the pause button in the status
+    // sidebar header to stop new bg precompute jobs from being enqueued.
+    agentBackgroundPrecomputeEnabled: true,
     songDawOffsets: {},
     checklistDawOffsetDefaultSeconds: 0,
     checklistDawOffsetDefaultEnabled: false,
@@ -707,6 +712,14 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.agentDangerouslyBypassPermissions === 'boolean'
         ? raw.agentDangerouslyBypassPermissions
         : fallback.agentDangerouslyBypassPermissions,
+    // v3.120 (Item #14 follow-up) — bg precompute pause toggle. Falls back
+    // to the default (true) so old state files implicitly opt in to the
+    // historical precompute behavior. Only an explicit boolean false in
+    // persisted state actually pauses precompute.
+    agentBackgroundPrecomputeEnabled:
+      typeof raw.agentBackgroundPrecomputeEnabled === 'boolean'
+        ? raw.agentBackgroundPrecomputeEnabled
+        : fallback.agentBackgroundPrecomputeEnabled,
     songDawOffsets: parseSongDawOffsets(raw.songDawOffsets),
     // Migration: if the new "default" fields are missing but the legacy
     // app-global `checklistDawOffsetSeconds`/`checklistDawOffsetEnabled`

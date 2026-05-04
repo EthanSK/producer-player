@@ -268,7 +268,19 @@ function getAudioConstraints(
     audioConstraints.deviceId = { exact: deviceId };
   }
 
-  if (channelMode === 'mono') {
+  // v3.108 — Scarlett 18i8 / RME / multi-channel interface fix:
+  // Always supply a channelCount hint, even for "default" mode. Without
+  // one, getUserMedia hands back the device's native channel count
+  // (e.g. 18 channels for the 18i8), and Web Audio's standard speaker
+  // mixers do NOT know how to fold N!=1,2,4,6 down to mono — the analyser
+  // sees silence, the MediaRecorder produces an Opus stream with too many
+  // channels, and Deepgram/AssemblyAI return an empty transcript.
+  // We pick `1` for mono/default and `2` for stereo/left/right so the
+  // browser delivers a stream we can actually decode below; if the device
+  // refuses, the splitter graph in buildRecordingGraph still extracts
+  // channel 0 (the lowest-numbered active input on every interface I have
+  // tested).
+  if (channelMode === 'mono' || channelMode === 'default') {
     audioConstraints.channelCount = { ideal: 1 };
   } else if (
     channelMode === 'stereo' ||
@@ -281,6 +293,27 @@ function getAudioConstraints(
   return Object.keys(audioConstraints).length > 0
     ? { audio: audioConstraints }
     : { audio: true };
+}
+
+/**
+ * Read the actual channel count of the negotiated input stream. The
+ * `getUserMedia` `channelCount` constraint is `ideal`, not `exact`, so
+ * a multi-channel interface (Scarlett 18i8 etc.) may still return more
+ * than 1/2 channels. We need the real number to size the splitter
+ * correctly — using a splitter with the wrong channel count silently
+ * drops audio.
+ */
+function getInputStreamChannelCount(stream: MediaStream): number {
+  const track = stream.getAudioTracks()[0];
+  if (!track) return 1;
+  const settings = track.getSettings();
+  // `MediaTrackSettings.channelCount` is the spec-defined property but
+  // not all browsers populate it for every device class. Fall back to a
+  // sensible default of 2 (the most common stereo mic case).
+  if (typeof settings.channelCount === 'number' && settings.channelCount > 0) {
+    return settings.channelCount;
+  }
+  return 2;
 }
 
 function buildRecordingGraph(
@@ -297,18 +330,50 @@ function buildRecordingGraph(
   analyser.fftSize = 256;
   analyser.smoothingTimeConstant = 0.7;
 
+  const sourceChannelCount = Math.max(1, getInputStreamChannelCount(inputStream));
+
+  // v3.108 — for multi-channel interfaces (Scarlett 18i8 with 18 inputs,
+  // RME with 12, etc.), connecting `source` directly to `analyser` invokes
+  // the WebAudio default channel mixer, which only knows the 1/2/4/6
+  // speaker layouts. With 18 channels the result is silent (or
+  // implementation-defined). Always run through a splitter so we
+  // deterministically pick channel 0 for mono/default, channel 0+1 for
+  // stereo, or the requested channel for left/right. Bonus: this also
+  // gives us a clean MediaStreamDestination to feed MediaRecorder with,
+  // instead of routing the raw multi-channel stream through it (which
+  // produces an Opus/WebM file the STT services can't decode).
+  const splitter = audioContext.createChannelSplitter(sourceChannelCount);
+  source.connect(splitter);
+  const destination = audioContext.createMediaStreamDestination();
+
   if (channelMode === 'left' || channelMode === 'right') {
-    const splitter = audioContext.createChannelSplitter(2);
-    const destination = audioContext.createMediaStreamDestination();
-    const outputIndex = channelMode === 'left' ? 0 : 1;
-    source.connect(splitter);
+    // Stereo split: route the chosen side to both analyser and recorder.
+    // Fall back to channel 0 if the device only delivered one channel
+    // (defensive — should be rare given the channelCount: { ideal: 2 }
+    // constraint).
+    const desiredIndex = channelMode === 'left' ? 0 : 1;
+    const outputIndex = Math.min(desiredIndex, sourceChannelCount - 1);
     splitter.connect(analyser, outputIndex);
     splitter.connect(destination, outputIndex);
     return { audioContext, analyser, recordingStream: destination.stream };
   }
 
-  source.connect(analyser);
-  return { audioContext, analyser, recordingStream: inputStream };
+  if (channelMode === 'stereo') {
+    // True stereo: merge channels 0+1 back into a 2-channel stream so
+    // both the analyser and the recorder see well-formed stereo audio.
+    const merger = audioContext.createChannelMerger(2);
+    splitter.connect(merger, 0, 0);
+    splitter.connect(merger, Math.min(1, sourceChannelCount - 1), 1);
+    merger.connect(analyser);
+    merger.connect(destination);
+    return { audioContext, analyser, recordingStream: destination.stream };
+  }
+
+  // mono / default: take channel 0 only. This is the path that fixes
+  // the Scarlett 18i8 "input 1, no waveform, empty transcription" bug.
+  splitter.connect(analyser, 0);
+  splitter.connect(destination, 0);
+  return { audioContext, analyser, recordingStream: destination.stream };
 }
 
 /* ── Toast component ────────────────────────────────────────── */
@@ -741,7 +806,12 @@ export function AgentComposer({
     typeof navigator !== 'undefined' &&
     typeof navigator.mediaDevices?.getUserMedia === 'function' &&
     typeof MediaRecorder !== 'undefined';
-  const showMic = !isStreaming;
+  // v3.108 — keep the mic visible even while the assistant is streaming an
+  // answer. Previously it was hidden and replaced by the stop button so the
+  // user couldn't start dictating their next prompt without aborting the
+  // current generation. Now the mic is always present; the stop button sits
+  // alongside it (only when streaming) so the user can do both.
+  const showMic = true;
   const micClickable = voiceSupported && !disabled && !isArming && !isProcessing;
   const providerDisplayName = getProviderDisplayName(sttProvider);
   const micInputTitle = [

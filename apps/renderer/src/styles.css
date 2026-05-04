@@ -2606,6 +2606,19 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   outline-offset: 2px;
 }
 
+/* v3.108 — inline variant: the V·WAV pill now renders under the song
+   title (replacing the old "N versions" plain text). The bottom row
+   reserves left-side space, so the popover should anchor to the LEFT
+   edge of the pill, not the right. */
+.main-list-row-metadata--inline {
+  flex-shrink: 0;
+}
+
+.main-list-row-metadata--inline .main-list-row-metadata-popover {
+  right: auto;
+  left: 0;
+}
+
 .main-list-row-metadata-popover {
   position: absolute;
   right: 0;
@@ -4776,6 +4789,39 @@ button.checklist-play-toggle[data-playing='true'] {
   background: rgba(248, 113, 113, 0.04);
 }
 
+/* v3.108 — importance===5 rules (true-peak, clipping) get a strong red
+   accent regardless of pass/warn/fail so deal-breaker rows are always
+   impossible to miss. 5/5 + pass uses a moderate red (reminder); 5/5 +
+   warn / fail stacks with a stronger red wash. Authored after Ethan
+   asked for "5/5 importance → strong red background." */
+.mastering-checklist-row.high-importance {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(248, 113, 113, 0.1);
+  box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 0.65);
+}
+
+.mastering-checklist-row.high-importance.pass {
+  /* Still flag the importance but tone it slightly so a passing 5/5 row
+     doesn't read as broken — the user can see it's critical AND clean. */
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(248, 113, 113, 0.06);
+  box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 0.55);
+}
+
+.mastering-checklist-row.high-importance.warn {
+  border-color: rgba(248, 113, 113, 0.62);
+  background: rgba(248, 113, 113, 0.14);
+  box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 0.75);
+}
+
+.mastering-checklist-row.high-importance.fail {
+  /* Strongest red — 5/5 importance + failing = the absolute top-priority
+     row to fix before exporting. */
+  border-color: rgba(248, 113, 113, 0.85);
+  background: rgba(248, 113, 113, 0.22);
+  box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 1);
+}
+
 /*
  * v3.28.0 — unavailable state for rule rows whose data source isn't
  * populated yet (e.g. ffmpeg analysis not available). Keeps the row
@@ -5451,71 +5497,9 @@ button.checklist-play-toggle[data-playing='true'] {
   min-width: 0;
 }
 
-/* Compact +/- UI zoom cluster pinned to the right of .album-header-row.
-   Mirrors the existing sidebar <select> control but is always visible at the
-   top of the album panel. Uses .icon-button for ± hover affordance and a
-   small label that resets to auto on click. */
-.album-header-zoom-cluster {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  flex-shrink: 0;
-}
-
-.album-header-zoom-cluster .album-header-zoom-button.icon-button {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-main);
-}
-
-.album-header-zoom-cluster .album-header-zoom-button.icon-button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.album-header-zoom-label {
-  min-width: 38px;
-  height: 26px;
-  padding: 0 6px;
-  border-radius: 8px;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-variant-numeric: tabular-nums;
-}
-
-.album-header-zoom-label:hover:not(:disabled) {
-  background: rgba(92, 167, 255, 0.12);
-  color: var(--text-main);
-}
-
-.album-header-zoom-label:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Hide the cluster on very narrow widths — the existing sidebar <select>
-   remains the canonical zoom control there. */
-@media (max-width: 900px) {
-  .album-header-zoom-cluster {
-    display: none;
-  }
-}
+/* v3.108 — album-header zoom cluster removed (was duplicate of the
+   status-section UI zoom dropdown). Status-section <select> is now the
+   single zoom control. Block left intentionally empty for git blame. */
 
 .album-art-trigger {
   position: relative;

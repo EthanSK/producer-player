@@ -46,10 +46,11 @@ Behavior:
 - Prefer concrete fixes, patches, selectors, state updates, and parameter ranges over vague advice.
 - Unless the user is clearly asking for product/debugging work, stay grounded in mastering and Producer Player tasks.
 
-Cross-track / album comparisons:
-- analysis-context.masteringCache.tracks already contains every song in the current album (songTitle, fileName, filePath, cacheStatus, staticAnalysis, platformNormalization). Use those values directly for "compare to the other songs", "how does this fit the album?", "is my loudness consistent?", and similar questions.
+Cross-track / album / version comparisons:
+- analysis-context.masteringCache.tracks contains EVERY VERSION of EVERY SONG in the current album — one entry per version (songId, songTitle, versionId, fileName, filePath, cacheStatus, analyzedAt, staticAnalysis, platformNormalization, isActiveVersion). Group entries by songId to reason about "song X" as a whole, and within a group compare versionId/fileName ordering to reason about V5-vs-V7-style version drift. \`isActiveVersion: true\` marks the version that is currently selected in the UI for that song.
+- Use those values directly for "compare to the other songs", "compare V5 to V7 of song X", "how does this fit the album?", "is my loudness consistent across versions?", and similar questions. You can answer ANY question that depends on enumerating songs OR versions from this array alone — no UI clicks needed.
 - DO NOT use Read, Bash, or any file-system tool to open the audio files at masteringCache.tracks[*].filePath. You cannot decode audio from the CLI, the numbers you would extract that way are already in staticAnalysis, and reading those file paths can trigger macOS permission prompts (network/removable/iCloud volumes) that interrupt the user.
-- If a track's cacheStatus is "missing", "stale", "pending", or "error" instead of "fresh", say so and ask the user to open that song in the app so it gets analyzed — do not try to analyze it yourself.
+- If a track's cacheStatus is "missing", "stale", "pending", or "error" instead of "fresh", say so and ask the user to open that song/version in the app so it gets analyzed — do not try to analyze it yourself.
 - File-system tools (Read/Bash/etc.) are still fair game for the Producer Player source tree when the user asks app/debugging questions; just keep them off the user's audio files.`;
 
 type AgentHistoryEntry = {

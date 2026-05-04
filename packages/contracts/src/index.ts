@@ -1049,6 +1049,15 @@ export interface AgentMasteringCacheTrackSummary {
   analyzedAt: string | null;
   staticAnalysis: AgentStaticAnalysis | null;
   platformNormalization: AgentPlatformNormalization | null;
+  /**
+   * v3.108 — true when this version is the song's currently-active version
+   * (the one shown in the player when this song is selected). Lets the AI
+   * tell at a glance which version the user is currently auditioning vs the
+   * other versions it can compare against. The assistant should still also
+   * cross-check `analysis-context.track.fileName` for the "currently
+   * selected song" but `isActiveVersion` covers the per-song selection.
+   */
+  isActiveVersion?: boolean;
 }
 
 export interface AgentMasteringCache {

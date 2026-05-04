@@ -161,6 +161,7 @@ import {
 } from './agentPrompts';
 import type {
   AgentContext,
+  AgentMasteringCacheTrackSummary,
   AgentPlatformNormalization,
   AgentStaticAnalysis,
   MasteringAnalysisCachePayload,
@@ -6310,37 +6311,53 @@ export function App(): JSX.Element {
     return map;
   }, [normalizationSourceAnalysis]);
   const masteringCacheTrackSummaries = useMemo(() => {
-    return albumActiveVersions.map(({ song, version }) => {
-      const cachedEntry = masteringCacheByVersionId[version.id];
-      const statusState = masteringCacheStatusByVersionId[version.id];
-      const isPending = statusState?.status === 'pending';
-      const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
-
-      const cacheStatus: 'fresh' | 'stale' | 'missing' | 'pending' | 'error' = isPending
-        ? 'pending'
-        : statusState?.status === 'error'
-          ? 'error'
-          : cachedEntry
-            ? isFresh
-              ? 'fresh'
-              : 'stale'
-            : statusState?.status === 'stale'
-              ? 'stale'
-              : 'missing';
-
-      return {
-        songId: song.id,
-        songTitle: song.title,
-        versionId: version.id,
-        fileName: version.fileName,
-        filePath: version.filePath,
-        cacheStatus,
-        analyzedAt: cachedEntry?.analyzedAt ?? null,
-        staticAnalysis: cachedEntry?.staticAnalysis ?? null,
-        platformNormalization: cachedEntry?.platformNormalization ?? null,
-      };
-    });
-  }, [albumActiveVersions, masteringCacheByVersionId, masteringCacheStatusByVersionId]);
+    // v3.108 — enumerate EVERY version of EVERY song, not just the active
+    // version per song. The AI assistant prompt promises that
+    // analysis-context.masteringCache.tracks "contains every song in the
+    // current album" — but it was only emitting the one selected version
+    // per song, so the agent couldn't answer "compare V5 vs V7 of song X"
+    // or "list all versions". Now both Claude and Codex see the full grid
+    // (one entry per version) and can reason about cross-version drift,
+    // version-bumps, and per-song version counts. This is the parity fix
+    // for "Claude + Codex full UI access to any version of any song."
+    const summaries: AgentMasteringCacheTrackSummary[] = [];
+    for (const song of albumSongs) {
+      const activeVersionId = getActiveSongVersion(song)?.id ?? null;
+      // Iterate sorted versions so the AI sees them newest-first (matches
+      // the user's visual order in the version switcher).
+      const sortedVersions = sortVersions(song.versions);
+      for (const version of sortedVersions) {
+        const cachedEntry = masteringCacheByVersionId[version.id];
+        const statusState = masteringCacheStatusByVersionId[version.id];
+        const isPending = statusState?.status === 'pending';
+        const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
+        const cacheStatus: 'fresh' | 'stale' | 'missing' | 'pending' | 'error' = isPending
+          ? 'pending'
+          : statusState?.status === 'error'
+            ? 'error'
+            : cachedEntry
+              ? isFresh
+                ? 'fresh'
+                : 'stale'
+              : statusState?.status === 'stale'
+                ? 'stale'
+                : 'missing';
+        summaries.push({
+          songId: song.id,
+          songTitle: song.title,
+          versionId: version.id,
+          fileName: version.fileName,
+          filePath: version.filePath,
+          cacheStatus,
+          analyzedAt: cachedEntry?.analyzedAt ?? null,
+          staticAnalysis: cachedEntry?.staticAnalysis ?? null,
+          platformNormalization: cachedEntry?.platformNormalization ?? null,
+          isActiveVersion: version.id === activeVersionId,
+        });
+      }
+    }
+    return summaries;
+  }, [albumSongs, masteringCacheByVersionId, masteringCacheStatusByVersionId]);
   const masteringCacheContext = useMemo(
     () => ({
       schemaVersion: MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
@@ -9060,6 +9077,15 @@ export function App(): JSX.Element {
 
     setPlaybackError(null);
     setSelectedSongId(songId);
+
+    // v3.108 — match the version-switcher behavior (App.tsx:11414):
+    // double-clicking a track row should always end up playing the mix,
+    // even if the user was auditioning the reference track. Without this
+    // flip, desiredPlaybackSource stays on the reference, so the click
+    // silently "selects" the song without ever switching what is audible.
+    if (playbackPreviewMode === 'reference') {
+      setPlaybackPreviewMode('mix');
+    }
 
     if (!nextPlaybackVersionId) {
       return;
@@ -13228,42 +13254,9 @@ export function App(): JSX.Element {
       });
   }, []);
 
-  // Compact +/- controls in album header step through uiZoomState.options.
-  // Index lookup is by closest factor (auto-mode reports a factor that may not
-  // exactly land on a configured step), then ±1, clamped at array bounds.
-  const uiZoomCurrentIndex = useMemo(() => {
-    const options = uiZoomState.options;
-    if (!options || options.length === 0) return -1;
-    let bestIdx = 0;
-    let bestDelta = Math.abs(options[0] - uiZoomState.factor);
-    for (let i = 1; i < options.length; i += 1) {
-      const delta = Math.abs(options[i] - uiZoomState.factor);
-      if (delta < bestDelta) {
-        bestDelta = delta;
-        bestIdx = i;
-      }
-    }
-    return bestIdx;
-  }, [uiZoomState.options, uiZoomState.factor]);
-
-  const handleUiZoomStep = useCallback(
-    (direction: 1 | -1) => {
-      const options = uiZoomState.options;
-      if (!options || options.length === 0) return;
-      const nextIndex = Math.max(
-        0,
-        Math.min(options.length - 1, uiZoomCurrentIndex + direction),
-      );
-      if (nextIndex === uiZoomCurrentIndex) return;
-      const nextFactor = options[nextIndex];
-      handleUiZoomChange(String(nextFactor));
-    },
-    [uiZoomState.options, uiZoomCurrentIndex, handleUiZoomChange],
-  );
-
-  const handleUiZoomReset = useCallback(() => {
-    handleUiZoomChange('auto');
-  }, [handleUiZoomChange]);
+  // v3.108 — removed the album-header +/-/% zoom cluster; the status-section
+  // dropdown is now the only UI-zoom control. The handlers/index helpers that
+  // backed the cluster have been deleted because they had no remaining callers.
 
   const statusCardHelpText = useMemo(
     () => buildStatusCardHelpText(snapshot.linkedFolders, iCloudAvailability, environment),
@@ -14368,54 +14361,10 @@ export function App(): JSX.Element {
                 <HelpTooltip text={"What this is: Your song list — all the tracks in the currently linked folder, organized as an album. Songs are auto-grouped by name, with versions nested under each title.\n\nHow to use it: Click a song to select it. Double-click to start playback. Drag songs up or down to reorder the tracklist. Use the search bar to filter by name.\n\nWhy you'd want to: Arrange your album's running order and keep all your mixes organized in one place.\n\nTip: The order you set here is preserved across sessions and used when you export — so arrange it like your final tracklist."} />
               </div>
             </div>
-            <div
-              className="album-header-zoom-cluster"
-              data-testid="album-header-zoom-cluster"
-              role="group"
-              aria-label="UI zoom controls"
-            >
-              <button
-                type="button"
-                className="icon-button album-header-zoom-button"
-                onClick={() => handleUiZoomStep(-1)}
-                disabled={uiZoomSaving || uiZoomCurrentIndex <= 0}
-                data-testid="album-header-zoom-out"
-                aria-label="Zoom out UI"
-                title="Zoom out UI (smaller)"
-              >
-                <span aria-hidden="true">−</span>
-              </button>
-              <button
-                type="button"
-                className="album-header-zoom-label"
-                onClick={handleUiZoomReset}
-                disabled={uiZoomSaving}
-                data-testid="album-header-zoom-label"
-                aria-label="Reset UI zoom to automatic"
-                title={
-                  uiZoomState.source === 'auto'
-                    ? `Automatic UI zoom (${Math.round(uiZoomState.factor * 100)}%). Click to keep auto.`
-                    : `UI zoom fixed at ${Math.round(uiZoomState.factor * 100)}%. Click to reset to automatic.`
-                }
-              >
-                {Math.round(uiZoomState.factor * 100)}%
-              </button>
-              <button
-                type="button"
-                className="icon-button album-header-zoom-button"
-                onClick={() => handleUiZoomStep(1)}
-                disabled={
-                  uiZoomSaving ||
-                  uiZoomCurrentIndex < 0 ||
-                  uiZoomCurrentIndex >= uiZoomState.options.length - 1
-                }
-                data-testid="album-header-zoom-in"
-                aria-label="Zoom in UI"
-                title="Zoom in UI (larger)"
-              >
-                <span aria-hidden="true">+</span>
-              </button>
-            </div>
+            {/* v3.108 — removed the duplicate album-header zoom cluster
+                (kept only the status-section UI zoom dropdown). Ethan flagged
+                the redundancy: two zoom controls for the same setting. The
+                status-section dropdown stays as the single source of truth. */}
           </div>
           <div className="actions">
             <button
@@ -14667,6 +14616,11 @@ export function App(): JSX.Element {
                     <strong className="main-list-row-title" data-testid="main-list-row-title">
                       {songRowTitle}
                     </strong>
+                    {/* v3.108 — LUFS now stands alone in the top-right (no more
+                        V·WAV pill alongside it). The version capsule moved to
+                        the row's bottom-left, replacing the plain "N version(s)"
+                        text. The capsule is still the click-to-copy-next-export
+                        affordance — same handler, same testid. */}
                     <span className="main-list-row-metadata-group">
                       <span
                         className="main-list-row-lufs"
@@ -14675,8 +14629,14 @@ export function App(): JSX.Element {
                       >
                         {activeSongIntegratedLufsText}
                       </span>
+                    </span>
+                  </div>
+                  <div className="main-list-row-bottom">
+                    {showMatchedVersions ? (
+                      <p className="muted main-list-row-secondary">{secondaryRowText}</p>
+                    ) : (
                       <span
-                        className="main-list-row-metadata"
+                        className="main-list-row-metadata main-list-row-metadata--inline"
                         data-testid="main-list-row-metadata"
                         role="button"
                         tabIndex={activeSongVersion ? 0 : -1}
@@ -14714,10 +14674,7 @@ export function App(): JSX.Element {
                           </span>
                         ) : null}
                       </span>
-                    </span>
-                  </div>
-                  <div className="main-list-row-bottom">
-                    <p className="muted main-list-row-secondary">{secondaryRowText}</p>
+                    )}
                     <div className="main-list-row-meta-footer">
                       {songProjectFilePath ? (
                         <div className="song-project-controls">
@@ -18187,11 +18144,25 @@ export function App(): JSX.Element {
                                     // rationale. Not user-adjustable.
                                     const meta = getMasteringChecklistRuleMeta(rule.id);
                                     const importance = meta.importance;
+                                    // v3.108 — importance===5 rules are
+                                    // deal-breakers (true-peak, clipping).
+                                    // Surface them with a strong red wash so
+                                    // they're impossible to miss in the panel.
+                                    // 5/5 + fail stacks for the most prominent
+                                    // accent; 5/5 + pass still shows red as a
+                                    // reminder that this row is critical.
+                                    const isHighImportance = importance === 5;
+                                    const rowClassParts = [
+                                      'mastering-checklist-row',
+                                      statusClass,
+                                      isHighImportance ? 'high-importance' : '',
+                                    ].filter(Boolean);
                                     return (
                                       <div
                                         key={rule.id}
-                                        className={`mastering-checklist-row ${statusClass}`}
+                                        className={rowClassParts.join(' ')}
                                         data-testid={`mastering-checklist-row-${rule.id}`}
+                                        data-importance={importance}
                                       >
                                         <span className="checklist-icon">{icon}</span>
                                         <span className="checklist-label">

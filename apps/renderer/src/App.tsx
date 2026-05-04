@@ -63,6 +63,7 @@ import type {
 import {
   analyzeTrackFromUrl,
   ANALYSIS_PRIORITY_BACKGROUND,
+  ANALYSIS_PRIORITY_NEIGHBOR,
   ANALYSIS_PRIORITY_USER_SELECTED,
   dumpPreviewAnalysisQueue,
   estimateShortTermLufs,
@@ -70,7 +71,11 @@ import {
   promotePreviewAnalysis,
   type TrackAnalysisResult,
 } from './audioAnalysis';
-import { AnalysisQueue, type AnalysisPriority } from './audioAnalysisQueue';
+import {
+  AnalysisQueue,
+  AnalysisTaskTimeoutError,
+  type AnalysisPriority,
+} from './audioAnalysisQueue';
 import { BackgroundTasksIndicator } from './BackgroundTasksIndicator';
 import {
   getMasteringChecklistRuleById,
@@ -6172,10 +6177,15 @@ export function App(): JSX.Element {
             cacheKey,
           });
 
-          if (cancelled) {
-            return;
-          }
-
+          // v3.121 (Concern 4) — DO NOT bail on `cancelled` here. The setter's
+          // own `existing.cacheKey === cacheKey` guard already prevents stale
+          // writes when the version genuinely changed. Bailing early left the
+          // entry stuck in `loading` forever after a track-switch — the very
+          // "Version History stuck on loading" symptom Ethan reported on
+          // v3.119+. Letting the ready write through means: if the user
+          // switches BACK to this same version, the cached sample-rate / LUFS
+          // is already there and renders immediately. If they don't, the
+          // cacheKey guard short-circuits silently.
           setInspectorVersionSampleRateByVersionId((previous) => {
             const existing = previous[version.id];
             if (!existing || existing.cacheKey !== cacheKey) {
@@ -6200,10 +6210,15 @@ export function App(): JSX.Element {
             };
           });
         } catch (error: unknown) {
-          if (cancelled) {
-            return;
-          }
-
+          // v3.121 (Concern 4) — same fix as the success branch. Bailing on
+          // `cancelled` left timeout-rejected entries stuck on "loading"
+          // forever (the queue's 60s `AnalysisTaskTimeoutError` would reject,
+          // but the catch block silently swallowed the error because the
+          // user had already switched tracks). The setter's cacheKey guard
+          // protects against cross-version clobber; let the error write
+          // through so the UI clears the spinner and shows "Unavailable" or
+          // surfaces a retry path.
+          const isTimeout = error instanceof AnalysisTaskTimeoutError;
           setInspectorVersionSampleRateByVersionId((previous) => {
             const existing = previous[version.id];
             if (!existing || existing.cacheKey !== cacheKey) {
@@ -6218,7 +6233,11 @@ export function App(): JSX.Element {
                 sampleRateHz: null,
                 integratedLufs: null,
                 error:
-                  error instanceof Error ? error.message : 'Could not load version analysis yet.',
+                  isTimeout
+                    ? 'Analysis timed out. Try selecting this version again.'
+                    : error instanceof Error
+                      ? error.message
+                      : 'Could not load version analysis yet.',
               },
             };
           });
@@ -6254,6 +6273,42 @@ export function App(): JSX.Element {
         .map(({ version }) => `${version.id}:${buildMasteringCacheKey(version)}`)
         .join('|'),
     [albumActiveVersions]
+  );
+
+  // v3.121 (Concern 3) — visible-songs precompute prioritization.
+  //
+  // The bg-preload effect previously fanned out across the entire folder
+  // (`albumActiveVersions`). When the user runs a search / filter, the
+  // visible main-list collapses to a subset, but the queue keeps chewing
+  // through the full folder in folder-order — so the rows the user is
+  // ACTUALLY looking at often stay "loading" while the bg pool processes
+  // off-screen tracks first.
+  //
+  // Fix: compute the visible (post-filter, post-search) active versions and
+  // enqueue them at NEIGHBOR priority (1) BEFORE the full folder loop
+  // enqueues at BACKGROUND (2). The queue's de-dup keeps the work to one
+  // run per version; promote() bumps an in-flight bg job up to NEIGHBOR if
+  // it was already queued. Foreground (USER_SELECTED, priority 0) still
+  // wins for the explicitly-clicked track.
+  const visibleActiveVersions = useMemo(
+    () =>
+      songs
+        .map((song) => ({
+          song,
+          version: getActiveSongVersion(song),
+        }))
+        .filter(
+          (entry): entry is { song: SongWithVersions; version: SongVersion } =>
+            entry.version !== null
+        ),
+    [songs]
+  );
+  const visibleActiveVersionAnalysisKey = useMemo(
+    () =>
+      visibleActiveVersions
+        .map(({ version }) => `${version.id}:${buildMasteringCacheKey(version)}`)
+        .join('|'),
+    [visibleActiveVersions]
   );
   const handleCopyNextVersionExportFileName = useCallback(
     (
@@ -6384,6 +6439,28 @@ export function App(): JSX.Element {
 
     let cancelled = false;
 
+    // v3.121 (Concern 3) — visible-songs prioritization. Build a set of
+    // version-ids that are currently visible in the main list (post search
+    // / filter). Visible versions enqueue at NEIGHBOR (priority 1); the
+    // rest of the folder enqueues at BACKGROUND (priority 2). The queue
+    // de-dupes by cacheKey so the same version never runs twice; it also
+    // re-orders pending tasks via promote() when a higher-priority duplicate
+    // arrives. End result: when the user runs a search, the bg pool covers
+    // the rows they're actually looking at first, and only afterwards
+    // chews through the off-screen rest. Foreground clicks (USER_SELECTED,
+    // priority 0) still bypass everything via the selected-track effect.
+    const visibleVersionIds = new Set(
+      visibleActiveVersions.map(({ version }) => version.id)
+    );
+
+    // Promote any already-pending background jobs whose version is now in
+    // the visible set (e.g. user just typed into the search bar; tracks
+    // already queued from the previous fan-out should jump the queue).
+    for (const { version } of visibleActiveVersions) {
+      const cacheKey = buildMasteringCacheKey(version);
+      promoteMeasuredAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
+    }
+
     // Item #10 (v3.110) — fan album-active-version preloads through the
     // shared MEASURED_ANALYSIS_QUEUE at background priority. Previously this
     // ran sequentially per album, so a 30-track album took 30× single-track
@@ -6432,8 +6509,13 @@ export function App(): JSX.Element {
 
         try {
           const cacheKey = buildMasteringCacheKey(version);
+          // v3.121 (Concern 3) — pick priority based on whether this
+          // version is visible in the main list right now.
+          const priority = visibleVersionIds.has(version.id)
+            ? ANALYSIS_PRIORITY_NEIGHBOR
+            : ANALYSIS_PRIORITY_BACKGROUND;
           const measured = await runMeasuredAnalysis(version.filePath, {
-            priority: ANALYSIS_PRIORITY_BACKGROUND,
+            priority,
             cacheKey,
           });
 
@@ -6447,15 +6529,24 @@ export function App(): JSX.Element {
             })
           );
         } catch (error: unknown) {
-          if (cancelled) {
-            return;
-          }
-
+          // v3.121 (Concern 4) — let errors flow through even after the
+          // effect was cancelled. The previous `if (cancelled) return` left
+          // album rows stuck in `pending` status forever after a folder /
+          // search switch (or a rapid track-switch) — the queue would
+          // eventually reject with `AnalysisTaskTimeoutError` after 60s but
+          // the catch silently swallowed it. Mastering-cache writes are
+          // keyed by version-id and idempotent, so writing the error
+          // state is safe.
+          const isTimeout = error instanceof AnalysisTaskTimeoutError;
           setMasteringCacheStatusByVersionId((previous) => ({
             ...previous,
             [version.id]: {
               status: 'error',
-              error: error instanceof Error ? error.message : 'Could not analyze this track yet.',
+              error: isTimeout
+                ? 'Analysis timed out. Try selecting this track again.'
+                : error instanceof Error
+                  ? error.message
+                  : 'Could not analyze this track yet.',
             },
           }));
         } finally {
@@ -6472,6 +6563,10 @@ export function App(): JSX.Element {
   }, [
     albumActiveVersionAnalysisKey,
     albumActiveVersions,
+    // v3.121 (Concern 3) — re-run when the visible-songs subset changes
+    // so newly-visible rows are promoted to NEIGHBOR priority.
+    visibleActiveVersionAnalysisKey,
+    visibleActiveVersions,
     createMasteringCacheEntry,
     upsertMasteringCacheEntry,
     agentBackgroundPrecomputeEnabled,
@@ -8772,6 +8867,23 @@ export function App(): JSX.Element {
       __producerPlayerGetBackgroundPrecomputeEnabled?: () => boolean;
     }).__producerPlayerGetBackgroundPrecomputeEnabled = () =>
       agentBackgroundPrecomputeEnabled;
+    // v3.121 (Concern 3) — test hooks for the visible-songs prioritization.
+    // setSearchText drives the search filter (which collapses the visible
+    // main-list). getMeasuredQueuePendingByPriority dumps the queue's
+    // priority-bucket counts so a test can verify NEIGHBOR vs BACKGROUND
+    // dispatch. Real users type into a search input wired up elsewhere;
+    // these hooks just shortcut the test path.
+    (window as unknown as {
+      __producerPlayerSetSearchText?: (next: string) => void;
+    }).__producerPlayerSetSearchText = (next: string) => {
+      setSearchText(next);
+    };
+    (window as unknown as {
+      __producerPlayerGetMeasuredQueueDump?: () => ReturnType<
+        typeof MEASURED_ANALYSIS_QUEUE.dump
+      >;
+    }).__producerPlayerGetMeasuredQueueDump = () =>
+      MEASURED_ANALYSIS_QUEUE.dump();
     (window as unknown as {
       __producerPlayerGetAnalysisVersion?: () => string | null;
     }).__producerPlayerGetAnalysisVersion = () =>
@@ -8837,6 +8949,12 @@ export function App(): JSX.Element {
       delete (window as unknown as {
         __producerPlayerGetBackgroundPrecomputeEnabled?: unknown;
       }).__producerPlayerGetBackgroundPrecomputeEnabled;
+      delete (window as unknown as {
+        __producerPlayerSetSearchText?: unknown;
+      }).__producerPlayerSetSearchText;
+      delete (window as unknown as {
+        __producerPlayerGetMeasuredQueueDump?: unknown;
+      }).__producerPlayerGetMeasuredQueueDump;
     };
   }, [
     computeCurrentAnalysisVersion,

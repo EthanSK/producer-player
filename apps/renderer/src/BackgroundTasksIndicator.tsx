@@ -24,7 +24,17 @@
 //   until they finish naturally (no abort signal — letting them finish
 //   matches the queue's existing cancellation policy and avoids partial-
 //   write artifacts in the mastering cache).
-import { useEffect, useState } from 'react';
+//
+// v3.121 (Concern 1) — hover/focus popover that explains the
+//   "active / queued" pill at a glance. Ethan kept asking what the two
+//   numbers mean; the answer (active = currently processing,
+//   queued = waiting, priority bypass for clicks, pause stops new jobs,
+//   60s task timeout) belongs right next to the pill rather than buried
+//   in a help-tooltip elsewhere. Opens on mouseenter and on keyboard focus
+//   (focus visibility shows it; Esc dismisses it). Click does NOT toggle
+//   the popover — Ethan asked specifically for hover semantics, not a
+//   click modal.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { dumpPreviewAnalysisQueue } from './audioAnalysis';
 
 export interface BackgroundTasksIndicatorProps {
@@ -80,6 +90,11 @@ export function BackgroundTasksIndicator(
   const [snapshot, setSnapshot] = useState<AggregateSnapshot>(() =>
     aggregate(dumpPreviewAnalysisQueue(), getMeasuredDump())
   );
+  // v3.121 (Concern 1) — popover visibility. Driven by mouseenter/leave
+  // on the pill PLUS focus/blur on the focusable children so keyboard-only
+  // users can tab into it. Esc closes when open.
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const containerRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +124,53 @@ export function BackgroundTasksIndicator(
     };
   }, [getMeasuredDump]);
 
+  // v3.121 (Concern 1) — Esc dismisses the popover (only when open).
+  // Capture-phase + stopPropagation matches HelpTooltip / TechnicalInfoPopover
+  // so a parent overlay's Esc handler (e.g. fullscreen mastering) doesn't
+  // also fire.
+  useEffect(() => {
+    if (!popoverOpen) {
+      return;
+    }
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setPopoverOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handler, { capture: true });
+    };
+  }, [popoverOpen]);
+
+  const handleMouseEnter = useCallback(() => setPopoverOpen(true), []);
+  const handleMouseLeave = useCallback((event: React.MouseEvent) => {
+    // Don't close when the cursor moves between sibling children (button,
+    // dot, label, popover itself). Only close when leaving the pill.
+    const related = event.relatedTarget as Node | null;
+    if (
+      related &&
+      containerRef.current &&
+      containerRef.current.contains(related)
+    ) {
+      return;
+    }
+    setPopoverOpen(false);
+  }, []);
+  const handleFocusCapture = useCallback(() => setPopoverOpen(true), []);
+  const handleBlurCapture = useCallback((event: React.FocusEvent) => {
+    const related = event.relatedTarget as Node | null;
+    if (
+      related &&
+      containerRef.current &&
+      containerRef.current.contains(related)
+    ) {
+      return;
+    }
+    setPopoverOpen(false);
+  }, []);
+
   // v3.120 — pre-3.120 we returned null when both queues were idle. Now
   // we keep the pill mounted whenever the user has paused precompute so
   // the resume button is always reachable. The pill is still hidden in
@@ -118,10 +180,14 @@ export function BackgroundTasksIndicator(
     return null;
   }
 
+  // v3.121 (Concern 1) — short native title kept as a fallback for
+  // screenreaders / touch users who can't hover. The full explanation
+  // lives in the popover below.
   const tooltip = paused
-    ? 'Background analysis paused. Click ▶ to resume.'
+    ? 'Background analysis paused. Hover for details.'
     : `Background analysis: ${snapshot.active} processing` +
-      (snapshot.pending > 0 ? `, ${snapshot.pending} queued` : '');
+      (snapshot.pending > 0 ? `, ${snapshot.pending} queued` : '') +
+      '. Hover for details.';
 
   const buttonLabel = paused
     ? 'Resume background analysis'
@@ -129,6 +195,7 @@ export function BackgroundTasksIndicator(
 
   return (
     <span
+      ref={containerRef}
       className={
         paused ? 'bg-tasks-indicator bg-tasks-indicator-paused' : 'bg-tasks-indicator'
       }
@@ -137,6 +204,11 @@ export function BackgroundTasksIndicator(
       title={tooltip}
       data-testid="bg-tasks-indicator"
       data-paused={paused ? 'true' : 'false'}
+      data-popover-open={popoverOpen ? 'true' : 'false'}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onFocusCapture={handleFocusCapture}
+      onBlurCapture={handleBlurCapture}
     >
       <span
         className={
@@ -192,6 +264,55 @@ export function BackgroundTasksIndicator(
             </svg>
           )}
         </button>
+      ) : null}
+      {popoverOpen ? (
+        <span
+          className="bg-tasks-indicator-popover"
+          role="tooltip"
+          data-testid="bg-tasks-indicator-popover"
+        >
+          <span className="bg-tasks-indicator-popover-title">
+            Background audio analysis
+          </span>
+          <span className="bg-tasks-indicator-popover-row">
+            <strong className="bg-tasks-indicator-popover-row-label">
+              Active / queued:
+            </strong>{' '}
+            {paused
+              ? 'paused — no new jobs are being scheduled.'
+              : `${snapshot.active} job${snapshot.active === 1 ? '' : 's'} running, ${snapshot.pending} waiting in line.`}
+          </span>
+          <span className="bg-tasks-indicator-popover-row">
+            <strong className="bg-tasks-indicator-popover-row-label">
+              Active:
+            </strong>{' '}
+            ffmpeg + WAV-decode jobs in flight (includes any user-priority
+            bypass slots).
+          </span>
+          <span className="bg-tasks-indicator-popover-row">
+            <strong className="bg-tasks-indicator-popover-row-label">
+              Queued:
+            </strong>{' '}
+            jobs waiting for an open slot. Clicking a track jumps the queue
+            (user-priority bypasses up to 3 background jobs so a click
+            never stalls behind precompute).
+          </span>
+          <span className="bg-tasks-indicator-popover-row">
+            <strong className="bg-tasks-indicator-popover-row-label">
+              Pause:
+            </strong>{' '}
+            stops scheduling new background-precompute jobs. In-flight jobs
+            finish naturally — no partial-write artifacts in the cache.
+          </span>
+          <span className="bg-tasks-indicator-popover-row">
+            <strong className="bg-tasks-indicator-popover-row-label">
+              Stuck job?
+            </strong>{' '}
+            Each job has a 60-second wall-clock timeout. If ffmpeg or the
+            WAV decoder hangs, the queue gives up, frees the slot, and the
+            track shows an error rather than spinning forever.
+          </span>
+        </span>
       ) : null}
     </span>
   );

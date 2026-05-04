@@ -621,6 +621,55 @@ input[type='range'] {
   line-height: 1.4;
   user-select: none;
   cursor: default;
+  /* v3.121 (Concern 1) — anchor for the absolute-positioned hover popover. */
+  position: relative;
+}
+
+/* v3.121 (Concern 1) — hover/focus popover that explains the
+   "active / queued" pill. Lives inside the indicator span so the
+   pill's own mouseleave closes it automatically. Sits below the pill
+   (top: 100%) and aligned to the left edge so it doesn't overflow the
+   viewport when the indicator is in the right-hand sidebar. */
+.bg-tasks-indicator-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 9000;
+  width: max-content;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #0d1520;
+  border: 1px solid #2b3a49;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  color: #c6d5e8;
+  font-size: 11.5px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  pointer-events: auto;
+  white-space: normal;
+}
+
+.bg-tasks-indicator-popover-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a8fa3;
+  margin-bottom: 2px;
+}
+
+.bg-tasks-indicator-popover-row {
+  color: #c6d5e8;
+}
+
+.bg-tasks-indicator-popover-row-label {
+  color: #9cafc4;
+  font-weight: 600;
+  margin-right: 2px;
 }
 
 /* v3.120 — paused treatment. Drop the blue accent for a muted neutral so

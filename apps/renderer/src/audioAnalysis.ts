@@ -47,6 +47,7 @@ const previewAnalysisQueue = new AnalysisQueue({
 
 export {
   ANALYSIS_PRIORITY_BACKGROUND,
+  ANALYSIS_PRIORITY_NEIGHBOR,
   ANALYSIS_PRIORITY_USER_SELECTED,
 } from './audioAnalysisQueue';
 export type { AnalysisPriority } from './audioAnalysisQueue';

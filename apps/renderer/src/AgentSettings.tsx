@@ -8,11 +8,13 @@ import type {
 } from '@producer-player/contracts';
 import { AGENT_PROVIDER_LABELS } from './agentModels';
 import {
-  AGENT_MIC_CHANNEL_MODE_LABELS,
   AGENT_STT_PROVIDER_LABELS,
   type AgentMicChannelMode,
   type AgentSttProviderId,
+  buildAgentMicChannelMode,
+  getAgentMicChannelModeLabel,
   notifyAgentVoiceSettingsUpdated,
+  parseAgentMicChannelIndex,
   readStoredAgentMicChannelMode,
   readStoredAgentMicDeviceId,
   readStoredAgentSttProvider,
@@ -84,6 +86,14 @@ export function AgentSettings({
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [micDevicesLoading, setMicDevicesLoading] = useState(false);
   const [micDevicesError, setMicDevicesError] = useState<string | null>(null);
+  // v3.121 (Concern 2) — detected channel count of the currently-selected
+  // input device. `null` means "not yet probed" (we render a default
+  // mono/stereo/left/right list as a fallback). `1` means the device
+  // really is mono — picker collapses to "Default / Mono". `2+` means a
+  // multi-channel interface is connected; we expose Channel 1..N for
+  // explicit raw-channel routing.
+  const [detectedChannelCount, setDetectedChannelCount] = useState<number | null>(null);
+  const [channelDetectError, setChannelDetectError] = useState<string | null>(null);
 
   const [deepgramKey, setDeepgramKey] = useState('');
   const [deepgramKeySet, setDeepgramKeySet] = useState(false);
@@ -163,6 +173,66 @@ export function AgentSettings({
       navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
     };
   }, [refreshMicDevices]);
+
+  // v3.121 (Concern 2) — probe the selected input device to discover its
+  // actual channel count. We need this to render a Channel 1..N picker
+  // that matches what the device actually exposes (Scarlett 18i8 → 18,
+  // RME → 12, MacBook built-in → 1 or 2).
+  //
+  // Strategy: open a short-lived MediaStream with no channel constraint
+  // (so the browser doesn't downmix), read `track.getSettings().channelCount`,
+  // and stop the stream immediately. We do this lazily — only when the
+  // settings panel is open AND the device choice changed — to avoid
+  // surprise mic-permission prompts.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setDetectedChannelCount(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const constraints: MediaStreamConstraints = {
+          audio:
+            selectedMicDeviceId === 'default'
+              ? true
+              : { deviceId: { exact: selectedMicDeviceId } },
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        try {
+          const track = stream.getAudioTracks()[0];
+          const settings = track?.getSettings();
+          const reportedCount =
+            typeof settings?.channelCount === 'number' && settings.channelCount > 0
+              ? Math.min(99, Math.max(1, Math.floor(settings.channelCount)))
+              : null;
+          if (!cancelled) {
+            setDetectedChannelCount(reportedCount);
+            setChannelDetectError(null);
+          }
+        } finally {
+          stream.getTracks().forEach((t) => t.stop());
+        }
+      } catch (error: unknown) {
+        if (cancelled) return;
+        // Permission denied / device gone — leave the picker on the
+        // canonical mono/stereo/left/right fallback list so the user can
+        // still configure something rather than seeing an empty select.
+        setDetectedChannelCount(null);
+        setChannelDetectError(
+          error instanceof Error
+            ? error.message
+            : 'Could not detect channel count for this device.'
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMicDeviceId]);
 
   const handleSaveDeepgramKey = useCallback(async () => {
     const trimmed = deepgramKey.trim();
@@ -255,12 +325,46 @@ export function AgentSettings({
   const selectedMicMissing =
     selectedMicDeviceId !== 'default' &&
     !listedAudioInputDevices.some((device) => device.deviceId === selectedMicDeviceId);
-  const micChannelModes: AgentMicChannelMode[] = [
+
+  // v3.121 (Concern 2) — build the channel-mode option list. The canonical
+  // four (default/mono/stereo/left/right) always come first as a safety
+  // fallback for users on simpler 1- or 2-channel mics. When the probe
+  // detected 3+ channels (multi-channel interface), we also expose
+  // Channel 1..N so users can route any specific raw input channel.
+  //
+  // Ordering: canonical list first, then a divider note, then Channel 1..N.
+  // We also make sure the user's currently-saved mode is always visible
+  // even if the device probe hasn't completed — otherwise picking
+  // "Channel 12" on the 18i8 would briefly disappear from the list when
+  // they revisit settings before the probe finished.
+  const baseChannelModes: AgentMicChannelMode[] = [
     'default',
     'mono',
     'stereo',
     'left',
     'right',
+  ];
+  const detectedMultiChannelCount =
+    detectedChannelCount !== null && detectedChannelCount >= 3
+      ? detectedChannelCount
+      : 0;
+  const dynamicChannelIndices: number[] = [];
+  for (let i = 1; i <= detectedMultiChannelCount; i += 1) {
+    dynamicChannelIndices.push(i);
+  }
+  // Ensure the saved mode is in the option list even if the probe hasn't
+  // populated channel-N options yet (or the device is disconnected).
+  const savedChannelIndex = parseAgentMicChannelIndex(micChannelMode);
+  if (
+    savedChannelIndex !== null &&
+    !dynamicChannelIndices.includes(savedChannelIndex)
+  ) {
+    dynamicChannelIndices.push(savedChannelIndex);
+    dynamicChannelIndices.sort((a, b) => a - b);
+  }
+  const micChannelModes: AgentMicChannelMode[] = [
+    ...baseChannelModes,
+    ...dynamicChannelIndices.map((index) => buildAgentMicChannelMode(index)),
   ];
 
   return (
@@ -432,7 +536,7 @@ export function AgentSettings({
           <span>Microphone input</span>
           <span className="agent-settings-expander-value">
             {selectedMicDeviceId === 'default' ? 'System default' : 'Custom'} ·{' '}
-            {AGENT_MIC_CHANNEL_MODE_LABELS[micChannelMode]}
+            {getAgentMicChannelModeLabel(micChannelMode)}
           </span>
         </summary>
 
@@ -498,14 +602,33 @@ export function AgentSettings({
             >
               {micChannelModes.map((channelMode) => (
                 <option key={channelMode} value={channelMode}>
-                  {AGENT_MIC_CHANNEL_MODE_LABELS[channelMode]}
+                  {getAgentMicChannelModeLabel(channelMode)}
                 </option>
               ))}
             </select>
             <p className="agent-settings-key-help" data-testid="agent-mic-channel-help">
-              Use mono/stereo when the device supports it, or force only the left/right
-              channel when an interface is wired to one side.
+              {detectedChannelCount !== null && detectedChannelCount >= 3 ? (
+                <>
+                  Detected {detectedChannelCount} input channels. Pick a specific
+                  Channel N to route that raw input through to recording — useful
+                  for multi-channel interfaces (Scarlett 18i8, RME, etc.) where
+                  the mic isn't on channels 1/2.
+                </>
+              ) : (
+                <>
+                  Use mono/stereo when the device supports it, or force only the
+                  left/right channel when an interface is wired to one side.
+                </>
+              )}
             </p>
+            {channelDetectError ? (
+              <p
+                className="agent-settings-key-error"
+                data-testid="agent-mic-channel-detect-error"
+              >
+                {channelDetectError}
+              </p>
+            ) : null}
           </div>
         </div>
       </details>

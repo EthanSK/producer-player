@@ -7,8 +7,9 @@ import {
 } from 'react';
 import type { AgentAttachment } from '@producer-player/contracts';
 import {
-  AGENT_MIC_CHANNEL_MODE_LABELS,
   AGENT_VOICE_SETTINGS_UPDATED_EVENT,
+  getAgentMicChannelModeLabel,
+  parseAgentMicChannelIndex,
   readStoredAgentMicChannelMode,
   readStoredAgentMicDeviceId,
   readStoredAgentSttProvider,
@@ -275,12 +276,21 @@ function getAudioConstraints(
   // mixers do NOT know how to fold N!=1,2,4,6 down to mono — the analyser
   // sees silence, the MediaRecorder produces an Opus stream with too many
   // channels, and Deepgram/AssemblyAI return an empty transcript.
-  // We pick `1` for mono/default and `2` for stereo/left/right so the
-  // browser delivers a stream we can actually decode below; if the device
-  // refuses, the splitter graph in buildRecordingGraph still extracts
-  // channel 0 (the lowest-numbered active input on every interface I have
-  // tested).
-  if (channelMode === 'mono' || channelMode === 'default') {
+  //
+  // v3.121 (Concern 2) — for `channel-N` (specific raw input), DO NOT
+  // force a `channelCount: 1` constraint. The browser would honor the
+  // ideal=1 hint and downmix the multi-channel input before we ever see
+  // it, dropping channels 2..N. We must accept the device's full
+  // channel layout so the splitter in buildRecordingGraph can route the
+  // user's chosen channel. Most platforms cap raw multi-channel input at
+  // the device's native channel count; passing `ideal: oneBasedIndex`
+  // tells the browser "I want at least this many channels." Falling back
+  // to `audio: true` works on Chromium/Electron where the constraint is
+  // best-effort.
+  const requestedChannelIndex = parseAgentMicChannelIndex(channelMode);
+  if (requestedChannelIndex !== null) {
+    audioConstraints.channelCount = { ideal: requestedChannelIndex };
+  } else if (channelMode === 'mono' || channelMode === 'default') {
     audioConstraints.channelCount = { ideal: 1 };
   } else if (
     channelMode === 'stereo' ||
@@ -345,6 +355,21 @@ function buildRecordingGraph(
   const splitter = audioContext.createChannelSplitter(sourceChannelCount);
   source.connect(splitter);
   const destination = audioContext.createMediaStreamDestination();
+
+  // v3.121 (Concern 2) — explicit `channel-N` mode for multi-channel
+  // interfaces (Scarlett 18i8, RME, etc.). Routes the (N-1)-th splitter
+  // output to both analyser and MediaRecorder destination. Clamps to the
+  // device's actual channel count so a user who picked Channel 12 on a
+  // 2-channel device still gets a usable stream (channel 1) rather than
+  // silence.
+  const requestedChannelIndex = parseAgentMicChannelIndex(channelMode);
+  if (requestedChannelIndex !== null) {
+    const zeroBasedIndex = requestedChannelIndex - 1;
+    const outputIndex = Math.min(zeroBasedIndex, sourceChannelCount - 1);
+    splitter.connect(analyser, outputIndex);
+    splitter.connect(destination, outputIndex);
+    return { audioContext, analyser, recordingStream: destination.stream };
+  }
 
   if (channelMode === 'left' || channelMode === 'right') {
     // Stereo split: route the chosen side to both analyser and recorder.
@@ -816,7 +841,7 @@ export function AgentComposer({
   const providerDisplayName = getProviderDisplayName(sttProvider);
   const micInputTitle = [
     micDeviceId === 'default' ? 'default microphone' : 'selected microphone',
-    AGENT_MIC_CHANNEL_MODE_LABELS[micChannelMode].toLowerCase(),
+    getAgentMicChannelModeLabel(micChannelMode).toLowerCase(),
   ].join(' · ');
   const micTitle = voiceSettingsCheckedRef.current && !hasSelectedProviderKey
     ? `Add ${providerDisplayName} API key in Settings to enable voice input`

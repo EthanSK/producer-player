@@ -21,6 +21,11 @@ const DEFAULT_MATCHER_SETTINGS: MatcherSettings = {
   autoMoveOld: true,
 };
 
+// Keep per-directory metadata reads parallel enough to make startup/rescan feel
+// snappy on albums with lots of bounces, but bounded so a huge folder cannot
+// flood the OS with hundreds of simultaneous `stat` calls.
+const FILE_METADATA_CONCURRENCY = 32;
+
 type SnapshotSubscriber = (snapshot: LibrarySnapshot) => void;
 
 interface FileLibraryServiceOptions {
@@ -73,6 +78,37 @@ async function pathExists(absolutePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const workerCount = Math.max(1, Math.min(Math.floor(concurrency), items.length));
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+
+        if (index >= items.length) {
+          return;
+        }
+
+        results[index] = await mapper(items[index], index);
+      }
+    })
+  );
+
+  return results;
 }
 
 function getFileCreatedAt(stats: Stats): Date {
@@ -154,53 +190,55 @@ async function collectAudioFilesInDirectory(
   directoryPath: string,
   folderId: string
 ): Promise<ScannedAudioFile[]> {
-  const files: ScannedAudioFile[] = [];
-
   let entries: Dirent[];
   try {
     entries = await fs.readdir(directoryPath, { withFileTypes: true });
   } catch {
-    return files;
+    return [];
   }
 
-  for (const entry of entries) {
-    const absolutePath = path.join(directoryPath, entry.name);
+  const audioFilePaths = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(directoryPath, entry.name))
+    .filter((absolutePath) => isSupportedAudioFile(absolutePath));
 
-    if (!entry.isFile() || !isSupportedAudioFile(absolutePath)) {
-      continue;
+  const files = await mapWithConcurrency(
+    audioFilePaths,
+    FILE_METADATA_CONCURRENCY,
+    async (absolutePath): Promise<ScannedAudioFile | null> => {
+      try {
+        const stats = await fs.stat(absolutePath);
+        return {
+          folderId,
+          filePath: absolutePath,
+          sizeBytes: stats.size,
+          createdAt: getFileCreatedAt(stats),
+          modifiedAt: stats.mtime,
+        };
+      } catch {
+        // Ignore transient stat errors while files are still being written.
+        return null;
+      }
     }
+  );
 
-    try {
-      const stats = await fs.stat(absolutePath);
-      files.push({
-        folderId,
-        filePath: absolutePath,
-        sizeBytes: stats.size,
-        createdAt: getFileCreatedAt(stats),
-        modifiedAt: stats.mtime,
-      });
-    } catch {
-      // Ignore transient stat errors while files are still being written.
-    }
-  }
-
-  return files;
+  return files.filter((file): file is ScannedAudioFile => file !== null);
 }
 
 async function collectAudioFiles(
   folderPath: string,
   folderId: string
 ): Promise<ScannedAudioFile[]> {
-  const files: ScannedAudioFile[] = [];
-
-  // Track top-level exports only.
-  files.push(...(await collectAudioFilesInDirectory(folderPath, folderId)));
-
-  // Track archived versions from the reserved old/ folder only.
   const archivedDirectory = path.join(folderPath, 'old');
-  files.push(...(await collectAudioFilesInDirectory(archivedDirectory, folderId)));
 
-  return files;
+  const [topLevelFiles, archivedFiles] = await Promise.all([
+    // Track top-level exports only.
+    collectAudioFilesInDirectory(folderPath, folderId),
+    // Track archived versions from the reserved old/ folder only.
+    collectAudioFilesInDirectory(archivedDirectory, folderId),
+  ]);
+
+  return [...topLevelFiles, ...archivedFiles];
 }
 
 function isInsideOldDirectory(filePath: string, folderPath: string): boolean {
@@ -387,9 +425,9 @@ export class FileLibraryService {
 
     this.setStatus('scanning', 'Scanning linked folders…');
 
-    for (const folderId of this.linkedFolders.keys()) {
-      await this.scanFolder(folderId);
-    }
+    await Promise.all(
+      Array.from(this.linkedFolders.keys()).map((folderId) => this.scanFolder(folderId))
+    );
 
     const movedCount = await this.maybeAutoOrganizeOldVersions();
 
@@ -413,9 +451,9 @@ export class FileLibraryService {
 
     this.setStatus('scanning', 'Organizing old versions…');
 
-    for (const folderId of this.linkedFolders.keys()) {
-      await this.scanFolder(folderId);
-    }
+    await Promise.all(
+      Array.from(this.linkedFolders.keys()).map((folderId) => this.scanFolder(folderId))
+    );
 
     const movedCount = await this.organizeOldVersionsInternal();
 
@@ -462,9 +500,9 @@ export class FileLibraryService {
 
     this.setStatus('scanning', 'Auto-organize enabled. Organizing old versions…');
 
-    for (const folderId of this.linkedFolders.keys()) {
-      await this.scanFolder(folderId);
-    }
+    await Promise.all(
+      Array.from(this.linkedFolders.keys()).map((folderId) => this.scanFolder(folderId))
+    );
 
     const movedCount = await this.organizeOldVersionsInternal();
 

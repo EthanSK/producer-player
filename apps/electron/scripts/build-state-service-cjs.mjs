@@ -115,4 +115,21 @@ await build({
   plugins: [shimElectronLog],
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/agent-ui-control.test.cjs');
+// v3.110 — agent-service prompt/history bundling for hermetic Node tests.
+// Verifies that attachments from prior turns are replayed into every
+// subsequent turn's prompt (issue: model previously couldn't recall
+// images attached on past turns). No electron runtime is needed.
+await build({
+  entryPoints: [resolve(appDir, 'src/agent-service.ts')],
+  outfile: resolve(appDir, 'dist/agent-service.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+  external: ['electron', 'node:child_process', 'node:fs', 'node:readline'],
+  plugins: [shimElectronLog],
+});
+
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs');

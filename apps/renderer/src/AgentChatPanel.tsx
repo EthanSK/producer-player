@@ -47,6 +47,13 @@ export interface AgentChatMessage {
   timestamp: number;
   status?: 'streaming' | 'complete' | 'stopped' | 'error';
   usage?: AgentTokenUsage;
+  /**
+   * v3.110 — files the user attached to this turn. Persisted to
+   * localStorage and included in `buildHistorySeed` so subsequent turns
+   * (and sessions reloaded after an app restart) keep the agent informed
+   * about every prior-turn attachment.
+   */
+  attachments?: AgentAttachment[];
 }
 
 export interface AgentChatPromptRequest {
@@ -276,6 +283,24 @@ function sanitizeTokenUsage(value: unknown): AgentTokenUsage | undefined {
   };
 }
 
+function sanitizeStoredAttachments(value: unknown): AgentAttachment[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const cleaned: AgentAttachment[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const path = typeof entry.path === 'string' ? entry.path : '';
+    const name = typeof entry.name === 'string' ? entry.name : '';
+    const sizeBytes =
+      typeof entry.sizeBytes === 'number' && Number.isFinite(entry.sizeBytes)
+        ? entry.sizeBytes
+        : 0;
+    const mimeType = typeof entry.mimeType === 'string' ? entry.mimeType : '';
+    if (path.length === 0 || name.length === 0) continue;
+    cleaned.push({ path, name, sizeBytes, mimeType });
+  }
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 function sanitizeStoredMessage(value: unknown): AgentChatMessage | null {
   if (!isRecord(value)) return null;
 
@@ -304,6 +329,7 @@ function sanitizeStoredMessage(value: unknown): AgentChatMessage | null {
       : undefined;
 
   const usage = sanitizeTokenUsage(value.usage);
+  const attachments = sanitizeStoredAttachments(value.attachments);
 
   return {
     id,
@@ -312,6 +338,7 @@ function sanitizeStoredMessage(value: unknown): AgentChatMessage | null {
     timestamp,
     ...(status ? { status } : {}),
     ...(usage ? { usage } : {}),
+    ...(attachments ? { attachments } : {}),
   };
 }
 
@@ -597,6 +624,12 @@ function buildHistorySeed(messages: AgentChatMessage[]): AgentConversationHistor
     .map((message) => ({
       role: message.role === 'user' ? 'user' : 'assistant',
       content: message.content,
+      // v3.110 — carry attachments forward across session restarts so the
+      // agent can recall prior-turn images / files. Empty array is omitted
+      // to keep the seed lean for chats that never had attachments.
+      ...(message.attachments && message.attachments.length > 0
+        ? { attachments: message.attachments }
+        : {}),
     }));
 }
 
@@ -1604,6 +1637,13 @@ export function AgentChatPanel({
         content: displayContent,
         timestamp: Date.now(),
         status: 'complete',
+        // v3.110 — keep attachments on the user message itself so they
+        // travel with the chat history. Past turns' attachments now feed
+        // back into every subsequent agent turn (see buildHistorySeed →
+        // agent-service.buildAccumulatedAttachmentsSection).
+        ...(attachmentsForTurn.length > 0
+          ? { attachments: attachmentsForTurn.map((a) => ({ ...a })) }
+          : {}),
       };
       const pendingAssistantId = nextMessageId();
 
@@ -1660,16 +1700,13 @@ export function AgentChatPanel({
         ...(attachmentsForTurn.length > 0 ? { attachments: attachmentsForTurn } : {}),
       });
 
-      // Best-effort cleanup of the attachment temp files after the turn has
-      // been dispatched. The agent subprocess has already been handed the
-      // absolute paths and will read them itself before its first response.
-      if (attachmentsForTurn.length > 0) {
-        window.setTimeout(() => {
-          void window.producerPlayer
-            .agentClearAttachments(attachmentsForTurn.map((a) => a.path))
-            .catch(() => {});
-        }, 60_000);
-      }
+      // v3.110 — DO NOT delete the attachment temp files after the turn.
+      // The agent now needs to be able to re-read them on every subsequent
+      // turn (e.g. "what was in that screenshot you sent two turns ago?"),
+      // so we keep them on disk for the lifetime of the session and rely
+      // on `sweepStaleAgentAttachments` (7-day age threshold, runs at app
+      // launch) to clean them up eventually. The disk footprint is
+      // bounded — only attachments dropped by the user in the last week.
     },
     [
       currentModel,

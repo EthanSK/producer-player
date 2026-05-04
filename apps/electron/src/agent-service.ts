@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import {
   DEFAULT_AGENT_MODEL_BY_PROVIDER,
@@ -56,6 +56,19 @@ Cross-track / album / version comparisons:
 type AgentHistoryEntry = {
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * v3.110 — attachments captured on this turn (typically only present on
+   * `user` entries). They flow into every subsequent turn's prompt via
+   * `buildAccumulatedAttachmentsSection` so the agent can recall files
+   * referenced in earlier turns (e.g. screenshots / images) instead of
+   * forgetting them after the turn they were attached on.
+   */
+  attachments?: AgentAttachment[];
+  /**
+   * Monotonic 1-based index identifying which turn this entry belongs to.
+   * Used to label attachments with their originating turn in the prompt.
+   */
+  turnIndex?: number;
 };
 
 interface AgentTurnState {
@@ -169,6 +182,24 @@ function normalizeThinking(
   return DEFAULT_AGENT_THINKING_BY_PROVIDER[provider];
 }
 
+function sanitizeSeedAttachments(value: unknown): AgentAttachment[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const cleaned: AgentAttachment[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const path = typeof e.path === 'string' ? e.path : '';
+    const name = typeof e.name === 'string' ? e.name : '';
+    const sizeBytes = typeof e.sizeBytes === 'number' && Number.isFinite(e.sizeBytes)
+      ? e.sizeBytes
+      : 0;
+    const mimeType = typeof e.mimeType === 'string' ? e.mimeType : '';
+    if (path.length === 0 || name.length === 0) continue;
+    cleaned.push({ path, name, sizeBytes, mimeType });
+  }
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 function normalizeSeedHistory(
   history?: AgentConversationHistoryEntry[],
 ): AgentHistoryEntry[] {
@@ -176,19 +207,24 @@ function normalizeSeedHistory(
     return [];
   }
 
-  return history
-    .flatMap((entry) => {
-      const role = entry?.role;
-      const content = typeof entry?.content === 'string' ? entry.content.trim() : '';
-      if ((role !== 'user' && role !== 'assistant') || content.length === 0) {
-        return [];
-      }
-      return [{ role, content } as const];
-    })
-    .map((entry) => ({
-      role: entry.role,
-      content: entry.content,
-    }));
+  // Track an incrementing turnIndex across user turns so prior-turn
+  // attachments can be labeled clearly in subsequent prompts.
+  let userTurnCounter = 0;
+  return history.flatMap((entry) => {
+    const role = entry?.role;
+    const content = typeof entry?.content === 'string' ? entry.content.trim() : '';
+    if ((role !== 'user' && role !== 'assistant') || content.length === 0) {
+      return [];
+    }
+    const attachments = sanitizeSeedAttachments(entry?.attachments);
+    const turnIndex = role === 'user' ? ++userTurnCounter : undefined;
+    return [{
+      role,
+      content,
+      ...(attachments ? { attachments } : {}),
+      ...(turnIndex !== undefined ? { turnIndex } : {}),
+    } as AgentHistoryEntry];
+  });
 }
 
 function buildConversationHistory(history: AgentSessionState['history']): string {
@@ -204,15 +240,87 @@ function formatAttachmentSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function buildAttachmentsSection(attachments: AgentAttachment[]): string {
-  const lines = attachments.map((attachment) => {
-    const mime = attachment.mimeType ? ` · ${attachment.mimeType}` : '';
-    return `- ${attachment.name} (${formatAttachmentSize(attachment.sizeBytes)}${mime})\n  path: ${attachment.path}`;
-  });
+/**
+ * Check whether an attachment's file is still readable on disk. Pure
+ * `existsSync` would also be fooled by directories, so we additionally
+ * require it to be a regular file. Returns `false` on any I/O error so
+ * the prompt always degrades safely (and visibly) rather than throwing.
+ */
+function attachmentStillAccessible(path: string): boolean {
+  try {
+    if (!existsSync(path)) return false;
+    const stat = statSync(path);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+function renderAttachmentLine(
+  attachment: AgentAttachment,
+  options: { turnIndex?: number; isCurrent: boolean },
+): string {
+  const mime = attachment.mimeType ? ` · ${attachment.mimeType}` : '';
+  const turnLabel = options.isCurrent
+    ? '(current turn)'
+    : options.turnIndex !== undefined
+      ? `(from user turn #${options.turnIndex})`
+      : '(from earlier turn)';
+
+  const accessible = attachmentStillAccessible(attachment.path);
+  const accessNote = accessible
+    ? `path: ${attachment.path}`
+    : `path: ${attachment.path} — NOTE: this file is no longer accessible on disk; describe it from earlier conversation context if relevant, or ask the user to re-attach.`;
+
+  return `- ${attachment.name} ${turnLabel} (${formatAttachmentSize(attachment.sizeBytes)}${mime})\n  ${accessNote}`;
+}
+
+/**
+ * v3.110 — accumulate attachments from the entire session history plus
+ * the current turn into a single deduped (by absolute path) list, so the
+ * agent can recall images / files attached on prior turns. Without this,
+ * conversation-history was text-only and the model lost visibility on
+ * past attachments after the turn they were sent on.
+ */
+function buildAccumulatedAttachmentsSection(
+  history: AgentSessionState['history'],
+  currentAttachments: AgentAttachment[],
+): string | null {
+  const seen = new Set<string>();
+  type Entry = { attachment: AgentAttachment; turnIndex?: number; isCurrent: boolean };
+  const entries: Entry[] = [];
+
+  for (const historyEntry of history) {
+    if (!historyEntry.attachments || historyEntry.attachments.length === 0) continue;
+    for (const attachment of historyEntry.attachments) {
+      if (seen.has(attachment.path)) continue;
+      seen.add(attachment.path);
+      entries.push({
+        attachment,
+        turnIndex: historyEntry.turnIndex,
+        isCurrent: false,
+      });
+    }
+  }
+
+  for (const attachment of currentAttachments) {
+    if (seen.has(attachment.path)) continue;
+    seen.add(attachment.path);
+    entries.push({ attachment, isCurrent: true });
+  }
+
+  if (entries.length === 0) return null;
+
+  const lines = entries.map((entry) =>
+    renderAttachmentLine(entry.attachment, {
+      turnIndex: entry.turnIndex,
+      isCurrent: entry.isCurrent,
+    }),
+  );
 
   return [
     '<attached-files>',
-    'The user attached the following files to this turn. The absolute path is on the local filesystem; read it with your file-read tool if it would help answer the question. Do NOT decode audio files — describe what you can from metadata or the producer-player analysis context instead.',
+    'Files the user attached at any point in this conversation, including past turns. The absolute path is on the local filesystem; read it with your file-read tool if it would help answer the question — even files attached several turns ago are still valid context. Each line indicates which turn the file came from. Do NOT decode audio files — describe what you can from metadata or the producer-player analysis context instead. If a path is marked "no longer accessible", treat it as missing and respond accordingly.',
     '',
     ...lines,
     '</attached-files>',
@@ -242,8 +350,17 @@ function buildTurnPrompt(
     sections.push(`<ui-context>\n${JSON.stringify(uiContext, null, 2)}\n</ui-context>`);
   }
 
-  if (Array.isArray(attachments) && attachments.length > 0) {
-    sections.push(buildAttachmentsSection(attachments));
+  // v3.110 — render attachments from the entire session history plus the
+  // current turn, deduped by absolute path. This way the agent can see
+  // (and re-read) images / files attached on previous turns instead of
+  // losing them as soon as the next turn lands.
+  const currentAttachments = Array.isArray(attachments) ? attachments : [];
+  const attachmentsSection = buildAccumulatedAttachmentsSection(
+    session.history,
+    currentAttachments,
+  );
+  if (attachmentsSection) {
+    sections.push(attachmentsSection);
   }
 
   if (session.history.length > 0) {
@@ -657,7 +774,24 @@ export function sendTurn(
     cwd: process.cwd(),
   });
 
-  session.history.push({ role: 'user', content: trimmedMessage });
+  // v3.110 — persist attachments on the user-history entry so the
+  // accumulated <attached-files> block can replay them on every future
+  // turn. Compute a stable user-turn index for clear "(from user turn #N)"
+  // labels in subsequent prompts.
+  const previousUserTurns = session.history.reduce(
+    (count, entry) => (entry.role === 'user' ? count + 1 : count),
+    0,
+  );
+  const turnIndex = previousUserTurns + 1;
+  const persistedAttachments = Array.isArray(attachments) && attachments.length > 0
+    ? attachments.map((attachment) => ({ ...attachment }))
+    : undefined;
+  session.history.push({
+    role: 'user',
+    content: trimmedMessage,
+    turnIndex,
+    ...(persistedAttachments ? { attachments: persistedAttachments } : {}),
+  });
   session.process = child;
   session.activeTurn = {
     assistantText: '',
@@ -828,3 +962,85 @@ export function destroySession(): void {
 export function setEventCallback(callback: ((event: AgentEvent) => void) | null): void {
   eventCallback = callback;
 }
+
+/**
+ * v3.110 — internal-only test surface.
+ *
+ * The prompt-building helpers (`buildTurnPrompt`, `buildAccumulatedAttachmentsSection`,
+ * `normalizeSeedHistory`) are pure functions that drive how the agent's
+ * conversation history + attachments are rendered into the per-turn stdin
+ * prompt for both Claude Code and Codex backends. Tests need access to
+ * them to verify that prior-turn attachments survive across multiple
+ * turns. Not part of the runtime API; do NOT import outside tests.
+ */
+export const __testing__ = {
+  buildTurnPrompt(
+    session: {
+      provider: AgentProviderId;
+      systemPrompt: string;
+      history: AgentHistoryEntry[];
+    },
+    message: string,
+    options: {
+      context?: AgentContext | null;
+      uiContext?: AgentUiContext | null;
+      attachments?: AgentAttachment[];
+    } = {},
+  ): string {
+    // Reconstruct a minimal AgentSessionState-shaped object — buildTurnPrompt
+    // only reads provider, systemPrompt, and history, so this is sufficient.
+    const fakeSession = {
+      provider: session.provider,
+      mode: 'analysis' as AgentMode,
+      model: '' as AgentModelId,
+      thinking: 'high' as AgentThinkingEffort,
+      process: null,
+      systemPrompt: session.systemPrompt,
+      alive: true,
+      history: session.history,
+      activeTurn: null,
+    };
+    return buildTurnPrompt(
+      fakeSession,
+      message,
+      options.context ?? null,
+      options.uiContext ?? null,
+      options.attachments,
+    );
+  },
+  normalizeSeedHistory,
+  buildAccumulatedAttachmentsSection,
+  /**
+   * Simulate a multi-turn conversation by appending a user history entry
+   * (with attachments) and then building the next turn's prompt. Mirrors
+   * the runtime path inside `sendTurn` minus the child_process spawn.
+   */
+  appendUserTurn(
+    history: AgentHistoryEntry[],
+    content: string,
+    attachments?: AgentAttachment[],
+  ): AgentHistoryEntry[] {
+    const previousUserTurns = history.reduce(
+      (count, entry) => (entry.role === 'user' ? count + 1 : count),
+      0,
+    );
+    const turnIndex = previousUserTurns + 1;
+    return [
+      ...history,
+      {
+        role: 'user',
+        content,
+        turnIndex,
+        ...(attachments && attachments.length > 0
+          ? { attachments: attachments.map((a) => ({ ...a })) }
+          : {}),
+      },
+    ];
+  },
+  appendAssistantTurn(
+    history: AgentHistoryEntry[],
+    content: string,
+  ): AgentHistoryEntry[] {
+    return [...history, { role: 'assistant', content }];
+  },
+};

@@ -858,6 +858,13 @@ export const DEFAULT_AGENT_THINKING_BY_PROVIDER: Record<AgentProviderId, AgentTh
 export interface AgentConversationHistoryEntry {
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * v3.110 — attachments that were present on this turn. Included so the
+   * agent can recall files (especially images) that the user sent on
+   * earlier turns. Only carried for `user` turns in practice; assistant
+   * turns inherit visibility through the conversation context.
+   */
+  attachments?: AgentAttachment[];
 }
 
 export interface AgentStartSessionPayload {

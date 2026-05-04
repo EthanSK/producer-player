@@ -9408,21 +9408,21 @@ export function App(): JSX.Element {
     setSoloedBands((prev) => {
       let next: Set<number>;
       if (shiftKey) {
-        // Shift+click: replace current selection with only the clicked band
-        // (intentional behavior change — previously this selected every band
-        // EXCEPT the clicked one, which was rarely useful).
-        // If the clicked band is already the sole selection, clear (toggle off).
-        if (prev.size === 1 && prev.has(bandIndex)) {
-          next = new Set<number>();
-        } else {
-          next = new Set<number>([bandIndex]);
-        }
-      } else {
+        // Shift+click: add/remove the clicked band while preserving the
+        // existing selection, matching common multi-select behavior.
         next = new Set(prev);
         if (next.has(bandIndex)) {
           next.delete(bandIndex);
         } else {
           next.add(bandIndex);
+        }
+      } else {
+        // Plain click: solo only the clicked band. If it is already the sole
+        // selected band, clear the solo selection (toggle off).
+        if (prev.size === 1 && prev.has(bandIndex)) {
+          next = new Set<number>();
+        } else {
+          next = new Set<number>([bandIndex]);
         }
       }
       // The consolidated output chain effect rebuilds the Web Audio graph

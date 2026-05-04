@@ -743,15 +743,21 @@ test.describe('checklist playback workflow', () => {
         scrubberStart + 0.1
       );
 
-      await miniSpectrum.click({ position: { x: 120, y: 24 } });
+      const firstBandClickX = Math.max(8, Math.round(miniSpectrumWidth * 0.25));
+      const secondBandClickX = Math.min(miniSpectrumWidth - 8, Math.round(miniSpectrumWidth * 0.75));
+
+      await miniSpectrum.click({ position: { x: firstBandClickX, y: 24 } });
       await expect(miniSpectrum).toHaveAttribute('data-active-bands', /^[0-5]$/);
       const miniSpectrumStatus = page.getByTestId('player-dock-spectrum-solo-label');
       await expect(miniSpectrumStatus).toContainText('Soloing:');
       await expect(page.getByTestId('player-dock-clear-solo-bands')).toBeVisible();
 
-      await miniSpectrum.click({ position: { x: 120, y: 24 }, modifiers: ['Shift'] });
+      await miniSpectrum.click({ position: { x: secondBandClickX, y: 24 }, modifiers: ['Shift'] });
       await expect(miniSpectrum).toHaveAttribute('data-active-bands', /,/);
       await expect(miniSpectrumStatus).toContainText('+');
+
+      await miniSpectrum.click({ position: { x: secondBandClickX, y: 24 } });
+      await expect(miniSpectrum).toHaveAttribute('data-active-bands', /^[0-5]$/);
 
       await page.getByTestId('player-dock-clear-solo-bands').click();
       await expect(miniSpectrum).toHaveAttribute('data-active-bands', '');

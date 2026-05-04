@@ -3348,7 +3348,6 @@ export function App(): JSX.Element {
       return;
     }
 
-    const controller = new AbortController();
     let cancelled = false;
 
     setAnalysis(cached.previewAnalysis);
@@ -3365,7 +3364,13 @@ export function App(): JSX.Element {
 
     const previewPromise = cached.previewAnalysis
       ? Promise.resolve(cached.previewAnalysis)
-      : analyzeTrackFromUrl(mixPlaybackSource.url, controller.signal, {
+      : // Do not pass an AbortSignal here. The preview-analysis queue de-dupes
+        // by cache key, so a StrictMode/effect cleanup that aborts the first
+        // request can otherwise poison the re-run with that same aborted
+        // in-flight promise and leave the live selection stuck at "loading"
+        // (Windows CI was slow enough to hit this consistently). Stale results
+        // are still ignored by the `cancelled` guard below.
+        analyzeTrackFromUrl(mixPlaybackSource.url, undefined, {
           priority: ANALYSIS_PRIORITY_USER_SELECTED,
           key: analysisCacheKey,
         });
@@ -3378,8 +3383,8 @@ export function App(): JSX.Element {
 
     void Promise.all([previewPromise, measuredPromise])
       .then(([previewResult, measuredResult]) => {
-        // v3.116 (Windows-CI fix) — ALWAYS populate the in-memory analysis
-        // cache, even when this effect run is cancelled. Without this, a
+        // Windows-CI fix — ALWAYS populate the in-memory analysis cache,
+        // even when this effect run is cancelled. Without this, a
         // rapid sequence of effect re-runs (driven by snapshot reference
         // churn from background file-watcher rescans on Windows) means the
         // cleanup races the .then handler, every analysis run gets bailed
@@ -3419,14 +3424,18 @@ export function App(): JSX.Element {
         setAnalysisStatus('ready');
       })
       .catch((analysisIssue: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
         if (
           analysisIssue instanceof DOMException &&
           analysisIssue.name === 'AbortError'
         ) {
-          return;
-        }
-
-        if (cancelled) {
+          setAnalysis(cached.previewAnalysis);
+          setMeasuredAnalysis(cached.measuredAnalysis);
+          setAnalysisStatus('error');
+          setAnalysisError('Analysis was interrupted before it could finish.');
           return;
         }
 
@@ -3442,7 +3451,6 @@ export function App(): JSX.Element {
 
     return () => {
       cancelled = true;
-      controller.abort();
     };
   }, [
     cacheMasteringAnalysis,

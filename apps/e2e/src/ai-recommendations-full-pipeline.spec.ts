@@ -233,7 +233,6 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
 
       // Auto-run should fire within a few seconds once analysis completes.
-      await dumpAutoRunGateState(page, 'auto-run-pre-poll');
       try {
         await expect
           .poll(async () => getMockCallCount(page), { timeout: 20_000 })
@@ -301,7 +300,6 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
 
-      await dumpAutoRunGateState(page, 'toggle-spec-pre-poll');
       try {
         await expect
           .poll(async () => getMockCallCount(page), { timeout: 20_000 })
@@ -379,7 +377,6 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       expect(autoRunCalls).toBe(0);
 
       // Manual Regenerate still fires the mock.
-      await dumpAutoRunGateState(page, 'manual-regen-pre-click');
       await page.getByTestId('ai-rec-regenerate').click();
       try {
         await expect
@@ -441,7 +438,6 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
 
-      await dumpAutoRunGateState(page, 'tool-spec-pre-poll');
       try {
         await expect
           .poll(async () => getMockCallCount(page), { timeout: 20_000 })

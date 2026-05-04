@@ -3378,14 +3378,18 @@ export function App(): JSX.Element {
 
     void Promise.all([previewPromise, measuredPromise])
       .then(([previewResult, measuredResult]) => {
-        if (cancelled) {
-          return;
-        }
-
+        // v3.116 (Windows-CI fix) — ALWAYS populate the in-memory analysis
+        // cache, even when this effect run is cancelled. Without this, a
+        // rapid sequence of effect re-runs (driven by snapshot reference
+        // churn from background file-watcher rescans on Windows) means the
+        // cleanup races the .then handler, every analysis run gets bailed
+        // BEFORE it can call cacheMasteringAnalysis, so the NEXT effect run
+        // re-enqueues a fresh analysis instead of hitting cache, and the
+        // user is stuck in `analysisStatus: 'loading'` indefinitely. The
+        // cache is keyed by analysisCacheKey (file path + size + mtime) and
+        // is idempotent — writing is always safe and unblocks subsequent
+        // runs immediately.
         cacheMasteringAnalysis(analysisCacheKey, previewResult, measuredResult);
-        setAnalysis(previewResult);
-        setMeasuredAnalysis(measuredResult);
-        setAnalysisStatus('ready');
 
         if (selectedVersion) {
           const selectedVersionSong =
@@ -3402,6 +3406,17 @@ export function App(): JSX.Element {
             );
           }
         }
+
+        // Renderer-state setters are still gated on `!cancelled`. If this
+        // run was cancelled, a newer effect run is now in charge of those
+        // setters; clobbering them here would cause flashes or stale data.
+        if (cancelled) {
+          return;
+        }
+
+        setAnalysis(previewResult);
+        setMeasuredAnalysis(measuredResult);
+        setAnalysisStatus('ready');
       })
       .catch((analysisIssue: unknown) => {
         if (

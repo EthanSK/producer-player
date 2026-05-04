@@ -64,12 +64,14 @@ import {
   analyzeTrackFromUrl,
   ANALYSIS_PRIORITY_BACKGROUND,
   ANALYSIS_PRIORITY_USER_SELECTED,
+  dumpPreviewAnalysisQueue,
   estimateShortTermLufs,
   getPreviewAnalysisQueueStats,
   promotePreviewAnalysis,
   type TrackAnalysisResult,
 } from './audioAnalysis';
 import { AnalysisQueue, type AnalysisPriority } from './audioAnalysisQueue';
+import { BackgroundTasksIndicator } from './BackgroundTasksIndicator';
 import {
   getMasteringChecklistRuleById,
   getMasteringChecklistRuleMeta,
@@ -1079,6 +1081,11 @@ function cacheMasteringAnalysisValue<T>(
 const MEASURED_ANALYSIS_QUEUE = new AnalysisQueue({
   concurrency: 2,
   label: 'measured-analysis',
+  // Item #14 (v3.118) — let user-selected ffmpeg jobs bypass the cap when
+  // both regular slots are taken by bg precompute. ffmpeg is cheap enough
+  // that 3 extra concurrent runs is fine on modern hardware; the bg work
+  // continues in parallel so the precompute backlog doesn't stall.
+  maxUserBypassSlots: 3,
 });
 
 interface RunMeasuredAnalysisOptions {
@@ -2523,6 +2530,18 @@ function parseMigrationInput(
   }
 
   return preview;
+}
+
+// Item #14 (v3.118) — stable callback reference used by
+// <BackgroundTasksIndicator>. Defined at module scope so the indicator's
+// useEffect dependency array stays stable across App re-renders.
+function getMeasuredQueueDump(): {
+  active: number;
+  userBypassActive: number;
+  pending: number;
+  pendingByPriority: { user: number; neighbor: number; background: number };
+} {
+  return MEASURED_ANALYSIS_QUEUE.dump();
 }
 
 export function App(): JSX.Element {
@@ -13736,7 +13755,12 @@ export function App(): JSX.Element {
 
         <section className="sidebar-status" data-testid="status-card">
           <div className="sidebar-status-header">
-            <h3>Status</h3>
+            <div className="sidebar-status-heading-row">
+              <h3>Status</h3>
+              {/* Item #14 (v3.118) — Rekordbox-style background-tasks pill.
+                  Hidden when both queues are idle so it never adds noise. */}
+              <BackgroundTasksIndicator getMeasuredDump={getMeasuredQueueDump} />
+            </div>
             <HelpTooltip text={statusCardHelpText} />
           </div>
           <p>

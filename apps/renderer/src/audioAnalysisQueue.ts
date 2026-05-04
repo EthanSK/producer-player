@@ -6,6 +6,18 @@
 // every queued background-preload job, which made track switching feel slow on
 // large albums with rapid switching mid-preload.
 //
+// Item #14 (v3.118) — bug fix: foreground analysis was still being blocked by
+// background precompute. The `promote()` mechanism only re-orders PENDING
+// tasks; if a background task was already running (concurrency=1 preview, or
+// both concurrency=2 measured slots full), a user-priority job had to wait for
+// the running background job(s) to finish. Symptom: integrated LUFS, sample
+// rate, version-history all stuck on "loading" right after a track switch
+// while the precompute backlog churned. Fix below: user-priority enqueues
+// BYPASS the concurrency cap (up to `maxUserBypassSlots`) so a click never
+// stalls behind bg work in flight. Bg tasks keep running in parallel; the
+// renderer-state cancellation guard in App.tsx stops their stale results from
+// clobbering the user-selected view.
+//
 // This pool is the throttle + priority layer used by:
 //   - the renderer-side `analyzeTrackFromUrl` decoder (concurrency=1, memory-
 //     bound: a single full WAV decode can take hundreds of MB)
@@ -15,7 +27,10 @@
 // Behavior:
 //   - lower priority value runs first (0 = user-selected, 1 = neighbor, 2 = bg)
 //   - within the same priority level, tasks are FIFO
-//   - concurrent task cap is enforced; new jobs run as soon as a worker frees
+//   - concurrent task cap is enforced for non-user-priority tasks
+//   - user-priority (0) tasks BYPASS the cap when all slots are taken by lower-
+//     priority work, up to `maxUserBypassSlots` extra parallel jobs (default 3
+//     — enough for typical click-bursts without OOMing the WAV decoder pool)
 //   - tasks de-dupe by `key` when provided: identical pending key returns the
 //     in-flight promise instead of enqueueing a duplicate analysis job
 //   - calling `promote(key, priority)` re-orders an already-queued task (no-op
@@ -49,6 +64,17 @@ export interface AnalysisQueueOptions {
    * Optional human-readable label used by `dump()` (debugging only).
    */
   label?: string;
+  /**
+   * Item #14 — when a user-priority (priority=0) task is enqueued and all
+   * regular concurrency slots are taken by lower-priority work, the queue
+   * starts the user task IMMEDIATELY in an extra slot up to this cap. This
+   * is "preemption by bypass": background tasks keep running, but the user-
+   * priority task no longer waits.
+   *
+   * Defaults to 3 — covers the common case of one user click during 1-2 bg
+   * jobs without letting a click-storm OOM the WAV decode pool.
+   */
+  maxUserBypassSlots?: number;
 }
 
 export interface EnqueueOptions {
@@ -67,6 +93,7 @@ export interface EnqueueOptions {
 export class AnalysisQueue {
   private readonly concurrency: number;
   private readonly label: string;
+  private readonly maxUserBypassSlots: number;
   private readonly pending: QueuedTask<unknown>[] = [];
   private readonly runningKeys = new Set<string>();
   // In-flight + pending dedupe map: key -> the resolved promise the caller can
@@ -74,6 +101,17 @@ export class AnalysisQueue {
   private readonly inflightByKey = new Map<string, Promise<unknown>>();
   private nextInsertionOrder = 0;
   private active = 0;
+  // Item #14 — count of user-priority jobs currently bypassing the
+  // concurrency cap. These run on top of `active` regular workers, capped at
+  // `maxUserBypassSlots`. When a bypass slot frees, we DON'T immediately
+  // start a regular pending task in its place — the cap is for emergency
+  // preemption only, not steady-state throughput.
+  private userBypassActive = 0;
+  // Item #14 — number of currently-running NON-user-priority tasks. Bypass
+  // only triggers when at least one of these is holding a regular slot;
+  // otherwise a user-priority task waiting behind another user-priority
+  // task is just FIFO + concurrency cap as before, no bypass needed.
+  private nonUserActive = 0;
 
   constructor(options: AnalysisQueueOptions) {
     if (!Number.isFinite(options.concurrency) || options.concurrency < 1) {
@@ -83,6 +121,7 @@ export class AnalysisQueue {
     }
     this.concurrency = Math.floor(options.concurrency);
     this.label = options.label ?? 'analysis-queue';
+    this.maxUserBypassSlots = Math.max(0, Math.floor(options.maxUserBypassSlots ?? 3));
   }
 
   /**
@@ -153,18 +192,64 @@ export class AnalysisQueue {
           task.priority = priority;
         }
       }
+      // After a promote, a user-priority job may now be eligible to bypass
+      // the concurrency cap. Re-evaluate the start loop.
+      this.maybeStart();
     }
   }
 
   /**
    * Returns counts useful for tests / debugging.
    */
-  stats(): { active: number; pending: number; concurrency: number; label: string } {
+  stats(): {
+    active: number;
+    pending: number;
+    concurrency: number;
+    label: string;
+    userBypassActive: number;
+  } {
     return {
       active: this.active,
       pending: this.pending.length,
       concurrency: this.concurrency,
       label: this.label,
+      userBypassActive: this.userBypassActive,
+    };
+  }
+
+  /**
+   * Item #14 — diagnostic snapshot used by the background-tasks indicator UI
+   * in the status sidebar. Returns counts grouped by priority for the pending
+   * tasks PLUS the running task counts so the indicator can render
+   * "active N / queued M" without poking at internal arrays.
+   */
+  dump(): {
+    label: string;
+    concurrency: number;
+    active: number;
+    userBypassActive: number;
+    pending: number;
+    pendingByPriority: { user: number; neighbor: number; background: number };
+  } {
+    let user = 0;
+    let neighbor = 0;
+    let background = 0;
+    for (const p of this.pending) {
+      if (p.priority === ANALYSIS_PRIORITY_USER_SELECTED) {
+        user += 1;
+      } else if (p.priority === ANALYSIS_PRIORITY_NEIGHBOR) {
+        neighbor += 1;
+      } else {
+        background += 1;
+      }
+    }
+    return {
+      label: this.label,
+      concurrency: this.concurrency,
+      active: this.active,
+      userBypassActive: this.userBypassActive,
+      pending: this.pending.length,
+      pendingByPriority: { user, neighbor, background },
     };
   }
 
@@ -190,35 +275,93 @@ export class AnalysisQueue {
     return next;
   }
 
+  private peekHighestPendingPriority(): AnalysisPriority | null {
+    if (this.pending.length === 0) {
+      return null;
+    }
+    let best = this.pending[0].priority;
+    for (let i = 1; i < this.pending.length; i += 1) {
+      if (this.pending[i].priority < best) {
+        best = this.pending[i].priority;
+      }
+    }
+    return best;
+  }
+
+  private startTask(next: QueuedTask<unknown>, isUserBypass: boolean): void {
+    const isNonUser = next.priority !== ANALYSIS_PRIORITY_USER_SELECTED;
+    if (isUserBypass) {
+      this.userBypassActive += 1;
+    } else {
+      this.active += 1;
+      if (isNonUser) {
+        this.nonUserActive += 1;
+      }
+    }
+    if (next.key !== null) {
+      this.runningKeys.add(next.key);
+    }
+
+    Promise.resolve()
+      .then(() => next.task())
+      .then(
+        (value) => {
+          next.resolve(value);
+        },
+        (reason) => {
+          next.reject(reason);
+        }
+      )
+      .finally(() => {
+        if (isUserBypass) {
+          this.userBypassActive -= 1;
+        } else {
+          this.active -= 1;
+          if (isNonUser) {
+            this.nonUserActive -= 1;
+          }
+        }
+        if (next.key !== null) {
+          this.runningKeys.delete(next.key);
+          this.inflightByKey.delete(next.key);
+        }
+        this.maybeStart();
+      });
+  }
+
   private maybeStart(): void {
+    // Phase 1 — fill regular concurrency slots in priority order.
     while (this.active < this.concurrency && this.pending.length > 0) {
       const next = this.popNext();
       if (!next) {
         return;
       }
-      this.active += 1;
-      if (next.key !== null) {
-        this.runningKeys.add(next.key);
-      }
+      this.startTask(next, false);
+    }
 
-      Promise.resolve()
-        .then(() => next.task())
-        .then(
-          (value) => {
-            next.resolve(value);
-          },
-          (reason) => {
-            next.reject(reason);
-          }
-        )
-        .finally(() => {
-          this.active -= 1;
-          if (next.key !== null) {
-            this.runningKeys.delete(next.key);
-            this.inflightByKey.delete(next.key);
-          }
-          this.maybeStart();
-        });
+    // Phase 2 — Item #14 user-priority bypass. If we have a pending
+    // user-priority task AND at least one running task is non-user (i.e. bg
+    // or neighbor work is holding a slot), start the user task in an extra
+    // bypass slot rather than make it wait. We DO NOT bypass when the slots
+    // are all held by other user tasks — that's normal FIFO + cap.
+    while (
+      this.userBypassActive < this.maxUserBypassSlots &&
+      this.nonUserActive > 0 &&
+      this.peekHighestPendingPriority() === ANALYSIS_PRIORITY_USER_SELECTED
+    ) {
+      const next = this.popNext();
+      if (!next) {
+        return;
+      }
+      // Sanity: popNext returned a non-user task even though peek said user.
+      // Shouldn't happen given the invariant, but guard so we never bypass
+      // for non-user work.
+      if (next.priority !== ANALYSIS_PRIORITY_USER_SELECTED) {
+        // Put it back; let the regular phase pick it up next round.
+        this.pending.push(next);
+        return;
+      }
+      this.startTask(next, true);
     }
   }
 }

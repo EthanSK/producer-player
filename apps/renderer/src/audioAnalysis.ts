@@ -39,6 +39,10 @@ const HIGH_BAND_CUTOFF_HZ = 4_000;
 const previewAnalysisQueue = new AnalysisQueue({
   concurrency: 1,
   label: 'preview-analysis',
+  // Item #14 (v3.118) — allow the user-selected track to bypass the bg
+  // decoder when bg precompute is mid-decode. Cap at 2 to keep peak memory
+  // bounded (full-track decode can be hundreds of MB).
+  maxUserBypassSlots: 2,
 });
 
 export {
@@ -112,8 +116,24 @@ export function getPreviewAnalysisQueueStats(): {
   pending: number;
   concurrency: number;
   label: string;
+  userBypassActive: number;
 } {
   return previewAnalysisQueue.stats();
+}
+
+/**
+ * Item #14 (v3.118) — full per-priority dump for the background-tasks
+ * indicator UI in the status sidebar.
+ */
+export function dumpPreviewAnalysisQueue(): {
+  label: string;
+  concurrency: number;
+  active: number;
+  userBypassActive: number;
+  pending: number;
+  pendingByPriority: { user: number; neighbor: number; background: number };
+} {
+  return previewAnalysisQueue.dump();
 }
 
 function createMonoData(buffer: AudioBuffer): Float32Array {

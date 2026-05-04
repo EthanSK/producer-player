@@ -595,6 +595,66 @@ input[type='range'] {
   font-weight: 600;
 }
 
+/* Item #14 (v3.118) — wraps the Status heading + the background-tasks
+   indicator pill so they sit on the same row. */
+.sidebar-status-heading-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Item #14 — Rekordbox-style background-tasks indicator. Compact, muted,
+   non-interactive. Shows current "active / queued" counts for the audio-
+   analysis queues. Hidden entirely when both queues are idle. */
+.bg-tasks-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 9999px;
+  background: rgba(92, 167, 255, 0.10);
+  border: 1px solid rgba(92, 167, 255, 0.28);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  user-select: none;
+  cursor: default;
+}
+
+.bg-tasks-indicator-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(92, 167, 255, 0.85);
+  box-shadow: 0 0 6px rgba(92, 167, 255, 0.55);
+  animation: bg-tasks-indicator-pulse 1.4s ease-in-out infinite;
+}
+
+.bg-tasks-indicator-label {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+@keyframes bg-tasks-indicator-pulse {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-tasks-indicator-dot {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
 .ui-zoom-control {
   display: flex;
   align-items: center;

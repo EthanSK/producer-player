@@ -2632,6 +2632,15 @@ export function App(): JSX.Element {
   // button in the mastering fullscreen header is the explicit trigger.
   const [agentAutoRecommendEnabled, setAgentAutoRecommendEnabled] =
     useState<boolean>(false);
+  // Item #13 (v3.113) — DANGEROUS bypass for permission/approval gating
+  // on the underlying CLI. Default OFF (safe). When ON, every spawned
+  // session passes `--dangerously-skip-permissions` (Claude) or
+  // `--dangerously-bypass-approvals-and-sandbox` (Codex). Persisted in
+  // unified state as `agentDangerouslyBypassPermissions`. Surfaced in
+  // AgentSettings with an explicit DANGER label so users opt in
+  // intentionally.
+  const [agentDangerouslyBypassPermissions, setAgentDangerouslyBypassPermissions] =
+    useState<boolean>(false);
   // v3.33 Phase 4 — in-flight generation status for the current request.
   // `null` = idle. `{ source, songId, versionNumber, requestId }` during a
   // run. Used to block concurrent runs for the same pair and to expose the
@@ -4184,6 +4193,13 @@ export function App(): JSX.Element {
           setAgentAutoRecommendEnabled(userState.agentAutoRecommendEnabled);
         }
 
+        // Item #13 (v3.113) — DANGEROUS-bypass toggle hydration.
+        if (typeof userState.agentDangerouslyBypassPermissions === 'boolean') {
+          setAgentDangerouslyBypassPermissions(
+            userState.agentDangerouslyBypassPermissions,
+          );
+        }
+
         if (userState.songDawOffsets && typeof userState.songDawOffsets === 'object') {
           const sanitized: Record<string, { seconds: number; enabled: boolean }> = {};
           for (const [songId, entry] of Object.entries(userState.songDawOffsets)) {
@@ -4533,6 +4549,9 @@ export function App(): JSX.Element {
         uiZoomFactor: null, // managed by main process — ignored on renderer sync
         showAiRecommendationsFullscreen,
         agentAutoRecommendEnabled,
+        // Item #13 (v3.113) — DANGEROUS-bypass toggle. Persists in unified
+        // state so it survives relaunch.
+        agentDangerouslyBypassPermissions,
         songDawOffsets,
         checklistDawOffsetDefaultSeconds: dawOffsetDefault.seconds,
         checklistDawOffsetDefaultEnabled: dawOffsetDefault.enabled,
@@ -4610,6 +4629,7 @@ export function App(): JSX.Element {
     autoUpdateEnabled,
     showAiRecommendationsFullscreen,
     agentAutoRecommendEnabled,
+    agentDangerouslyBypassPermissions,
     songDawOffsets,
     dawOffsetDefault,
     listeningDevices,
@@ -4705,6 +4725,13 @@ export function App(): JSX.Element {
       // always reads straight from React state.
       if (typeof userState.agentAutoRecommendEnabled === 'boolean') {
         setAgentAutoRecommendEnabled(userState.agentAutoRecommendEnabled);
+      }
+
+      // Item #13 (v3.113) — DANGEROUS-bypass toggle import-path hydration.
+      if (typeof userState.agentDangerouslyBypassPermissions === 'boolean') {
+        setAgentDangerouslyBypassPermissions(
+          userState.agentDangerouslyBypassPermissions,
+        );
       }
 
       if (userState.songDawOffsets && typeof userState.songDawOffsets === 'object') {
@@ -18897,6 +18924,8 @@ export function App(): JSX.Element {
           promptRequest={agentChatPromptRequest}
           autoRecommendEnabled={agentAutoRecommendEnabled}
           onAutoRecommendEnabledChange={setAgentAutoRecommendEnabled}
+          dangerouslyBypassPermissions={agentDangerouslyBypassPermissions}
+          onDangerouslyBypassPermissionsChange={setAgentDangerouslyBypassPermissions}
           onDetectChatTool={handleAgentChatToolMatch}
           onSilentPromptDropped={handleSilentPromptDropped}
           onChatStreamingChange={setAgentChatStreaming}

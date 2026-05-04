@@ -610,6 +610,13 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     // don't burn agent credits automatically on song open; the ✨ AI Stars
     // button in the mastering fullscreen header is the explicit trigger.
     agentAutoRecommendEnabled: false,
+    // v3.113 (Item #13) — DANGEROUS bypass for permission/approval gating on
+    // the underlying CLI. Default OFF. When ON, passes
+    // `--dangerously-skip-permissions` (Claude) or
+    // `--dangerously-bypass-approvals-and-sandbox` (Codex) so the agent has
+    // unrestricted file-system + shell access. User opts in via the
+    // explicitly-labeled-DANGEROUS toggle in AgentSettings.
+    agentDangerouslyBypassPermissions: false,
     songDawOffsets: {},
     checklistDawOffsetDefaultSeconds: 0,
     checklistDawOffsetDefaultEnabled: false,
@@ -693,6 +700,13 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.agentAutoRecommendEnabled === 'boolean'
         ? raw.agentAutoRecommendEnabled
         : fallback.agentAutoRecommendEnabled,
+    // v3.113 (Item #13) — DANGEROUS-bypass toggle. Falls back to the
+    // safe default (false) for any non-boolean input so a malformed or
+    // missing value never accidentally enables full-access mode.
+    agentDangerouslyBypassPermissions:
+      typeof raw.agentDangerouslyBypassPermissions === 'boolean'
+        ? raw.agentDangerouslyBypassPermissions
+        : fallback.agentDangerouslyBypassPermissions,
     songDawOffsets: parseSongDawOffsets(raw.songDawOffsets),
     // Migration: if the new "default" fields are missing but the legacy
     // app-global `checklistDawOffsetSeconds`/`checklistDawOffsetEnabled`

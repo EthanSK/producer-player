@@ -116,9 +116,17 @@ await build({
 });
 
 // v3.110 — agent-service prompt/history bundling for hermetic Node tests.
-// Verifies that attachments from prior turns are replayed into every
-// subsequent turn's prompt (issue: model previously couldn't recall
-// images attached on past turns). No electron runtime is needed.
+// Used by:
+//   - agent-service-attachments.test.cjs (v3.110): verifies that
+//     attachments from prior turns are replayed into every subsequent
+//     turn's prompt (issue: model previously couldn't recall images
+//     attached on past turns).
+//   - agent-service-bypass-permissions.test.cjs (v3.113, Item #13):
+//     locks OFF/ON parity for the `--dangerously-skip-permissions`
+//     (Claude) and `--dangerously-bypass-approvals-and-sandbox` (Codex)
+//     flags via `__testing__.getSpawnArgs`.
+// External the node:* shims that agent-service uses at runtime so
+// esbuild leaves them alone for the host Node runtime to resolve.
 await build({
   entryPoints: [resolve(appDir, 'src/agent-service.ts')],
   outfile: resolve(appDir, 'dist/agent-service.test.cjs'),

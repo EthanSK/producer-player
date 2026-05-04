@@ -88,6 +88,14 @@ interface AgentSessionState {
   alive: boolean;
   history: AgentHistoryEntry[];
   activeTurn: AgentTurnState | null;
+  /**
+   * Item #13 (v3.113) — when `true`, the spawned CLI is invoked with the
+   * provider's "dangerously bypass all permission/approval gating" flag.
+   * Default `false`. Driven by the
+   * `agentDangerouslyBypassPermissions` user setting; surfaced via
+   * `AgentStartSessionPayload.dangerouslyBypassPermissions`.
+   */
+  dangerouslyBypassPermissions: boolean;
 }
 
 let currentSession: AgentSessionState | null = null;
@@ -375,9 +383,28 @@ function buildTurnPrompt(
   return sections.join('\n\n');
 }
 
+/**
+ * Build the CLI argv for the chosen provider.
+ *
+ * Item #13 (v3.113) — `dangerouslyBypassPermissions` is now opt-in via the
+ * persisted `agentDangerouslyBypassPermissions` user setting. Default OFF
+ * means the CLI runs with normal interactive permission/approval gating
+ * (Claude Code's default permission mode + Codex's `workspace-write`
+ * sandbox). When ON we add:
+ *   - Claude:  `--dangerously-skip-permissions`
+ *   - Codex:   `--dangerously-bypass-approvals-and-sandbox`
+ * which mirror T3 Code's `runtimeMode: 'full-access'` mapping
+ * (apps/server/src/codexAppServerManager.ts → `mapCodexRuntimeMode`).
+ *
+ * IMPORTANT: keep flag emission strictly conditional. Earlier revisions
+ * passed the dangerous flag unconditionally; the toggle exists precisely
+ * so users can turn that off again. Tests in
+ * `agent-service-bypass-permissions.test.cjs` lock the OFF/ON parity for
+ * both providers.
+ */
 function getSpawnArgs(session: AgentSessionState): string[] {
   if (session.provider === 'claude') {
-    return [
+    const args = [
       '-p',
       '--output-format',
       'stream-json',
@@ -389,23 +416,27 @@ function getSpawnArgs(session: AgentSessionState): string[] {
       session.thinking,
       '--system-prompt',
       session.systemPrompt,
-      '--dangerously-skip-permissions',
-      '--no-session-persistence',
     ];
+    if (session.dangerouslyBypassPermissions) {
+      args.push('--dangerously-skip-permissions');
+    }
+    args.push('--no-session-persistence');
+    return args;
   }
 
-  return [
-    'exec',
-    '--skip-git-repo-check',
-    '--ephemeral',
-    '--dangerously-bypass-approvals-and-sandbox',
+  const args = ['exec', '--skip-git-repo-check', '--ephemeral'];
+  if (session.dangerouslyBypassPermissions) {
+    args.push('--dangerously-bypass-approvals-and-sandbox');
+  }
+  args.push(
     '--model',
     session.model,
     '-c',
     `model_reasoning_effort="${session.thinking}"`,
     '--json',
     '-',
-  ];
+  );
+  return args;
 }
 
 function appendAssistantText(session: AgentSessionState, content: string): void {
@@ -676,6 +707,12 @@ export function startSession(
   model?: AgentModelId,
   thinking?: AgentThinkingEffort,
   history?: AgentConversationHistoryEntry[],
+  /**
+   * Item #13 (v3.113) — opt-in DANGEROUS bypass for permission/approval
+   * gating on the spawned CLI. Default `false`. Driven by the
+   * `agentDangerouslyBypassPermissions` user setting in unified state.
+   */
+  dangerouslyBypassPermissions?: boolean,
 ): void {
   if (currentSession?.alive) {
     destroySession();
@@ -701,6 +738,7 @@ export function startSession(
     alive: true,
     history: normalizeSeedHistory(history),
     activeTurn: null,
+    dangerouslyBypassPermissions: dangerouslyBypassPermissions === true,
   };
 }
 
@@ -964,14 +1002,19 @@ export function setEventCallback(callback: ((event: AgentEvent) => void) | null)
 }
 
 /**
- * v3.110 — internal-only test surface.
+ * Internal-only test surface.
  *
- * The prompt-building helpers (`buildTurnPrompt`, `buildAccumulatedAttachmentsSection`,
- * `normalizeSeedHistory`) are pure functions that drive how the agent's
- * conversation history + attachments are rendered into the per-turn stdin
- * prompt for both Claude Code and Codex backends. Tests need access to
- * them to verify that prior-turn attachments survive across multiple
- * turns. Not part of the runtime API; do NOT import outside tests.
+ * v3.110 — exposes the prompt-building helpers (`buildTurnPrompt`,
+ * `buildAccumulatedAttachmentsSection`, `normalizeSeedHistory`,
+ * `appendUserTurn`, `appendAssistantTurn`) so tests can verify that
+ * prior-turn attachments survive across multiple turns.
+ *
+ * v3.113 (Item #13) — also exposes `getSpawnArgs` so unit tests can
+ * lock in the OFF/ON parity for the dangerous-bypass-permissions
+ * toggle on both Claude and Codex without spawning a real child
+ * process.
+ *
+ * NOT part of the runtime API; do NOT import outside tests.
  */
 export const __testing__ = {
   buildTurnPrompt(
@@ -989,7 +1032,10 @@ export const __testing__ = {
   ): string {
     // Reconstruct a minimal AgentSessionState-shaped object — buildTurnPrompt
     // only reads provider, systemPrompt, and history, so this is sufficient.
-    const fakeSession = {
+    // `dangerouslyBypassPermissions: false` is the prompt-building tests'
+    // safe default; argv-construction tests use `getSpawnArgs` below and
+    // pass the flag explicitly there.
+    const fakeSession: AgentSessionState = {
       provider: session.provider,
       mode: 'analysis' as AgentMode,
       model: '' as AgentModelId,
@@ -999,6 +1045,7 @@ export const __testing__ = {
       alive: true,
       history: session.history,
       activeTurn: null,
+      dangerouslyBypassPermissions: false,
     };
     return buildTurnPrompt(
       fakeSession,
@@ -1042,5 +1089,31 @@ export const __testing__ = {
     content: string,
   ): AgentHistoryEntry[] {
     return [...history, { role: 'assistant', content }];
+  },
+  /**
+   * Item #13 (v3.113) — pure argv builder for both providers. Tests
+   * pass the toggle as input and assert flag presence/absence in the
+   * returned array.
+   */
+  getSpawnArgs(input: {
+    provider: AgentProviderId;
+    model?: AgentModelId;
+    thinking?: AgentThinkingEffort;
+    systemPrompt?: string;
+    dangerouslyBypassPermissions?: boolean;
+  }): string[] {
+    const fakeSession: AgentSessionState = {
+      provider: input.provider,
+      mode: 'analysis',
+      model: normalizeModel(input.provider, input.model),
+      thinking: normalizeThinking(input.provider, input.thinking),
+      process: null,
+      systemPrompt: input.systemPrompt ?? MASTERING_SYSTEM_PROMPT,
+      alive: true,
+      history: [],
+      activeTurn: null,
+      dangerouslyBypassPermissions: input.dangerouslyBypassPermissions === true,
+    };
+    return getSpawnArgs(fakeSession);
   },
 };

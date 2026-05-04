@@ -43,6 +43,12 @@ interface AgentSettingsProps {
   // mastering still works. Default ON.
   autoRecommendEnabled: boolean;
   onAutoRecommendEnabledChange: (enabled: boolean) => void;
+  // Item #13 (v3.113) — DANGEROUS bypass-permissions toggle. Off by default
+  // (safe). When ON, every spawned session passes the provider's
+  // "dangerously bypass permission/approval gating" CLI flag for full
+  // file-system + shell access. Persisted in unified state.
+  dangerouslyBypassPermissions: boolean;
+  onDangerouslyBypassPermissionsChange: (enabled: boolean) => void;
 }
 
 export function AgentSettings({
@@ -63,6 +69,8 @@ export function AgentSettings({
   controlsDisabled = false,
   autoRecommendEnabled,
   onAutoRecommendEnabledChange,
+  dangerouslyBypassPermissions,
+  onDangerouslyBypassPermissionsChange,
 }: AgentSettingsProps): JSX.Element {
   const [sttProvider, setSttProvider] = useState<AgentSttProviderId>(() =>
     readStoredAgentSttProvider()
@@ -355,6 +363,42 @@ export function AgentSettings({
           {autoRecommendEnabled
             ? 'The agent runs automatically the first time each track/version is opened in fullscreen mastering.'
             : 'Auto-run is OFF. Click "Regenerate AI recommendations" in fullscreen mastering to fire a run manually.'}
+        </p>
+      </div>
+
+      {/* Item #13 (v3.113) — DANGEROUS bypass-permissions toggle. Off by
+          default. When ON, the spawned CLI is invoked with the provider's
+          "skip permissions / bypass approvals" flag, giving the agent
+          unrestricted file-system + shell access. Mirrors T3 Code's
+          `runtimeMode: 'full-access'` behavior, adapted to PP's
+          direct-CLI-spawn architecture. Persisted in unified state via
+          `agentDangerouslyBypassPermissions`. */}
+      <div className="agent-settings-section agent-settings-section--danger">
+        <label
+          className="agent-settings-toggle-row"
+          title="DANGEROUS. When ON, the AI agent runs with no permission checks and gets full read/write access to your file system and shell. Only enable if you trust what you're about to ask the agent to do."
+        >
+          <input
+            type="checkbox"
+            className="agent-settings-toggle-input"
+            checked={dangerouslyBypassPermissions}
+            onChange={(event) =>
+              onDangerouslyBypassPermissionsChange(event.target.checked)
+            }
+            data-testid="agent-settings-bypass-permissions-toggle"
+          />
+          <span className="agent-settings-toggle-label">
+            Bypass CLI permission checks (DANGEROUS — gives the AI full
+            file-system access)
+          </span>
+        </label>
+        <p
+          className="agent-settings-key-help"
+          data-testid="agent-settings-bypass-permissions-help"
+        >
+          {dangerouslyBypassPermissions
+            ? 'ON. Every new agent session passes the provider’s "dangerously skip permissions / bypass approvals" flag to the underlying CLI. The agent can read and modify any file, run any shell command, and is NOT prompted before doing so. Turn this OFF unless you specifically need full-access mode.'
+            : 'OFF (recommended). The agent CLI runs with its normal permission/approval gating. Turn ON only when you intentionally want the agent to have unrestricted file-system + shell access.'}
         </p>
       </div>
 

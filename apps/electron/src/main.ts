@@ -5601,6 +5601,10 @@ function registerIpcHandlers(service: FileLibraryService): void {
         payload.model,
         payload.thinking,
         payload.history,
+        // v3.113 (Item #13) — DANGEROUS-bypass forwarded straight from the
+        // renderer's user-state-driven payload. Defaults to `false` when
+        // omitted (older clients / tests).
+        payload.dangerouslyBypassPermissions,
       );
     }
   );

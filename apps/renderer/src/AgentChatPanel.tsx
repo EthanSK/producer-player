@@ -77,6 +77,12 @@ interface AgentChatPanelProps {
   // Agent Settings panel so the user can flip it from one familiar place.
   autoRecommendEnabled?: boolean;
   onAutoRecommendEnabledChange?: (enabled: boolean) => void;
+  // Item #13 (v3.113) — DANGEROUS bypass-permissions toggle. Default `false`.
+  // When `true`, every spawned session passes the provider's "dangerously
+  // skip permissions / bypass approvals" CLI flag. Persisted in unified
+  // state via `App.tsx` so the choice survives relaunch.
+  dangerouslyBypassPermissions?: boolean;
+  onDangerouslyBypassPermissionsChange?: (enabled: boolean) => void;
   // v3.33 Phase 4 — chat-tool detector. When the user types something that
   // matches the `rerun_mastering_recommendations` tool pattern, we route
   // the call to the parent instead of sending the literal string to the
@@ -638,6 +644,11 @@ export function AgentChatPanel({
   promptRequest = null,
   autoRecommendEnabled = true,
   onAutoRecommendEnabledChange,
+  // Item #13 (v3.113) — DANGEROUS bypass toggle. Default `false` is the
+  // SAFE default; the parent (App.tsx) hydrates from unified state and
+  // forwards the persisted value here.
+  dangerouslyBypassPermissions = false,
+  onDangerouslyBypassPermissionsChange,
   onDetectChatTool,
   onSilentPromptDropped,
   onChatStreamingChange,
@@ -1615,6 +1626,11 @@ export function AgentChatPanel({
           thinking: currentThinking,
           systemPrompt: effectiveSystemPrompt,
           ...(historySeed.length > 0 ? { history: historySeed } : {}),
+          // Item #13 (v3.113) — forward the user's persisted bypass-permissions
+          // setting on every fresh session. The main process plumbs this into
+          // `agentService.startSession`, which sets the per-session flag that
+          // `getSpawnArgs` reads when building the CLI argv.
+          dangerouslyBypassPermissions,
         });
         setSessionActive(true);
       }
@@ -2097,6 +2113,10 @@ export function AgentChatPanel({
             autoRecommendEnabled={autoRecommendEnabled}
             onAutoRecommendEnabledChange={(next) =>
               onAutoRecommendEnabledChange?.(next)
+            }
+            dangerouslyBypassPermissions={dangerouslyBypassPermissions}
+            onDangerouslyBypassPermissionsChange={(next) =>
+              onDangerouslyBypassPermissionsChange?.(next)
             }
           />
         )}

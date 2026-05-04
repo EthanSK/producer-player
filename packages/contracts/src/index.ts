@@ -623,6 +623,17 @@ export interface ProducerPlayerUserState {
   // of any automatic LLM spend.
   agentAutoRecommendEnabled: boolean;
 
+  // v3.113 (Item #13) — opt-in toggle to pass dangerous-bypass flags to the
+  // underlying agent CLI: `--dangerously-skip-permissions` for Claude Code
+  // and `--dangerously-bypass-approvals-and-sandbox` for Codex. When ON the
+  // agent runs without ANY permission/approval gating and gets full
+  // file-system + shell access. Default OFF (safe). Persisted in unified
+  // state so the choice survives relaunch. Surfaced in AgentSettings with
+  // an explicit DANGEROUS warning. Pattern mirrors T3 Code's
+  // `runtimeMode: 'full-access'` (apps/server ClaudeAdapter + Codex
+  // app-server bridge), adapted to PP's direct-CLI-spawn architecture.
+  agentDangerouslyBypassPermissions: boolean;
+
   // Checklist DAW offset — when enabled, checklist timestamps are rendered
   // with a per-song offset added to their raw stored value so the
   // displayed time lines up with the user's digital audio workstation
@@ -874,6 +885,15 @@ export interface AgentStartSessionPayload {
   model?: AgentModelId;
   thinking?: AgentThinkingEffort;
   history?: AgentConversationHistoryEntry[];
+  /**
+   * Item #13 (v3.113) — when `true`, the spawned CLI is invoked with the
+   * provider's "dangerously bypass all permission/approval gating" flag.
+   * Default `false`. The renderer reads
+   * `ProducerPlayerUserState.agentDangerouslyBypassPermissions` and forwards
+   * it on every session start. Always-undefined is treated as `false` so
+   * old clients / tests degrade safely.
+   */
+  dangerouslyBypassPermissions?: boolean;
 }
 
 export interface AgentUiContext {

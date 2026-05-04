@@ -17118,24 +17118,20 @@ export function App(): JSX.Element {
               <div className="analysis-overlay-header-controls">
                 <div className="analysis-overlay-header-actions">
                   {/*
-                   * v3.110 — K-weighting (LUFS frequency-weighting) curve
-                   * button. Sits to the LEFT of the ✨ AI Stars button by
-                   * Ethan's spec. Opens a modal that plots the ITU-R
-                   * BS.1770-4 K-weighting shape — the fixed perceptual
-                   * weight LUFS applies to each frequency before
-                   * integrating loudness. Honest copy: this is the WEIGHT
-                   * applied at each frequency, not a per-frequency LUFS
-                   * reading of the user's track.
+                   * v3.126 — LUFS explainer button. Sits to the LEFT of the
+                   * ✨ AI Stars button by Ethan's spec. Opens a modal that
+                   * explains LUFS frequency weighting / BS.1770 K-weighting
+                   * without exposing the old cryptic f(w) notation in the UI.
                    */}
                   <button
                     type="button"
                     className="ai-rec-regenerate k-weighting-button"
                     data-testid="k-weighting-open"
                     onClick={() => setKWeightingModalOpen(true)}
-                    aria-label="View LUFS frequency-weighting curve"
-                    title="View the LUFS / BS.1770 K-weighting curve — the per-frequency weight applied during loudness measurement."
+                    aria-label="Explain LUFS frequency weighting"
+                    title="Explain LUFS and the BS.1770 K-weighting curve used during loudness measurement."
                   >
-                    <span aria-hidden="true" className="k-weighting-button-glyph">f(w)</span>
+                    <span className="k-weighting-button-glyph">LUFS</span>
                   </button>
                   {/*
                    * v3.63 — ✨ AI Stars button hoisted to the top of the
@@ -19552,10 +19548,10 @@ export function App(): JSX.Element {
         onClose={() => setErrorDetails(null)}
       />
       {/*
-       * v3.110 — K-weighting / LUFS frequency-weighting curve modal.
-       * Triggered from the new f(w) button in the fullscreen mastering
-       * header (left of the ✨ AI Stars button). Rendered at the App root
-       * so it can sit above the analysis overlay.
+       * v3.126 — K-weighting / LUFS frequency-weighting curve modal.
+       * Triggered from the LUFS button in the fullscreen mastering header
+       * (left of the ✨ AI Stars button). Rendered at the App root so it can
+       * sit above the analysis overlay.
        */}
       <KWeightingCurveModal
         open={kWeightingModalOpen}

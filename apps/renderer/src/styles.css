@@ -6208,10 +6208,9 @@ button.reference-action.active {
   ) !important;
 }
 
-/* v3.110 — K-weighting curve button. Sits to the LEFT of the ✨ AI
- * Stars button. Inherits the .ai-rec-regenerate base shape but uses a
- * subtle accent border and "f(w)" glyph styling to read as a graph
- * affordance rather than an action button. */
+/* v3.126 — LUFS explainer button. Sits to the LEFT of the ✨ AI Stars
+ * button. Inherits the .ai-rec-regenerate base shape but uses a clear
+ * all-caps LUFS label instead of the old cryptic f(w) notation. */
 .k-weighting-button {
   width: auto !important;
   padding: 4px 10px !important;
@@ -6230,9 +6229,10 @@ button.reference-action.active {
 }
 
 .k-weighting-button-glyph {
-  font-family: 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
-  font-style: italic;
-  letter-spacing: 0;
+  font-family: inherit;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.06em;
 }
 
 /* v3.110 — K-weighting curve modal. Mirrors the existing analysis /

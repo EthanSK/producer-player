@@ -1,7 +1,7 @@
 /**
  * v3.110 — K-weighting / LUFS frequency-weighting curve modal.
  *
- * Adds an explainer modal accessible from a small `f(w)` button in the
+ * Adds an explainer modal accessible from a clear `LUFS` button in the
  * fullscreen mastering header (immediately to the LEFT of the ✨ AI Stars
  * button). The modal plots the ITU-R BS.1770-4 K-weighting shape and
  * explains, in honest copy, that this is the per-frequency WEIGHT applied
@@ -84,12 +84,14 @@ test('k-weighting modal opens from the mastering header and displays the BS.1770
     await page.getByTestId('analysis-expand-button').click();
     await expect(page.getByTestId('analysis-modal')).toBeVisible();
 
-    // The K-weighting button must be present and to the LEFT of the
-    // ✨ AI Stars button (DOM order = visual order in the flex header).
+    // The LUFS / K-weighting button must be present, plainly labelled, and
+    // to the LEFT of the ✨ AI Stars button (DOM order = visual order in the
+    // flex header).
     const headerActions = page.locator('.analysis-overlay-header-actions');
     const kButton = headerActions.getByTestId('k-weighting-open');
     const aiButton = headerActions.getByTestId('ai-rec-regenerate');
     await expect(kButton).toBeVisible();
+    await expect(kButton).toHaveText('LUFS');
     await expect(aiButton).toBeVisible();
 
     const kBox = await kButton.boundingBox();

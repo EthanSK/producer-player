@@ -8670,6 +8670,46 @@ export function App(): JSX.Element {
       __producerPlayerGetAnalysisVersion?: () => string | null;
     }).__producerPlayerGetAnalysisVersion = () =>
       computeCurrentAnalysisVersion();
+    // v3.115 — Windows-CI diagnostic: expose the full auto-run gate state so
+    // E2E specs can dump it on failure to pinpoint which gate is blocking.
+    (window as unknown as {
+      __producerPlayerAutoRunGateState?: () => Record<string, unknown>;
+    }).__producerPlayerAutoRunGateState = () => ({
+      enableAgentFeatures: ENABLE_AGENT_FEATURES,
+      agentAutoRecommendEnabled,
+      showAiRecommendationsFullscreen,
+      agentChatStreaming,
+      playbackPreviewMode,
+      selectedPlaybackSongId,
+      currentPlaybackVersionNumber,
+      analysisIsSet: analysis !== null,
+      measuredAnalysisIsSet: measuredAnalysis !== null,
+      analysisStatus,
+      analysisVersion: computeCurrentAnalysisVersion(),
+      aiRecFetchCompletedKey,
+      aiRecFetchKeyExpected:
+        selectedPlaybackSongId && currentPlaybackVersionNumber
+          ? `${selectedPlaybackSongId}::${currentPlaybackVersionNumber}`
+          : null,
+      aiRecommendationsForCurrentTrackKeys: aiRecommendationsForCurrentTrack
+        ? Object.keys(aiRecommendationsForCurrentTrack)
+        : null,
+      aiRecommendationsGeneration: aiRecommendationsGeneration
+        ? {
+            source: aiRecommendationsGeneration.source,
+            requestId: aiRecommendationsGeneration.requestId,
+          }
+        : null,
+      mockInstalled:
+        typeof (window as unknown as { __producerPlayerAiRecMock?: unknown })
+          .__producerPlayerAiRecMock === 'function',
+      mockCallCount:
+        (
+          window as unknown as {
+            __producerPlayerAiRecMockCallCount?: number;
+          }
+        ).__producerPlayerAiRecMockCallCount ?? 0,
+    });
     return () => {
       delete (window as unknown as {
         __producerPlayerSetAutoRecommend?: unknown;
@@ -8677,8 +8717,25 @@ export function App(): JSX.Element {
       delete (window as unknown as {
         __producerPlayerGetAnalysisVersion?: unknown;
       }).__producerPlayerGetAnalysisVersion;
+      delete (window as unknown as {
+        __producerPlayerAutoRunGateState?: unknown;
+      }).__producerPlayerAutoRunGateState;
     };
-  }, [computeCurrentAnalysisVersion]);
+  }, [
+    computeCurrentAnalysisVersion,
+    agentAutoRecommendEnabled,
+    showAiRecommendationsFullscreen,
+    agentChatStreaming,
+    playbackPreviewMode,
+    selectedPlaybackSongId,
+    currentPlaybackVersionNumber,
+    analysis,
+    measuredAnalysis,
+    analysisStatus,
+    aiRecFetchCompletedKey,
+    aiRecommendationsForCurrentTrack,
+    aiRecommendationsGeneration,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

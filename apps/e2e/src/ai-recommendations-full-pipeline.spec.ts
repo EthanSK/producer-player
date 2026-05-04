@@ -139,6 +139,27 @@ async function getMockCallCount(page: import('@playwright/test').Page): Promise<
   );
 }
 
+/**
+ * v3.115 Windows-CI diagnostic. Dumps the full auto-run gate state so a
+ * timeout shows which gate is blocking. Returns a stringified JSON snapshot
+ * and an attached `console.log` line in the spec output.
+ */
+async function dumpAutoRunGateState(
+  page: import('@playwright/test').Page,
+  label: string,
+): Promise<void> {
+  const snapshot = await page.evaluate(() => {
+    const fn = (
+      window as unknown as {
+        __producerPlayerAutoRunGateState?: () => Record<string, unknown>;
+      }
+    ).__producerPlayerAutoRunGateState;
+    return typeof fn === 'function' ? fn() : { error: 'gate-state-hook-missing' };
+  });
+  // eslint-disable-next-line no-console
+  console.log(`[autoRunGateState:${label}]`, JSON.stringify(snapshot, null, 2));
+}
+
 async function closeAgentPanelIfOpen(page: import('@playwright/test').Page): Promise<void> {
   const agentClose = page.getByTestId('agent-panel-close');
   if ((await agentClose.count()) > 0 && (await agentClose.isVisible())) {
@@ -212,9 +233,15 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
 
       // Auto-run should fire within a few seconds once analysis completes.
-      await expect
-        .poll(async () => getMockCallCount(page), { timeout: 20_000 })
-        .toBeGreaterThanOrEqual(1);
+      await dumpAutoRunGateState(page, 'auto-run-pre-poll');
+      try {
+        await expect
+          .poll(async () => getMockCallCount(page), { timeout: 20_000 })
+          .toBeGreaterThanOrEqual(1);
+      } catch (failure) {
+        await dumpAutoRunGateState(page, 'auto-run-post-timeout');
+        throw failure;
+      }
 
       // Captions paint after the mock's persisted recs are fetched.
       const integratedCaption = page.getByTestId('ai-rec-integrated_lufs');
@@ -274,9 +301,15 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
 
-      await expect
-        .poll(async () => getMockCallCount(page), { timeout: 20_000 })
-        .toBeGreaterThanOrEqual(1);
+      await dumpAutoRunGateState(page, 'toggle-spec-pre-poll');
+      try {
+        await expect
+          .poll(async () => getMockCallCount(page), { timeout: 20_000 })
+          .toBeGreaterThanOrEqual(1);
+      } catch (failure) {
+        await dumpAutoRunGateState(page, 'toggle-spec-post-timeout');
+        throw failure;
+      }
 
       const caption = page.getByTestId('ai-rec-integrated_lufs');
       await expect(caption).toBeVisible({ timeout: 10_000 });
@@ -346,10 +379,16 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       expect(autoRunCalls).toBe(0);
 
       // Manual Regenerate still fires the mock.
+      await dumpAutoRunGateState(page, 'manual-regen-pre-click');
       await page.getByTestId('ai-rec-regenerate').click();
-      await expect
-        .poll(async () => getMockCallCount(page), { timeout: 10_000 })
-        .toBeGreaterThanOrEqual(1);
+      try {
+        await expect
+          .poll(async () => getMockCallCount(page), { timeout: 10_000 })
+          .toBeGreaterThanOrEqual(1);
+      } catch (failure) {
+        await dumpAutoRunGateState(page, 'manual-regen-post-timeout');
+        throw failure;
+      }
 
       const caption = page.getByTestId('ai-rec-integrated_lufs');
       await expect(caption).toBeVisible({ timeout: 10_000 });
@@ -402,9 +441,15 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       await page.getByTestId('main-list-row').first().click();
       await page.getByTestId('analysis-expand-button').click();
 
-      await expect
-        .poll(async () => getMockCallCount(page), { timeout: 20_000 })
-        .toBeGreaterThanOrEqual(1);
+      await dumpAutoRunGateState(page, 'tool-spec-pre-poll');
+      try {
+        await expect
+          .poll(async () => getMockCallCount(page), { timeout: 20_000 })
+          .toBeGreaterThanOrEqual(1);
+      } catch (failure) {
+        await dumpAutoRunGateState(page, 'tool-spec-post-timeout');
+        throw failure;
+      }
 
       // v3.36 (Codex round 2): wait for a rendered AI caption with the
       // mock's canned value, not just the mock call count. The mock call

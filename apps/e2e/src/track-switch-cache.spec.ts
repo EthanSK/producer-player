@@ -8,16 +8,16 @@ import { launchProducerPlayer } from './helpers/electron-app';
 // Item #10 (v3.110) — track-switch precompute / cache.
 //
 // These tests pin down the *user-felt* invariant of the precompute layer:
-// once the album-active-version preload has run, switching to a previously
-// selected track must come back from cache without re-running ffmpeg. We
-// verify this two ways:
-//   1. After selecting two tracks in turn, the persisted mastering-analysis
-//      cache (`getMasteringAnalysisCache()` IPC) contains entries for every
-//      active version of every song in the album — proof that the
-//      background preload pool fanned the work out concurrently and
+// once the visible/latest-version preload has run, switching to a visible
+// track must come back from cache without re-running ffmpeg or preview decode.
+// We verify this two ways:
+//   1. The persisted mastering-analysis cache (`getMasteringAnalysisCache()`
+//      IPC) contains entries for every latest visible version — proof that
+//      the measured background pool fanned the work out concurrently and
 //      finished within a sensible bound.
-//   2. After re-selecting an already-analyzed track, the analysisStatus
-//      surfaces 'ready' synchronously (no 'loading' flash at all).
+//   2. The renderer-side visible warmup hook reports both measured+preview
+//      caches ready, then a first jump to a never-selected row has no
+//      synchronous 'Loading' flash.
 //
 // The pool is a renderer-side concern; the cache is a main-process JSON file
 // keyed by filePath + sizeBytes + modifiedAtMs. Both layers cooperate to make
@@ -26,6 +26,31 @@ import { launchProducerPlayer } from './helpers/electron-app';
 function hasFfmpeg(): boolean {
   const check = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
   return check.status === 0;
+}
+
+interface VisibleWarmupState {
+  songTitle: string;
+  versionId: string;
+  fileName: string;
+  cacheKey: string;
+  previewReady: boolean;
+  measuredReady: boolean;
+}
+
+async function readVisibleWarmupState(
+  page: import('@playwright/test').Page
+): Promise<VisibleWarmupState[]> {
+  return page.evaluate(() => {
+    const reader = (
+      window as unknown as {
+        __producerPlayerGetVisibleLatestWarmupState?: () => VisibleWarmupState[];
+      }
+    ).__producerPlayerGetVisibleLatestWarmupState;
+    if (!reader) {
+      throw new Error('__producerPlayerGetVisibleLatestWarmupState not exposed yet');
+    }
+    return reader();
+  }) as Promise<VisibleWarmupState[]>;
 }
 
 async function runFfmpeg(args: string[]): Promise<void> {
@@ -59,10 +84,16 @@ test.describe('Track-switch precompute cache @smoke', () => {
       path.join(os.tmpdir(), 'producer-player-e2e-track-switch-cache-user-')
     );
 
-    // Three tiny real-WAV fixtures so ffmpeg ebur128 has signal to chew on.
-    // Short duration keeps each analysis deterministic and fast.
-    const fixtureNames = ['Alpha v1.wav', 'Bravo v1.wav', 'Charlie v1.wav'];
-    const frequencies = [330, 440, 550];
+    // Three visible songs (four tiny real-WAV fixtures because Charlie has
+    // v1+v2) so ffmpeg ebur128 has signal to chew on. Short duration keeps
+    // each analysis deterministic and fast.
+    const fixtureNames = [
+      'Alpha v1.wav',
+      'Bravo v1.wav',
+      'Charlie v1.wav',
+      'Charlie v2.wav',
+    ];
+    const frequencies = [330, 440, 550, 660];
     for (let i = 0; i < fixtureNames.length; i += 1) {
       // eslint-disable-next-line no-await-in-loop -- sequential by intent
       await runFfmpeg([
@@ -76,6 +107,18 @@ test.describe('Track-switch precompute cache @smoke', () => {
         path.join(fixtureDirectory, fixtureNames[i]),
       ]);
     }
+
+    const now = new Date();
+    await fs.utimes(
+      path.join(fixtureDirectory, 'Charlie v1.wav'),
+      new Date(now.getTime() - 2_000),
+      new Date(now.getTime() - 2_000)
+    );
+    await fs.utimes(
+      path.join(fixtureDirectory, 'Charlie v2.wav'),
+      now,
+      now
+    );
 
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
@@ -97,11 +140,11 @@ test.describe('Track-switch precompute cache @smoke', () => {
         { timeout: 15_000 }
       );
 
-      // Wait for the background-preload pool to drain the rest of the album.
-      // We poll the persisted mastering cache directly — that's what the
-      // preload effect writes to via upsertMasteringCacheEntry. Three tracks,
-      // concurrency-2 pool, 2-second sine waves, ffmpeg ebur128 ~0.3s each
-      // ⇒ generous 60s budget keeps CI runners happy.
+      // Wait for the background-preload pool to drain the visible latest
+      // versions. We poll the persisted mastering cache directly — that's
+      // what the preload effect writes to via upsertMasteringCacheEntry. Three
+      // visible songs (one has v1+v2), concurrency-2 pool, 2-second sine waves,
+      // ffmpeg ebur128 ~0.3s each ⇒ generous 60s budget keeps CI happy.
       let lastCount = 0;
       await expect
         .poll(
@@ -140,46 +183,69 @@ test.describe('Track-switch precompute cache @smoke', () => {
           { status: 'ready', loading: false },
         ]);
 
-      // Re-select the first track (Alpha) and assert analysisStatus does
-      // NOT pass through 'loading' — should land directly on 'ready' from
-      // the in-memory cache. We sample several React frames to give any
-      // accidental loading state a chance to appear.
-      await page
-        .getByTestId('main-list-row')
-        .filter({ hasText: 'Bravo' })
-        .first()
-        .click();
-      await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText(
-        'Loading',
-        { timeout: 15_000 }
-      );
+      // v3.131 — startup warmup must cover the full selected-track
+      // analysis path for every visible latest-version row, not just the
+      // persisted ffmpeg/LUFS cache. Otherwise the first click on a
+      // never-selected visible track still flashes "Preparing" / "Loading"
+      // while the renderer decodes its preview waveform.
+      await expect
+        .poll(
+          async () => {
+            const state = await readVisibleWarmupState(page);
+            return {
+              fileNames: state.map((entry) => entry.fileName).sort(),
+              allPreviewReady: state.every((entry) => entry.previewReady),
+              allMeasuredReady: state.every((entry) => entry.measuredReady),
+            };
+          },
+          { timeout: 60_000, intervals: [250, 500, 1000] }
+        )
+        .toEqual({
+          fileNames: ['Alpha v1.wav', 'Bravo v1.wav', 'Charlie v2.wav'],
+          allPreviewReady: true,
+          allMeasuredReady: true,
+        });
 
-      // Now jump back to Alpha and verify it's instant (no loading flash).
-      const alphaRow = page
+      const neverSelectedVisibleRowTitle = await page.evaluate(() => {
+        const rows = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-testid="main-list-row"]')
+        );
+        const target = rows.find((row) => !row.classList.contains('selected'));
+        return (
+          target
+            ?.querySelector<HTMLElement>('[data-testid="main-list-row-title"]')
+            ?.textContent?.trim() ?? null
+        );
+      });
+      expect(neverSelectedVisibleRowTitle).not.toBeNull();
+
+      const neverSelectedVisibleRow = page
         .getByTestId('main-list-row')
-        .filter({ hasText: 'Alpha' })
+        .filter({ hasText: neverSelectedVisibleRowTitle ?? '' })
         .first();
-      await alphaRow.click();
+      await neverSelectedVisibleRow.click();
+      await expect(neverSelectedVisibleRow).toHaveClass(/selected/);
 
-      // Sample the integrated-stat element across ~10 microticks. If the
-      // cache hit worked, none of those samples should ever say "Loading".
-      const sawLoading = await page.evaluate(async () => {
-        const start = performance.now();
-        let observedLoading = false;
-        const deadline = start + 250;
+      const observedNotReadyStatus = await page.evaluate(async () => {
+        const deadline = performance.now() + 350;
         while (performance.now() < deadline) {
-          const el = document.querySelector('[data-testid="analysis-integrated-stat"]');
-          const text = el?.textContent ?? '';
-          if (/loading/i.test(text)) {
-            observedLoading = true;
-            break;
+          const gateState = (window as unknown as {
+            __producerPlayerAutoRunGateState?: () => { analysisStatus?: string };
+          }).__producerPlayerAutoRunGateState?.();
+          const status = gateState?.analysisStatus ?? null;
+          if (status !== 'ready') {
+            return status;
           }
-          // eslint-disable-next-line no-await-in-loop -- intentional sampling
+          // eslint-disable-next-line no-await-in-loop -- intentional frame sampling
           await new Promise((resolve) => setTimeout(resolve, 16));
         }
-        return observedLoading;
+        return null;
       });
-      expect(sawLoading, 'cache hit should never flash "Loading"').toBe(false);
+      expect(
+        observedNotReadyStatus,
+        'never-selected visible rows should be fully prewarmed on startup'
+      ).toBeNull();
+
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });

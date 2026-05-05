@@ -625,18 +625,18 @@ input[type='range'] {
   position: relative;
 }
 
-/* v3.121 (Concern 1) — hover/focus popover that explains the
-   "active / queued" pill. Lives inside the indicator span so the
-   pill's own mouseleave closes it automatically. Sits below the pill
-   (top: 100%) and aligned to the left edge so it doesn't overflow the
-   viewport when the indicator is in the right-hand sidebar. */
+/* v3.127 (Concern 1 follow-up) — hover/focus popover that explains the
+   "active / queued" pill. Fixed positioning lets it escape the clipped
+   sidebar panel, and the wider width fits the explanatory text instead of
+   chopping it into a narrow column. JS supplies left/top so it still tracks
+   the pill and clamps to the viewport. */
 .bg-tasks-indicator-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
+  position: fixed;
   z-index: 9000;
-  width: max-content;
-  max-width: 320px;
+  width: min(520px, calc(100vw - 24px));
+  max-width: none;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -651,6 +651,7 @@ input[type='range'] {
   letter-spacing: 0;
   pointer-events: auto;
   white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .bg-tasks-indicator-popover-title {

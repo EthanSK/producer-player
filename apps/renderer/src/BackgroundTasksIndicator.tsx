@@ -34,7 +34,13 @@
 //   (focus visibility shows it; Esc dismisses it). Click does NOT toggle
 //   the popover — Ethan asked specifically for hover semantics, not a
 //   click modal.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { dumpPreviewAnalysisQueue } from './audioAnalysis';
 
 export interface BackgroundTasksIndicatorProps {
@@ -82,6 +88,8 @@ function aggregate(
 }
 
 const POLL_INTERVAL_MS = 500;
+const POPOVER_MAX_WIDTH_PX = 520;
+const POPOVER_VIEWPORT_MARGIN_PX = 12;
 
 export function BackgroundTasksIndicator(
   props: BackgroundTasksIndicatorProps
@@ -94,7 +102,35 @@ export function BackgroundTasksIndicator(
   // on the pill PLUS focus/blur on the focusable children so keyboard-only
   // users can tab into it. Esc closes when open.
   const [popoverOpen, setPopoverOpen] = useState(false);
+  // v3.127 — fixed-position popover escapes the clipped sidebar panel and
+  // can be wide enough for the explanatory text.
+  const [popoverPosition, setPopoverPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const containerRef = useRef<HTMLSpanElement | null>(null);
+
+  const updatePopoverPosition = useCallback(() => {
+    const anchor = containerRef.current;
+    if (!anchor) {
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    const viewportWidth =
+      window.innerWidth || document.documentElement.clientWidth;
+    const popoverWidth = Math.min(
+      POPOVER_MAX_WIDTH_PX,
+      Math.max(0, viewportWidth - POPOVER_VIEWPORT_MARGIN_PX * 2)
+    );
+    const maxLeft = Math.max(
+      POPOVER_VIEWPORT_MARGIN_PX,
+      viewportWidth - popoverWidth - POPOVER_VIEWPORT_MARGIN_PX
+    );
+    setPopoverPosition({
+      left: Math.min(Math.max(POPOVER_VIEWPORT_MARGIN_PX, rect.left), maxLeft),
+      top: rect.bottom + 6,
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,8 +166,12 @@ export function BackgroundTasksIndicator(
   // also fire.
   useEffect(() => {
     if (!popoverOpen) {
+      setPopoverPosition(null);
       return;
     }
+    updatePopoverPosition();
+    window.addEventListener('resize', updatePopoverPosition);
+    window.addEventListener('scroll', updatePopoverPosition, true);
     const handler = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
@@ -140,9 +180,11 @@ export function BackgroundTasksIndicator(
     };
     window.addEventListener('keydown', handler, { capture: true });
     return () => {
+      window.removeEventListener('resize', updatePopoverPosition);
+      window.removeEventListener('scroll', updatePopoverPosition, true);
       window.removeEventListener('keydown', handler, { capture: true });
     };
-  }, [popoverOpen]);
+  }, [popoverOpen, updatePopoverPosition]);
 
   const handleMouseEnter = useCallback(() => setPopoverOpen(true), []);
   const handleMouseLeave = useCallback((event: React.MouseEvent) => {
@@ -192,6 +234,12 @@ export function BackgroundTasksIndicator(
   const buttonLabel = paused
     ? 'Resume background analysis'
     : 'Pause background analysis';
+  const popoverStyle: CSSProperties | undefined = popoverPosition
+    ? {
+        left: popoverPosition.left,
+        top: popoverPosition.top,
+      }
+    : undefined;
 
   return (
     <span
@@ -265,11 +313,12 @@ export function BackgroundTasksIndicator(
           )}
         </button>
       ) : null}
-      {popoverOpen ? (
+      {popoverOpen && popoverStyle ? (
         <span
           className="bg-tasks-indicator-popover"
           role="tooltip"
           data-testid="bg-tasks-indicator-popover"
+          style={popoverStyle}
         >
           <span className="bg-tasks-indicator-popover-title">
             Background audio analysis

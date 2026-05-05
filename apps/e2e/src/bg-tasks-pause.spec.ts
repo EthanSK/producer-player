@@ -170,6 +170,23 @@ test.describe('Background tasks pause/resume @smoke', () => {
           page.getByTestId('bg-tasks-indicator-toggle')
         ).toHaveAttribute('aria-label', 'Resume background analysis');
 
+        // v3.127 — the explanatory popover should escape the clipped sidebar
+        // and be wide enough to read without chopping the text into a narrow
+        // column.
+        await page.getByTestId('bg-tasks-indicator').hover();
+        const popover = page.getByTestId('bg-tasks-indicator-popover');
+        await expect(popover).toBeVisible();
+        const popoverBox = await popover.boundingBox();
+        const viewportWidth = await page.evaluate(() => window.innerWidth);
+        expect(popoverBox).not.toBeNull();
+        if (popoverBox) {
+          expect(popoverBox.width).toBeGreaterThanOrEqual(480);
+          expect(popoverBox.x).toBeGreaterThanOrEqual(0);
+          expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(
+            viewportWidth
+          );
+        }
+
         // Click the button to RESUME, then click again to PAUSE so we
         // exercise the actual UI button (not just the test hook).
         await page.getByTestId('bg-tasks-indicator-toggle').click();

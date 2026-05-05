@@ -76,7 +76,7 @@ test.describe('Track-switch precompute cache @smoke', () => {
     'requires the host ffmpeg binary to synthesize realistic audio fixtures'
   );
 
-  test('background preload populates the album cache and re-selection is instant', async () => {
+  test('startup warmup readies every visible latest-version track for instant switching', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-track-switch-cache-')
     );
@@ -108,17 +108,17 @@ test.describe('Track-switch precompute cache @smoke', () => {
       ]);
     }
 
-    const now = new Date();
-    await fs.utimes(
-      path.join(fixtureDirectory, 'Charlie v1.wav'),
-      new Date(now.getTime() - 2_000),
-      new Date(now.getTime() - 2_000)
-    );
-    await fs.utimes(
-      path.join(fixtureDirectory, 'Charlie v2.wav'),
-      now,
-      now
-    );
+    const modifiedTimes: Record<string, string> = {
+      'Alpha v1.wav': '2026-05-05T12:00:03.000Z',
+      'Bravo v1.wav': '2026-05-05T12:00:02.000Z',
+      'Charlie v2.wav': '2026-05-05T12:00:01.000Z',
+      'Charlie v1.wav': '2026-05-05T12:00:00.000Z',
+    };
+    for (const [fileName, timestamp] of Object.entries(modifiedTimes)) {
+      const date = new Date(timestamp);
+      // eslint-disable-next-line no-await-in-loop -- deterministic fixture mtimes
+      await fs.utimes(path.join(fixtureDirectory, fileName), date, date);
+    }
 
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
 
@@ -183,7 +183,7 @@ test.describe('Track-switch precompute cache @smoke', () => {
           { status: 'ready', loading: false },
         ]);
 
-      // v3.131 — startup warmup must cover the full selected-track
+      // v3.130 follow-up — startup warmup must cover the full selected-track
       // analysis path for every visible latest-version row, not just the
       // persisted ffmpeg/LUFS cache. Otherwise the first click on a
       // never-selected visible track still flashes "Preparing" / "Loading"
@@ -206,44 +206,79 @@ test.describe('Track-switch precompute cache @smoke', () => {
           allMeasuredReady: true,
         });
 
-      const neverSelectedVisibleRowTitle = await page.evaluate(() => {
-        const rows = Array.from(
-          document.querySelectorAll<HTMLElement>('[data-testid="main-list-row"]')
-        );
-        const target = rows.find((row) => !row.classList.contains('selected'));
-        return (
-          target
-            ?.querySelector<HTMLElement>('[data-testid="main-list-row-title"]')
-            ?.textContent?.trim() ?? null
-        );
-      });
-      expect(neverSelectedVisibleRowTitle).not.toBeNull();
+      const charlieWarmupState = await readVisibleWarmupState(page).then((state) =>
+        state.find((entry) => entry.songTitle === 'Charlie') ?? null
+      );
+      expect(charlieWarmupState?.fileName).toBe('Charlie v2.wav');
 
-      const neverSelectedVisibleRow = page
+      const charlieRow = page
         .getByTestId('main-list-row')
-        .filter({ hasText: neverSelectedVisibleRowTitle ?? '' })
+        .filter({ hasText: 'Charlie' })
         .first();
-      await neverSelectedVisibleRow.click();
-      await expect(neverSelectedVisibleRow).toHaveClass(/selected/);
+      const charlieSongId = await charlieRow.getAttribute('data-song-id');
+      expect(charlieSongId).not.toBeNull();
 
-      const observedNotReadyStatus = await page.evaluate(async () => {
-        const deadline = performance.now() + 350;
-        while (performance.now() < deadline) {
-          const gateState = (window as unknown as {
-            __producerPlayerAutoRunGateState?: () => { analysisStatus?: string };
-          }).__producerPlayerAutoRunGateState?.();
-          const status = gateState?.analysisStatus ?? null;
-          if (status !== 'ready') {
-            return status;
+      await charlieRow.dblclick();
+      await expect(charlieRow).toHaveClass(/selected/);
+
+      const switchObservation = await page.evaluate(
+        async ({ targetSongId }) => {
+          const deadline = performance.now() + 500;
+          let sawTargetLatest = false;
+          let lastState: {
+            selectedPlaybackSongId: unknown;
+            currentPlaybackVersionNumber: unknown;
+            analysisStatus: unknown;
+          } | null = null;
+
+          while (performance.now() < deadline) {
+            const gateState = (window as unknown as {
+              __producerPlayerAutoRunGateState?: () => {
+                selectedPlaybackSongId?: unknown;
+                currentPlaybackVersionNumber?: unknown;
+                analysisStatus?: unknown;
+              };
+            }).__producerPlayerAutoRunGateState?.();
+            lastState = {
+              selectedPlaybackSongId: gateState?.selectedPlaybackSongId ?? null,
+              currentPlaybackVersionNumber: gateState?.currentPlaybackVersionNumber ?? null,
+              analysisStatus: gateState?.analysisStatus ?? null,
+            };
+
+            if (lastState.selectedPlaybackSongId === targetSongId) {
+              if (lastState.currentPlaybackVersionNumber !== 2) {
+                return {
+                  sawTargetLatest,
+                  notReadyStatus: `wrong-version:${String(
+                    lastState.currentPlaybackVersionNumber
+                  )}`,
+                  lastState,
+                };
+              }
+              sawTargetLatest = true;
+              if (lastState.analysisStatus !== 'ready') {
+                return {
+                  sawTargetLatest,
+                  notReadyStatus: String(lastState.analysisStatus),
+                  lastState,
+                };
+              }
+            }
+
+            // eslint-disable-next-line no-await-in-loop -- intentional frame sampling
+            await new Promise((resolve) => setTimeout(resolve, 16));
           }
-          // eslint-disable-next-line no-await-in-loop -- intentional frame sampling
-          await new Promise((resolve) => setTimeout(resolve, 16));
-        }
-        return null;
-      });
+
+          return { sawTargetLatest, notReadyStatus: null, lastState };
+        },
+        { targetSongId: charlieSongId }
+      );
+      expect(switchObservation.sawTargetLatest, 'Charlie v2 should become the playback target').toBe(
+        true
+      );
       expect(
-        observedNotReadyStatus,
-        'never-selected visible rows should be fully prewarmed on startup'
+        switchObservation.notReadyStatus,
+        'never-selected visible latest rows should be fully prewarmed on startup'
       ).toBeNull();
 
     } finally {

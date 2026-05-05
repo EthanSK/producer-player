@@ -1538,18 +1538,15 @@ function getLatestSongVersion(song: SongWithVersions): SongVersion | null {
 }
 
 function getActiveSongVersion(song: SongWithVersions): SongVersion | null {
-  if (song.activeVersionId) {
-    const matched = song.versions.find((version) => version.id === song.activeVersionId);
-    if (matched) {
-      return matched;
-    }
-  }
-
+  // The scanner writes activeVersionId as the newest export, but older/imported
+  // snapshots can carry a stale pointer. Renderer-facing "active" semantics
+  // must follow the latest sorted version so main-list rows, playback defaults,
+  // and startup warmup never target an older bounce when a newer one exists.
   return getLatestSongVersion(song);
 }
 
 function getPreferredPlaybackVersionId(song: SongWithVersions): string | null {
-  return getLatestSongVersion(song)?.id ?? getActiveSongVersion(song)?.id ?? null;
+  return getLatestSongVersion(song)?.id ?? null;
 }
 
 function getSongDisplayFileName(song: SongWithVersions): string {
@@ -6445,7 +6442,7 @@ export function App(): JSX.Element {
 
     let cancelled = false;
 
-    // v3.130 — startup/main-view instant-switch warmup. The previous pass
+    // v3.130 follow-up — startup/main-view instant-switch warmup. The previous pass
     // only warmed ffmpeg measured analysis (LUFS / platform-normalization),
     // so visible but never-selected rows still hit `analyzeTrackFromUrl` on
     // first click and flashed/loading-blocked the mastering panel. Warm BOTH

@@ -120,6 +120,26 @@ test.describe('Track-switch precompute cache @smoke', () => {
         )
         .toBeGreaterThanOrEqual(3);
 
+      // v3.128 — visible main-list rows should have their LUFS warmed in the
+      // background on startup. This is the value Platform Normalization uses,
+      // so clicking a row later can apply the right gain immediately.
+      await expect
+        .poll(
+          async () =>
+            page.getByTestId('main-list-row-integrated-lufs').evaluateAll((nodes) =>
+              nodes.map((node) => ({
+                status: node.getAttribute('data-status'),
+                loading: /loading/i.test(node.textContent ?? ''),
+              }))
+            ),
+          { timeout: 15_000, intervals: [250, 500, 1000] }
+        )
+        .toEqual([
+          { status: 'ready', loading: false },
+          { status: 'ready', loading: false },
+          { status: 'ready', loading: false },
+        ]);
+
       // Re-select the first track (Alpha) and assert analysisStatus does
       // NOT pass through 'loading' — should land directly on 'ready' from
       // the in-memory cache. We sample several React frames to give any

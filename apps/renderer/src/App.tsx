@@ -6439,19 +6439,20 @@ export function App(): JSX.Element {
 
     let cancelled = false;
 
-    // v3.121 (Concern 3) — visible-songs prioritization. Build a set of
-    // version-ids that are currently visible in the main list (post search
-    // / filter). Visible versions enqueue at NEIGHBOR (priority 1); the
-    // rest of the folder enqueues at BACKGROUND (priority 2). The queue
-    // de-dupes by cacheKey so the same version never runs twice; it also
-    // re-orders pending tasks via promote() when a higher-priority duplicate
-    // arrives. End result: when the user runs a search, the bg pool covers
-    // the rows they're actually looking at first, and only afterwards
-    // chews through the off-screen rest. Foreground clicks (USER_SELECTED,
-    // priority 0) still bypass everything via the selected-track effect.
+    // v3.128 — startup/main-view LUFS warmup. Build a set of version IDs
+    // currently visible in the main list (post folder/search filtering), then
+    // enqueue those rows FIRST at NEIGHBOR priority so their integrated LUFS
+    // and platform-normalization gain are ready before the user clicks them.
+    // Off-screen folder rows still fill in later at BACKGROUND priority.
     const visibleVersionIds = new Set(
       visibleActiveVersions.map(({ version }) => version.id)
     );
+    const orderedPreloadEntries = [
+      ...visibleActiveVersions,
+      ...albumActiveVersions.filter(
+        ({ version }) => !visibleVersionIds.has(version.id)
+      ),
+    ];
 
     // Promote any already-pending background jobs whose version is now in
     // the visible set (e.g. user just typed into the search bar; tracks
@@ -6477,7 +6478,7 @@ export function App(): JSX.Element {
     // snapshot updates kept cancelling the in-flight analysis runs and the
     // cache never got populated for non-selected tracks.
     void (async () => {
-      const tasks = albumActiveVersions.map(async (entry) => {
+      const tasks = orderedPreloadEntries.map(async (entry) => {
         const { song, version } = entry;
         const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
         const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);

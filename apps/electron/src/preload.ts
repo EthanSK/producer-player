@@ -103,6 +103,14 @@ const bridge: ProducerPlayerBridge = {
     await ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL_URL, url);
   },
 
+  async getMicrophonePermissionStatus() {
+    return ipcRenderer.invoke(IPC_CHANNELS.GET_MICROPHONE_PERMISSION_STATUS);
+  },
+
+  async openMicrophonePrivacySettings() {
+    await ipcRenderer.invoke(IPC_CHANNELS.OPEN_MICROPHONE_PRIVACY_SETTINGS);
+  },
+
   async copyTextToClipboard(text: string) {
     await ipcRenderer.invoke(IPC_CHANNELS.COPY_TEXT_TO_CLIPBOARD, text);
   },

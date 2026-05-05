@@ -488,6 +488,51 @@ body.agent-chat-panel-dragging * {
   padding: 0 10px 10px;
 }
 
+.agent-settings-permission-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--warning, #f5b84b) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning, #f5b84b) 16%, var(--bg-1));
+  color: var(--text-main);
+}
+
+.agent-settings-permission-callout-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-settings-permission-callout-copy strong {
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.agent-settings-permission-callout-copy span {
+  color: var(--text-muted);
+}
+
+.agent-settings-permission-callout-button {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning, #f5b84b) 76%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warning, #f5b84b) 24%, var(--bg-2));
+  color: var(--text-main);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.agent-settings-permission-callout-button:hover {
+  background: color-mix(in srgb, var(--warning, #f5b84b) 34%, var(--bg-2));
+}
+
 .agent-settings-system-prompt {
   width: 100%;
   min-height: 132px;

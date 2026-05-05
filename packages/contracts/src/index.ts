@@ -134,6 +134,14 @@ export interface UiZoomState {
   options: number[];
 }
 
+export type MicrophonePermissionStatus =
+  | 'not-determined'
+  | 'granted'
+  | 'denied'
+  | 'restricted'
+  | 'unknown'
+  | 'unsupported';
+
 export interface PlaylistOrderExportSelection {
   selectedFolderId: string | null;
   selectedFolderPath: string | null;
@@ -189,6 +197,10 @@ export const IPC_CHANNELS = {
   OPEN_FOLDER: 'producer-player:open-folder',
   OPEN_FILE: 'producer-player:open-file',
   OPEN_EXTERNAL_URL: 'producer-player:open-external-url',
+  GET_MICROPHONE_PERMISSION_STATUS:
+    'producer-player:get-microphone-permission-status',
+  OPEN_MICROPHONE_PRIVACY_SETTINGS:
+    'producer-player:open-microphone-privacy-settings',
   COPY_TEXT_TO_CLIPBOARD: 'producer-player:copy-text-to-clipboard',
   TO_FILE_URL: 'producer-player:to-file-url',
   RESOLVE_PLAYBACK_SOURCE: 'producer-player:resolve-playback-source',
@@ -1205,6 +1217,8 @@ export interface ProducerPlayerBridge {
   openFolder(folderPath: string): Promise<void>;
   openFile(filePath: string): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
+  getMicrophonePermissionStatus(): Promise<MicrophonePermissionStatus>;
+  openMicrophonePrivacySettings(): Promise<void>;
   copyTextToClipboard(text: string): Promise<void>;
   toFileUrl(filePath: string): Promise<string>;
   resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo>;

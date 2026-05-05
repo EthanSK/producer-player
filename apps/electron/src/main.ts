@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, protocol, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, protocol, safeStorage, screen, shell, systemPreferences } from 'electron';
 
 // ---------------------------------------------------------------------------
 // Obfuscated file storage helpers (replaces safeStorage/keychain for API keys)
@@ -83,6 +83,7 @@ import type {
   AutoUpdateRecheckResult,
   AutoUpdateState,
   MasteringAnalysisCachePayload,
+  MicrophonePermissionStatus,
   ICloudAvailabilityResult,
   ICloudBackupData,
   ICloudLoadResult,
@@ -318,6 +319,9 @@ async function sweepStaleAgentAttachments(): Promise<void> {
  *
  * To allow a new external link, just add another entry here.
  */
+const MICROPHONE_PRIVACY_SETTINGS_URL =
+  'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
+
 const TRUSTED_EXTERNAL_URLS: { origin: string; pathPrefix?: string }[] = [
   // GitHub repository (existing)
   { origin: 'https://github.com', pathPrefix: '/EthanSK/producer-player' },
@@ -3622,6 +3626,33 @@ function parseTrustedExternalUrl(url: string): URL {
   return parsed;
 }
 
+function getMicrophonePermissionStatus(): MicrophonePermissionStatus {
+  if (process.platform !== 'darwin') {
+    return 'unsupported';
+  }
+
+  try {
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    if (
+      status === 'not-determined' ||
+      status === 'granted' ||
+      status === 'denied' ||
+      status === 'restricted' ||
+      status === 'unknown'
+    ) {
+      return status;
+    }
+  } catch (error: unknown) {
+    log.warn(
+      `[permissions] Failed to read microphone permission status: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  return 'unknown';
+}
+
 function buildEnvironmentInfo(): ProducerPlayerEnvironment {
   return {
     isMacAppStoreSandboxed: IS_MAC_APP_STORE_SANDBOX,
@@ -4670,6 +4701,18 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL_URL, async (_event, url: string) => {
     const trustedUrl = parseTrustedExternalUrl(url);
     await shell.openExternal(trustedUrl.toString());
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_MICROPHONE_PERMISSION_STATUS, async () => {
+    return getMicrophonePermissionStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.OPEN_MICROPHONE_PRIVACY_SETTINGS, async () => {
+    if (process.platform !== 'darwin') {
+      throw new Error('Microphone privacy settings are only available on macOS.');
+    }
+
+    await shell.openExternal(MICROPHONE_PRIVACY_SETTINGS_URL);
   });
 
   ipcMain.handle(IPC_CHANNELS.COPY_TEXT_TO_CLIPBOARD, async (_event, text: string) => {

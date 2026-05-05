@@ -4,6 +4,7 @@ import type {
   AgentModelId,
   AgentProviderId,
   AgentThinkingEffort,
+  MicrophonePermissionStatus,
   AgentThinkingOption,
 } from '@producer-player/contracts';
 import { AGENT_PROVIDER_LABELS } from './agentModels';
@@ -94,6 +95,10 @@ export function AgentSettings({
   // explicit raw-channel routing.
   const [detectedChannelCount, setDetectedChannelCount] = useState<number | null>(null);
   const [channelDetectError, setChannelDetectError] = useState<string | null>(null);
+  const [microphonePermissionStatus, setMicrophonePermissionStatus] =
+    useState<MicrophonePermissionStatus | null>(null);
+  const [microphonePermissionError, setMicrophonePermissionError] =
+    useState<string | null>(null);
 
   const [deepgramKey, setDeepgramKey] = useState('');
   const [deepgramKeySet, setDeepgramKeySet] = useState(false);
@@ -125,6 +130,21 @@ export function AgentSettings({
       );
     } finally {
       setMicDevicesLoading(false);
+    }
+  }, []);
+
+  const refreshMicrophonePermissionStatus = useCallback(async () => {
+    try {
+      const status = await window.producerPlayer.getMicrophonePermissionStatus();
+      setMicrophonePermissionStatus(status);
+      setMicrophonePermissionError(null);
+    } catch (error: unknown) {
+      setMicrophonePermissionStatus('unknown');
+      setMicrophonePermissionError(
+        error instanceof Error
+          ? error.message
+          : 'Could not check microphone permission status.'
+      );
     }
   }, []);
 
@@ -173,6 +193,27 @@ export function AgentSettings({
       navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
     };
   }, [refreshMicDevices]);
+
+  useEffect(() => {
+    void refreshMicrophonePermissionStatus();
+
+    const handleAppBecameActive = () => {
+      void refreshMicrophonePermissionStatus();
+    };
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        void refreshMicrophonePermissionStatus();
+      }
+    };
+
+    window.addEventListener('focus', handleAppBecameActive);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleAppBecameActive);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [refreshMicrophonePermissionStatus]);
 
   // v3.121 (Concern 2) — probe the selected input device to discover its
   // actual channel count. We need this to render a Channel 1..N picker
@@ -319,6 +360,19 @@ export function AgentSettings({
     onClose();
   }, [onClose, onOpenHistory]);
 
+  const handleOpenMicrophonePrivacySettings = useCallback(async () => {
+    try {
+      await window.producerPlayer.openMicrophonePrivacySettings();
+      setMicrophonePermissionError(null);
+    } catch (error: unknown) {
+      setMicrophonePermissionError(
+        error instanceof Error
+          ? error.message
+          : 'Could not open microphone privacy settings.'
+      );
+    }
+  }, []);
+
   const listedAudioInputDevices = audioInputDevices.filter(
     (device) => device.deviceId !== 'default'
   );
@@ -366,6 +420,10 @@ export function AgentSettings({
     ...baseChannelModes,
     ...dynamicChannelIndices.map((index) => buildAgentMicChannelMode(index)),
   ];
+  const shouldShowMicrophonePermissionBanner =
+    microphonePermissionStatus === 'not-determined' ||
+    microphonePermissionStatus === 'denied' ||
+    microphonePermissionStatus === 'restricted';
 
   return (
     <div className="agent-settings" data-testid="agent-settings">
@@ -541,6 +599,40 @@ export function AgentSettings({
         </summary>
 
         <div className="agent-settings-expander-body">
+          {shouldShowMicrophonePermissionBanner ? (
+            <div
+              className="agent-settings-permission-callout"
+              role="alert"
+              data-testid="agent-mic-permission-callout"
+            >
+              <div className="agent-settings-permission-callout-copy">
+                <strong>Important: grant microphone permissions</strong>
+                <span>
+                  Producer Player needs macOS Microphone access before the mic
+                  button can record. Grant it in System Settings, then return
+                  here — this warning clears automatically.
+                </span>
+              </div>
+              <button
+                type="button"
+                className="agent-settings-permission-callout-button"
+                onClick={() => void handleOpenMicrophonePrivacySettings()}
+                data-testid="agent-mic-permission-settings-button"
+                title="Open macOS Microphone privacy settings"
+              >
+                Open System Settings → Privacy & Security → Microphone
+              </button>
+            </div>
+          ) : null}
+          {microphonePermissionError ? (
+            <p
+              className="agent-settings-key-error"
+              data-testid="agent-mic-permission-error"
+            >
+              {microphonePermissionError}
+            </p>
+          ) : null}
+
           <div className="agent-settings-section">
             <label className="agent-settings-label" htmlFor="agent-mic-device-select">
               Microphone

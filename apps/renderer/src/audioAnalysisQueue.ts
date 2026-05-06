@@ -174,6 +174,14 @@ export class AnalysisQueue {
   // otherwise a user-priority task waiting behind another user-priority
   // task is just FIFO + concurrency cap as before, no bypass needed.
   private nonUserActive = 0;
+  // Diagnostic-only totals used by E2E to prove startup warmup is not being
+  // silently routed through the optional BACKGROUND bucket. A fresh Electron
+  // launch resets these process-lifetime counters.
+  private readonly totalEnqueuedByPriority = {
+    user: 0,
+    neighbor: 0,
+    background: 0,
+  };
 
   constructor(options: AnalysisQueueOptions) {
     if (!Number.isFinite(options.concurrency) || options.concurrency < 1) {
@@ -210,6 +218,14 @@ export class AnalysisQueue {
         this.promote(key, priority);
         return existing as Promise<T>;
       }
+    }
+
+    if (priority === ANALYSIS_PRIORITY_USER_SELECTED) {
+      this.totalEnqueuedByPriority.user += 1;
+    } else if (priority === ANALYSIS_PRIORITY_NEIGHBOR) {
+      this.totalEnqueuedByPriority.neighbor += 1;
+    } else {
+      this.totalEnqueuedByPriority.background += 1;
     }
 
     return new Promise<T>((resolve, reject) => {
@@ -297,6 +313,7 @@ export class AnalysisQueue {
     userBypassActive: number;
     pending: number;
     pendingByPriority: { user: number; neighbor: number; background: number };
+    totalEnqueuedByPriority: { user: number; neighbor: number; background: number };
   } {
     let user = 0;
     let neighbor = 0;
@@ -317,6 +334,7 @@ export class AnalysisQueue {
       userBypassActive: this.userBypassActive,
       pending: this.pending.length,
       pendingByPriority: { user, neighbor, background },
+      totalEnqueuedByPriority: { ...this.totalEnqueuedByPriority },
     };
   }
 

@@ -20,8 +20,10 @@ import {
  *      until they turn it on, and it should persist throughout that
  *      pre-start").
  *   3. Resume re-enables the toggle (and persists the flip back).
- *   4. Foreground analysis still works while paused — selecting a track
- *      does not freeze the renderer or hit a no-precompute deadlock.
+ *   4. Foreground analysis still works while paused, and v3.137 startup
+ *      latest-track warmup may still run so instant switching can recover
+ *      after launch — selecting a track does not freeze the renderer or hit
+ *      a no-precompute deadlock.
  *
  * Why this is in @smoke: pause/resume is a top-level user-controllable
  * gate on a feature that powers the album view. Regressions here would

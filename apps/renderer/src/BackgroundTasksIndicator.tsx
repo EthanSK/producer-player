@@ -18,12 +18,14 @@
 // v3.120 (Item #14 follow-up) — pause/stop button next to the pill.
 //   Clicking flips `agentBackgroundPrecomputeEnabled` in user state. When
 //   paused: the pill stays mounted (so the button is always reachable) and
-//   renders in a muted "paused" treatment with a "paused" label. The
+//   renders in a muted "paused" treatment with a "paused" label. Optional
 //   bg-preload effects in App.tsx short-circuit while paused, so no new
-//   priority-2 jobs flow through the queues. In-flight bg jobs keep going
-//   until they finish naturally (no abort signal — letting them finish
-//   matches the queue's existing cancellation policy and avoids partial-
-//   write artifacts in the mastering cache).
+//   priority-2 jobs flow through the queues. v3.137 keeps startup latest-track
+//   warmup independent of this pause so switching can still become instantly
+//   ready after launch. In-flight jobs keep going until they finish naturally
+//   (no abort signal — letting them finish matches the queue's existing
+//   cancellation policy and avoids partial-write artifacts in the mastering
+//   cache).
 //
 // v3.121 (Concern 1) — hover/focus popover that explains the
 //   "active / queued" pill at a glance. Ethan kept asking what the two
@@ -328,7 +330,7 @@ export function BackgroundTasksIndicator(
               Active / queued:
             </strong>{' '}
             {paused
-              ? 'paused — no new jobs are being scheduled.'
+              ? 'paused — optional background jobs are stopped; startup warmup may finish.'
               : `${snapshot.active} job${snapshot.active === 1 ? '' : 's'} running, ${snapshot.pending} waiting in line.`}
           </span>
           <span className="bg-tasks-indicator-popover-row">
@@ -350,8 +352,9 @@ export function BackgroundTasksIndicator(
             <strong className="bg-tasks-indicator-popover-row-label">
               Pause:
             </strong>{' '}
-            stops scheduling new background-precompute jobs. In-flight jobs
-            finish naturally — no partial-write artifacts in the cache.
+            stops optional background-precompute jobs. Startup latest-track
+            warmup can still finish so switching is ready; in-flight jobs finish
+            naturally — no partial-write artifacts in the cache.
           </span>
           <span className="bg-tasks-indicator-popover-row">
             <strong className="bg-tasks-indicator-popover-row-label">

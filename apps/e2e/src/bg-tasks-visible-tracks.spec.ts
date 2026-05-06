@@ -9,20 +9,17 @@ import {
 } from './helpers/electron-app';
 
 /**
- * v3.121 (Concern 3) — visible-songs prioritization for background
- * precompute.
+ * v3.121/v3.137 — visible-songs ordering for startup/background warmup.
  *
  * Coverage:
- *   1. Search filter collapses the visible main-list. The bg-precompute
- *      pool starts processing the visible subset BEFORE the
- *      off-screen rest. Verified by reading the queue's
- *      `pendingByPriority` dump — visible-active versions enqueue at
- *      NEIGHBOR (priority 1), full-folder leftovers at BACKGROUND (2).
- *   2. Clearing the search filter expands the visible set; subsequent
- *      bg jobs cover the now-visible-again rest. We don't assert on
- *      exact ordering of in-flight jobs (that's racy on slow CI) — we
- *      assert that the priority dispatch of NEW enqueues respects the
- *      visible filter.
+ *   1. Search filter collapses the visible main-list. The warmup pool keeps
+ *      the visible subset first, and all latest-version startup jobs now use
+ *      NEIGHBOR priority rather than leaving hidden rows as a second-tier
+ *      BACKGROUND backlog.
+ *   2. Clearing the search filter expands the visible set; subsequent warmup
+ *      jobs cover the now-visible-again rest. We don't assert exact ordering
+ *      of in-flight jobs (that's racy on slow CI) — we assert that the queue
+ *      remains healthy while the visible set changes.
  *
  * Scoped to @smoke because Concern 3 is a UX correctness fix that should
  * never silently regress.
@@ -89,6 +86,7 @@ interface QueueDump {
   active: number;
   pending: number;
   pendingByPriority: { user: number; neighbor: number; background: number };
+  totalEnqueuedByPriority: { user: number; neighbor: number; background: number };
 }
 
 async function readMeasuredQueueDump(page: import('@playwright/test').Page): Promise<QueueDump> {
@@ -106,14 +104,15 @@ async function readMeasuredQueueDump(page: import('@playwright/test').Page): Pro
 }
 
 test.describe('Background tasks visible-songs prioritization @smoke', () => {
-  test('search filter promotes visible rows to NEIGHBOR priority @smoke', async () => {
+  test('search filter keeps startup warmup queues healthy @smoke', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-bg-tasks-visible'
     );
 
-    // Three real WAVs so the bg-precompute fan-out has enough work to
-    // observe priority bucket changes. Filenames chosen to make the
-    // search query unambiguous: only "Alpha" matches the prefix.
+    // One real WAV plus two lightweight rows is enough to exercise the
+    // startup-warmup queue without making this smoke test spend time on
+    // extra ffmpeg work. Filenames chosen to make the search query
+    // unambiguous: only "Alpha" matches the prefix.
     await writeTestWav(
       path.join(directories.fixtureDirectory, 'Alpha Track v1.wav')
     );
@@ -169,33 +168,25 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
         timeout: 5_000,
       });
 
-      // Pick up the queue dump. Even if the measured queue is racing —
-      // tasks may be in-flight and not in the pending bucket — ANY new
-      // enqueues that flow as a result of the search filter must use
-      // NEIGHBOR (1) priority for the visible row.
-      //
-      // We can't reliably assert on a specific dump shape because the
-      // queue may already be idle (only 3 short WAVs in the fixture). The
-      // asserted invariant is: while the search is active, pending
-      // jobs in the BACKGROUND (priority 2) bucket NEVER include the
-      // visible "Alpha" row's version. We sample the dump a few times
-      // with small delays to give the bg loop a chance to cycle.
+      // Pick up the queue dump. The queue may already be idle (only 3 short
+      // WAVs in the fixture), so we do not assert a specific dump shape. The
+      // invariant is that the v3.137 startup warmup path keeps latest-version
+      // jobs out of the optional BACKGROUND bucket while search filters change.
       const dumpsWhileSearching: QueueDump[] = [];
       for (let i = 0; i < 5; i += 1) {
         await page.waitForTimeout(150);
         dumpsWhileSearching.push(await readMeasuredQueueDump(page));
       }
 
-      // Total pending should never exceed 3 (we only have 3 tracks).
-      // This is a sanity bound; the real assertion is that the queue
-      // was driven and the dump is well-formed.
       for (const dump of dumpsWhileSearching) {
-        expect(
-          dump.pending +
-            dump.pendingByPriority.user +
+        expect(dump.pending).toBe(
+          dump.pendingByPriority.user +
             dump.pendingByPriority.neighbor +
             dump.pendingByPriority.background
-        ).toBeGreaterThanOrEqual(0);
+        );
+        expect(dump.pending).toBeLessThanOrEqual(3);
+        expect(dump.pendingByPriority.background).toBe(0);
+        expect(dump.totalEnqueuedByPriority.background).toBe(0);
       }
 
       // When we clear the search, the visible set expands to all 3
@@ -219,7 +210,13 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       // point without the renderer freezing.
       await page.waitForTimeout(500);
       const finalDump = await readMeasuredQueueDump(page);
-      expect(finalDump.active).toBeGreaterThanOrEqual(0);
+      expect(finalDump.pending).toBe(
+        finalDump.pendingByPriority.user +
+          finalDump.pendingByPriority.neighbor +
+          finalDump.pendingByPriority.background
+      );
+      expect(finalDump.pendingByPriority.background).toBe(0);
+      expect(finalDump.totalEnqueuedByPriority.background).toBe(0);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

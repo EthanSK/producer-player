@@ -2,21 +2,22 @@ import { spawn, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchProducerPlayer } from './helpers/electron-app';
 
 // Item #10 (v3.110) — track-switch precompute / cache.
 //
 // These tests pin down the *user-felt* invariant of the precompute layer:
-// once the visible/latest-version preload has run, switching to a visible
-// track must come back from cache without re-running ffmpeg or preview decode.
+// once the startup latest-version warmup has run, switching to a visible,
+// search-hidden, or other-folder latest track must come back from cache without
+// re-running ffmpeg or preview decode.
 // We verify this two ways:
 //   1. The persisted mastering-analysis cache (`getMasteringAnalysisCache()`
-//      IPC) contains entries for every latest visible version — proof that
+//      IPC) contains entries for every latest linked-library version — proof that
 //      the measured background pool fanned the work out concurrently and
 //      finished within a sensible bound.
-//   2. The renderer-side visible warmup hook reports both measured+preview
-//      caches ready, then a first jump to a never-selected row has no
+//   2. The renderer-side warmup hooks report both measured+preview caches
+//      ready, then a first jump to a never-selected row has no
 //      synchronous 'Loading' flash.
 //
 // The pool is a renderer-side concern; the cache is a main-process JSON file
@@ -37,9 +38,20 @@ interface WarmupState {
   measuredReady: boolean;
 }
 
-async function readVisibleWarmupState(
-  page: import('@playwright/test').Page
-): Promise<WarmupState[]> {
+interface QueueDump {
+  active: number;
+  userBypassActive: number;
+  pending: number;
+  pendingByPriority: { user: number; neighbor: number; background: number };
+  totalEnqueuedByPriority: { user: number; neighbor: number; background: number };
+}
+
+interface AnalysisQueueSnapshot {
+  preview: QueueDump;
+  measured: QueueDump;
+}
+
+async function readVisibleWarmupState(page: Page): Promise<WarmupState[]> {
   return page.evaluate(() => {
     const reader = (
       window as unknown as {
@@ -53,9 +65,7 @@ async function readVisibleWarmupState(
   }) as Promise<WarmupState[]>;
 }
 
-async function readLibraryWarmupState(
-  page: import('@playwright/test').Page
-): Promise<WarmupState[]> {
+async function readLibraryWarmupState(page: Page): Promise<WarmupState[]> {
   return page.evaluate(() => {
     const reader = (
       window as unknown as {
@@ -67,6 +77,137 @@ async function readLibraryWarmupState(
     }
     return reader();
   }) as Promise<WarmupState[]>;
+}
+
+async function readAnalysisQueues(page: Page): Promise<AnalysisQueueSnapshot> {
+  return page.evaluate(() => {
+    const preview = (
+      window as unknown as {
+        __producerPlayerGetPreviewQueueDump?: () => QueueDump;
+      }
+    ).__producerPlayerGetPreviewQueueDump?.();
+    const measured = (
+      window as unknown as {
+        __producerPlayerGetMeasuredQueueDump?: () => QueueDump;
+      }
+    ).__producerPlayerGetMeasuredQueueDump?.();
+    if (!preview || !measured) {
+      throw new Error('analysis queue dump hooks not exposed yet');
+    }
+    return { preview, measured };
+  }) as Promise<AnalysisQueueSnapshot>;
+}
+
+function countQueueWork(snapshot: AnalysisQueueSnapshot): number {
+  return (
+    snapshot.preview.active +
+    snapshot.preview.userBypassActive +
+    snapshot.preview.pending +
+    snapshot.measured.active +
+    snapshot.measured.userBypassActive +
+    snapshot.measured.pending
+  );
+}
+
+async function expectStartupQueuesDrained(page: Page): Promise<void> {
+  await expect
+    .poll(async () => countQueueWork(await readAnalysisQueues(page)), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+    })
+    .toBe(0);
+  await expect(page.getByTestId('bg-tasks-indicator')).toHaveCount(0);
+}
+
+function countBackgroundEnqueues(snapshot: AnalysisQueueSnapshot): number {
+  return (
+    snapshot.preview.totalEnqueuedByPriority.background +
+    snapshot.measured.totalEnqueuedByPriority.background
+  );
+}
+
+async function expectDoubleClickSwitchIsInstantlyReady(
+  page: Page,
+  row: Locator,
+  expectedVersionNumber: number,
+  reason: string
+): Promise<void> {
+  const targetSongId = await row.getAttribute('data-song-id');
+  expect(targetSongId).not.toBeNull();
+
+  await row.dblclick();
+  await expect(row).toHaveClass(/selected/);
+
+  const switchObservation = await page.evaluate(
+    async ({ targetSongId: expectedSongId, expectedVersionNumber: expectedVersion }) => {
+      const deadline = performance.now() + 500;
+      let sawTargetLatest = false;
+      let lastState: {
+        selectedPlaybackSongId: unknown;
+        currentPlaybackVersionNumber: unknown;
+        analysisStatus: unknown;
+        analysisIsSet: unknown;
+        measuredAnalysisIsSet: unknown;
+      } | null = null;
+
+      while (performance.now() < deadline) {
+        const gateState = (window as unknown as {
+          __producerPlayerAutoRunGateState?: () => {
+            selectedPlaybackSongId?: unknown;
+            currentPlaybackVersionNumber?: unknown;
+            analysisStatus?: unknown;
+            analysisIsSet?: unknown;
+            measuredAnalysisIsSet?: unknown;
+          };
+        }).__producerPlayerAutoRunGateState?.();
+        lastState = {
+          selectedPlaybackSongId: gateState?.selectedPlaybackSongId ?? null,
+          currentPlaybackVersionNumber: gateState?.currentPlaybackVersionNumber ?? null,
+          analysisStatus: gateState?.analysisStatus ?? null,
+          analysisIsSet: gateState?.analysisIsSet ?? null,
+          measuredAnalysisIsSet: gateState?.measuredAnalysisIsSet ?? null,
+        };
+
+        if (lastState.selectedPlaybackSongId === expectedSongId) {
+          if (lastState.currentPlaybackVersionNumber !== expectedVersion) {
+            return {
+              sawTargetLatest,
+              notReadyStatus: `wrong-version:${String(
+                lastState.currentPlaybackVersionNumber
+              )}`,
+              lastState,
+            };
+          }
+          sawTargetLatest = true;
+          if (lastState.analysisStatus !== 'ready') {
+            return {
+              sawTargetLatest,
+              notReadyStatus: String(lastState.analysisStatus),
+              lastState,
+            };
+          }
+          if (!lastState.analysisIsSet || !lastState.measuredAnalysisIsSet) {
+            return {
+              sawTargetLatest,
+              notReadyStatus: 'missing-in-memory-cache',
+              lastState,
+            };
+          }
+        }
+
+        // eslint-disable-next-line no-await-in-loop -- intentional frame sampling
+        await new Promise((resolve) => setTimeout(resolve, 16));
+      }
+
+      return { sawTargetLatest, notReadyStatus: null, lastState };
+    },
+    { targetSongId, expectedVersionNumber }
+  );
+
+  expect(switchObservation.sawTargetLatest, `${reason}: row should become playback target`).toBe(
+    true
+  );
+  expect(switchObservation.notReadyStatus, reason).toBeNull();
 }
 
 async function runFfmpeg(args: string[]): Promise<void> {
@@ -92,7 +233,7 @@ test.describe('Track-switch precompute cache @smoke', () => {
     'requires the host ffmpeg binary to synthesize realistic audio fixtures'
   );
 
-  test('startup warmup processes hidden library latest-version tracks after visible rows @smoke', async () => {
+  test('startup warmup readies hidden library latest-version tracks for instant switching @smoke', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-track-switch-cache-all-')
     );
@@ -106,8 +247,9 @@ test.describe('Track-switch precompute cache @smoke', () => {
     // Search hides Bravo from the selected-folder main list, and the second
     // linked folder is not selected at all. The invariant here is stronger
     // than “visible rows get warm”: every latest version in the linked library
-    // should still process in the background, with visible Alpha ahead of the
-    // hidden BACKGROUND-priority leftovers.
+    // should finish startup warmup into BOTH in-memory caches. Hidden/search-
+    // filtered/other-folder rows must then double-click switch without a
+    // Loading/Preparing flash.
     const fixtures = [
       { directory: fixtureDirectory, fileName: 'Alpha v1.wav', frequency: 330 },
       { directory: fixtureDirectory, fileName: 'Bravo v1.wav', frequency: 440 },
@@ -200,6 +342,56 @@ test.describe('Track-switch precompute cache @smoke', () => {
           allPreviewReady: true,
           allMeasuredReady: true,
         });
+
+      await expectStartupQueuesDrained(page);
+      expect(
+        countBackgroundEnqueues(await readAnalysisQueues(page)),
+        'startup latest-track warmup should not use the optional BACKGROUND bucket'
+      ).toBe(0);
+
+      await page.evaluate(() => {
+        (
+          window as unknown as {
+            __producerPlayerSetSearchText?: (next: string) => void;
+          }
+        ).__producerPlayerSetSearchText?.('Bravo');
+      });
+      const bravoRow = page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Bravo' })
+        .first();
+      await expect(bravoRow).toBeVisible();
+      await expectDoubleClickSwitchIsInstantlyReady(
+        page,
+        bravoRow,
+        1,
+        'search-hidden latest row should switch from startup warmup cache'
+      );
+
+      await page.evaluate(() => {
+        (
+          window as unknown as {
+            __producerPlayerSetSearchText?: (next: string) => void;
+          }
+        ).__producerPlayerSetSearchText?.('');
+      });
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2, {
+        timeout: 5_000,
+      });
+      await page.getByTestId('linked-folder-item').nth(1).click();
+      const charlieRow = page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Charlie' })
+        .first();
+      await expect(charlieRow).toBeVisible();
+      await expectDoubleClickSwitchIsInstantlyReady(
+        page,
+        charlieRow,
+        2,
+        'other-folder latest row should switch from startup warmup cache'
+      );
+
+      await expectStartupQueuesDrained(page);
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });
@@ -338,6 +530,8 @@ test.describe('Track-switch precompute cache @smoke', () => {
           allMeasuredReady: true,
         });
 
+      await expectStartupQueuesDrained(page);
+
       const charlieWarmupState = await readVisibleWarmupState(page).then((state) =>
         state.find((entry) => entry.songTitle === 'Charlie') ?? null
       );
@@ -347,71 +541,12 @@ test.describe('Track-switch precompute cache @smoke', () => {
         .getByTestId('main-list-row')
         .filter({ hasText: 'Charlie' })
         .first();
-      const charlieSongId = await charlieRow.getAttribute('data-song-id');
-      expect(charlieSongId).not.toBeNull();
-
-      await charlieRow.dblclick();
-      await expect(charlieRow).toHaveClass(/selected/);
-
-      const switchObservation = await page.evaluate(
-        async ({ targetSongId }) => {
-          const deadline = performance.now() + 500;
-          let sawTargetLatest = false;
-          let lastState: {
-            selectedPlaybackSongId: unknown;
-            currentPlaybackVersionNumber: unknown;
-            analysisStatus: unknown;
-          } | null = null;
-
-          while (performance.now() < deadline) {
-            const gateState = (window as unknown as {
-              __producerPlayerAutoRunGateState?: () => {
-                selectedPlaybackSongId?: unknown;
-                currentPlaybackVersionNumber?: unknown;
-                analysisStatus?: unknown;
-              };
-            }).__producerPlayerAutoRunGateState?.();
-            lastState = {
-              selectedPlaybackSongId: gateState?.selectedPlaybackSongId ?? null,
-              currentPlaybackVersionNumber: gateState?.currentPlaybackVersionNumber ?? null,
-              analysisStatus: gateState?.analysisStatus ?? null,
-            };
-
-            if (lastState.selectedPlaybackSongId === targetSongId) {
-              if (lastState.currentPlaybackVersionNumber !== 2) {
-                return {
-                  sawTargetLatest,
-                  notReadyStatus: `wrong-version:${String(
-                    lastState.currentPlaybackVersionNumber
-                  )}`,
-                  lastState,
-                };
-              }
-              sawTargetLatest = true;
-              if (lastState.analysisStatus !== 'ready') {
-                return {
-                  sawTargetLatest,
-                  notReadyStatus: String(lastState.analysisStatus),
-                  lastState,
-                };
-              }
-            }
-
-            // eslint-disable-next-line no-await-in-loop -- intentional frame sampling
-            await new Promise((resolve) => setTimeout(resolve, 16));
-          }
-
-          return { sawTargetLatest, notReadyStatus: null, lastState };
-        },
-        { targetSongId: charlieSongId }
-      );
-      expect(switchObservation.sawTargetLatest, 'Charlie v2 should become the playback target').toBe(
-        true
-      );
-      expect(
-        switchObservation.notReadyStatus,
+      await expectDoubleClickSwitchIsInstantlyReady(
+        page,
+        charlieRow,
+        2,
         'never-selected visible latest rows should be fully prewarmed on startup'
-      ).toBeNull();
+      );
 
     } finally {
       await electronApp.close();

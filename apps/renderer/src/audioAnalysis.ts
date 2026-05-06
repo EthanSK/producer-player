@@ -133,6 +133,7 @@ export function dumpPreviewAnalysisQueue(): {
   userBypassActive: number;
   pending: number;
   pendingByPriority: { user: number; neighbor: number; background: number };
+  totalEnqueuedByPriority: { user: number; neighbor: number; background: number };
 } {
   return previewAnalysisQueue.dump();
 }

@@ -2541,12 +2541,7 @@ function parseMigrationInput(
 // Item #14 (v3.118) — stable callback reference used by
 // <BackgroundTasksIndicator>. Defined at module scope so the indicator's
 // useEffect dependency array stays stable across App re-renders.
-function getMeasuredQueueDump(): {
-  active: number;
-  userBypassActive: number;
-  pending: number;
-  pendingByPriority: { user: number; neighbor: number; background: number };
-} {
+function getMeasuredQueueDump(): ReturnType<typeof MEASURED_ANALYSIS_QUEUE.dump> {
   return MEASURED_ANALYSIS_QUEUE.dump();
 }
 
@@ -2671,9 +2666,9 @@ export function App(): JSX.Element {
   // background-priority audio analysis precompute. Default ON so behavior
   // matches every prior version on first launch. Toggled via the
   // pause/resume button next to the BackgroundTasksIndicator. When OFF:
-  //   - the bg-preload effects below SKIP enqueueing any priority-2 jobs
-  //   - foreground (priority-0) work still flows through both queues, so
-  //     the user-selected track always analyses normally
+  //   - optional bg-preload effects below SKIP enqueueing priority-2 jobs
+  //   - startup latest-version warmup and foreground (priority-0) work still
+  //     flow through both queues, so track switching stays hot
   //   - in-flight bg jobs are NOT cancelled (no abort signal — let them
   //     finish naturally; the foreground bypass already protects the
   //     selected track from waiting on them)
@@ -3386,7 +3381,12 @@ export function App(): JSX.Element {
       return;
     }
 
-    if (!mixPlaybackSource?.url) {
+    const selectedPlaybackSourceUrl =
+      mixPlaybackSourceSelectedFilePath === analysisFilePath
+        ? mixPlaybackSource?.url ?? null
+        : null;
+
+    if (!selectedPlaybackSourceUrl) {
       setAnalysis(cached.previewAnalysis);
       setMeasuredAnalysis(cached.measuredAnalysis);
       setAnalysisStatus(
@@ -3418,7 +3418,7 @@ export function App(): JSX.Element {
         // in-flight promise and leave the live selection stuck at "loading"
         // (Windows CI was slow enough to hit this consistently). Stale results
         // are still ignored by the `cancelled` guard below.
-        analyzeTrackFromUrl(mixPlaybackSource.url, undefined, {
+        analyzeTrackFromUrl(selectedPlaybackSourceUrl, undefined, {
           priority: ANALYSIS_PRIORITY_USER_SELECTED,
           key: analysisCacheKey,
         });
@@ -3505,6 +3505,7 @@ export function App(): JSX.Element {
     createMasteringCacheEntry,
     getCachedMasteringAnalysis,
     mixPlaybackSource?.url,
+    mixPlaybackSourceSelectedFilePath,
     selectedPlaybackVersionId,
     snapshot.songs,
     snapshot.versions,
@@ -6298,21 +6299,14 @@ export function App(): JSX.Element {
     [libraryActiveVersions]
   );
 
-  // v3.121 (Concern 3) — visible-songs precompute prioritization.
+  // v3.121 (Concern 3) — visible-songs precompute ordering.
   //
-  // The bg-preload effect previously fanned out across the entire folder
-  // (`albumActiveVersions`). When the user runs a search / filter, the
-  // visible main-list collapses to a subset, but the queue keeps chewing
-  // through the full folder in folder-order — so the rows the user is
-  // ACTUALLY looking at often stay "loading" while the bg pool processes
-  // off-screen tracks first.
-  //
-  // Fix: compute the visible (post-filter, post-search) active versions and
-  // enqueue them at NEIGHBOR priority (1) BEFORE the full folder loop
-  // enqueues at BACKGROUND (2). The queue's de-dup keeps the work to one
-  // run per version; promote() bumps an in-flight bg job up to NEIGHBOR if
-  // it was already queued. Foreground (USER_SELECTED, priority 0) still
-  // wins for the explicitly-clicked track.
+  // The startup warmup still computes the visible (post-filter, post-search)
+  // active versions first so what the user is looking at gets queued first.
+  // v3.137 removed the lower BACKGROUND-priority distinction for hidden
+  // latest-version rows: the whole linked-library latest-version warmup now
+  // runs at NEIGHBOR priority, while foreground (USER_SELECTED, priority 0)
+  // still wins for the explicitly-clicked track.
   const visibleActiveVersions = useMemo(
     () =>
       songs
@@ -6461,24 +6455,21 @@ export function App(): JSX.Element {
     // first click and flashed/loading-blocked the mastering panel. Warm BOTH
     // caches for the latest version of every visible row immediately.
     //
-    // v3.135 — extend that same full analysis warmup to every latest
-    // version in the linked library when background precompute is ON:
-    // visible/search-matched rows enqueue at NEIGHBOR priority first, then
-    // off-screen/search-hidden/other-folder rows fill both measured+preview
-    // caches at BACKGROUND priority. The pause toggle still suppresses that
-    // off-screen fill; visible rows stay hot because they are the tracks the
-    // user is most likely to jump between.
+    // v3.137 — Ethan's follow-up: the latest version of every linked-library
+    // track is now part of startup warmup itself, not an optional second-tier
+    // background fill. Hidden/search-filtered/other-folder latest rows use the
+    // same NEIGHBOR priority as visible rows and are not gated by the pause
+    // toggle, so once the startup warmup drains, double-click switching hits
+    // the in-memory measured + preview caches immediately.
     const visibleVersionIds = new Set(
       visibleActiveVersions.map(({ version }) => version.id)
     );
-    const orderedPreloadEntries = agentBackgroundPrecomputeEnabled
-      ? [
-          ...visibleActiveVersions,
-          ...libraryActiveVersions.filter(
-            ({ version }) => !visibleVersionIds.has(version.id)
-          ),
-        ]
-      : [...visibleActiveVersions];
+    const orderedPreloadEntries = [
+      ...visibleActiveVersions,
+      ...libraryActiveVersions.filter(
+        ({ version }) => !visibleVersionIds.has(version.id)
+      ),
+    ];
 
     async function warmPreviewAnalysis(
       version: SongVersion,
@@ -6547,9 +6538,9 @@ export function App(): JSX.Element {
     }
 
     // Item #10 (v3.110) — fan latest-version preloads through the
-    // shared MEASURED_ANALYSIS_QUEUE. Visible rows run first at NEIGHBOR
-    // priority; optional off-screen library rows fill in later at BACKGROUND
-    // priority while the user-selected track still jumps to priority 0.
+    // shared MEASURED_ANALYSIS_QUEUE. Visible rows are still enqueued first,
+    // but every latest-version startup warmup job now uses NEIGHBOR priority;
+    // the user-selected track still jumps to priority 0.
     //
     // Cancellation policy: we DO NOT bail the upsert path on `cancelled`.
     // The mastering cache is renderer-global state, and writing the analysis
@@ -6568,7 +6559,7 @@ export function App(): JSX.Element {
         const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
 
         if (!isVisibleVersion) {
-          void warmPreviewAnalysis(version, cacheKey, ANALYSIS_PRIORITY_BACKGROUND);
+          void warmPreviewAnalysis(version, cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
         }
 
         if (isFresh) {
@@ -6597,11 +6588,8 @@ export function App(): JSX.Element {
         }
 
         try {
-          const priority = isVisibleVersion
-            ? ANALYSIS_PRIORITY_NEIGHBOR
-            : ANALYSIS_PRIORITY_BACKGROUND;
           const measured = await runMeasuredAnalysis(version.filePath, {
-            priority,
+            priority: ANALYSIS_PRIORITY_NEIGHBOR,
             cacheKey,
           });
 
@@ -6655,7 +6643,6 @@ export function App(): JSX.Element {
     visibleActiveVersions,
     createMasteringCacheEntry,
     upsertMasteringCacheEntry,
-    agentBackgroundPrecomputeEnabled,
   ]);
 
   const activeMixPlaybackSource =
@@ -14104,8 +14091,9 @@ export function App(): JSX.Element {
                   Hidden when both queues are idle so it never adds noise.
                   v3.120 — pause/resume button next to the pill toggles
                   `agentBackgroundPrecomputeEnabled`; when paused the pill
-                  is rendered in a muted "paused" state and bg precompute
-                  effects skip enqueueing. */}
+                  is rendered in a muted "paused" state and optional bg
+                  precompute skips enqueueing. Startup latest-version warmup
+                  still runs so switching stays hot. */}
               <BackgroundTasksIndicator
                 getMeasuredDump={getMeasuredQueueDump}
                 paused={!agentBackgroundPrecomputeEnabled}

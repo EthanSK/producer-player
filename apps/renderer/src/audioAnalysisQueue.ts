@@ -46,6 +46,12 @@ export const ANALYSIS_PRIORITY_USER_SELECTED: AnalysisPriority = 0;
 export const ANALYSIS_PRIORITY_NEIGHBOR: AnalysisPriority = 1;
 export const ANALYSIS_PRIORITY_BACKGROUND: AnalysisPriority = 2;
 
+export interface AnalysisPriorityCounts {
+  user: number;
+  neighbor: number;
+  background: number;
+}
+
 interface QueuedTask<T> {
   key: string | null;
   priority: AnalysisPriority;
@@ -174,10 +180,18 @@ export class AnalysisQueue {
   // otherwise a user-priority task waiting behind another user-priority
   // task is just FIFO + concurrency cap as before, no bypass needed.
   private nonUserActive = 0;
+  // Diagnostic/cooperative-scheduling counts. Unlike `active` and
+  // `userBypassActive`, this records WHAT priority is currently running,
+  // regardless of whether the task is in a regular slot or a bypass slot.
+  private readonly activeByPriority: AnalysisPriorityCounts = {
+    user: 0,
+    neighbor: 0,
+    background: 0,
+  };
   // Diagnostic-only totals used by E2E to prove startup warmup is not being
   // silently routed through the optional BACKGROUND bucket. A fresh Electron
   // launch resets these process-lifetime counters.
-  private readonly totalEnqueuedByPriority = {
+  private readonly totalEnqueuedByPriority: AnalysisPriorityCounts = {
     user: 0,
     neighbor: 0,
     background: 0,
@@ -312,8 +326,9 @@ export class AnalysisQueue {
     active: number;
     userBypassActive: number;
     pending: number;
-    pendingByPriority: { user: number; neighbor: number; background: number };
-    totalEnqueuedByPriority: { user: number; neighbor: number; background: number };
+    activeByPriority: AnalysisPriorityCounts;
+    pendingByPriority: AnalysisPriorityCounts;
+    totalEnqueuedByPriority: AnalysisPriorityCounts;
   } {
     let user = 0;
     let neighbor = 0;
@@ -333,9 +348,20 @@ export class AnalysisQueue {
       active: this.active,
       userBypassActive: this.userBypassActive,
       pending: this.pending.length,
+      activeByPriority: { ...this.activeByPriority },
       pendingByPriority: { user, neighbor, background },
       totalEnqueuedByPriority: { ...this.totalEnqueuedByPriority },
     };
+  }
+
+  private priorityBucket(priority: AnalysisPriority): keyof AnalysisPriorityCounts {
+    if (priority === ANALYSIS_PRIORITY_USER_SELECTED) {
+      return 'user';
+    }
+    if (priority === ANALYSIS_PRIORITY_NEIGHBOR) {
+      return 'neighbor';
+    }
+    return 'background';
   }
 
   private comparePending(a: QueuedTask<unknown>, b: QueuedTask<unknown>): number {
@@ -375,6 +401,7 @@ export class AnalysisQueue {
 
   private startTask(next: QueuedTask<unknown>, isUserBypass: boolean): void {
     const isNonUser = next.priority !== ANALYSIS_PRIORITY_USER_SELECTED;
+    const activePriorityBucket = this.priorityBucket(next.priority);
     if (isUserBypass) {
       this.userBypassActive += 1;
     } else {
@@ -383,6 +410,7 @@ export class AnalysisQueue {
         this.nonUserActive += 1;
       }
     }
+    this.activeByPriority[activePriorityBucket] += 1;
     if (next.key !== null) {
       this.runningKeys.add(next.key);
     }
@@ -408,6 +436,7 @@ export class AnalysisQueue {
           this.nonUserActive -= 1;
         }
       }
+      this.activeByPriority[activePriorityBucket] -= 1;
       if (next.key !== null) {
         this.runningKeys.delete(next.key);
         this.inflightByKey.delete(next.key);

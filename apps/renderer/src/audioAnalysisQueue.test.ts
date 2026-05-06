@@ -472,6 +472,7 @@ describe('AnalysisQueue', () => {
     const snap = queue.dump();
     expect(snap.active).toBe(1);
     expect(snap.pending).toBe(4);
+    expect(snap.activeByPriority).toEqual({ user: 0, neighbor: 0, background: 1 });
     expect(snap.pendingByPriority).toEqual({ user: 2, neighbor: 1, background: 1 });
     expect(snap.userBypassActive).toBe(0);
 

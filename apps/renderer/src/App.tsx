@@ -77,6 +77,7 @@ import {
   type AnalysisPriority,
 } from './audioAnalysisQueue';
 import { BackgroundTasksIndicator } from './BackgroundTasksIndicator';
+import { runSequentialLatestTrackWarmup } from './latestTrackWarmup';
 import {
   getMasteringChecklistRuleById,
   getMasteringChecklistRuleMeta,
@@ -2783,6 +2784,20 @@ export function App(): JSX.Element {
   const masteringCacheByVersionIdRef = useRef<Record<string, MasteringCacheEntry>>({});
   const masteringCachePendingVersionIdsRef = useRef<Set<string>>(new Set());
   const previewAnalysisPreloadPendingVersionIdsRef = useRef<Set<string>>(new Set());
+  const latestTrackWarmupDebugRef = useRef<{
+    runId: number;
+    activeVersionId: string | null;
+    startedVersionIds: string[];
+    completedVersionIds: string[];
+    pausedForUrgentCount: number;
+  }>({
+    runId: 0,
+    activeVersionId: null,
+    startedVersionIds: [],
+    completedVersionIds: [],
+    pausedForUrgentCount: 0,
+  });
+  const latestTrackWarmupTailRef = useRef<Promise<void>>(Promise.resolve());
   const [masteringCacheStatusByVersionId, setMasteringCacheStatusByVersionId] = useState<
     Record<string, MasteringCacheStatusState>
   >({});
@@ -6110,20 +6125,15 @@ export function App(): JSX.Element {
     if (inspectorVersions.length === 0) {
       return;
     }
-    // v3.120 (Item #14 follow-up) — bg precompute is paused. Skip enqueueing
-    // any priority-2 inspector-version preloads. Foreground (user-priority)
-    // analysis on the selected track still flows through the queue
-    // unaffected because the selected-track effect uses USER_SELECTED.
-    if (!agentBackgroundPrecomputeEnabled) {
-      return;
-    }
 
     let cancelled = false;
 
-    // Item #10 (v3.110) — fan inspector-version analyses out through the
-    // shared MEASURED_ANALYSIS_QUEUE at background priority. Concurrency is
-    // capped inside the pool (currently 2). The selected-track effect promotes
-    // its own job to user-priority, so this loop never starves a click.
+    // v3.140 — selected-song/version-history analysis is intent-driven, not
+    // optional background precompute. When Ethan picks/plays a track while
+    // startup warmup is still walking the library, all versions for THAT
+    // track should jump the queue together so sample-rate/LUFS/platform-
+    // normalization data is ready now; then the sequential latest-track
+    // startup warmup can resume.
     void (async () => {
       const tasks = inspectorVersions.map(async (version) => {
         if (cancelled) {
@@ -6184,7 +6194,7 @@ export function App(): JSX.Element {
 
         try {
           const measured = await runMeasuredAnalysis(version.filePath, {
-            priority: ANALYSIS_PRIORITY_BACKGROUND,
+            priority: ANALYSIS_PRIORITY_USER_SELECTED,
             cacheKey,
           });
 
@@ -6263,7 +6273,7 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [inspectorVersions, agentBackgroundPrecomputeEnabled]);
+  }, [inspectorVersions]);
 
   const albumActiveVersions = useMemo(
     () =>
@@ -6448,6 +6458,14 @@ export function App(): JSX.Element {
     }
 
     let cancelled = false;
+    const runId = latestTrackWarmupDebugRef.current.runId + 1;
+    latestTrackWarmupDebugRef.current = {
+      runId,
+      activeVersionId: null,
+      startedVersionIds: [],
+      completedVersionIds: [],
+      pausedForUrgentCount: 0,
+    };
 
     // v3.130 follow-up — startup/main-view instant-switch warmup. The previous pass
     // only warmed ffmpeg measured analysis (LUFS / platform-normalization),
@@ -6461,6 +6479,13 @@ export function App(): JSX.Element {
     // same NEIGHBOR priority as visible rows and are not gated by the pause
     // toggle, so once the startup warmup drains, double-click switching hits
     // the in-memory measured + preview caches immediately.
+    //
+    // v3.140 — Ethan's follow-up: do NOT blast the whole latest-track library
+    // into the queues at once. Startup warmup now walks the visible-then-
+    // hidden list sequentially, while each track's measured + preview work runs
+    // in parallel. Between tracks it yields to USER_SELECTED queue work, so a
+    // double-click/reference/listen action can jump the line and the warmup
+    // resumes from the next remaining latest track afterwards.
     const visibleVersionIds = new Set(
       visibleActiveVersions.map(({ version }) => version.id)
     );
@@ -6470,6 +6495,59 @@ export function App(): JSX.Element {
         ({ version }) => !visibleVersionIds.has(version.id)
       ),
     ];
+
+    const markWarmupStarted = (versionId: string): void => {
+      const debug = latestTrackWarmupDebugRef.current;
+      if (debug.runId !== runId) {
+        return;
+      }
+      latestTrackWarmupDebugRef.current = {
+        ...debug,
+        activeVersionId: versionId,
+        startedVersionIds: [...debug.startedVersionIds, versionId],
+      };
+    };
+
+    const markWarmupCompleted = (versionId: string): void => {
+      const debug = latestTrackWarmupDebugRef.current;
+      if (debug.runId !== runId) {
+        return;
+      }
+      latestTrackWarmupDebugRef.current = {
+        ...debug,
+        activeVersionId: debug.activeVersionId === versionId ? null : debug.activeVersionId,
+        completedVersionIds: [...debug.completedVersionIds, versionId],
+      };
+    };
+
+    const hasUrgentAnalysisWork = (): boolean => {
+      const preview = dumpPreviewAnalysisQueue();
+      const measured = MEASURED_ANALYSIS_QUEUE.dump();
+
+      return (
+        preview.activeByPriority.user > 0 ||
+        measured.activeByPriority.user > 0 ||
+        preview.userBypassActive > 0 ||
+        measured.userBypassActive > 0 ||
+        preview.pendingByPriority.user > 0 ||
+        measured.pendingByPriority.user > 0
+      );
+    };
+
+    const sleep = (ms: number): Promise<void> =>
+      new Promise((resolve) => {
+        window.setTimeout(resolve, ms);
+      });
+
+    const recordUrgentWarmupPause = (): void => {
+      const debug = latestTrackWarmupDebugRef.current;
+      if (debug.runId === runId) {
+        latestTrackWarmupDebugRef.current = {
+          ...debug,
+          pausedForUrgentCount: debug.pausedForUrgentCount + 1,
+        };
+      }
+    };
 
     async function warmPreviewAnalysis(
       version: SongVersion,
@@ -6526,113 +6604,137 @@ export function App(): JSX.Element {
       }
     }
 
-    // Promote any already-pending jobs whose version is now in the visible
-    // set (e.g. startup snapshot churn or a search/filter change). Measured
-    // and preview queues use the same cache key, so the selected-track effect
-    // can de-dupe/promote these if the user clicks before warmup completes.
-    for (const { version } of visibleActiveVersions) {
-      const cacheKey = buildMasteringCacheKey(version);
-      promoteMeasuredAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
-      promotePreviewAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
-      void warmPreviewAnalysis(version, cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
-    }
+    async function warmMeasuredAnalysis(
+      entry: (typeof orderedPreloadEntries)[number],
+      cacheKey: string
+    ): Promise<void> {
+      const { song, version } = entry;
+      const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
+      const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
 
-    // Item #10 (v3.110) — fan latest-version preloads through the
-    // shared MEASURED_ANALYSIS_QUEUE. Visible rows are still enqueued first,
-    // but every latest-version startup warmup job now uses NEIGHBOR priority;
-    // the user-selected track still jumps to priority 0.
-    //
-    // Cancellation policy: we DO NOT bail the upsert path on `cancelled`.
-    // The mastering cache is renderer-global state, and writing the analysis
-    // to it (idempotent under cacheKey) is always desirable even if the
-    // album view re-rendered mid-flight (e.g. the snapshot updated from a
-    // file-watcher rescan). We only skip the renderer-state setters that
-    // belong to the current render cycle. This avoids a race where rapid
-    // snapshot updates kept cancelling the in-flight analysis runs and the
-    // cache never got populated for non-selected tracks.
-    void (async () => {
-      const tasks = orderedPreloadEntries.map(async (entry) => {
-        const { song, version } = entry;
-        const cacheKey = buildMasteringCacheKey(version);
-        const isVisibleVersion = visibleVersionIds.has(version.id);
-        const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
-        const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
-
-        if (!isVisibleVersion) {
-          void warmPreviewAnalysis(version, cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
-        }
-
-        if (isFresh) {
-          if (!cancelled) {
-            setMasteringCacheStatusByVersionId((previous) => ({
-              ...previous,
-              [version.id]: { status: 'fresh', error: null },
-            }));
-          }
-          return;
-        }
-
-        if (masteringCachePendingVersionIdsRef.current.has(version.id)) {
-          return;
-        }
-
-        masteringCachePendingVersionIdsRef.current.add(version.id);
+      if (isFresh) {
         if (!cancelled) {
           setMasteringCacheStatusByVersionId((previous) => ({
             ...previous,
-            [version.id]: {
-              status: 'pending',
-              error: null,
-            },
+            [version.id]: { status: 'fresh', error: null },
           }));
         }
+        return;
+      }
 
-        try {
-          const measured = await runMeasuredAnalysis(version.filePath, {
-            priority: ANALYSIS_PRIORITY_NEIGHBOR,
-            cacheKey,
-          });
+      if (masteringCachePendingVersionIdsRef.current.has(version.id)) {
+        return;
+      }
 
-          // Always upsert to the global cache — idempotent under cacheKey.
-          upsertMasteringCacheEntry(
-            createMasteringCacheEntry({
-              source: 'background-preload',
-              version,
-              song,
-              measured,
-            })
-          );
-        } catch (error: unknown) {
-          // v3.121 (Concern 4) — let errors flow through even after the
-          // effect was cancelled. The previous `if (cancelled) return` left
-          // album rows stuck in `pending` status forever after a folder /
-          // search switch (or a rapid track-switch) — the queue would
-          // eventually reject with `AnalysisTaskTimeoutError` after 60s but
-          // the catch silently swallowed it. Mastering-cache writes are
-          // keyed by version-id and idempotent, so writing the error
-          // state is safe.
-          const isTimeout = error instanceof AnalysisTaskTimeoutError;
-          setMasteringCacheStatusByVersionId((previous) => ({
-            ...previous,
-            [version.id]: {
-              status: 'error',
-              error: isTimeout
-                ? 'Analysis timed out. Try selecting this track again.'
-                : error instanceof Error
-                  ? error.message
-                  : 'Could not analyze this track yet.',
-            },
-          }));
-        } finally {
-          masteringCachePendingVersionIdsRef.current.delete(version.id);
-        }
+      masteringCachePendingVersionIdsRef.current.add(version.id);
+      if (!cancelled) {
+        setMasteringCacheStatusByVersionId((previous) => ({
+          ...previous,
+          [version.id]: {
+            status: 'pending',
+            error: null,
+          },
+        }));
+      }
+
+      try {
+        const measured = await runMeasuredAnalysis(version.filePath, {
+          priority: ANALYSIS_PRIORITY_NEIGHBOR,
+          cacheKey,
+        });
+
+        // Always upsert to the global cache — idempotent under cacheKey.
+        upsertMasteringCacheEntry(
+          createMasteringCacheEntry({
+            source: 'background-preload',
+            version,
+            song,
+            measured,
+          })
+        );
+      } catch (error: unknown) {
+        // v3.121 (Concern 4) — let errors flow through even after the
+        // effect was cancelled. The previous `if (cancelled) return` left
+        // album rows stuck in `pending` status forever after a folder /
+        // search switch (or a rapid track-switch) — the queue would
+        // eventually reject with `AnalysisTaskTimeoutError` after 60s but
+        // the catch silently swallowed it. Mastering-cache writes are
+        // keyed by version-id and idempotent, so writing the error
+        // state is safe.
+        const isTimeout = error instanceof AnalysisTaskTimeoutError;
+        setMasteringCacheStatusByVersionId((previous) => ({
+          ...previous,
+          [version.id]: {
+            status: 'error',
+            error: isTimeout
+              ? 'Analysis timed out. Try selecting this track again.'
+              : error instanceof Error
+                ? error.message
+                : 'Could not analyze this track yet.',
+          },
+        }));
+      } finally {
+        masteringCachePendingVersionIdsRef.current.delete(version.id);
+      }
+    }
+
+    // Measured + preview processing for EACH track is parallel, but the
+    // top-level walk is sequential. That keeps startup gentle and avoids a
+    // 9-at-once decode/ffmpeg burst while preserving the existing cache-
+    // readiness invariant once the warmup drains.
+    const runPromise = latestTrackWarmupTailRef.current
+      .catch(() => undefined)
+      .then(() =>
+        runSequentialLatestTrackWarmup({
+          entries: orderedPreloadEntries,
+          isCancelled: () => cancelled,
+          hasUrgentWork: hasUrgentAnalysisWork,
+          wait: sleep,
+          onUrgentPause: recordUrgentWarmupPause,
+          processEntry: async (entry) => {
+            const { version } = entry;
+            const cacheKey = buildMasteringCacheKey(version);
+
+            // If this version was already pending from an older render, make sure
+            // it stays at the normal/latest-track bucket rather than the optional
+            // background bucket. The selected-track effect can still promote the
+            // same key to USER_SELECTED if Ethan clicks it.
+            promoteMeasuredAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
+            promotePreviewAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
+
+            markWarmupStarted(version.id);
+            await Promise.allSettled([
+              warmPreviewAnalysis(version, cacheKey, ANALYSIS_PRIORITY_NEIGHBOR),
+              warmMeasuredAnalysis(entry, cacheKey),
+            ]);
+            markWarmupCompleted(version.id);
+          },
+        })
+      );
+    latestTrackWarmupTailRef.current = runPromise;
+    void runPromise.catch((error: unknown) => {
+      void window.producerPlayer.rendererLog('warn', 'Latest-track warmup runner failed', {
+        error: error instanceof Error ? error.message : String(error),
       });
-
-      await Promise.allSettled(tasks);
-    })();
+    }).finally(() => {
+      const debug = latestTrackWarmupDebugRef.current;
+      if (debug.runId === runId) {
+        latestTrackWarmupDebugRef.current = {
+          ...debug,
+          activeVersionId: null,
+        };
+      }
+    });
 
     return () => {
       cancelled = true;
+      const debug = latestTrackWarmupDebugRef.current;
+      if (debug.runId === runId) {
+        latestTrackWarmupDebugRef.current = {
+          ...debug,
+          activeVersionId: null,
+        };
+      }
     };
   }, [
     libraryActiveVersionAnalysisKey,
@@ -8975,6 +9077,19 @@ export function App(): JSX.Element {
       >;
     }).__producerPlayerGetMeasuredQueueDump = () =>
       MEASURED_ANALYSIS_QUEUE.dump();
+    (window as unknown as {
+      __producerPlayerGetLatestWarmupDebugState?: () => {
+        runId: number;
+        activeVersionId: string | null;
+        startedVersionIds: string[];
+        completedVersionIds: string[];
+        pausedForUrgentCount: number;
+      };
+    }).__producerPlayerGetLatestWarmupDebugState = () => ({
+      ...latestTrackWarmupDebugRef.current,
+      startedVersionIds: [...latestTrackWarmupDebugRef.current.startedVersionIds],
+      completedVersionIds: [...latestTrackWarmupDebugRef.current.completedVersionIds],
+    });
     const readWarmupState = (entries: typeof libraryActiveVersions) =>
       entries.map(({ song, version }) => {
         const cacheKey = buildMasteringCacheKey(version);
@@ -9124,6 +9239,9 @@ export function App(): JSX.Element {
       delete (window as unknown as {
         __producerPlayerGetMeasuredQueueDump?: unknown;
       }).__producerPlayerGetMeasuredQueueDump;
+      delete (window as unknown as {
+        __producerPlayerGetLatestWarmupDebugState?: unknown;
+      }).__producerPlayerGetLatestWarmupDebugState;
       delete (window as unknown as {
         __producerPlayerGetVisibleLatestWarmupState?: unknown;
       }).__producerPlayerGetVisibleLatestWarmupState;

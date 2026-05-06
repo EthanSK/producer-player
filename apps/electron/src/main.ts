@@ -4052,7 +4052,10 @@ async function createMainWindow(): Promise<void> {
   // Inject a Content-Security-Policy that allows YouTube thumbnail images to
   // load.  Without this Electron's default restrictive CSP (applied when the
   // renderer is loaded from a file:// or custom-scheme origin) blocks the
-  // external <img> requests to img.youtube.com.
+  // external <img> requests to YouTube's thumbnail hosts.  Keep both the
+  // legacy img.youtube.com URL used by the renderer and YouTube's canonical
+  // i.ytimg.com image host allowed so a redirect/host swap cannot blank the
+  // cards.
   mainWindow.webContents.session.webRequest.onHeadersReceived(
     (details, callback) => {
       callback({
@@ -4060,7 +4063,7 @@ async function createMainWindow(): Promise<void> {
           ...details.responseHeaders,
           'Content-Security-Policy': [
             "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: file: producer-media:; " +
-            "img-src 'self' data: blob: file: producer-media: https://img.youtube.com; " +
+            "img-src 'self' data: blob: file: producer-media: https://img.youtube.com https://i.ytimg.com; " +
             "media-src 'self' data: blob: file: mediastream: producer-media:; " +
             "connect-src 'self' ws: wss: http: https: producer-media:;",
           ],

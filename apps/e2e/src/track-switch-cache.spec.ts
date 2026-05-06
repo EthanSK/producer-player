@@ -98,6 +98,62 @@ async function readAnalysisQueues(page: Page): Promise<AnalysisQueueSnapshot> {
   }) as Promise<AnalysisQueueSnapshot>;
 }
 
+async function dropPreviewAnalysisCacheForVersion(
+  page: Page,
+  versionId: string
+): Promise<boolean> {
+  await page.waitForFunction(
+    () =>
+      typeof (
+        window as unknown as {
+          __producerPlayerDropPreviewAnalysisCacheForVersion?: unknown;
+        }
+      ).__producerPlayerDropPreviewAnalysisCacheForVersion === 'function',
+    null,
+    { timeout: 10_000 }
+  );
+  return page.evaluate((targetVersionId) => {
+    const dropper = (
+      window as unknown as {
+        __producerPlayerDropPreviewAnalysisCacheForVersion?: (versionId: string) => boolean;
+      }
+    ).__producerPlayerDropPreviewAnalysisCacheForVersion;
+    if (!dropper) {
+      throw new Error('__producerPlayerDropPreviewAnalysisCacheForVersion not exposed yet');
+    }
+    return dropper(targetVersionId);
+  }, versionId) as Promise<boolean>;
+}
+
+async function readCachedNormalizationPreviewGainForVersion(
+  page: Page,
+  versionId: string
+): Promise<number | null> {
+  await page.waitForFunction(
+    () =>
+      typeof (
+        window as unknown as {
+          __producerPlayerGetCachedNormalizationPreviewGainForVersion?: unknown;
+        }
+      ).__producerPlayerGetCachedNormalizationPreviewGainForVersion === 'function',
+    null,
+    { timeout: 10_000 }
+  );
+  return page.evaluate((targetVersionId) => {
+    const reader = (
+      window as unknown as {
+        __producerPlayerGetCachedNormalizationPreviewGainForVersion?: (
+          versionId: string
+        ) => number | null;
+      }
+    ).__producerPlayerGetCachedNormalizationPreviewGainForVersion;
+    if (!reader) {
+      throw new Error('__producerPlayerGetCachedNormalizationPreviewGainForVersion not exposed yet');
+    }
+    return reader(targetVersionId);
+  }, versionId) as Promise<number | null>;
+}
+
 function countQueueWork(snapshot: AnalysisQueueSnapshot): number {
   return (
     snapshot.preview.active +
@@ -130,22 +186,37 @@ async function expectDoubleClickSwitchIsInstantlyReady(
   page: Page,
   row: Locator,
   expectedVersionNumber: number,
-  reason: string
+  reason: string,
+  options: {
+    requireFullAnalysisReady?: boolean;
+    expectedNormalizationPreviewGainDb?: number | null;
+  } = {}
 ): Promise<void> {
   const targetSongId = await row.getAttribute('data-song-id');
   expect(targetSongId).not.toBeNull();
+  const requireFullAnalysisReady = options.requireFullAnalysisReady ?? true;
+  const expectedNormalizationPreviewGainDb =
+    options.expectedNormalizationPreviewGainDb ?? null;
 
   await row.dblclick();
   await expect(row).toHaveClass(/selected/);
 
   const switchObservation = await page.evaluate(
-    async ({ targetSongId: expectedSongId, expectedVersionNumber: expectedVersion }) => {
+    async ({
+      targetSongId: expectedSongId,
+      expectedVersionNumber: expectedVersion,
+      requireFullAnalysisReady: shouldRequireFullAnalysisReady,
+      expectedNormalizationPreviewGainDb: expectedNormalizationGain,
+    }) => {
       const deadline = performance.now() + 500;
       let sawTargetLatest = false;
+      let sawTargetNormalizationGain = false;
       let lastState: {
         selectedPlaybackSongId: unknown;
         currentPlaybackVersionNumber: unknown;
         analysisStatus: unknown;
+        normalizationSourceStatus: unknown;
+        normalizationPreviewAppliedGainDb: unknown;
         analysisIsSet: unknown;
         measuredAnalysisIsSet: unknown;
       } | null = null;
@@ -156,6 +227,8 @@ async function expectDoubleClickSwitchIsInstantlyReady(
             selectedPlaybackSongId?: unknown;
             currentPlaybackVersionNumber?: unknown;
             analysisStatus?: unknown;
+            normalizationSourceStatus?: unknown;
+            normalizationPreviewAppliedGainDb?: unknown;
             analysisIsSet?: unknown;
             measuredAnalysisIsSet?: unknown;
           };
@@ -164,6 +237,9 @@ async function expectDoubleClickSwitchIsInstantlyReady(
           selectedPlaybackSongId: gateState?.selectedPlaybackSongId ?? null,
           currentPlaybackVersionNumber: gateState?.currentPlaybackVersionNumber ?? null,
           analysisStatus: gateState?.analysisStatus ?? null,
+          normalizationSourceStatus: gateState?.normalizationSourceStatus ?? null,
+          normalizationPreviewAppliedGainDb:
+            gateState?.normalizationPreviewAppliedGainDb ?? null,
           analysisIsSet: gateState?.analysisIsSet ?? null,
           measuredAnalysisIsSet: gateState?.measuredAnalysisIsSet ?? null,
         };
@@ -172,6 +248,7 @@ async function expectDoubleClickSwitchIsInstantlyReady(
           if (lastState.currentPlaybackVersionNumber !== expectedVersion) {
             return {
               sawTargetLatest,
+              sawTargetNormalizationGain,
               notReadyStatus: `wrong-version:${String(
                 lastState.currentPlaybackVersionNumber
               )}`,
@@ -179,34 +256,93 @@ async function expectDoubleClickSwitchIsInstantlyReady(
             };
           }
           sawTargetLatest = true;
-          if (lastState.analysisStatus !== 'ready') {
+
+          if (typeof lastState.normalizationPreviewAppliedGainDb !== 'number') {
             return {
               sawTargetLatest,
+              sawTargetNormalizationGain,
+              notReadyStatus: 'missing-normalization-preview-gain',
+              lastState,
+            };
+          }
+
+          if (
+            typeof expectedNormalizationGain === 'number' &&
+            Math.abs(lastState.normalizationPreviewAppliedGainDb - expectedNormalizationGain) >
+              0.001
+          ) {
+            // Selection state can move to the target row one render before
+            // the analysis state follows. Keep sampling until normalization is
+            // definitely computed from the target version's cached measured LUFS.
+            // eslint-disable-next-line no-await-in-loop -- intentional frame sampling
+            await new Promise((resolve) => setTimeout(resolve, 16));
+            continue;
+          }
+
+          sawTargetNormalizationGain = true;
+
+          if (shouldRequireFullAnalysisReady && lastState.analysisStatus !== 'ready') {
+            return {
+              sawTargetLatest,
+              sawTargetNormalizationGain,
               notReadyStatus: String(lastState.analysisStatus),
               lastState,
             };
           }
-          if (!lastState.analysisIsSet || !lastState.measuredAnalysisIsSet) {
+          if (
+            (shouldRequireFullAnalysisReady && !lastState.analysisIsSet) ||
+            !lastState.measuredAnalysisIsSet
+          ) {
             return {
               sawTargetLatest,
+              sawTargetNormalizationGain,
               notReadyStatus: 'missing-in-memory-cache',
               lastState,
             };
           }
+          if (lastState.normalizationSourceStatus !== 'ready') {
+            return {
+              sawTargetLatest,
+              sawTargetNormalizationGain,
+              notReadyStatus: `normalization-${String(
+                lastState.normalizationSourceStatus
+              )}`,
+              lastState,
+            };
+          }
+
+          return { sawTargetLatest, sawTargetNormalizationGain, notReadyStatus: null, lastState };
         }
 
         // eslint-disable-next-line no-await-in-loop -- intentional frame sampling
         await new Promise((resolve) => setTimeout(resolve, 16));
       }
 
-      return { sawTargetLatest, notReadyStatus: null, lastState };
+      return {
+        sawTargetLatest,
+        sawTargetNormalizationGain,
+        notReadyStatus:
+          sawTargetLatest && !sawTargetNormalizationGain
+            ? 'target-normalization-gain-not-applied'
+            : null,
+        lastState,
+      };
     },
-    { targetSongId, expectedVersionNumber }
+    {
+      targetSongId,
+      expectedVersionNumber,
+      requireFullAnalysisReady,
+      expectedNormalizationPreviewGainDb,
+    }
   );
 
   expect(switchObservation.sawTargetLatest, `${reason}: row should become playback target`).toBe(
     true
   );
+  expect(
+    switchObservation.sawTargetNormalizationGain,
+    `${reason}: target normalization gain should be in-memory immediately`
+  ).toBe(true);
   expect(switchObservation.notReadyStatus, reason).toBeNull();
 }
 
@@ -251,10 +387,21 @@ test.describe('Track-switch precompute cache @smoke', () => {
     // filtered/other-folder rows must then double-click switch without a
     // Loading/Preparing flash.
     const fixtures = [
-      { directory: fixtureDirectory, fileName: 'Alpha v1.wav', frequency: 330 },
-      { directory: fixtureDirectory, fileName: 'Bravo v1.wav', frequency: 440 },
-      { directory: secondFixtureDirectory, fileName: 'Charlie v1.wav', frequency: 550 },
-      { directory: secondFixtureDirectory, fileName: 'Charlie v2.wav', frequency: 660 },
+      { directory: fixtureDirectory, fileName: 'Alpha v1.wav', frequency: 330, duration: 1 },
+      { directory: fixtureDirectory, fileName: 'Bravo v1.wav', frequency: 440, duration: 1 },
+      {
+        directory: secondFixtureDirectory,
+        fileName: 'Charlie v1.wav',
+        frequency: 550,
+        duration: 1,
+      },
+      {
+        directory: secondFixtureDirectory,
+        fileName: 'Charlie v2.wav',
+        frequency: 660,
+        duration: 8,
+        volumeDb: -12,
+      },
     ];
     for (const fixture of fixtures) {
       // eslint-disable-next-line no-await-in-loop -- deterministic fixture generation
@@ -263,7 +410,8 @@ test.describe('Track-switch precompute cache @smoke', () => {
         '-f',
         'lavfi',
         '-i',
-        `sine=frequency=${fixture.frequency}:duration=1`,
+        `sine=frequency=${fixture.frequency}:duration=${fixture.duration}`,
+        ...(typeof fixture.volumeDb === 'number' ? ['-af', `volume=${fixture.volumeDb}dB`] : []),
         '-c:a',
         'pcm_s16le',
         path.join(fixture.directory, fixture.fileName),
@@ -378,7 +526,10 @@ test.describe('Track-switch precompute cache @smoke', () => {
       await expect(page.getByTestId('main-list-row')).toHaveCount(2, {
         timeout: 5_000,
       });
-      const secondLinkedFolder = page.getByTestId('linked-folder-item').nth(1);
+      const secondLinkedFolder = page
+        .getByTestId('linked-folder-item')
+        .filter({ hasText: path.basename(secondFixtureDirectory) })
+        .first();
       await expect(secondLinkedFolder).toBeVisible();
       await secondLinkedFolder.locator('.folder-row-content').click();
       await expect(secondLinkedFolder).toHaveClass(/selected/);
@@ -387,11 +538,28 @@ test.describe('Track-switch precompute cache @smoke', () => {
         .filter({ hasText: 'Charlie' })
         .first();
       await expect(charlieRow).toBeVisible();
+
+      const charlieWarmupState = (await readLibraryWarmupState(page)).find(
+        (entry) => entry.fileName === 'Charlie v2.wav'
+      );
+      expect(charlieWarmupState).toBeTruthy();
+      const charlieNormalizationGain = await readCachedNormalizationPreviewGainForVersion(
+        page,
+        charlieWarmupState!.versionId
+      );
+      expect(typeof charlieNormalizationGain).toBe('number');
+      expect(await dropPreviewAnalysisCacheForVersion(page, charlieWarmupState!.versionId)).toBe(
+        true
+      );
       await expectDoubleClickSwitchIsInstantlyReady(
         page,
         charlieRow,
         2,
-        'other-folder latest row should switch from startup warmup cache'
+        'other-folder latest row should switch from measured LUFS warmup cache even while preview decode is cold',
+        {
+          requireFullAnalysisReady: false,
+          expectedNormalizationPreviewGainDb: charlieNormalizationGain,
+        }
       );
 
       await expectStartupQueuesDrained(page);

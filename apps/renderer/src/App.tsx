@@ -6734,9 +6734,21 @@ export function App(): JSX.Element {
   // the surrounding Preview toggle stays disabled and the summary
   // text says "Analysing…" because the mix `analysisStatus` is still
   // 'loading'. Codex review #2 (2026-04-18).
-  const normalizationSourceStatus: 'idle' | 'loading' | 'ready' | 'error' = isRefMode
-    ? referenceStatus
-    : analysisStatus;
+  //
+  // v3.139 — platform normalization only needs measured LUFS / true peak.
+  // The selected-track `analysisStatus` represents the combined preview-waveform
+  // + measured-analysis pipeline, so a track with measured analysis already
+  // warmed from startup or the persisted mastering cache could still show
+  // "Loading…" / disable Preview while the waveform decode caught up. Treat
+  // measured analysis as the readiness source here so double-click switching
+  // reuses the warmed LUFS data immediately instead of visually waiting for a
+  // fresh preview decode.
+  const normalizationSourceStatus: 'idle' | 'loading' | 'ready' | 'error' =
+    normalizationSourceAnalysis
+      ? 'ready'
+      : isRefMode
+        ? referenceStatus
+        : analysisStatus;
   const normalizationPreview = computePlatformNormalizationPreview(
     normalizationSourceAnalysis,
     selectedNormalizationPlatform
@@ -9011,6 +9023,31 @@ export function App(): JSX.Element {
       }>;
     }).__producerPlayerGetLibraryLatestWarmupState = () =>
       readWarmupState(libraryActiveVersions);
+
+    const getVersionCacheKey = (versionId: string): string | null => {
+      const version = snapshot.versions.find((candidate) => candidate.id === versionId);
+      return version ? buildMasteringCacheKey(version) : null;
+    };
+
+    (window as unknown as {
+      __producerPlayerDropPreviewAnalysisCacheForVersion?: (versionId: string) => boolean;
+    }).__producerPlayerDropPreviewAnalysisCacheForVersion = (versionId: string) => {
+      const cacheKey = getVersionCacheKey(versionId);
+      return cacheKey ? previewAnalysisCacheRef.current.delete(cacheKey) : false;
+    };
+    (window as unknown as {
+      __producerPlayerGetCachedNormalizationPreviewGainForVersion?: (
+        versionId: string
+      ) => number | null;
+    }).__producerPlayerGetCachedNormalizationPreviewGainForVersion = (versionId: string) => {
+      const cacheKey = getVersionCacheKey(versionId);
+      const cachedMeasured = cacheKey ? measuredAnalysisCacheRef.current.get(cacheKey) ?? null : null;
+      return (
+        computePlatformNormalizationPreview(cachedMeasured, selectedNormalizationPlatform)
+          ?.appliedGainDb ?? null
+      );
+    };
+
     (window as unknown as {
       __producerPlayerGetAnalysisVersion?: () => string | null;
     }).__producerPlayerGetAnalysisVersion = () =>
@@ -9030,6 +9067,8 @@ export function App(): JSX.Element {
       analysisIsSet: analysis !== null,
       measuredAnalysisIsSet: measuredAnalysis !== null,
       analysisStatus,
+      normalizationSourceStatus,
+      normalizationPreviewAppliedGainDb: normalizationPreview?.appliedGainDb ?? null,
       analysisVersion: computeCurrentAnalysisVersion(),
       aiRecFetchCompletedKey,
       aiRecFetchKeyExpected:
@@ -9094,6 +9133,12 @@ export function App(): JSX.Element {
       delete (window as unknown as {
         __producerPlayerGetLibraryLatestWarmupState?: unknown;
       }).__producerPlayerGetLibraryLatestWarmupState;
+      delete (window as unknown as {
+        __producerPlayerDropPreviewAnalysisCacheForVersion?: unknown;
+      }).__producerPlayerDropPreviewAnalysisCacheForVersion;
+      delete (window as unknown as {
+        __producerPlayerGetCachedNormalizationPreviewGainForVersion?: unknown;
+      }).__producerPlayerGetCachedNormalizationPreviewGainForVersion;
     };
   }, [
     computeCurrentAnalysisVersion,
@@ -9106,6 +9151,9 @@ export function App(): JSX.Element {
     analysis,
     measuredAnalysis,
     analysisStatus,
+    normalizationSourceStatus,
+    normalizationPreview,
+    selectedNormalizationPlatform,
     aiRecFetchCompletedKey,
     aiRecommendationsForCurrentTrack,
     aiRecommendationsGeneration,
@@ -9113,6 +9161,7 @@ export function App(): JSX.Element {
     visibleActiveVersions,
     albumActiveVersions,
     libraryActiveVersions,
+    snapshot.versions,
   ]);
 
   useEffect(() => {

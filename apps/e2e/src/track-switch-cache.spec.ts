@@ -53,17 +53,17 @@ async function readVisibleWarmupState(
   }) as Promise<WarmupState[]>;
 }
 
-async function readAlbumWarmupState(
+async function readLibraryWarmupState(
   page: import('@playwright/test').Page
 ): Promise<WarmupState[]> {
   return page.evaluate(() => {
     const reader = (
       window as unknown as {
-        __producerPlayerGetAlbumLatestWarmupState?: () => WarmupState[];
+        __producerPlayerGetLibraryLatestWarmupState?: () => WarmupState[];
       }
-    ).__producerPlayerGetAlbumLatestWarmupState;
+    ).__producerPlayerGetLibraryLatestWarmupState;
     if (!reader) {
-      throw new Error('__producerPlayerGetAlbumLatestWarmupState not exposed yet');
+      throw new Error('__producerPlayerGetLibraryLatestWarmupState not exposed yet');
     }
     return reader();
   }) as Promise<WarmupState[]>;
@@ -92,49 +92,52 @@ test.describe('Track-switch precompute cache @smoke', () => {
     'requires the host ffmpeg binary to synthesize realistic audio fixtures'
   );
 
-  test('startup warmup processes hidden album latest-version tracks after visible rows @smoke', async () => {
+  test('startup warmup processes hidden library latest-version tracks after visible rows @smoke', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-track-switch-cache-all-')
+    );
+    const secondFixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-track-switch-cache-all-second-')
     );
     const userDataDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-track-switch-cache-all-user-')
     );
 
-    // Search hides Bravo/Charlie from the main list before the folder snapshot
-    // arrives. The invariant we need here is stronger than “visible rows get
-    // warm”: all latest album versions should still process in the background,
-    // with visible Alpha ahead of the hidden BACKGROUND-priority leftovers.
-    const fixtureNames = [
-      'Alpha v1.wav',
-      'Bravo v1.wav',
-      'Charlie v1.wav',
-      'Charlie v2.wav',
+    // Search hides Bravo from the selected-folder main list, and the second
+    // linked folder is not selected at all. The invariant here is stronger
+    // than “visible rows get warm”: every latest version in the linked library
+    // should still process in the background, with visible Alpha ahead of the
+    // hidden BACKGROUND-priority leftovers.
+    const fixtures = [
+      { directory: fixtureDirectory, fileName: 'Alpha v1.wav', frequency: 330 },
+      { directory: fixtureDirectory, fileName: 'Bravo v1.wav', frequency: 440 },
+      { directory: secondFixtureDirectory, fileName: 'Charlie v1.wav', frequency: 550 },
+      { directory: secondFixtureDirectory, fileName: 'Charlie v2.wav', frequency: 660 },
     ];
-    const frequencies = [330, 440, 550, 660];
-    for (let i = 0; i < fixtureNames.length; i += 1) {
+    for (const fixture of fixtures) {
       // eslint-disable-next-line no-await-in-loop -- deterministic fixture generation
       await runFfmpeg([
         '-y',
         '-f',
         'lavfi',
         '-i',
-        `sine=frequency=${frequencies[i]}:duration=1`,
+        `sine=frequency=${fixture.frequency}:duration=1`,
         '-c:a',
         'pcm_s16le',
-        path.join(fixtureDirectory, fixtureNames[i]),
+        path.join(fixture.directory, fixture.fileName),
       ]);
     }
 
-    const modifiedTimes: Record<string, string> = {
-      'Alpha v1.wav': '2026-05-05T12:00:03.000Z',
-      'Bravo v1.wav': '2026-05-05T12:00:02.000Z',
-      'Charlie v2.wav': '2026-05-05T12:00:01.000Z',
-      'Charlie v1.wav': '2026-05-05T12:00:00.000Z',
-    };
-    for (const [fileName, timestamp] of Object.entries(modifiedTimes)) {
+    const modifiedTimes = new Map<string, string>([
+      [path.join(fixtureDirectory, 'Alpha v1.wav'), '2026-05-05T12:00:03.000Z'],
+      [path.join(fixtureDirectory, 'Bravo v1.wav'), '2026-05-05T12:00:02.000Z'],
+      [path.join(secondFixtureDirectory, 'Charlie v2.wav'), '2026-05-05T12:00:01.000Z'],
+      [path.join(secondFixtureDirectory, 'Charlie v1.wav'), '2026-05-05T12:00:00.000Z'],
+    ]);
+    for (const [filePath, timestamp] of modifiedTimes) {
       const date = new Date(timestamp);
       // eslint-disable-next-line no-await-in-loop -- deterministic fixture mtimes
-      await fs.utimes(path.join(fixtureDirectory, fileName), date, date);
+      await fs.utimes(filePath, date, date);
     }
 
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
@@ -145,14 +148,14 @@ test.describe('Track-switch precompute cache @smoke', () => {
           typeof (
             window as unknown as {
               __producerPlayerSetSearchText?: (next: string) => void;
-              __producerPlayerGetAlbumLatestWarmupState?: () => unknown;
+              __producerPlayerGetLibraryLatestWarmupState?: () => unknown;
             }
           ).__producerPlayerSetSearchText === 'function' &&
           typeof (
             window as unknown as {
-              __producerPlayerGetAlbumLatestWarmupState?: () => unknown;
+              __producerPlayerGetLibraryLatestWarmupState?: () => unknown;
             }
-          ).__producerPlayerGetAlbumLatestWarmupState === 'function',
+          ).__producerPlayerGetLibraryLatestWarmupState === 'function',
         null,
         { timeout: 10_000 }
       );
@@ -165,10 +168,12 @@ test.describe('Track-switch precompute cache @smoke', () => {
         ).__producerPlayerSetSearchText?.('Alpha');
       });
 
-      await page.evaluate(async (folderPath) => {
+      await page.evaluate(async ([firstFolderPath, secondFolderPath]) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (window as any).producerPlayer.linkFolder(folderPath);
-      }, fixtureDirectory);
+        await (window as any).producerPlayer.linkFolder(firstFolderPath);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (window as any).producerPlayer.linkFolder(secondFolderPath);
+      }, [fixtureDirectory, secondFixtureDirectory]);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1, {
         timeout: 15_000,
@@ -177,12 +182,12 @@ test.describe('Track-switch precompute cache @smoke', () => {
       await expect
         .poll(
           async () => {
-            const state = await readAlbumWarmupState(page);
+            const state = await readLibraryWarmupState(page);
             return {
               visibleFileNames: await readVisibleWarmupState(page).then((visible) =>
                 visible.map((entry) => entry.fileName).sort()
               ),
-              albumFileNames: state.map((entry) => entry.fileName).sort(),
+              libraryFileNames: state.map((entry) => entry.fileName).sort(),
               allPreviewReady: state.every((entry) => entry.previewReady),
               allMeasuredReady: state.every((entry) => entry.measuredReady),
             };
@@ -191,13 +196,14 @@ test.describe('Track-switch precompute cache @smoke', () => {
         )
         .toEqual({
           visibleFileNames: ['Alpha v1.wav'],
-          albumFileNames: ['Alpha v1.wav', 'Bravo v1.wav', 'Charlie v2.wav'],
+          libraryFileNames: ['Alpha v1.wav', 'Bravo v1.wav', 'Charlie v2.wav'],
           allPreviewReady: true,
           allMeasuredReady: true,
         });
     } finally {
       await electronApp.close();
       await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(secondFixtureDirectory, { recursive: true, force: true });
       await fs.rm(userDataDirectory, { recursive: true, force: true });
     }
   });

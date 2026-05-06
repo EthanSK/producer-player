@@ -6277,12 +6277,25 @@ export function App(): JSX.Element {
         ),
     [albumSongs]
   );
-  const albumActiveVersionAnalysisKey = useMemo(
+  const libraryActiveVersions = useMemo(
     () =>
-      albumActiveVersions
+      snapshot.songs
+        .map((song) => ({
+          song,
+          version: getLatestSongVersion(song),
+        }))
+        .filter(
+          (entry): entry is { song: SongWithVersions; version: SongVersion } =>
+            entry.version !== null
+        ),
+    [snapshot.songs]
+  );
+  const libraryActiveVersionAnalysisKey = useMemo(
+    () =>
+      libraryActiveVersions
         .map(({ version }) => `${version.id}:${buildMasteringCacheKey(version)}`)
         .join('|'),
-    [albumActiveVersions]
+    [libraryActiveVersions]
   );
 
   // v3.121 (Concern 3) — visible-songs precompute prioritization.
@@ -6436,7 +6449,7 @@ export function App(): JSX.Element {
     playbackPreviewMode === 'reference' ? null : selectedPlaybackVersionId;
 
   useEffect(() => {
-    if (albumActiveVersions.length === 0 && visibleActiveVersions.length === 0) {
+    if (libraryActiveVersions.length === 0 && visibleActiveVersions.length === 0) {
       return;
     }
 
@@ -6448,20 +6461,20 @@ export function App(): JSX.Element {
     // first click and flashed/loading-blocked the mastering panel. Warm BOTH
     // caches for the latest version of every visible row immediately.
     //
-    // v3.134 — extend that same full analysis warmup to the rest of the
-    // current album/latest-version list when background precompute is ON:
+    // v3.135 — extend that same full analysis warmup to every latest
+    // version in the linked library when background precompute is ON:
     // visible/search-matched rows enqueue at NEIGHBOR priority first, then
-    // off-screen/search-hidden album rows fill both measured+preview caches at
-    // BACKGROUND priority. The pause toggle still suppresses that off-screen
-    // fill; visible rows stay hot because they are the tracks the user is most
-    // likely to jump between.
+    // off-screen/search-hidden/other-folder rows fill both measured+preview
+    // caches at BACKGROUND priority. The pause toggle still suppresses that
+    // off-screen fill; visible rows stay hot because they are the tracks the
+    // user is most likely to jump between.
     const visibleVersionIds = new Set(
       visibleActiveVersions.map(({ version }) => version.id)
     );
     const orderedPreloadEntries = agentBackgroundPrecomputeEnabled
       ? [
           ...visibleActiveVersions,
-          ...albumActiveVersions.filter(
+          ...libraryActiveVersions.filter(
             ({ version }) => !visibleVersionIds.has(version.id)
           ),
         ]
@@ -6533,9 +6546,9 @@ export function App(): JSX.Element {
       void warmPreviewAnalysis(version, cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
     }
 
-    // Item #10 (v3.110) — fan album/latest-version preloads through the
+    // Item #10 (v3.110) — fan latest-version preloads through the
     // shared MEASURED_ANALYSIS_QUEUE. Visible rows run first at NEIGHBOR
-    // priority; optional off-screen folder rows fill in later at BACKGROUND
+    // priority; optional off-screen library rows fill in later at BACKGROUND
     // priority while the user-selected track still jumps to priority 0.
     //
     // Cancellation policy: we DO NOT bail the upsert path on `cancelled`.
@@ -6634,8 +6647,8 @@ export function App(): JSX.Element {
       cancelled = true;
     };
   }, [
-    albumActiveVersionAnalysisKey,
-    albumActiveVersions,
+    libraryActiveVersionAnalysisKey,
+    libraryActiveVersions,
     // v3.121 (Concern 3) — re-run when the visible-songs subset changes
     // so newly-visible rows are promoted to NEIGHBOR priority.
     visibleActiveVersionAnalysisKey,
@@ -8963,7 +8976,7 @@ export function App(): JSX.Element {
       >;
     }).__producerPlayerGetMeasuredQueueDump = () =>
       MEASURED_ANALYSIS_QUEUE.dump();
-    const readWarmupState = (entries: typeof albumActiveVersions) =>
+    const readWarmupState = (entries: typeof libraryActiveVersions) =>
       entries.map(({ song, version }) => {
         const cacheKey = buildMasteringCacheKey(version);
         const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
@@ -9000,6 +9013,17 @@ export function App(): JSX.Element {
       }>;
     }).__producerPlayerGetAlbumLatestWarmupState = () =>
       readWarmupState(albumActiveVersions);
+    (window as unknown as {
+      __producerPlayerGetLibraryLatestWarmupState?: () => Array<{
+        songTitle: string;
+        versionId: string;
+        fileName: string;
+        cacheKey: string;
+        previewReady: boolean;
+        measuredReady: boolean;
+      }>;
+    }).__producerPlayerGetLibraryLatestWarmupState = () =>
+      readWarmupState(libraryActiveVersions);
     (window as unknown as {
       __producerPlayerGetAnalysisVersion?: () => string | null;
     }).__producerPlayerGetAnalysisVersion = () =>
@@ -9080,6 +9104,9 @@ export function App(): JSX.Element {
       delete (window as unknown as {
         __producerPlayerGetAlbumLatestWarmupState?: unknown;
       }).__producerPlayerGetAlbumLatestWarmupState;
+      delete (window as unknown as {
+        __producerPlayerGetLibraryLatestWarmupState?: unknown;
+      }).__producerPlayerGetLibraryLatestWarmupState;
     };
   }, [
     computeCurrentAnalysisVersion,
@@ -9098,6 +9125,7 @@ export function App(): JSX.Element {
     agentBackgroundPrecomputeEnabled,
     visibleActiveVersions,
     albumActiveVersions,
+    libraryActiveVersions,
   ]);
 
   useEffect(() => {

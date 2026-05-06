@@ -28,7 +28,7 @@ function hasFfmpeg(): boolean {
   return check.status === 0;
 }
 
-interface VisibleWarmupState {
+interface WarmupState {
   songTitle: string;
   versionId: string;
   fileName: string;
@@ -39,18 +39,34 @@ interface VisibleWarmupState {
 
 async function readVisibleWarmupState(
   page: import('@playwright/test').Page
-): Promise<VisibleWarmupState[]> {
+): Promise<WarmupState[]> {
   return page.evaluate(() => {
     const reader = (
       window as unknown as {
-        __producerPlayerGetVisibleLatestWarmupState?: () => VisibleWarmupState[];
+        __producerPlayerGetVisibleLatestWarmupState?: () => WarmupState[];
       }
     ).__producerPlayerGetVisibleLatestWarmupState;
     if (!reader) {
       throw new Error('__producerPlayerGetVisibleLatestWarmupState not exposed yet');
     }
     return reader();
-  }) as Promise<VisibleWarmupState[]>;
+  }) as Promise<WarmupState[]>;
+}
+
+async function readAlbumWarmupState(
+  page: import('@playwright/test').Page
+): Promise<WarmupState[]> {
+  return page.evaluate(() => {
+    const reader = (
+      window as unknown as {
+        __producerPlayerGetAlbumLatestWarmupState?: () => WarmupState[];
+      }
+    ).__producerPlayerGetAlbumLatestWarmupState;
+    if (!reader) {
+      throw new Error('__producerPlayerGetAlbumLatestWarmupState not exposed yet');
+    }
+    return reader();
+  }) as Promise<WarmupState[]>;
 }
 
 async function runFfmpeg(args: string[]): Promise<void> {
@@ -75,6 +91,116 @@ test.describe('Track-switch precompute cache @smoke', () => {
     !hasFfmpeg(),
     'requires the host ffmpeg binary to synthesize realistic audio fixtures'
   );
+
+  test('startup warmup processes hidden album latest-version tracks after visible rows @smoke', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-track-switch-cache-all-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-track-switch-cache-all-user-')
+    );
+
+    // Search hides Bravo/Charlie from the main list before the folder snapshot
+    // arrives. The invariant we need here is stronger than “visible rows get
+    // warm”: all latest album versions should still process in the background,
+    // with visible Alpha ahead of the hidden BACKGROUND-priority leftovers.
+    const fixtureNames = [
+      'Alpha v1.wav',
+      'Bravo v1.wav',
+      'Charlie v1.wav',
+      'Charlie v2.wav',
+    ];
+    const frequencies = [330, 440, 550, 660];
+    for (let i = 0; i < fixtureNames.length; i += 1) {
+      // eslint-disable-next-line no-await-in-loop -- deterministic fixture generation
+      await runFfmpeg([
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        `sine=frequency=${frequencies[i]}:duration=1`,
+        '-c:a',
+        'pcm_s16le',
+        path.join(fixtureDirectory, fixtureNames[i]),
+      ]);
+    }
+
+    const modifiedTimes: Record<string, string> = {
+      'Alpha v1.wav': '2026-05-05T12:00:03.000Z',
+      'Bravo v1.wav': '2026-05-05T12:00:02.000Z',
+      'Charlie v2.wav': '2026-05-05T12:00:01.000Z',
+      'Charlie v1.wav': '2026-05-05T12:00:00.000Z',
+    };
+    for (const [fileName, timestamp] of Object.entries(modifiedTimes)) {
+      const date = new Date(timestamp);
+      // eslint-disable-next-line no-await-in-loop -- deterministic fixture mtimes
+      await fs.utimes(path.join(fixtureDirectory, fileName), date, date);
+    }
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await page.waitForFunction(
+        () =>
+          typeof (
+            window as unknown as {
+              __producerPlayerSetSearchText?: (next: string) => void;
+              __producerPlayerGetAlbumLatestWarmupState?: () => unknown;
+            }
+          ).__producerPlayerSetSearchText === 'function' &&
+          typeof (
+            window as unknown as {
+              __producerPlayerGetAlbumLatestWarmupState?: () => unknown;
+            }
+          ).__producerPlayerGetAlbumLatestWarmupState === 'function',
+        null,
+        { timeout: 10_000 }
+      );
+
+      await page.evaluate(() => {
+        (
+          window as unknown as {
+            __producerPlayerSetSearchText?: (next: string) => void;
+          }
+        ).__producerPlayerSetSearchText?.('Alpha');
+      });
+
+      await page.evaluate(async (folderPath) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, fixtureDirectory);
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1, {
+        timeout: 15_000,
+      });
+
+      await expect
+        .poll(
+          async () => {
+            const state = await readAlbumWarmupState(page);
+            return {
+              visibleFileNames: await readVisibleWarmupState(page).then((visible) =>
+                visible.map((entry) => entry.fileName).sort()
+              ),
+              albumFileNames: state.map((entry) => entry.fileName).sort(),
+              allPreviewReady: state.every((entry) => entry.previewReady),
+              allMeasuredReady: state.every((entry) => entry.measuredReady),
+            };
+          },
+          { timeout: 60_000, intervals: [250, 500, 1000] }
+        )
+        .toEqual({
+          visibleFileNames: ['Alpha v1.wav'],
+          albumFileNames: ['Alpha v1.wav', 'Bravo v1.wav', 'Charlie v2.wav'],
+          allPreviewReady: true,
+          allMeasuredReady: true,
+        });
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
 
   test('startup warmup readies every visible latest-version track for instant switching', async () => {
     const fixtureDirectory = await fs.mkdtemp(

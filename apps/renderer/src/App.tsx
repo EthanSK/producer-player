@@ -6446,10 +6446,15 @@ export function App(): JSX.Element {
     // only warmed ffmpeg measured analysis (LUFS / platform-normalization),
     // so visible but never-selected rows still hit `analyzeTrackFromUrl` on
     // first click and flashed/loading-blocked the mastering panel. Warm BOTH
-    // caches for the latest version of every visible row immediately. The
-    // user pause toggle now only suppresses off-screen background fill; the
-    // visible rows are intentionally kept hot because they are the tracks the
-    // user is most likely to jump between.
+    // caches for the latest version of every visible row immediately.
+    //
+    // v3.134 — extend that same full analysis warmup to the rest of the
+    // current album/latest-version list when background precompute is ON:
+    // visible/search-matched rows enqueue at NEIGHBOR priority first, then
+    // off-screen/search-hidden album rows fill both measured+preview caches at
+    // BACKGROUND priority. The pause toggle still suppresses that off-screen
+    // fill; visible rows stay hot because they are the tracks the user is most
+    // likely to jump between.
     const visibleVersionIds = new Set(
       visibleActiveVersions.map(({ version }) => version.id)
     );
@@ -6462,9 +6467,10 @@ export function App(): JSX.Element {
         ]
       : [...visibleActiveVersions];
 
-    async function warmVisiblePreviewAnalysis(
+    async function warmPreviewAnalysis(
       version: SongVersion,
-      cacheKey: string
+      cacheKey: string,
+      priority: AnalysisPriority
     ): Promise<void> {
       if (
         previewAnalysisCacheRef.current.has(cacheKey) ||
@@ -6492,7 +6498,7 @@ export function App(): JSX.Element {
           playbackSource.url,
           undefined,
           {
-            priority: ANALYSIS_PRIORITY_NEIGHBOR,
+            priority,
             key: cacheKey,
           }
         );
@@ -6505,7 +6511,7 @@ export function App(): JSX.Element {
       } catch (error: unknown) {
         void window.producerPlayer.rendererLog(
           'warn',
-          'Visible track preview warmup failed',
+          'Track preview warmup failed',
           {
             filePath: version.filePath,
             error: error instanceof Error ? error.message : String(error),
@@ -6524,7 +6530,7 @@ export function App(): JSX.Element {
       const cacheKey = buildMasteringCacheKey(version);
       promoteMeasuredAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
       promotePreviewAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
-      void warmVisiblePreviewAnalysis(version, cacheKey);
+      void warmPreviewAnalysis(version, cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
     }
 
     // Item #10 (v3.110) — fan album/latest-version preloads through the
@@ -6548,8 +6554,8 @@ export function App(): JSX.Element {
         const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
         const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
 
-        if (isVisibleVersion) {
-          void warmVisiblePreviewAnalysis(version, cacheKey);
+        if (!isVisibleVersion) {
+          void warmPreviewAnalysis(version, cacheKey, ANALYSIS_PRIORITY_BACKGROUND);
         }
 
         if (isFresh) {
@@ -8957,17 +8963,8 @@ export function App(): JSX.Element {
       >;
     }).__producerPlayerGetMeasuredQueueDump = () =>
       MEASURED_ANALYSIS_QUEUE.dump();
-    (window as unknown as {
-      __producerPlayerGetVisibleLatestWarmupState?: () => Array<{
-        songTitle: string;
-        versionId: string;
-        fileName: string;
-        cacheKey: string;
-        previewReady: boolean;
-        measuredReady: boolean;
-      }>;
-    }).__producerPlayerGetVisibleLatestWarmupState = () =>
-      visibleActiveVersions.map(({ song, version }) => {
+    const readWarmupState = (entries: typeof albumActiveVersions) =>
+      entries.map(({ song, version }) => {
         const cacheKey = buildMasteringCacheKey(version);
         const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
         return {
@@ -8981,6 +8978,28 @@ export function App(): JSX.Element {
             isMasteringCacheEntryFresh(cachedEntry, version),
         };
       });
+    (window as unknown as {
+      __producerPlayerGetVisibleLatestWarmupState?: () => Array<{
+        songTitle: string;
+        versionId: string;
+        fileName: string;
+        cacheKey: string;
+        previewReady: boolean;
+        measuredReady: boolean;
+      }>;
+    }).__producerPlayerGetVisibleLatestWarmupState = () =>
+      readWarmupState(visibleActiveVersions);
+    (window as unknown as {
+      __producerPlayerGetAlbumLatestWarmupState?: () => Array<{
+        songTitle: string;
+        versionId: string;
+        fileName: string;
+        cacheKey: string;
+        previewReady: boolean;
+        measuredReady: boolean;
+      }>;
+    }).__producerPlayerGetAlbumLatestWarmupState = () =>
+      readWarmupState(albumActiveVersions);
     (window as unknown as {
       __producerPlayerGetAnalysisVersion?: () => string | null;
     }).__producerPlayerGetAnalysisVersion = () =>
@@ -9058,6 +9077,9 @@ export function App(): JSX.Element {
       delete (window as unknown as {
         __producerPlayerGetVisibleLatestWarmupState?: unknown;
       }).__producerPlayerGetVisibleLatestWarmupState;
+      delete (window as unknown as {
+        __producerPlayerGetAlbumLatestWarmupState?: unknown;
+      }).__producerPlayerGetAlbumLatestWarmupState;
     };
   }, [
     computeCurrentAnalysisVersion,
@@ -9075,6 +9097,7 @@ export function App(): JSX.Element {
     aiRecommendationsGeneration,
     agentBackgroundPrecomputeEnabled,
     visibleActiveVersions,
+    albumActiveVersions,
   ]);
 
   useEffect(() => {

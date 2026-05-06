@@ -378,7 +378,10 @@ test.describe('Track-switch precompute cache @smoke', () => {
       await expect(page.getByTestId('main-list-row')).toHaveCount(2, {
         timeout: 5_000,
       });
-      await page.getByTestId('linked-folder-item').nth(1).click();
+      const secondLinkedFolder = page.getByTestId('linked-folder-item').nth(1);
+      await expect(secondLinkedFolder).toBeVisible();
+      await secondLinkedFolder.locator('.folder-row-content').click();
+      await expect(secondLinkedFolder).toHaveClass(/selected/);
       const charlieRow = page
         .getByTestId('main-list-row')
         .filter({ hasText: 'Charlie' })

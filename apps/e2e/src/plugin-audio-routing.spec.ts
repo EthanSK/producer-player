@@ -103,6 +103,27 @@ async function seedFakePluginLibrary(page: import('@playwright/test').Page): Pro
   }, FAKE_LIBRARY);
 }
 
+async function getPersistedEnabledPluginCount(
+  page: import('@playwright/test').Page,
+): Promise<number> {
+  return page.evaluate(async () => {
+    const api = (window as unknown as {
+      producerPlayer?: {
+        getLibrarySnapshot: () => Promise<{ songs: Array<{ id: string }> }>;
+        getTrackPluginChain: (id: string) => Promise<{
+          items: Array<{ enabled: boolean }>;
+        }>;
+      };
+    }).producerPlayer;
+    if (!api) throw new Error('producerPlayer API unavailable');
+    const snap = await api.getLibrarySnapshot();
+    const songId = snap.songs[0]?.id;
+    if (!songId) throw new Error('no song');
+    const chain = await api.getTrackPluginChain(songId);
+    return chain.items.filter((i) => i.enabled).length;
+  });
+}
+
 test.describe('Plugin audio routing invariants @smoke', () => {
   test('empty chain + toggle-off + remove all respect the bypass invariant @smoke', async () => {
     const directories = await createE2ETestDirectories('plugin-audio-routing');
@@ -160,23 +181,14 @@ test.describe('Plugin audio routing invariants @smoke', () => {
       // Scenario 3 — Read chain back from IPC and confirm the enabled-count
       // is zero. That's exactly the signal the renderer's bypass branch
       // reads, so asserting it at the IPC layer proves the invariant.
-      const enabledCount = await page.evaluate(async () => {
-        const api = (window as unknown as {
-          producerPlayer?: {
-            getLibrarySnapshot: () => Promise<{ songs: Array<{ id: string }> }>;
-            getTrackPluginChain: (id: string) => Promise<{
-              items: Array<{ enabled: boolean }>;
-            }>;
-          };
-        }).producerPlayer;
-        if (!api) throw new Error('producerPlayer API unavailable');
-        const snap = await api.getLibrarySnapshot();
-        const songId = snap.songs[0]?.id;
-        if (!songId) throw new Error('no song');
-        const chain = await api.getTrackPluginChain(songId);
-        return chain.items.filter((i) => i.enabled).length;
-      });
-      expect(enabledCount).toBe(0);
+      // The toggle updates the pill optimistically before the IPC mutation
+      // round-trip finishes. Wait for the persisted chain to catch up so
+      // this assertion covers the real bypass signal without racing CI.
+      await expect
+        .poll(() => getPersistedEnabledPluginCount(page), {
+          message: 'persisted plugin chain should have zero enabled plugins',
+        })
+        .toBe(0);
 
       // Scenario 4 — Remove the last plugin. Empty chain = full bypass.
       await strip.getByTestId('plugin-pill-remove').first().click();

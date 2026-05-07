@@ -131,6 +131,7 @@ import {
   UNIFIED_STATE_FILE_NAME,
   migrateStateIfNeeded,
 } from './state-service';
+import { openFileWithDetachedSystemHandler } from './file-open';
 import { PluginHostService, resolveSidecarBinaryCandidates } from './plugin-host-service';
 import { PluginPresetLibraryStore } from './plugin-preset-library';
 import {
@@ -4624,10 +4625,11 @@ function registerIpcHandlers(service: FileLibraryService): void {
       throw new Error(`Path is not a file: ${resolvedPath}`);
     }
 
-    const error = await shell.openPath(resolvedPath);
-    if (error) {
-      throw new Error(error);
-    }
+    openFileWithDetachedSystemHandler(resolvedPath, {
+      onAsyncError: (cause) => {
+        log.warn('[producer-player] Detached file-open handoff failed asynchronously', cause);
+      },
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL_URL, async (_event, url: string) => {

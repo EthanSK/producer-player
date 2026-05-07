@@ -100,6 +100,20 @@ await build({
   logLevel: 'warning',
 });
 
+// Detached OS file-open command construction stays pure/injectable so the
+// Ableton/DAW handoff isolation can be locked without launching real apps.
+await build({
+  entryPoints: [resolve(appDir, 'src/file-open.ts')],
+  outfile: resolve(appDir, 'dist/file-open.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+  external: ['node:child_process'],
+});
+
 // v3.90 — agent UI control primitives. Pure logic (no electron runtime
 // needed) once electron-log and `electron` types are stripped at build time.
 await build({
@@ -140,4 +154,4 @@ await build({
   plugins: [shimElectronLog],
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs');
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs');

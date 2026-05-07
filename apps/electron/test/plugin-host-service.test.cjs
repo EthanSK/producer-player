@@ -227,8 +227,15 @@ test('scanPlugins sends explicit global plugin paths by default', async () => {
   assert.equal(requests.length, 1);
   assert.equal(requests[0].method, 'scan_plugins');
   assert.equal(requests[0].params.format, 'all');
-  assert.equal(requests[0].params.paths.some((p) => p.endsWith('/Library/Audio/Plug-Ins/VST3')), true);
-  assert.equal(requests[0].params.paths.some((p) => p.endsWith('/Library/Audio/Plug-Ins/Components')), true);
+  assert.deepEqual(
+    requests[0].params.paths,
+    defaultGlobalPluginScanRoots().map((root) => root.path),
+    'scan should send the current platform default plugin paths deterministically',
+  );
+  if (process.platform === 'darwin') {
+    assert.equal(requests[0].params.paths.some((p) => p.endsWith('/Library/Audio/Plug-Ins/VST3')), true);
+    assert.equal(requests[0].params.paths.some((p) => p.endsWith('/Library/Audio/Plug-Ins/Components')), true);
+  }
 });
 
 test('scanPlugins falls back to filesystem global discovery when sidecar returns no plugin metadata', async () => {

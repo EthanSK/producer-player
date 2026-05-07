@@ -3,7 +3,7 @@
 # Phase 1a scaffold (v3.39):
 #  - Depends on JUCE 8.0.12 vendored at ./JUCE
 #  - Builds a console app that speaks newline-delimited JSON on stdio
-#  - Implements `scan_plugins` against the user's VST3 + AudioUnit folders
+#  - Implements `scan_plugins` against global macOS VST3 + AudioUnit folders
 #  - All other commands (load, unload, process, set_parameter, shutdown)
 #    are stubs returning {"ok":false,"error":"not implemented"} so the
 #    Electron integration has a real binary to exercise end-to-end.

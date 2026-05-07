@@ -4,7 +4,7 @@
  * Modal overlay that lets the user pick a plugin to append to the chain.
  *
  * - Search filters by plugin name + vendor (case-insensitive substring).
- * - Empty / stale library surfaces a "Scan plugins" call-to-action.
+ * - Empty / stale library surfaces a "Scan installed plugins" call-to-action.
  * - Keyboard: Esc → close, `/` → focus search, Enter → add highlighted.
  * - Styling uses the existing dark-theme tokens only (see styles.css).
  *
@@ -192,9 +192,9 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
             onClick={onScan}
             disabled={scanning}
             data-testid="plugin-browser-dialog-scan"
-            title="Re-scan installed plugins"
+            title="Re-scan installed VST3/AU plugins"
           >
-            {scanning ? 'Scanning…' : 'Scan plugins'}
+            {scanning ? 'Scanning…' : 'Scan installed plugins'}
           </button>
         </div>
 
@@ -205,8 +205,8 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
           >
             <p>
               {scanning
-                ? 'Scanning installed plugins…'
-                : 'No plugins found in this library. Click “Scan plugins” to index your VST3 / AU / CLAP installs.'}
+                ? 'Scanning installed VST3/AU plugins…'
+                : 'No installed plugins found. Click “Scan installed plugins” to scan your Mac’s standard VST3/AU folders.'}
             </p>
           </div>
         ) : (

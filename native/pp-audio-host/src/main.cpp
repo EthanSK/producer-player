@@ -438,7 +438,7 @@ juce::var handleScanPlugins (const juce::var& params)
     result->setProperty ("ok", true);
     result->setProperty ("plugins", plugins);
     result->setProperty ("failed", failed);
-    result->setProperty ("scanVersion", 1);
+    result->setProperty ("scanVersion", 2);
     return juce::var (result.get());
 }
 

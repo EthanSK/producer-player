@@ -21,6 +21,11 @@
 //   and the user-facing pause/resume control is gone. The legacy persisted
 //   `agentBackgroundPrecomputeEnabled=false` flag is ignored by App.tsx so a
 //   stale paused state can no longer hide/start-stop warmup by accident.
+//
+// v3.152 — startup latest-track warmup intentionally admits only one measured
+//   ffmpeg job at a time, but the whole album is planned up front. Surface that
+//   planned per-track backlog here so the UI does not make the album warmup
+//   look like one mysterious hidden job.
 import {
   type CSSProperties,
   useCallback,
@@ -39,6 +44,20 @@ import {
 
 type QueueDump = ReturnType<typeof dumpPreviewAnalysisQueue>;
 
+export interface WarmupPlanSnapshot {
+  total: number;
+  completed: number;
+  activeLabel: string | null;
+  nextLabels: string[];
+}
+
+const EMPTY_WARMUP_PLAN: WarmupPlanSnapshot = {
+  total: 0,
+  completed: 0,
+  activeLabel: null,
+  nextLabels: [],
+};
+
 export interface BackgroundTasksIndicatorProps {
   /**
    * Function returning the measured queue dump. Passed in (rather than
@@ -46,6 +65,12 @@ export interface BackgroundTasksIndicatorProps {
    * audioAnalysisQueue.ts decoupled from renderer state.
    */
   getMeasuredDump: () => QueueDump;
+  /**
+   * Function returning the planned latest-track warmup backlog. These entries
+   * are intentionally not all enqueued into the shared analysis queue at once,
+   * but they are still user-visible background work.
+   */
+  getWarmupPlan?: () => WarmupPlanSnapshot;
 }
 
 export interface BackgroundTaskRunningJob {
@@ -60,6 +85,11 @@ interface AggregateSnapshot {
   active: number;
   pending: number;
   bgPending: number;
+  plannedWarmupPending: number;
+  plannedWarmupTotal: number;
+  plannedWarmupCompleted: number;
+  plannedWarmupActiveLabel: string | null;
+  plannedWarmupNextLabels: string[];
   runningJobs: BackgroundTaskRunningJob[];
 }
 
@@ -127,21 +157,48 @@ function snapshotsEqual(left: AggregateSnapshot, right: AggregateSnapshot): bool
     left.active === right.active &&
     left.pending === right.pending &&
     left.bgPending === right.bgPending &&
+    left.plannedWarmupPending === right.plannedWarmupPending &&
+    left.plannedWarmupTotal === right.plannedWarmupTotal &&
+    left.plannedWarmupCompleted === right.plannedWarmupCompleted &&
+    left.plannedWarmupActiveLabel === right.plannedWarmupActiveLabel &&
+    left.plannedWarmupNextLabels.join('|') === right.plannedWarmupNextLabels.join('|') &&
     runningJobSignature(left.runningJobs) === runningJobSignature(right.runningJobs)
   );
 }
 
-function aggregate(preview: QueueDump, measured: QueueDump): AggregateSnapshot {
+export function getWarmupPlanPending(plan: WarmupPlanSnapshot): number {
+  const safeTotal = Math.max(0, Math.floor(plan.total));
+  const safeCompleted = Math.min(safeTotal, Math.max(0, Math.floor(plan.completed)));
+  const activeOffset = plan.activeLabel ? 1 : 0;
+  return Math.max(0, safeTotal - safeCompleted - activeOffset);
+}
+
+function aggregate(
+  preview: QueueDump,
+  measured: QueueDump,
+  warmupPlan: WarmupPlanSnapshot
+): AggregateSnapshot {
+  const plannedWarmupPending = getWarmupPlanPending(warmupPlan);
   const active =
     preview.active + preview.userBypassActive + measured.active + measured.userBypassActive;
-  const pending = preview.pending + measured.pending;
+  const pending = preview.pending + measured.pending + plannedWarmupPending;
   const bgPending =
     preview.pendingByPriority.background + measured.pendingByPriority.background;
   const runningJobs = [
     ...collectRunningJobs('Measured', measured),
     ...collectRunningJobs('Preview', preview),
   ];
-  return { active, pending, bgPending, runningJobs };
+  return {
+    active,
+    pending,
+    bgPending,
+    plannedWarmupPending,
+    plannedWarmupTotal: Math.max(0, Math.floor(warmupPlan.total)),
+    plannedWarmupCompleted: Math.max(0, Math.floor(warmupPlan.completed)),
+    plannedWarmupActiveLabel: warmupPlan.activeLabel,
+    plannedWarmupNextLabels: [...warmupPlan.nextLabels],
+    runningJobs,
+  };
 }
 
 const POLL_INTERVAL_MS = 500;
@@ -152,9 +209,13 @@ const MAX_RUNNING_JOBS_SHOWN = 5;
 export function BackgroundTasksIndicator(
   props: BackgroundTasksIndicatorProps
 ): JSX.Element | null {
-  const { getMeasuredDump } = props;
+  const { getMeasuredDump, getWarmupPlan } = props;
   const [snapshot, setSnapshot] = useState<AggregateSnapshot>(() =>
-    aggregate(dumpPreviewAnalysisQueue(), getMeasuredDump())
+    aggregate(
+      dumpPreviewAnalysisQueue(),
+      getMeasuredDump(),
+      getWarmupPlan?.() ?? EMPTY_WARMUP_PLAN
+    )
   );
   // v3.121 (Concern 1) — popover visibility. Driven by mouseenter/leave
   // on the pill PLUS focus/blur on the focusable children so keyboard-only
@@ -196,7 +257,11 @@ export function BackgroundTasksIndicator(
       if (cancelled) {
         return;
       }
-      const next = aggregate(dumpPreviewAnalysisQueue(), getMeasuredDump());
+      const next = aggregate(
+        dumpPreviewAnalysisQueue(),
+        getMeasuredDump(),
+        getWarmupPlan?.() ?? EMPTY_WARMUP_PLAN
+      );
       setSnapshot((previous) => (snapshotsEqual(previous, next) ? previous : next));
     };
 
@@ -206,7 +271,7 @@ export function BackgroundTasksIndicator(
       cancelled = true;
       window.clearInterval(handle);
     };
-  }, [getMeasuredDump]);
+  }, [getMeasuredDump, getWarmupPlan]);
 
   // v3.121 (Concern 1) — Esc dismisses the popover (only when open).
   // Capture-phase + stopPropagation matches HelpTooltip / TechnicalInfoPopover
@@ -271,7 +336,7 @@ export function BackgroundTasksIndicator(
   // lives in the popover below.
   const tooltip =
     `Audio analysis: ${snapshot.active} processing` +
-    (snapshot.pending > 0 ? `, ${snapshot.pending} queued` : '') +
+    (snapshot.pending > 0 ? `, ${snapshot.pending} waiting/planned` : '') +
     '. Hover for details.';
   const popoverStyle: CSSProperties | undefined = popoverPosition
     ? {
@@ -319,7 +384,39 @@ export function BackgroundTasksIndicator(
             <strong className="bg-tasks-indicator-popover-row-label">
               Active / queued:
             </strong>{' '}
-            {`${snapshot.active} job${snapshot.active === 1 ? '' : 's'} running, ${snapshot.pending} waiting in line.`}
+            {`${snapshot.active} job${snapshot.active === 1 ? '' : 's'} running, ${snapshot.pending} waiting/planned.`}
+          </span>
+          {snapshot.plannedWarmupTotal > 0 ? (
+            <span className="bg-tasks-indicator-popover-row">
+              <strong className="bg-tasks-indicator-popover-row-label">
+                Startup warmup:
+              </strong>{' '}
+              {`${snapshot.plannedWarmupCompleted}/${snapshot.plannedWarmupTotal} tracks complete`}
+              {snapshot.plannedWarmupActiveLabel
+                ? `; warming ${snapshot.plannedWarmupActiveLabel}`
+                : snapshot.plannedWarmupPending > 0
+                  ? `; ${snapshot.plannedWarmupPending} planned next`
+                  : '; complete'}
+              {snapshot.plannedWarmupNextLabels.length > 0 ? (
+                <span className="bg-tasks-indicator-job-list">
+                  {snapshot.plannedWarmupNextLabels.map((label, index) => (
+                    <span
+                      key={`${label}-${index}`}
+                      className="bg-tasks-indicator-job bg-tasks-indicator-job-muted"
+                    >
+                      Next: {label}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+            </span>
+          ) : null}
+          <span className="bg-tasks-indicator-popover-row">
+            <strong className="bg-tasks-indicator-popover-row-label">
+              Warmup scheduling:
+            </strong>{' '}
+            latest-track warmup is planned per track but admitted to ffmpeg
+            one at a time so selected tracks can still jump the line.
           </span>
           <span className="bg-tasks-indicator-popover-row">
             <strong className="bg-tasks-indicator-popover-row-label">
@@ -356,9 +453,10 @@ export function BackgroundTasksIndicator(
             <strong className="bg-tasks-indicator-popover-row-label">
               Queued:
             </strong>{' '}
-            jobs waiting for an open slot. Clicking a track jumps the queue
-            (user-priority bypasses up to 3 background jobs so a click
-            never stalls behind precompute).
+            jobs waiting for an open slot, plus planned startup warmup tracks
+            that have not been admitted to the ffmpeg queue yet. Clicking a
+            track jumps the queue (user-priority bypasses up to 3 background
+            jobs so a click never stalls behind precompute).
           </span>
           <span className="bg-tasks-indicator-popover-row">
             <strong className="bg-tasks-indicator-popover-row-label">

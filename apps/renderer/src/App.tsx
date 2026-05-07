@@ -2742,17 +2742,40 @@ export function App(): JSX.Element {
   const latestTrackWarmupDebugRef = useRef<{
     runId: number;
     activeVersionId: string | null;
+    plannedEntries: Array<{ versionId: string; label: string }>;
     startedVersionIds: string[];
     completedVersionIds: string[];
     pausedForUrgentCount: number;
   }>({
     runId: 0,
     activeVersionId: null,
+    plannedEntries: [],
     startedVersionIds: [],
     completedVersionIds: [],
     pausedForUrgentCount: 0,
   });
   const latestTrackWarmupTailRef = useRef<Promise<void>>(Promise.resolve());
+  const getLatestWarmupPlanDump = useCallback(() => {
+    const debug = latestTrackWarmupDebugRef.current;
+    const completed = new Set(debug.completedVersionIds);
+    const activeVersionId = debug.activeVersionId;
+    const activeEntry = activeVersionId
+      ? debug.plannedEntries.find((entry) => entry.versionId === activeVersionId)
+      : null;
+    const nextLabels = debug.plannedEntries
+      .filter(
+        (entry) => entry.versionId !== activeVersionId && !completed.has(entry.versionId)
+      )
+      .slice(0, 3)
+      .map((entry) => entry.label);
+
+    return {
+      total: debug.plannedEntries.length,
+      completed: completed.size,
+      activeLabel: activeEntry?.label ?? null,
+      nextLabels,
+    };
+  }, []);
   const [masteringCacheStatusByVersionId, setMasteringCacheStatusByVersionId] = useState<
     Record<string, MasteringCacheStatusState>
   >({});
@@ -6337,6 +6360,7 @@ export function App(): JSX.Element {
     latestTrackWarmupDebugRef.current = {
       runId,
       activeVersionId: null,
+      plannedEntries: [],
       startedVersionIds: [],
       completedVersionIds: [],
       pausedForUrgentCount: 0,
@@ -6372,6 +6396,13 @@ export function App(): JSX.Element {
         ({ version }) => !visibleVersionIds.has(version.id)
       ),
     ];
+    latestTrackWarmupDebugRef.current = {
+      ...latestTrackWarmupDebugRef.current,
+      plannedEntries: orderedPreloadEntries.map(({ song, version }) => ({
+        versionId: version.id,
+        label: `${song.title} — ${version.fileName}`,
+      })),
+    };
 
     const markWarmupStarted = (versionId: string): void => {
       const debug = latestTrackWarmupDebugRef.current;
@@ -8882,12 +8913,16 @@ export function App(): JSX.Element {
       __producerPlayerGetLatestWarmupDebugState?: () => {
         runId: number;
         activeVersionId: string | null;
+        plannedEntries: Array<{ versionId: string; label: string }>;
         startedVersionIds: string[];
         completedVersionIds: string[];
         pausedForUrgentCount: number;
       };
     }).__producerPlayerGetLatestWarmupDebugState = () => ({
       ...latestTrackWarmupDebugRef.current,
+      plannedEntries: latestTrackWarmupDebugRef.current.plannedEntries.map((entry) => ({
+        ...entry,
+      })),
       startedVersionIds: [...latestTrackWarmupDebugRef.current.startedVersionIds],
       completedVersionIds: [...latestTrackWarmupDebugRef.current.completedVersionIds],
     });
@@ -14059,7 +14094,10 @@ export function App(): JSX.Element {
               {/* Item #14/v3.145 — Rekordbox-style background-tasks pill.
                   Hidden when both queues are idle so it never adds noise;
                   hover/focus shows currently running jobs. */}
-              <BackgroundTasksIndicator getMeasuredDump={getMeasuredQueueDump} />
+              <BackgroundTasksIndicator
+                getMeasuredDump={getMeasuredQueueDump}
+                getWarmupPlan={getLatestWarmupPlanDump}
+              />
             </div>
             <HelpTooltip text={statusCardHelpText} />
           </div>

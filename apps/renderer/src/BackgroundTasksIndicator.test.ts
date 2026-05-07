@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { formatBackgroundTaskRunningJob } from './BackgroundTasksIndicator';
+import {
+  formatBackgroundTaskRunningJob,
+  getWarmupPlanPending,
+} from './BackgroundTasksIndicator';
 import {
   ANALYSIS_PRIORITY_BACKGROUND,
   ANALYSIS_PRIORITY_NEIGHBOR,
@@ -39,5 +42,29 @@ describe('formatBackgroundTaskRunningJob', () => {
         slot: 'regular',
       })
     ).toBe('Measured: Charlie v2.wav (background)');
+  });
+});
+
+describe('getWarmupPlanPending', () => {
+  it('counts planned warmup tracks that are not active or complete yet', () => {
+    expect(
+      getWarmupPlanPending({
+        total: 5,
+        completed: 2,
+        activeLabel: 'Song C — mix.wav',
+        nextLabels: ['Song D — mix.wav', 'Song E — mix.wav'],
+      })
+    ).toBe(2);
+  });
+
+  it('keeps the whole planned album visible before the next ffmpeg job starts', () => {
+    expect(
+      getWarmupPlanPending({
+        total: 5,
+        completed: 2,
+        activeLabel: null,
+        nextLabels: ['Song C — mix.wav', 'Song D — mix.wav'],
+      })
+    ).toBe(3);
   });
 });

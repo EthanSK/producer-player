@@ -83,6 +83,7 @@ import type {
   AutoUpdateRecheckResult,
   AutoUpdateState,
   MasteringAnalysisCachePayload,
+  MasteringAnalysisCacheState,
   MicrophonePermissionStatus,
   ICloudAvailabilityResult,
   ICloudBackupData,
@@ -154,8 +155,6 @@ const STATE_DIRECTORY_SYMLINK_NAME = 'state';
 const PLAYBACK_PROTOCOL = 'producer-media';
 const PLAYBACK_PROTOCOL_HOST = 'file';
 const PLAYBACK_CACHE_DIRECTORY = 'playback-cache';
-const MASTERING_CACHE_DIRECTORY = 'mastering-cache';
-const MASTERING_CACHE_FILE_NAME = 'mastering-analysis-cache.v1.json';
 const MASTERING_CACHE_SCHEMA_VERSION = 1;
 const FFMPEG_BINARY_DIRECTORY = 'bin';
 const AIFF_LIKE_EXTENSIONS = new Set(['aiff', 'aif', 'aifc']);
@@ -2646,108 +2645,38 @@ function getPlaybackCacheDirectoryPath(): string {
   return join(getStateDirectoryPath(), PLAYBACK_CACHE_DIRECTORY);
 }
 
-function getMasteringCacheDirectoryPath(): string {
-  return join(getStateDirectoryPath(), MASTERING_CACHE_DIRECTORY);
-}
-
-function getMasteringCacheFilePath(): string {
-  return join(getMasteringCacheDirectoryPath(), MASTERING_CACHE_FILE_NAME);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function parseMasteringAnalysisCachePayload(raw: unknown): MasteringAnalysisCachePayload {
-  const fallback: MasteringAnalysisCachePayload = {
-    schemaVersion: MASTERING_CACHE_SCHEMA_VERSION,
-    updatedAt: new Date(0).toISOString(),
-    entries: [],
-  };
-
-  if (!isRecord(raw)) {
-    return fallback;
-  }
-
-  const schemaVersion =
-    typeof raw.schemaVersion === 'number' && Number.isFinite(raw.schemaVersion)
-      ? Math.trunc(raw.schemaVersion)
-      : MASTERING_CACHE_SCHEMA_VERSION;
-
-  const updatedAt =
-    typeof raw.updatedAt === 'string' && raw.updatedAt.trim().length > 0
-      ? raw.updatedAt
-      : fallback.updatedAt;
-
-  const entries = Array.isArray(raw.entries) ? raw.entries.filter(isRecord) : [];
-
+function createEmptyMasteringAnalysisCacheState(
+  updatedAt = new Date(0).toISOString()
+): MasteringAnalysisCacheState {
   return {
-    schemaVersion,
-    updatedAt,
-    entries: entries as unknown as MasteringAnalysisCachePayload['entries'],
+    cacheDirectoryPath: null,
+    cacheFilePath: null,
+    payload: {
+      schemaVersion: MASTERING_CACHE_SCHEMA_VERSION,
+      updatedAt,
+      entries: [],
+    },
   };
 }
 
-async function readMasteringAnalysisCacheState(): Promise<{
-  cacheDirectoryPath: string;
-  cacheFilePath: string;
-  payload: MasteringAnalysisCachePayload;
-}> {
-  const cacheDirectoryPath = getMasteringCacheDirectoryPath();
-  const cacheFilePath = getMasteringCacheFilePath();
-
-  try {
-    const raw = await fs.readFile(cacheFilePath, 'utf8');
-    const parsed = parseMasteringAnalysisCachePayload(JSON.parse(raw));
-
-    return {
-      cacheDirectoryPath,
-      cacheFilePath,
-      payload:
-        parsed.schemaVersion === MASTERING_CACHE_SCHEMA_VERSION
-          ? parsed
-          : {
-              schemaVersion: MASTERING_CACHE_SCHEMA_VERSION,
-              updatedAt: parsed.updatedAt,
-              entries: [],
-            },
-    };
-  } catch {
-    return {
-      cacheDirectoryPath,
-      cacheFilePath,
-      payload: {
-        schemaVersion: MASTERING_CACHE_SCHEMA_VERSION,
-        updatedAt: new Date(0).toISOString(),
-        entries: [],
-      },
-    };
-  }
+async function readMasteringAnalysisCacheState(): Promise<MasteringAnalysisCacheState> {
+  // v3.144 — compatibility-only IPC. Ethan explicitly does not want
+  // mastering/measured analysis saved to disk files anymore, so reads never
+  // touch the legacy mastering-analysis-cache.v1.json path. Renderer warmup
+  // refills the in-session measured cache instead.
+  return createEmptyMasteringAnalysisCacheState();
 }
 
 async function writeMasteringAnalysisCacheState(
   payload: MasteringAnalysisCachePayload
-): Promise<{
-  cacheDirectoryPath: string;
-  cacheFilePath: string;
-  payload: MasteringAnalysisCachePayload;
-}> {
-  const cacheDirectoryPath = getMasteringCacheDirectoryPath();
-  const cacheFilePath = getMasteringCacheFilePath();
-  const normalized: MasteringAnalysisCachePayload = {
-    schemaVersion: MASTERING_CACHE_SCHEMA_VERSION,
-    updatedAt: payload.updatedAt,
-    entries: Array.isArray(payload.entries) ? payload.entries : [],
-  };
-
-  await fs.mkdir(cacheDirectoryPath, { recursive: true });
-  await writeJsonAtomic(cacheFilePath, normalized);
-
-  return {
-    cacheDirectoryPath,
-    cacheFilePath,
-    payload: normalized,
-  };
+): Promise<MasteringAnalysisCacheState> {
+  // v3.144 — compatibility-only no-op. Keep the IPC contract for older
+  // renderer/tests, but deliberately do not mkdir/write the legacy cache file.
+  return createEmptyMasteringAnalysisCacheState(
+    typeof payload.updatedAt === 'string' && payload.updatedAt.trim().length > 0
+      ? payload.updatedAt
+      : new Date().toISOString()
+  );
 }
 
 function getBundledFfmpegPath(): string {

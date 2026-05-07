@@ -13,17 +13,17 @@ import { launchProducerPlayer } from './helpers/electron-app';
 // normalization ready from cache without re-running ffmpeg. WebAudio preview
 // decode is allowed to load lazily for graphs.
 // We verify this two ways:
-//   1. The persisted mastering-analysis cache (`getMasteringAnalysisCache()`
-//      IPC) contains entries for every latest linked-library version — proof that
-//      the measured warmup filled LUFS / true-peak stats and finished within a
-//      sensible bound.
-//   2. The renderer-side warmup hooks report measured cache readiness, then a
-//      first jump to a never-selected row has immediate normalization gain even
+//   1. The renderer-side warmup hooks report measured cache readiness for every
+//      latest linked-library version — proof that the measured warmup filled
+//      LUFS / true-peak stats within a sensible bound.
+//   2. A first jump to a never-selected row has immediate normalization gain even
 //      if graph/preview decode is still cold.
+//   3. No legacy mastering-analysis-cache.v1.json file is written; measured
+//      LUFS/static/normalization data is session-memory only.
 //
-// The pool is a renderer-side concern; the cache is a main-process JSON file
-// keyed by filePath + sizeBytes + modifiedAtMs. Both layers cooperate to make
-// rapid track switching feel instant.
+// The pool and session cache are renderer-side concerns keyed by schema +
+// filePath + sizeBytes + modifiedAtMs. That keeps rapid track switching instant
+// without persisting analysis payloads to disk.
 
 function hasFfmpeg(): boolean {
   const check = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
@@ -153,6 +153,55 @@ async function readCachedNormalizationPreviewGainForVersion(
     }
     return reader(targetVersionId);
   }, versionId) as Promise<number | null>;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function expectNoPersistentMasteringAnalysisCache(
+  userDataDirectory: string
+): Promise<void> {
+  const legacyCacheDirectory = path.join(userDataDirectory, 'mastering-cache');
+  const legacyCacheFile = path.join(
+    legacyCacheDirectory,
+    'mastering-analysis-cache.v1.json'
+  );
+
+  expect(await pathExists(legacyCacheFile), 'legacy mastering analysis cache file').toBe(false);
+
+  if (await pathExists(legacyCacheDirectory)) {
+    await expect(
+      fs.readdir(legacyCacheDirectory),
+      'legacy mastering cache directory should not contain analysis files'
+    ).resolves.not.toContain('mastering-analysis-cache.v1.json');
+  }
+}
+
+async function expectMasteringAnalysisCacheIpcIsNoOp(page: Page): Promise<void> {
+  const result = await page.evaluate(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const api = (window as any).producerPlayer;
+    const before = await api.getMasteringAnalysisCache();
+    const after = await api.writeMasteringAnalysisCache({
+      schemaVersion: 1,
+      updatedAt: '2026-05-07T00:00:00.000Z',
+      entries: [],
+    });
+    return { before, after };
+  });
+
+  expect(result.before.cacheFilePath).toBeNull();
+  expect(result.before.cacheDirectoryPath).toBeNull();
+  expect(result.before.payload.entries).toEqual([]);
+  expect(result.after.cacheFilePath).toBeNull();
+  expect(result.after.cacheDirectoryPath).toBeNull();
+  expect(result.after.payload.entries).toEqual([]);
 }
 
 function countQueueWork(snapshot: AnalysisQueueSnapshot): number {
@@ -503,6 +552,8 @@ test.describe('Track-switch precompute cache @smoke', () => {
         });
 
       await expectStartupQueuesDrained(page);
+      await expectMasteringAnalysisCacheIpcIsNoOp(page);
+      await expectNoPersistentMasteringAnalysisCache(userDataDirectory);
       expect(
         countBackgroundEnqueues(await readAnalysisQueues(page)),
         'startup latest-track warmup should not use the optional BACKGROUND bucket'
@@ -666,24 +717,15 @@ test.describe('Track-switch precompute cache @smoke', () => {
         { timeout: 15_000 }
       );
 
-      // Wait for the background-preload pool to drain the visible latest
-      // versions. We poll the persisted mastering cache directly — that's
-      // what the preload effect writes to via upsertMasteringCacheEntry. Three
-      // visible songs (one has v1+v2), concurrency-2 pool, 2-second sine waves,
-      // ffmpeg ebur128 ~0.3s each ⇒ generous 60s budget keeps CI happy.
-      let lastCount = 0;
+      // Wait for the session-memory warmup to drain the visible latest
+      // versions. Three visible songs (one has v1+v2), concurrency-2 pool,
+      // 2-second sine waves, ffmpeg ebur128 ~0.3s each ⇒ generous 60s budget
+      // keeps CI happy without relying on a persisted cache file.
       await expect
         .poll(
           async () => {
-            lastCount = await page.evaluate(async () => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const api = (window as any).producerPlayer;
-              const state = await api.getMasteringAnalysisCache();
-              return Array.isArray(state?.payload?.entries)
-                ? state.payload.entries.length
-                : 0;
-            });
-            return lastCount;
+            const state = await readVisibleWarmupState(page);
+            return state.filter((entry) => entry.measuredReady).length;
           },
           { timeout: 60_000, intervals: [500, 1000, 2000] }
         )
@@ -729,6 +771,7 @@ test.describe('Track-switch precompute cache @smoke', () => {
         });
 
       await expectStartupQueuesDrained(page);
+      await expectNoPersistentMasteringAnalysisCache(userDataDirectory);
       expect(
         countPreviewNonUserEnqueues(await readAnalysisQueues(page)),
         'startup latest-track warmup must not enqueue background/neighbor preview decode jobs'

@@ -78,6 +78,13 @@ import {
 } from './audioAnalysisQueue';
 import { BackgroundTasksIndicator } from './BackgroundTasksIndicator';
 import { cacheAnalysisValue } from './analysisMemoryCache';
+import {
+  MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
+  MASTERING_SESSION_CACHE_DISCLOSURE_REMINDER,
+  buildMasteringCacheKey,
+  isMasteringCacheEntryFresh,
+  parseVersionModifiedAtMs,
+} from './masteringAnalysisCache';
 import { runSequentialLatestTrackWarmup } from './latestTrackWarmup';
 import {
   getMasteringChecklistRuleById,
@@ -179,7 +186,6 @@ import type {
   AgentMasteringCacheTrackSummary,
   AgentPlatformNormalization,
   AgentStaticAnalysis,
-  MasteringAnalysisCachePayload,
   MasteringCacheEntry,
   PluginPresetEntry,
   ScannedPluginLibrary,
@@ -759,9 +765,6 @@ const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
 const PUBLIC_PAGES_URL = 'https://ethansk.github.io/producer-player/';
 const BUG_REPORT_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=bug_report.yml`;
 const FEATURE_REQUEST_URL = `${PUBLIC_REPOSITORY_URL}/issues/new?template=feature_request.yml`;
-const MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION = 1;
-const MASTERING_CACHE_DISCLOSURE_REMINDER =
-  'If you reference cached track analyses, explicitly tell the user those values came from the mastering cache.';
 
 function isNormalizationPlatformId(value: string | null): value is NormalizationPlatformId {
   return NORMALIZATION_PLATFORM_PROFILES.some((platform) => platform.id === value);
@@ -950,14 +953,6 @@ function toAgentPlatformNormalization(
   };
 }
 
-function parseVersionModifiedAtMs(version: SongVersion): number {
-  const parsed = Number(new Date(version.modifiedAt).getTime());
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 0;
-  }
-  return parsed;
-}
-
 /**
  * Parse the AI agent's response text to extract EQ band gains.
  * Looks for a JSON block with the `eq_recommendation.bands` structure.
@@ -994,34 +989,6 @@ function parseAiEqResponse(text: string): number[] | null {
   } catch {
     return null;
   }
-}
-
-function buildMasteringCacheKey(version: SongVersion): string {
-  // v3.141 — strict track/version identity for the shared analysis cache.
-  // Filename alone is not enough: a same-name replacement should invalidate
-  // when the scanner observes a different path/size/mtime tuple, but repeated
-  // A↔B↔A switching inside one unchanged session must keep hitting this exact
-  // key and therefore reuse completed cache entries / in-flight promises.
-  return [
-    MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
-    version.filePath,
-    version.sizeBytes,
-    parseVersionModifiedAtMs(version),
-  ].join('::');
-}
-
-function isMasteringCacheEntryFresh(
-  entry: MasteringCacheEntry | undefined,
-  version: SongVersion
-): boolean {
-  if (!entry) {
-    return false;
-  }
-
-  return (
-    entry.schemaVersion === MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION &&
-    entry.cacheKey === buildMasteringCacheKey(version)
-  );
 }
 
 const DEFAULT_COMPACT_MASTERING_PANEL_ORDER: readonly CompactMasteringPanelId[] = [
@@ -2770,7 +2737,7 @@ export function App(): JSX.Element {
     null
   );
   const [masteringCacheUpdatedAt, setMasteringCacheUpdatedAt] = useState<string | null>(null);
-  const [masteringAnalysisCacheLoaded, setMasteringAnalysisCacheLoaded] = useState(false);
+  const [masteringAnalysisCacheLoaded] = useState(true);
   const [masteringCacheByVersionId, setMasteringCacheByVersionId] = useState<
     Record<string, MasteringCacheEntry>
   >({});
@@ -3102,11 +3069,10 @@ export function App(): JSX.Element {
     const previewAnalysis = previewAnalysisCacheRef.current.get(cacheKey) ?? null;
     let measuredAnalysis = measuredAnalysisCacheRef.current.get(cacheKey) ?? null;
 
-    // v3.141 — strict shared cache contract. The persisted mastering cache is
-    // the source of truth for ffmpeg/LUFS stats; foreground selection should
-    // read a fresh durable entry instead of re-running ffmpeg just because the
-    // renderer memory map has not been hydrated yet. The cache key includes
-    // schema + path + size + mtime, so a replaced file invalidates safely.
+    // Strict shared session-cache contract. The per-version entry is in-memory
+    // only, but foreground selection should still reuse a fresh measured entry
+    // instead of re-running ffmpeg. The cache key includes schema + path + size
+    // + mtime, so a replaced file invalidates safely.
     if (!measuredAnalysis) {
       const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
       if (isMasteringCacheEntryFresh(cachedEntry, version)) {
@@ -3165,61 +3131,9 @@ export function App(): JSX.Element {
     []
   );
 
-  // Item #10 (v3.110) — single-flight write with re-trigger.
-  //
-  // With the album-active background preload now fanning out at concurrency=2
-  // through MEASURED_ANALYSIS_QUEUE, multiple `upsertMasteringCacheEntry`
-  // calls fire in quick succession. Each one used to schedule its own
-  // `writeMasteringAnalysisCache` IPC, and the IPC responses could arrive at
-  // main out of order — a stale "earlier snapshot" write could land AFTER a
-  // newer one and clobber freshly-cached entries. We serialize via a single
-  // in-flight write and a "dirty" bit: while a write is running, additional
-  // upserts mark the cache dirty; when the write finishes, if dirty was set
-  // we run another write (which always reads the LATEST in-memory snapshot).
-  // This guarantees: (a) at most one IPC in flight at any time, (b) the
-  // final on-disk state reflects the final in-memory state, (c) we never
-  // burn IPCs scheduling redundant writes during a burst.
-  const persistMasteringCacheRunningRef = useRef<boolean>(false);
-  const persistMasteringCacheDirtyRef = useRef<boolean>(false);
-
-  const persistMasteringCache = useCallback(async (): Promise<void> => {
-    if (persistMasteringCacheRunningRef.current) {
-      // A write is in flight; mark dirty so it re-runs once it finishes.
-      persistMasteringCacheDirtyRef.current = true;
-      return;
-    }
-
-    persistMasteringCacheRunningRef.current = true;
-    persistMasteringCacheDirtyRef.current = false;
-
-    try {
-      // Loop until no further upserts arrive during the in-flight write.
-      // Each iteration always reads the LATEST snapshot from the ref.
-      // eslint-disable-next-line no-constant-condition -- loop exits via break
-      while (true) {
-        const snapshot = masteringCacheByVersionIdRef.current;
-        const payload: MasteringAnalysisCachePayload = {
-          schemaVersion: MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
-          updatedAt: new Date().toISOString(),
-          entries: Object.values(snapshot),
-        };
-
-        // eslint-disable-next-line no-await-in-loop -- intentional: serialize IPCs
-        const nextState = await window.producerPlayer.writeMasteringAnalysisCache(payload);
-        setMasteringCacheFilePath(nextState.cacheFilePath);
-        setMasteringCacheDirectoryPath(nextState.cacheDirectoryPath);
-        setMasteringCacheUpdatedAt(nextState.payload.updatedAt);
-
-        if (!persistMasteringCacheDirtyRef.current) {
-          break;
-        }
-        persistMasteringCacheDirtyRef.current = false;
-      }
-    } finally {
-      persistMasteringCacheRunningRef.current = false;
-    }
-  }, []);
-
+  // v3.144 — mastering analysis entries are session-only. Do not persist
+  // measured LUFS/static stats/platform-normalization payloads to disk; the
+  // stale-safety key still guards every in-memory hit inside this app session.
   const upsertMasteringCacheEntry = useCallback(
     (entry: MasteringCacheEntry) => {
       const nextEntriesByVersionId = {
@@ -3234,16 +3148,15 @@ export function App(): JSX.Element {
         entry.cacheKey,
         entry.measuredAnalysis
       );
+      setMasteringCacheDirectoryPath(null);
+      setMasteringCacheFilePath(null);
+      setMasteringCacheUpdatedAt(entry.analyzedAt);
       setMasteringCacheStatusByVersionId((previous) => ({
         ...previous,
         [entry.versionId]: { status: 'fresh', error: null },
       }));
-      // Item #10 — persistMasteringCache() always reads the latest ref at
-      // write time and serializes via a tail promise, so callers don't have
-      // to pass the snapshot through.
-      void persistMasteringCache().catch(() => undefined);
     },
-    [persistMasteringCache]
+    []
   );
 
   const createMasteringCacheEntry = useCallback(
@@ -3477,9 +3390,9 @@ export function App(): JSX.Element {
         cacheKey: analysisCacheKey,
       })
         .then((measuredResult) => {
-          // Always populate the measured cache and persisted mastering entry,
+          // Always populate the measured session cache and mastering entry,
           // even if this effect run was superseded before ffmpeg returned. The
-          // write is keyed by schema + file path + size + mtime, so it is
+          // entry is keyed by schema + file path + size + mtime, so it is
           // idempotent and lets the next selection/effect hit the completed
           // shared cache instead of queueing duplicate measured analysis.
           cacheMasteringAnalysisValue(
@@ -5916,53 +5829,9 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    window.producerPlayer
-      .getMasteringAnalysisCache()
-      .then((state) => {
-        if (cancelled) {
-          return;
-        }
-
-        const loadedEntriesByVersionId = Object.fromEntries(
-          state.payload.entries
-            .filter((entry) => typeof entry.versionId === 'string' && entry.versionId.length > 0)
-            .map((entry) => [entry.versionId, entry])
-        );
-
-        const mergedEntriesByVersionId = {
-          ...loadedEntriesByVersionId,
-          ...masteringCacheByVersionIdRef.current,
-        };
-
-        masteringCacheByVersionIdRef.current = mergedEntriesByVersionId;
-        setMasteringCacheByVersionId(mergedEntriesByVersionId);
-        for (const entry of Object.values(mergedEntriesByVersionId)) {
-          if (entry.cacheKey && entry.measuredAnalysis) {
-            cacheMasteringAnalysisValue(
-              measuredAnalysisCacheRef.current,
-              entry.cacheKey,
-              entry.measuredAnalysis
-            );
-          }
-        }
-        setMasteringCacheDirectoryPath(state.cacheDirectoryPath);
-        setMasteringCacheFilePath(state.cacheFilePath);
-        setMasteringCacheUpdatedAt(state.payload.updatedAt);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) {
-          setMasteringAnalysisCacheLoaded(true);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // No startup hydration: mastering analysis is intentionally kept in memory
+  // for this renderer session only. Warmup below refills the measured cache
+  // for current top-level tracks using the same stale-safe key.
 
   useEffect(() => {
     if (snapshot.linkedFolders.length === 0) {
@@ -6807,7 +6676,7 @@ export function App(): JSX.Element {
   // v3.139/v3.141 — platform normalization only needs measured LUFS / true
   // peak. The preview/graph decode (`analysisStatus`) can legitimately be
   // cold or loading while measured ffmpeg stats are already ready from startup
-  // warmup or the persisted mastering cache, so normalization must key off the
+  // warmup or the in-session mastering cache, so normalization must key off the
   // measured status instead of blocking on waveform/tonal-balance data.
   const normalizationSourceStatus: 'idle' | 'loading' | 'ready' | 'error' =
     normalizationSourceAnalysis
@@ -6885,10 +6754,10 @@ export function App(): JSX.Element {
       pendingTrackCount: masteringCacheTrackSummaries.filter((track) => track.cacheStatus === 'pending').length,
       tracks: masteringCacheTrackSummaries,
       cacheEntryFormat:
-        'Each entry stores schemaVersion, cacheKey, source, analyzedAt, song/version metadata, measuredAnalysis, staticAnalysis, and platformNormalization.',
+        'In-session entries store schemaVersion, cacheKey, source, analyzedAt, song/version metadata, measuredAnalysis, staticAnalysis, and platformNormalization.',
       cacheInvalidationStrategy:
         'An entry is fresh only when schemaVersion and cacheKey both match. cacheKey = schemaVersion + filePath + sizeBytes + modifiedAtMs.',
-      disclosureReminder: MASTERING_CACHE_DISCLOSURE_REMINDER,
+      disclosureReminder: MASTERING_SESSION_CACHE_DISCLOSURE_REMINDER,
     }),
     [
       masteringCacheDirectoryPath,

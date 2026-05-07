@@ -1084,8 +1084,8 @@ export interface MasteringAnalysisCachePayload {
 }
 
 export interface MasteringAnalysisCacheState {
-  cacheDirectoryPath: string;
-  cacheFilePath: string;
+  cacheDirectoryPath: string | null;
+  cacheFilePath: string | null;
   payload: MasteringAnalysisCachePayload;
 }
 

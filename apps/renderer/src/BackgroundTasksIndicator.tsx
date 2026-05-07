@@ -2,8 +2,10 @@
 //
 // Compact Rekordbox-style pill that lives in the status sidebar header,
 // next to "Status". Renders a spinner + count of in-flight + queued audio
-// analysis jobs (preview decode + measured ffmpeg). Hidden when both
-// queues are idle so it doesn't add noise during normal use.
+// analysis jobs. v3.141 split the product invariant: startup/background
+// warmup is measured ffmpeg analysis for LUFS/stats/normalization; WebAudio
+// preview decode is lazy/user-requested for waveform and graph UI. The pill
+// still counts both queues when either is active so users can see real work.
 //
 // Polling is preferred over a subscription because:
 //   - the queues live in module-level singletons used across many call
@@ -228,8 +230,8 @@ export function BackgroundTasksIndicator(
   // screenreaders / touch users who can't hover. The full explanation
   // lives in the popover below.
   const tooltip = paused
-    ? 'Background analysis paused. Hover for details.'
-    : `Background analysis: ${snapshot.active} processing` +
+    ? 'Background measured analysis paused. Hover for details.'
+    : `Audio analysis: ${snapshot.active} processing` +
       (snapshot.pending > 0 ? `, ${snapshot.pending} queued` : '') +
       '. Hover for details.';
 
@@ -323,22 +325,22 @@ export function BackgroundTasksIndicator(
           style={popoverStyle}
         >
           <span className="bg-tasks-indicator-popover-title">
-            Background audio analysis
+            Audio analysis work
           </span>
           <span className="bg-tasks-indicator-popover-row">
             <strong className="bg-tasks-indicator-popover-row-label">
               Active / queued:
             </strong>{' '}
             {paused
-              ? 'paused — optional background jobs are stopped; startup warmup may finish.'
+              ? 'paused — optional background jobs are stopped; startup measured warmup may finish.'
               : `${snapshot.active} job${snapshot.active === 1 ? '' : 's'} running, ${snapshot.pending} waiting in line.`}
           </span>
           <span className="bg-tasks-indicator-popover-row">
             <strong className="bg-tasks-indicator-popover-row-label">
               Active:
             </strong>{' '}
-            ffmpeg + WAV-decode jobs in flight (includes any user-priority
-            bypass slots).
+            ffmpeg measured-analysis jobs plus any lazy WAV-decode preview
+            jobs in flight (includes any user-priority bypass slots).
           </span>
           <span className="bg-tasks-indicator-popover-row">
             <strong className="bg-tasks-indicator-popover-row-label">
@@ -353,16 +355,17 @@ export function BackgroundTasksIndicator(
               Pause:
             </strong>{' '}
             stops optional background-precompute jobs. Startup latest-track
-            warmup can still finish so switching is ready; in-flight jobs finish
-            naturally — no partial-write artifacts in the cache.
+            measured warmup can still finish so LUFS/stat switching is ready;
+            in-flight jobs finish naturally — no partial-write artifacts in the
+            cache.
           </span>
           <span className="bg-tasks-indicator-popover-row">
             <strong className="bg-tasks-indicator-popover-row-label">
               Stuck job?
             </strong>{' '}
-            Each job has a 60-second wall-clock timeout. If ffmpeg or the
-            WAV decoder hangs, the queue gives up, frees the slot, and the
-            track shows an error rather than spinning forever.
+            Each job has a 60-second wall-clock timeout. If ffmpeg or a lazy
+            WAV preview decode hangs, the queue gives up, frees the slot, and
+            the track shows an error rather than spinning forever.
           </span>
         </span>
       ) : null}

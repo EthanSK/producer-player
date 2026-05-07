@@ -183,6 +183,13 @@ function countBackgroundEnqueues(snapshot: AnalysisQueueSnapshot): number {
   );
 }
 
+function countPreviewNonUserEnqueues(snapshot: AnalysisQueueSnapshot): number {
+  return (
+    snapshot.preview.totalEnqueuedByPriority.neighbor +
+    snapshot.preview.totalEnqueuedByPriority.background
+  );
+}
+
 function countMeasuredEnqueues(snapshot: AnalysisQueueSnapshot): number {
   const measured = snapshot.measured.totalEnqueuedByPriority;
   return measured.user + measured.neighbor + measured.background;
@@ -200,7 +207,7 @@ async function expectDoubleClickSwitchIsInstantlyReady(
 ): Promise<void> {
   const targetSongId = await row.getAttribute('data-song-id');
   expect(targetSongId).not.toBeNull();
-  const requireFullAnalysisReady = options.requireFullAnalysisReady ?? true;
+  const requireFullAnalysisReady = options.requireFullAnalysisReady ?? false;
   const expectedNormalizationPreviewGainDb =
     options.expectedNormalizationPreviewGainDb ?? null;
 
@@ -389,9 +396,9 @@ test.describe('Track-switch precompute cache @smoke', () => {
     // Search hides Bravo from the selected-folder main list, and the second
     // linked folder is not selected at all. The invariant here is stronger
     // than “visible rows get warm”: every latest version in the linked library
-    // should finish startup warmup into BOTH in-memory caches. Hidden/search-
-    // filtered/other-folder rows must then double-click switch without a
-    // Loading/Preparing flash.
+    // should finish startup warmup into measured LUFS / true-peak cache.
+    // Hidden/search-filtered/other-folder rows must then double-click switch
+    // with normalization ready even while graph preview decode remains lazy.
     const fixtures = [
       { directory: fixtureDirectory, fileName: 'Alpha v1.wav', frequency: 330, duration: 1 },
       { directory: fixtureDirectory, fileName: 'Bravo v1.wav', frequency: 440, duration: 1 },
@@ -499,6 +506,10 @@ test.describe('Track-switch precompute cache @smoke', () => {
       expect(
         countBackgroundEnqueues(await readAnalysisQueues(page)),
         'startup latest-track warmup should not use the optional BACKGROUND bucket'
+      ).toBe(0);
+      expect(
+        countPreviewNonUserEnqueues(await readAnalysisQueues(page)),
+        'startup latest-track warmup must not enqueue background/neighbor preview decode jobs'
       ).toBe(0);
 
       await page.evaluate(() => {
@@ -649,8 +660,7 @@ test.describe('Track-switch precompute cache @smoke', () => {
       });
 
       // Wait for the integrated-LUFS readout on the first selected song to
-      // resolve — confirms the selected-track effect populated both the
-      // measured and preview caches.
+      // resolve — confirms the selected-track measured-analysis path is ready.
       await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText(
         'Loading',
         { timeout: 15_000 }
@@ -719,6 +729,10 @@ test.describe('Track-switch precompute cache @smoke', () => {
         });
 
       await expectStartupQueuesDrained(page);
+      expect(
+        countPreviewNonUserEnqueues(await readAnalysisQueues(page)),
+        'startup latest-track warmup must not enqueue background/neighbor preview decode jobs'
+      ).toBe(0);
 
       const charlieWarmupState = await readVisibleWarmupState(page).then((state) =>
         state.find((entry) => entry.songTitle === 'Charlie') ?? null

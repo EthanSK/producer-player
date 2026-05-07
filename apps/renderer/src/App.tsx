@@ -2760,7 +2760,11 @@ export function App(): JSX.Element {
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
     'idle'
   );
+  const [measuredAnalysisStatus, setMeasuredAnalysisStatus] = useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [measuredAnalysisError, setMeasuredAnalysisError] = useState<string | null>(null);
   const [masteringCacheFilePath, setMasteringCacheFilePath] = useState<string | null>(null);
   const [masteringCacheDirectoryPath, setMasteringCacheDirectoryPath] = useState<string | null>(
     null
@@ -3394,85 +3398,96 @@ export function App(): JSX.Element {
       setAnalysis(null);
       setMeasuredAnalysis(null);
       setAnalysisStatus('idle');
+      setMeasuredAnalysisStatus('idle');
       setAnalysisError(null);
+      setMeasuredAnalysisError(null);
       return;
     }
 
     const cached = getCachedMasteringAnalysisForVersion(selectedVersion);
     const analysisCacheKey = cached.cacheKey;
-
-    if (cached.previewAnalysis && cached.measuredAnalysis) {
-      setAnalysis(cached.previewAnalysis);
-      setMeasuredAnalysis(cached.measuredAnalysis);
-      setAnalysisStatus('ready');
-      setAnalysisError(null);
-      return;
-    }
-
     const selectedPlaybackSourceUrl =
       mixPlaybackSourceSelectedFilePath === analysisFilePath
         ? mixPlaybackSource?.url ?? null
         : null;
 
-    if (!selectedPlaybackSourceUrl) {
-      setAnalysis(cached.previewAnalysis);
-      setMeasuredAnalysis(cached.measuredAnalysis);
-      setAnalysisStatus(
-        cached.previewAnalysis || cached.measuredAnalysis ? 'loading' : 'idle'
-      );
-      setAnalysisError(null);
-      return;
-    }
-
     let cancelled = false;
 
     setAnalysis(cached.previewAnalysis);
     setMeasuredAnalysis(cached.measuredAnalysis);
-    setAnalysisStatus('loading');
+    setAnalysisStatus(
+      cached.previewAnalysis ? 'ready' : selectedPlaybackSourceUrl ? 'loading' : 'idle'
+    );
+    setMeasuredAnalysisStatus(cached.measuredAnalysis ? 'ready' : 'loading');
     setAnalysisError(null);
+    setMeasuredAnalysisError(null);
 
-    // Item #10 — promote any already-queued background preload for this
-    // version to user-selected priority so it jumps ahead of the rest of the
-    // backlog. If the version isn't in the queue (cache hit, or never
-    // enqueued), promote() is a no-op.
-    promotePreviewAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
+    // v3.141 — measured mastering stats and preview/graph decode are now
+    // intentionally independent. LUFS, true peak, sample rate, and platform
+    // normalization must become ready as soon as ffmpeg measured analysis is
+    // cached/resolved; a cold WebAudio preview decode for waveform/graphs must
+    // never hold those scalar readouts hostage. Both paths still share the
+    // same cache key and queue in-flight de-dupe, so repeated A↔B↔A switching
+    // does not rerun unchanged work.
     promoteMeasuredAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
+    if (selectedPlaybackSourceUrl) {
+      promotePreviewAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
+    }
 
-    const previewPromise = cached.previewAnalysis
-      ? Promise.resolve(cached.previewAnalysis)
-      : // Do not pass an AbortSignal here. The preview-analysis queue de-dupes
-        // by cache key, so a StrictMode/effect cleanup that aborts the first
-        // request can otherwise poison the re-run with that same aborted
-        // in-flight promise and leave the live selection stuck at "loading"
-        // (Windows CI was slow enough to hit this consistently). Stale results
-        // are still ignored by the `cancelled` guard below.
-        analyzeTrackFromUrl(selectedPlaybackSourceUrl, undefined, {
-          priority: ANALYSIS_PRIORITY_USER_SELECTED,
-          key: analysisCacheKey,
+    if (!cached.previewAnalysis && selectedPlaybackSourceUrl) {
+      void analyzeTrackFromUrl(selectedPlaybackSourceUrl, undefined, {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+        key: analysisCacheKey,
+      })
+        .then((previewResult) => {
+          cacheMasteringAnalysisValue(
+            previewAnalysisCacheRef.current,
+            analysisCacheKey,
+            previewResult
+          );
+
+          if (cancelled) {
+            return;
+          }
+
+          setAnalysis(previewResult);
+          setAnalysisStatus('ready');
+          setAnalysisError(null);
+        })
+        .catch((analysisIssue: unknown) => {
+          if (cancelled) {
+            return;
+          }
+
+          setAnalysis(cached.previewAnalysis);
+          setAnalysisStatus(cached.previewAnalysis ? 'ready' : 'error');
+          setAnalysisError(
+            analysisIssue instanceof DOMException && analysisIssue.name === 'AbortError'
+              ? 'Analysis was interrupted before it could finish.'
+              : analysisIssue instanceof Error
+                ? analysisIssue.message
+                : 'Could not analyse this track preview.'
+          );
         });
-    const measuredPromise = cached.measuredAnalysis
-      ? Promise.resolve(cached.measuredAnalysis)
-      : runMeasuredAnalysis(analysisFilePath, {
-          priority: ANALYSIS_PRIORITY_USER_SELECTED,
-          cacheKey: analysisCacheKey,
-        });
+    }
 
-    void Promise.all([previewPromise, measuredPromise])
-      .then(([previewResult, measuredResult]) => {
-        // Windows-CI fix — ALWAYS populate the in-memory analysis cache,
-        // even when this effect run is cancelled. Without this, a
-        // rapid sequence of effect re-runs (driven by snapshot reference
-        // churn from background file-watcher rescans on Windows) means the
-        // cleanup races the .then handler, every analysis run gets bailed
-        // BEFORE it can call cacheMasteringAnalysis, so the NEXT effect run
-        // re-enqueues a fresh analysis instead of hitting cache, and the
-        // user is stuck in `analysisStatus: 'loading'` indefinitely. The
-        // cache is keyed by analysisCacheKey (file path + size + mtime) and
-        // is idempotent — writing is always safe and unblocks subsequent
-        // runs immediately.
-        cacheMasteringAnalysis(analysisCacheKey, previewResult, measuredResult);
+    if (!cached.measuredAnalysis) {
+      void runMeasuredAnalysis(analysisFilePath, {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+        cacheKey: analysisCacheKey,
+      })
+        .then((measuredResult) => {
+          // Always populate the measured cache and persisted mastering entry,
+          // even if this effect run was superseded before ffmpeg returned. The
+          // write is keyed by schema + file path + size + mtime, so it is
+          // idempotent and lets the next selection/effect hit the completed
+          // shared cache instead of queueing duplicate measured analysis.
+          cacheMasteringAnalysisValue(
+            measuredAnalysisCacheRef.current,
+            analysisCacheKey,
+            measuredResult
+          );
 
-        if (selectedVersion) {
           const selectedVersionSong =
             snapshot.songs.find((song) => song.id === selectedVersion.songId) ?? null;
 
@@ -3486,50 +3501,36 @@ export function App(): JSX.Element {
               })
             );
           }
-        }
 
-        // Renderer-state setters are still gated on `!cancelled`. If this
-        // run was cancelled, a newer effect run is now in charge of those
-        // setters; clobbering them here would cause flashes or stale data.
-        if (cancelled) {
-          return;
-        }
+          if (cancelled) {
+            return;
+          }
 
-        setAnalysis(previewResult);
-        setMeasuredAnalysis(measuredResult);
-        setAnalysisStatus('ready');
-      })
-      .catch((analysisIssue: unknown) => {
-        if (cancelled) {
-          return;
-        }
+          setMeasuredAnalysis(measuredResult);
+          setMeasuredAnalysisStatus('ready');
+          setMeasuredAnalysisError(null);
+        })
+        .catch((analysisIssue: unknown) => {
+          if (cancelled) {
+            return;
+          }
 
-        if (
-          analysisIssue instanceof DOMException &&
-          analysisIssue.name === 'AbortError'
-        ) {
-          setAnalysis(cached.previewAnalysis);
           setMeasuredAnalysis(cached.measuredAnalysis);
-          setAnalysisStatus('error');
-          setAnalysisError('Analysis was interrupted before it could finish.');
-          return;
-        }
-
-        setAnalysis(cached.previewAnalysis);
-        setMeasuredAnalysis(cached.measuredAnalysis);
-        setAnalysisStatus('error');
-        setAnalysisError(
-          analysisIssue instanceof Error
-            ? analysisIssue.message
-            : 'Could not analyse this track preview.'
-        );
-      });
+          setMeasuredAnalysisStatus(cached.measuredAnalysis ? 'ready' : 'error');
+          setMeasuredAnalysisError(
+            analysisIssue instanceof AnalysisTaskTimeoutError
+              ? 'Measured analysis timed out. Try selecting this track again.'
+              : analysisIssue instanceof Error
+                ? analysisIssue.message
+                : 'Could not analyse this track yet.'
+          );
+        });
+    }
 
     return () => {
       cancelled = true;
     };
   }, [
-    cacheMasteringAnalysis,
     createMasteringCacheEntry,
     getCachedMasteringAnalysisForVersion,
     mixPlaybackSource?.url,
@@ -6744,6 +6745,7 @@ export function App(): JSX.Element {
   const activePreviewAnalysis = isRefMode ? referenceTrack?.previewAnalysis ?? null : analysis;
   const activePreviewAnalysisStatus = isRefMode ? referenceStatus : analysisStatus;
   const activeMeasuredAnalysis = isRefMode ? referenceTrack?.measuredAnalysis ?? null : measuredAnalysis;
+  const activeMeasuredAnalysisStatus = isRefMode ? referenceStatus : measuredAnalysisStatus;
   const desiredPlaybackSource =
     playbackPreviewMode === 'reference'
       ? referenceTrack?.playbackSource ?? null
@@ -6803,20 +6805,17 @@ export function App(): JSX.Element {
   // text says "Analysing…" because the mix `analysisStatus` is still
   // 'loading'. Codex review #2 (2026-04-18).
   //
-  // v3.139 — platform normalization only needs measured LUFS / true peak.
-  // The selected-track `analysisStatus` represents the combined preview-waveform
-  // + measured-analysis pipeline, so a track with measured analysis already
-  // warmed from startup or the persisted mastering cache could still show
-  // "Loading…" / disable Preview while the waveform decode caught up. Treat
-  // measured analysis as the readiness source here so double-click switching
-  // reuses the warmed LUFS data immediately instead of visually waiting for a
-  // fresh preview decode.
+  // v3.139/v3.141 — platform normalization only needs measured LUFS / true
+  // peak. The preview/graph decode (`analysisStatus`) can legitimately be
+  // cold or loading while measured ffmpeg stats are already ready from startup
+  // warmup or the persisted mastering cache, so normalization must key off the
+  // measured status instead of blocking on waveform/tonal-balance data.
   const normalizationSourceStatus: 'idle' | 'loading' | 'ready' | 'error' =
     normalizationSourceAnalysis
       ? 'ready'
       : isRefMode
         ? referenceStatus
-        : analysisStatus;
+        : measuredAnalysisStatus;
   const normalizationPreview = computePlatformNormalizationPreview(
     normalizationSourceAnalysis,
     selectedNormalizationPlatform
@@ -9148,6 +9147,9 @@ export function App(): JSX.Element {
       analysisIsSet: analysis !== null,
       measuredAnalysisIsSet: measuredAnalysis !== null,
       analysisStatus,
+      measuredAnalysisStatus,
+      analysisError,
+      measuredAnalysisError,
       normalizationSourceStatus,
       normalizationPreviewAppliedGainDb: normalizationPreview?.appliedGainDb ?? null,
       analysisVersion: computeCurrentAnalysisVersion(),
@@ -9235,6 +9237,9 @@ export function App(): JSX.Element {
     analysis,
     measuredAnalysis,
     analysisStatus,
+    measuredAnalysisStatus,
+    analysisError,
+    measuredAnalysisError,
     normalizationSourceStatus,
     normalizationPreview,
     selectedNormalizationPlatform,
@@ -13407,7 +13412,7 @@ export function App(): JSX.Element {
   ]);
 
   const measuredIntegratedText = buildAnalysisValue(
-    activePreviewAnalysisStatus,
+    activeMeasuredAnalysisStatus,
     formatMeasuredStat(activeMeasuredAnalysis?.integratedLufs, 'LUFS'),
     {
       loading: 'Loading…',
@@ -13415,7 +13420,7 @@ export function App(): JSX.Element {
     }
   );
   const measuredLraText = buildAnalysisValue(
-    activePreviewAnalysisStatus,
+    activeMeasuredAnalysisStatus,
     formatMeasuredStat(activeMeasuredAnalysis?.loudnessRangeLufs, 'LU'),
     {
       loading: 'Loading…',
@@ -13423,7 +13428,7 @@ export function App(): JSX.Element {
     }
   );
   const measuredTruePeakText = buildAnalysisValue(
-    activePreviewAnalysisStatus,
+    activeMeasuredAnalysisStatus,
     formatMeasuredStat(activeMeasuredAnalysis?.truePeakDbfs, 'dBTP'),
     {
       loading: 'Loading…',
@@ -13431,7 +13436,7 @@ export function App(): JSX.Element {
     }
   );
   const measuredMaxShortTermText = buildAnalysisValue(
-    activePreviewAnalysisStatus,
+    activeMeasuredAnalysisStatus,
     formatMeasuredStat(activeMeasuredAnalysis?.maxShortTermLufs, 'LUFS'),
     {
       loading: 'Loading…',
@@ -13439,7 +13444,7 @@ export function App(): JSX.Element {
     }
   );
   const measuredMaxMomentaryText = buildAnalysisValue(
-    activePreviewAnalysisStatus,
+    activeMeasuredAnalysisStatus,
     formatMeasuredStat(activeMeasuredAnalysis?.maxMomentaryLufs, 'LUFS'),
     {
       loading: 'Loading…',
@@ -13447,7 +13452,7 @@ export function App(): JSX.Element {
     }
   );
   const measuredSamplePeakText = buildAnalysisValue(
-    activePreviewAnalysisStatus,
+    activeMeasuredAnalysisStatus,
     formatMeasuredStat(activeMeasuredAnalysis?.samplePeakDbfs, 'dBFS'),
     {
       loading: 'Loading…',
@@ -13455,7 +13460,7 @@ export function App(): JSX.Element {
     }
   );
   const measuredMeanVolumeText = buildAnalysisValue(
-    activePreviewAnalysisStatus,
+    activeMeasuredAnalysisStatus,
     formatMeasuredStat(activeMeasuredAnalysis?.meanVolumeDbfs, 'dBFS'),
     {
       loading: 'Loading…',
@@ -13643,7 +13648,7 @@ export function App(): JSX.Element {
             } · ${normalizationPreview.explanation}`
           : 'Select a track to preview platform loudness.';
   const selectedPlaybackSampleRateText = buildAnalysisValue(
-    analysisStatus,
+    measuredAnalysisStatus,
     formatSampleRateHz(measuredAnalysis?.sampleRateHz),
     {
       loading: 'Loading…',
@@ -14538,16 +14543,22 @@ export function App(): JSX.Element {
               {analysisStatus !== 'ready' ? (
                 <p className="muted analysis-loading-line" data-testid="analysis-status">
                   {analysisStatus === 'loading'
-                    ? 'Loading mastering analysis…'
+                    ? 'Loading preview graphs…'
                     : analysisStatus === 'error'
-                      ? 'Analysis failed.'
-                      : 'Preparing mastering analysis…'}
+                      ? 'Preview graph analysis failed.'
+                      : 'Preparing preview graphs…'}
                 </p>
               ) : null}
 
               {analysisStatus === 'error' ? (
                 <p className="error" data-testid="analysis-error">
                   {analysisError ?? 'Could not analyse this track preview.'}
+                </p>
+              ) : null}
+
+              {measuredAnalysisStatus === 'error' ? (
+                <p className="error" data-testid="measured-analysis-error">
+                  {measuredAnalysisError ?? 'Could not analyse LUFS/stat data for this track.'}
                 </p>
               ) : null}
 
@@ -18039,15 +18050,20 @@ export function App(): JSX.Element {
                 {analysisStatus !== 'ready' ? (
                   <p className="muted analysis-loading-line" data-testid="analysis-overlay-status">
                     {analysisStatus === 'loading'
-                      ? 'Loading mastering analysis…'
+                      ? 'Loading preview graphs…'
                       : analysisStatus === 'error'
-                        ? 'Analysis failed.'
-                        : 'Preparing mastering analysis…'}
+                        ? 'Preview graph analysis failed.'
+                        : 'Preparing preview graphs…'}
                   </p>
                 ) : null}
                 {analysisStatus === 'error' ? (
                   <p className="error" data-testid="analysis-overlay-error">
                     {analysisError ?? 'Could not analyse this track preview.'}
+                  </p>
+                ) : null}
+                {measuredAnalysisStatus === 'error' ? (
+                  <p className="error" data-testid="measured-analysis-overlay-error">
+                    {measuredAnalysisError ?? 'Could not analyse LUFS/stat data for this track.'}
                   </p>
                 ) : null}
 

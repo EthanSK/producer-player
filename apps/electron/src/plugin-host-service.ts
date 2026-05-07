@@ -43,7 +43,10 @@
  */
 
 import { spawn as defaultSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, extname, join, normalize, resolve } from 'node:path';
 import log from 'electron-log/main';
 import type {
   PluginChainItem,
@@ -60,12 +63,206 @@ import type {
  */
 export type SpawnFn = typeof defaultSpawn;
 
+export type PluginScanFormat = PluginFormat | 'all';
+
+export interface GlobalPluginScanRoot {
+  format: Exclude<PluginFormat, 'clap'>;
+  path: string;
+}
+
+export interface GlobalPluginDiscoveryResult {
+  plugins: PluginInfo[];
+  searchedPaths: string[];
+  skippedPaths: Array<{ path: string; reason: string }>;
+}
+
+interface DiscoverGlobalPluginOptions {
+  format?: PluginScanFormat;
+  paths?: string[];
+  maxDepth?: number;
+}
+
+interface NormalizedScanOptions {
+  format: PluginScanFormat;
+  paths: string[];
+}
+
 type PendingResolver = (value: unknown) => void;
 type PendingRejecter = (reason: Error) => void;
 interface Pending {
   resolve: PendingResolver;
   reject: PendingRejecter;
   timer: NodeJS.Timeout;
+}
+
+const DEFAULT_PLUGIN_SCAN_MAX_DEPTH = 4;
+const PLUGIN_SCAN_VERSION = 2;
+
+const HOSTABLE_PLUGIN_EXTENSIONS: Record<string, Exclude<PluginFormat, 'clap'>> = {
+  '.vst3': 'vst3',
+  '.component': 'au',
+};
+
+function uniqueStrings(values: Iterable<string>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+export function defaultGlobalPluginScanRoots(
+  opts: { homeDirectory?: string; platform?: NodeJS.Platform; format?: PluginScanFormat } = {},
+): GlobalPluginScanRoot[] {
+  const platform = opts.platform ?? process.platform;
+  if (platform !== 'darwin') return [];
+
+  const homeDirectory = opts.homeDirectory ?? homedir();
+  const roots: GlobalPluginScanRoot[] = [
+    { format: 'vst3', path: join(homeDirectory, 'Library/Audio/Plug-Ins/VST3') },
+    { format: 'vst3', path: '/Library/Audio/Plug-Ins/VST3' },
+    { format: 'au', path: join(homeDirectory, 'Library/Audio/Plug-Ins/Components') },
+    { format: 'au', path: '/Library/Audio/Plug-Ins/Components' },
+  ];
+
+  const format = opts.format ?? 'all';
+  return roots.filter((root) => format === 'all' || root.format === format);
+}
+
+export function defaultGlobalPluginScanPaths(format: PluginScanFormat = 'all'): string[] {
+  return uniqueStrings(defaultGlobalPluginScanRoots({ format }).map((root) => root.path));
+}
+
+function normalizeScanOptions(opts?: { format?: PluginScanFormat; paths?: string[] }): NormalizedScanOptions {
+  const format = opts?.format ?? 'all';
+  const paths = opts?.paths && opts.paths.length > 0 ? opts.paths : defaultGlobalPluginScanPaths(format);
+  return {
+    format,
+    paths: uniqueStrings(paths.map((path) => path.trim()).filter(Boolean)),
+  };
+}
+
+function formatMatches(requested: PluginScanFormat, candidate: PluginFormat): boolean {
+  return requested === 'all' || requested === candidate;
+}
+
+function pluginNameFromPath(path: string): string {
+  const ext = extname(path);
+  return basename(path, ext).trim() || basename(path).trim() || 'Unknown plugin';
+}
+
+function pluginIdFromPath(format: PluginFormat, path: string): string {
+  const normalizedPath = normalize(path).toLowerCase();
+  const digest = createHash('sha256').update(`${format}:${normalizedPath}`).digest('hex').slice(0, 16);
+  return `${format}:fs-${digest}`;
+}
+
+function pluginInfoFromPath(format: PluginFormat, path: string): PluginInfo {
+  return {
+    id: pluginIdFromPath(format, path),
+    name: pluginNameFromPath(path),
+    vendor: '',
+    format,
+    version: '',
+    path,
+    categories: [],
+    isSupported: true,
+    failureReason: null,
+  };
+}
+
+function pathLooksLikePluginBundle(path: string): PluginFormat | null {
+  const format = HOSTABLE_PLUGIN_EXTENSIONS[extname(path).toLowerCase()];
+  return format ?? null;
+}
+
+export function discoverGlobalPlugins(opts: DiscoverGlobalPluginOptions = {}): GlobalPluginDiscoveryResult {
+  const requestedFormat = opts.format ?? 'all';
+  const paths = opts.paths && opts.paths.length > 0 ? opts.paths : defaultGlobalPluginScanPaths(requestedFormat);
+  const maxDepth = Math.max(0, Math.floor(opts.maxDepth ?? DEFAULT_PLUGIN_SCAN_MAX_DEPTH));
+  const searchedPaths = uniqueStrings(paths.map((path) => path.trim()).filter(Boolean));
+  const skippedPaths: Array<{ path: string; reason: string }> = [];
+  const pluginsByPath = new Map<string, PluginInfo>();
+
+  const visit = (path: string, depth: number) => {
+    const directFormat = pathLooksLikePluginBundle(path);
+    if (directFormat) {
+      try {
+        if (!existsSync(path)) {
+          skippedPaths.push({ path, reason: 'missing' });
+          return;
+        }
+      } catch (err) {
+        skippedPaths.push({ path, reason: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+      if (formatMatches(requestedFormat, directFormat)) {
+        pluginsByPath.set(normalize(path).toLowerCase(), pluginInfoFromPath(directFormat, path));
+      }
+      // Plugin bundles are directories; don't recurse into Contents/.
+      return;
+    }
+    if (depth > maxDepth) return;
+
+    let entries: string[];
+    try {
+      if (!existsSync(path)) {
+        skippedPaths.push({ path, reason: 'missing' });
+        return;
+      }
+      const stats = statSync(path);
+      if (!stats.isDirectory()) return;
+      entries = readdirSync(path);
+    } catch (err) {
+      skippedPaths.push({ path, reason: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+
+    for (const entry of entries) {
+      visit(join(path, entry), depth + 1);
+    }
+  };
+
+  for (const path of searchedPaths) visit(path, 0);
+
+  return {
+    plugins: Array.from(pluginsByPath.values()).sort((a, b) => {
+      const name = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      if (name !== 0) return name;
+      return a.path.localeCompare(b.path);
+    }),
+    searchedPaths,
+    skippedPaths,
+  };
+}
+
+function sidecarPluginPaths(plugins: readonly PluginInfo[]): Set<string> {
+  const paths = new Set<string>();
+  for (const plugin of plugins) {
+    if (plugin.path) paths.add(normalize(plugin.path).toLowerCase());
+  }
+  return paths;
+}
+
+function mergeWithFilesystemDiscovery(
+  plugins: PluginInfo[],
+  discovery: GlobalPluginDiscoveryResult,
+): PluginInfo[] {
+  if (plugins.length > 0) return plugins;
+  if (discovery.plugins.length === 0) return plugins;
+
+  const existingPaths = sidecarPluginPaths(plugins);
+  const merged = [...plugins];
+  for (const plugin of discovery.plugins) {
+    const key = normalize(plugin.path).toLowerCase();
+    if (existingPaths.has(key)) continue;
+    existingPaths.add(key);
+    merged.push(plugin);
+  }
+  return merged;
 }
 
 /**
@@ -469,17 +666,19 @@ export class PluginHostService {
   }
 
   /**
-   * Run a plugin-folder scan and return a fresh `ScannedPluginLibrary`.
-   * Uses OS-default folders when called with no arguments (matches the
-   * sidecar's built-in defaults on macOS).
+   * Run a global installed-plugin scan and return a fresh `ScannedPluginLibrary`.
+   * With no arguments we explicitly scan the standard macOS VST3/AU install
+   * folders (user + machine-wide), matching a DAW-style global plugin browser
+   * instead of any Producer Player project/library-local directory.
    */
-  async scanPlugins(opts?: { format?: 'vst3' | 'au' | 'all'; paths?: string[] }): Promise<ScannedPluginLibrary> {
+  async scanPlugins(opts?: { format?: PluginScanFormat; paths?: string[] }): Promise<ScannedPluginLibrary> {
+    const scanOptions = normalizeScanOptions(opts);
     log.info(
-      `[plugin-host] scanPlugins starting (format=${opts?.format ?? 'all'}, paths=${
-        opts?.paths ? opts.paths.join('|') : 'os-defaults'
+      `[plugin-host] scanPlugins starting (format=${scanOptions.format}, paths=${
+        scanOptions.paths.length > 0 ? scanOptions.paths.join('|') : 'none'
       })`,
     );
-    const reply = await this.send<Record<string, unknown>>('scan_plugins', opts ?? {}, { timeoutMs: 120_000 });
+    const reply = await this.send<Record<string, unknown>>('scan_plugins', scanOptions, { timeoutMs: 120_000 });
     // v3.50 — surface sidecar-reported scan failures in the main log so a
     // "Plugin scan failed" toast has something to point at beyond the
     // generic error message. main.cpp's handleScanPlugins fills `failed`
@@ -501,7 +700,7 @@ export class PluginHostService {
       );
     }
     const pluginsRaw = Array.isArray(reply.plugins) ? (reply.plugins as unknown[]) : [];
-    const plugins: PluginInfo[] = pluginsRaw.flatMap((p) => {
+    let plugins: PluginInfo[] = pluginsRaw.flatMap((p) => {
       if (!p || typeof p !== 'object' || Array.isArray(p)) return [];
       const entry = p as Record<string, unknown>;
       const id = typeof entry.id === 'string' ? entry.id : null;
@@ -529,10 +728,27 @@ export class PluginHostService {
       };
       return [info];
     });
+    const discovery = discoverGlobalPlugins(scanOptions);
+    if (plugins.length === 0 && discovery.plugins.length > 0) {
+      log.info(
+        `[plugin-host] sidecar returned no plugin metadata; using filesystem global discovery fallback (${discovery.plugins.length} bundles)`,
+      );
+    }
+    if (discovery.skippedPaths.length > 0) {
+      const skippedPreview = discovery.skippedPaths
+        .filter((entry) => entry.reason !== 'missing')
+        .slice(0, 5)
+        .map((entry) => `${entry.path} (${entry.reason})`);
+      if (skippedPreview.length > 0) {
+        log.warn(`[plugin-host] skipped unreadable plugin scan paths: ${skippedPreview.join('; ')}`);
+      }
+    }
+    plugins = mergeWithFilesystemDiscovery(plugins, discovery);
+
     const scanVersion =
       typeof reply.scanVersion === 'number' && Number.isFinite(reply.scanVersion)
-        ? (reply.scanVersion as number)
-        : 1;
+        ? Math.max(reply.scanVersion as number, PLUGIN_SCAN_VERSION)
+        : PLUGIN_SCAN_VERSION;
     const library: ScannedPluginLibrary = {
       plugins,
       scannedAt: new Date().toISOString(),

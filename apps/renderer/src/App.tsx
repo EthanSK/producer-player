@@ -11212,7 +11212,7 @@ export function App(): JSX.Element {
     toast.show({
       id: 'plugin-scan',
       kind: 'info',
-      text: 'Scanning plugins…',
+      text: 'Scanning installed plugins…',
       durationMs: 0, // sticky until scan finishes (we overwrite on success/fail)
     });
     void window.producerPlayer
@@ -11225,7 +11225,7 @@ export function App(): JSX.Element {
           kind: 'success',
           text: count
             ? `Found ${count} plugin${count === 1 ? '' : 's'}.`
-            : 'Plugin scan finished (no plugins found).',
+            : 'Plugin scan finished (no installed VST3/AU plugins found).',
         });
       })
       .catch((err) => {

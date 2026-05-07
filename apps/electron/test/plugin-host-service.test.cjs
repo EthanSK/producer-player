@@ -18,17 +18,22 @@
  */
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
 const { PassThrough } = require('node:stream');
 const test = require('node:test');
 
 const {
   PluginHostService,
+  defaultGlobalPluginScanRoots,
+  discoverGlobalPlugins,
   resolveSidecarBinary,
   diffChainReconciliation,
 } = require('../dist/plugin-host-service.test.cjs');
 
 /** Build a fake ChildProcessWithoutNullStreams-like object we can script. */
-function makeFakeChild({ replies = {}, emitReady = true } = {}) {
+function makeFakeChild({ replies = {}, emitReady = true, requests = [] } = {}) {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -54,6 +59,7 @@ function makeFakeChild({ replies = {}, emitReady = true } = {}) {
       if (!line.trim()) continue;
       try {
         const req = JSON.parse(line);
+        requests.push(req);
         const handler = replies[req.method];
         if (!handler) {
           stdout.write(
@@ -85,6 +91,15 @@ function makeFakeChild({ replies = {}, emitReady = true } = {}) {
   return child;
 }
 
+async function withTempPluginRoot(fn) {
+  const root = mkdtempSync(join(tmpdir(), 'pp-plugin-scan-'));
+  try {
+    return await fn(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Existing Phase 1a coverage
 // ---------------------------------------------------------------------------
@@ -92,6 +107,47 @@ function makeFakeChild({ replies = {}, emitReady = true } = {}) {
 test('resolveSidecarBinary returns null when no build output exists in a pristine cwd', () => {
   const found = resolveSidecarBinary('/tmp/pp-does-not-exist-here');
   assert.equal(found, null);
+});
+
+test('defaultGlobalPluginScanRoots targets macOS global VST3/AU install folders', () => {
+  const roots = defaultGlobalPluginScanRoots({
+    platform: 'darwin',
+    homeDirectory: '/Users/tester',
+  });
+  assert.deepEqual(roots, [
+    { format: 'vst3', path: '/Users/tester/Library/Audio/Plug-Ins/VST3' },
+    { format: 'vst3', path: '/Library/Audio/Plug-Ins/VST3' },
+    { format: 'au', path: '/Users/tester/Library/Audio/Plug-Ins/Components' },
+    { format: 'au', path: '/Library/Audio/Plug-Ins/Components' },
+  ]);
+
+  assert.deepEqual(
+    defaultGlobalPluginScanRoots({ platform: 'darwin', homeDirectory: '/Users/tester', format: 'au' }),
+    [
+      { format: 'au', path: '/Users/tester/Library/Audio/Plug-Ins/Components' },
+      { format: 'au', path: '/Library/Audio/Plug-Ins/Components' },
+    ],
+  );
+  assert.deepEqual(defaultGlobalPluginScanRoots({ platform: 'linux', homeDirectory: '/home/tester' }), []);
+});
+
+test('discoverGlobalPlugins finds VST3/AU bundles recursively without entering bundle contents', async () => {
+  await withTempPluginRoot((root) => {
+    mkdirSync(join(root, 'Vendor'));
+    mkdirSync(join(root, 'Vendor', 'Mock EQ.vst3'));
+    mkdirSync(join(root, 'Vendor', 'Mock EQ.vst3', 'Contents'));
+    mkdirSync(join(root, 'Vendor', 'Mock Compressor.component'));
+    mkdirSync(join(root, 'Vendor', 'Not a plugin.txt'));
+    writeFileSync(join(root, 'Vendor', 'Mock EQ.vst3', 'Contents', 'Nested.component'), 'ignore');
+
+    const discovery = discoverGlobalPlugins({ paths: [root], format: 'all' });
+    assert.deepEqual(
+      discovery.plugins.map((plugin) => `${plugin.format}:${plugin.name}`).sort(),
+      ['au:Mock Compressor', 'vst3:Mock EQ'],
+    );
+    assert.equal(discovery.plugins.every((plugin) => plugin.id.startsWith(`${plugin.format}:fs-`)), true);
+    assert.equal(discovery.searchedPaths[0], root);
+  });
 });
 
 test('start resolves on the {"event":"ready"} handshake', async () => {
@@ -137,10 +193,99 @@ test('scanPlugins parses a canned reply into a ScannedPluginLibrary shape', asyn
   const service = new PluginHostService('/fake/path', () => fake);
   const library = await service.scanPlugins();
   assert.equal(library.plugins.length, 2, 'malformed entry filtered out');
-  assert.equal(library.scanVersion, 1);
+  assert.equal(library.scanVersion, 2);
   assert.ok(library.scannedAt.length > 0, 'scannedAt is stamped');
   const vst3 = library.plugins.find((p) => p.format === 'vst3');
   assert.equal(vst3.vendor, 'FabFilter');
+});
+
+test('scanPlugins sends explicit global plugin paths by default', async () => {
+  const requests = [];
+  const fake = makeFakeChild({
+    requests,
+    replies: {
+      scan_plugins: {
+        plugins: [
+          {
+            id: 'vst3:abc',
+            name: 'Pro-Q 4',
+            vendor: 'FabFilter',
+            format: 'vst3',
+            version: '4.0',
+            path: '/Library/Audio/Plug-Ins/VST3/FabFilter Pro-Q 4.vst3',
+            categories: ['Fx', 'EQ'],
+            isSupported: true,
+            failureReason: null,
+          },
+        ],
+      },
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.scanPlugins();
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'scan_plugins');
+  assert.equal(requests[0].params.format, 'all');
+  assert.equal(requests[0].params.paths.some((p) => p.endsWith('/Library/Audio/Plug-Ins/VST3')), true);
+  assert.equal(requests[0].params.paths.some((p) => p.endsWith('/Library/Audio/Plug-Ins/Components')), true);
+});
+
+test('scanPlugins falls back to filesystem global discovery when sidecar returns no plugin metadata', async () => {
+  await withTempPluginRoot(async (root) => {
+    mkdirSync(join(root, 'Nested'));
+    mkdirSync(join(root, 'Nested', 'Filesystem EQ.vst3'));
+    mkdirSync(join(root, 'Filesystem Compressor.component'));
+
+    const fake = makeFakeChild({
+      replies: {
+        scan_plugins: {
+          plugins: [],
+          scanVersion: 1,
+        },
+      },
+    });
+    const service = new PluginHostService('/fake/path', () => fake);
+    const library = await service.scanPlugins({ paths: [root], format: 'all' });
+
+    assert.equal(library.scanVersion, 2);
+    assert.deepEqual(
+      library.plugins.map((plugin) => `${plugin.format}:${plugin.name}`).sort(),
+      ['au:Filesystem Compressor', 'vst3:Filesystem EQ'],
+    );
+  });
+});
+
+test('scanPlugins keeps validated sidecar metadata when sidecar finds plugins', async () => {
+  await withTempPluginRoot(async (root) => {
+    mkdirSync(join(root, 'Fallback Candidate.vst3'));
+
+    const fake = makeFakeChild({
+      replies: {
+        scan_plugins: {
+          plugins: [
+            {
+              id: 'vst3:validated',
+              name: 'Validated EQ',
+              vendor: 'Unit Test',
+              format: 'vst3',
+              version: '1.0',
+              path: join(root, 'Fallback Candidate.vst3'),
+              categories: ['Fx'],
+              isSupported: true,
+              failureReason: null,
+            },
+          ],
+        },
+      },
+    });
+    const service = new PluginHostService('/fake/path', () => fake);
+    const library = await service.scanPlugins({ paths: [root], format: 'all' });
+
+    assert.equal(library.plugins.length, 1);
+    assert.equal(library.plugins[0].id, 'vst3:validated');
+    assert.equal(library.plugins[0].vendor, 'Unit Test');
+  });
 });
 
 test('stop sends shutdown and kills the child', async () => {

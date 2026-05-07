@@ -21,7 +21,7 @@ import {
  * We bypass the native `pp-audio-host` sidecar by seeding a fake plugin
  * library through `setUserState`. The renderer treats the cached library
  * as authoritative for rendering (it only hits the sidecar when the user
- * clicks "Scan plugins"), so the full flow exercises without needing the
+ * clicks "Scan installed plugins"), so the full flow exercises without needing the
  * compiled JUCE binary to exist in the E2E environment.
  */
 

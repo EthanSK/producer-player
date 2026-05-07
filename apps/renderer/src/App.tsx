@@ -226,6 +226,7 @@ import {
 } from './helpTooltipLinks';
 import { buildStatusCardHelpText } from './statusCardHelp';
 import {
+  calculateEdgeAutoScrollVelocity,
   movePanelBefore,
   persistPanelOrder,
   readPanelOrderFromStorage,
@@ -263,6 +264,9 @@ type FullscreenMasteringPanelId =
 
 type MasteringPanelId = CompactMasteringPanelId | FullscreenMasteringPanelId;
 type MasteringPanelSurface = 'compact' | 'fullscreen';
+
+const FULLSCREEN_MASTERING_DRAG_AUTOSCROLL_EDGE_PX = 112;
+const FULLSCREEN_MASTERING_DRAG_AUTOSCROLL_MAX_VELOCITY_PX = 24;
 
 const PLUGIN_CHAIN_HELP_TEXT =
   'The Plugin Chain lets you insert VST3/AU plugins into the mastering signal path. Add plugins with the + button, drag the ⋮⋮ handle to reorder, click a plugin name to open its native editor, and use the power toggle to bypass any slot without removing it. Your chain is saved per-song. Use the ⋯ preset menu to save and recall per-plugin presets — great for standardizing mastering chains across an album.';
@@ -2833,6 +2837,11 @@ export function App(): JSX.Element {
     useState<FullscreenMasteringPanelId | null>(null);
   const [fullscreenMasteringDropTargetPanelId, setFullscreenMasteringDropTargetPanelId] =
     useState<FullscreenMasteringPanelId | null>(null);
+  const fullscreenMasteringAutoScrollRef = useRef<{
+    container: HTMLElement | null;
+    frameId: number | null;
+    velocity: number;
+  }>({ container: null, frameId: null, velocity: 0 });
   const [agentChatPromptRequest, setAgentChatPromptRequest] =
     useState<AgentChatPromptRequest | null>(null);
 
@@ -6936,6 +6945,66 @@ export function App(): JSX.Element {
     []
   );
 
+  const stopFullscreenMasteringDragAutoScroll = useCallback(() => {
+    const state = fullscreenMasteringAutoScrollRef.current;
+    if (state.frameId !== null) {
+      window.cancelAnimationFrame(state.frameId);
+    }
+    state.container = null;
+    state.frameId = null;
+    state.velocity = 0;
+  }, []);
+
+  const runFullscreenMasteringDragAutoScroll = useCallback(function scrollStep() {
+    const state = fullscreenMasteringAutoScrollRef.current;
+    if (!state.container || state.velocity === 0) {
+      state.frameId = null;
+      return;
+    }
+
+    state.container.scrollTop += state.velocity;
+    state.frameId = window.requestAnimationFrame(scrollStep);
+  }, []);
+
+  const updateFullscreenMasteringDragAutoScroll = useCallback(
+    (event: DragEvent<HTMLElement>) => {
+      if (!draggingFullscreenMasteringPanelId) {
+        stopFullscreenMasteringDragAutoScroll();
+        return;
+      }
+
+      const container = event.currentTarget.closest('.analysis-overlay-card') as HTMLElement | null;
+      if (!container) {
+        stopFullscreenMasteringDragAutoScroll();
+        return;
+      }
+
+      const rect = container.getBoundingClientRect();
+      const velocity = calculateEdgeAutoScrollVelocity({
+        pointerY: event.clientY,
+        containerTop: rect.top,
+        containerBottom: rect.bottom,
+        edgeThresholdPx: FULLSCREEN_MASTERING_DRAG_AUTOSCROLL_EDGE_PX,
+        maxVelocityPx: FULLSCREEN_MASTERING_DRAG_AUTOSCROLL_MAX_VELOCITY_PX,
+      });
+      const state = fullscreenMasteringAutoScrollRef.current;
+      state.container = container;
+      state.velocity = velocity;
+
+      if (velocity !== 0 && state.frameId === null) {
+        state.frameId = window.requestAnimationFrame(runFullscreenMasteringDragAutoScroll);
+      } else if (velocity === 0 && state.frameId !== null) {
+        window.cancelAnimationFrame(state.frameId);
+        state.frameId = null;
+      }
+    },
+    [
+      draggingFullscreenMasteringPanelId,
+      runFullscreenMasteringDragAutoScroll,
+      stopFullscreenMasteringDragAutoScroll,
+    ]
+  );
+
   const handleCompactMasteringPanelDragStart = useCallback(
     (event: DragEvent<HTMLButtonElement>, panelId: CompactMasteringPanelId) => {
       setDraggingCompactMasteringPanelId(panelId);
@@ -7015,6 +7084,7 @@ export function App(): JSX.Element {
 
   const handleFullscreenMasteringPanelDragStart = useCallback(
     (event: DragEvent<HTMLButtonElement>, panelId: FullscreenMasteringPanelId) => {
+      stopFullscreenMasteringDragAutoScroll();
       setDraggingFullscreenMasteringPanelId(panelId);
       setFullscreenMasteringDropTargetPanelId(null);
       event.dataTransfer.effectAllowed = 'move';
@@ -7050,20 +7120,32 @@ export function App(): JSX.Element {
         // setDragImage unsupported in some contexts — fall back to default.
       }
     },
-    []
+    [stopFullscreenMasteringDragAutoScroll]
   );
 
   const handleFullscreenMasteringPanelDragOver = useCallback(
     (event: DragEvent<HTMLElement>, panelId: FullscreenMasteringPanelId) => {
-      if (!draggingFullscreenMasteringPanelId || draggingFullscreenMasteringPanelId === panelId) {
+      if (!draggingFullscreenMasteringPanelId) {
         return;
       }
 
+      updateFullscreenMasteringDragAutoScroll(event);
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
       setFullscreenMasteringDropTargetPanelId(panelId);
     },
-    [draggingFullscreenMasteringPanelId]
+    [draggingFullscreenMasteringPanelId, updateFullscreenMasteringDragAutoScroll]
+  );
+
+  const handleFullscreenMasteringContainerDragOver = useCallback(
+    (event: DragEvent<HTMLElement>) => {
+      if (!draggingFullscreenMasteringPanelId) {
+        return;
+      }
+
+      updateFullscreenMasteringDragAutoScroll(event);
+    },
+    [draggingFullscreenMasteringPanelId, updateFullscreenMasteringDragAutoScroll]
   );
 
   const handleFullscreenMasteringPanelDrop = useCallback(
@@ -7076,20 +7158,27 @@ export function App(): JSX.Element {
       if (!draggedPanelId || draggedPanelId === panelId) {
         setFullscreenMasteringDropTargetPanelId(null);
         setDraggingFullscreenMasteringPanelId(null);
+        stopFullscreenMasteringDragAutoScroll();
         return;
       }
 
       reorderFullscreenMasteringPanels(draggedPanelId, panelId);
       setFullscreenMasteringDropTargetPanelId(null);
       setDraggingFullscreenMasteringPanelId(null);
+      stopFullscreenMasteringDragAutoScroll();
     },
-    [draggingFullscreenMasteringPanelId, reorderFullscreenMasteringPanels]
+    [
+      draggingFullscreenMasteringPanelId,
+      reorderFullscreenMasteringPanels,
+      stopFullscreenMasteringDragAutoScroll,
+    ]
   );
 
   const handleFullscreenMasteringPanelDragEnd = useCallback(() => {
     setDraggingFullscreenMasteringPanelId(null);
     setFullscreenMasteringDropTargetPanelId(null);
-  }, []);
+    stopFullscreenMasteringDragAutoScroll();
+  }, [stopFullscreenMasteringDragAutoScroll]);
 
   const buildMasteringPanelAskAiPrompt = useCallback(
     (panelId: MasteringPanelId, surface: MasteringPanelSurface): string => {
@@ -17236,6 +17325,7 @@ export function App(): JSX.Element {
             onClick={(event) => {
               event.stopPropagation();
             }}
+            onDragOver={handleFullscreenMasteringContainerDragOver}
           >
             <div className="analysis-overlay-header">
               <div className="analysis-overlay-header-title">

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  calculateEdgeAutoScrollVelocity,
   movePanelBefore,
   persistPanelOrder,
   readPanelOrderFromStorage,
@@ -27,6 +28,56 @@ describe('movePanelBefore', () => {
     const result = movePanelBefore(original, 'b', 'b');
     expect(result).toEqual(['a', 'b', 'c']);
     expect(result).not.toBe(original);
+  });
+});
+
+describe('calculateEdgeAutoScrollVelocity', () => {
+  it('ramps upward near the top edge', () => {
+    expect(
+      calculateEdgeAutoScrollVelocity({
+        pointerY: 110,
+        containerTop: 100,
+        containerBottom: 600,
+        edgeThresholdPx: 100,
+        maxVelocityPx: 24,
+      })
+    ).toBeLessThan(0);
+  });
+
+  it('ramps downward near the bottom edge', () => {
+    expect(
+      calculateEdgeAutoScrollVelocity({
+        pointerY: 590,
+        containerTop: 100,
+        containerBottom: 600,
+        edgeThresholdPx: 100,
+        maxVelocityPx: 24,
+      })
+    ).toBeGreaterThan(0);
+  });
+
+  it('stays idle away from the edges', () => {
+    expect(
+      calculateEdgeAutoScrollVelocity({
+        pointerY: 350,
+        containerTop: 100,
+        containerBottom: 600,
+        edgeThresholdPx: 100,
+        maxVelocityPx: 24,
+      })
+    ).toBe(0);
+  });
+
+  it('caps the threshold for short containers', () => {
+    expect(
+      calculateEdgeAutoScrollVelocity({
+        pointerY: 145,
+        containerTop: 100,
+        containerBottom: 200,
+        edgeThresholdPx: 100,
+        maxVelocityPx: 24,
+      })
+    ).toBeLessThan(0);
   });
 });
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import styles from './styles.css?raw';
+
+// Vitest's CSS transform stubs stylesheet imports to an empty string in CI, so
+// this contract test reads the source file directly.
+// @ts-ignore -- Vitest runs in Node; renderer tsconfig intentionally excludes Node ambient types.
+const { readFileSync } = await import('node:fs');
+const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8') as string;
 
 describe('mastering overlay floating controls clearance', () => {
   it('keeps scrollable fullscreen content clear of the floating mix/reference controls', () => {

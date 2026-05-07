@@ -77,6 +77,7 @@ import {
   type AnalysisPriority,
 } from './audioAnalysisQueue';
 import { BackgroundTasksIndicator } from './BackgroundTasksIndicator';
+import { cacheAnalysisValue } from './analysisMemoryCache';
 import { runSequentialLatestTrackWarmup } from './latestTrackWarmup';
 import {
   getMasteringChecklistRuleById,
@@ -753,7 +754,6 @@ const SHOW_AI_RECOMMENDATIONS_FULLSCREEN_KEY =
 const FULLSCREEN_MASTERING_PANEL_LAYOUT_KEY =
   'producer-player.mastering-layout.fullscreen.v1';
 const MAX_SAVED_REFERENCE_TRACKS = 20;
-const MASTERING_ANALYSIS_CACHE_LIMIT = 40;
 const PUBLIC_REPOSITORY_URL = 'https://github.com/EthanSK/producer-player';
 const PUBLIC_REPOSITORY_ACTIONS_URL = `${PUBLIC_REPOSITORY_URL}/actions`;
 const PUBLIC_PAGES_URL = 'https://ethansk.github.io/producer-player/';
@@ -997,6 +997,11 @@ function parseAiEqResponse(text: string): number[] | null {
 }
 
 function buildMasteringCacheKey(version: SongVersion): string {
+  // v3.141 — strict track/version identity for the shared analysis cache.
+  // Filename alone is not enough: a same-name replacement should invalidate
+  // when the scanner observes a different path/size/mtime tuple, but repeated
+  // A↔B↔A switching inside one unchanged session must keep hitting this exact
+  // key and therefore reuse completed cache entries / in-flight promises.
   return [
     MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
     version.filePath,
@@ -1052,26 +1057,9 @@ const DEFAULT_FULLSCREEN_MASTERING_PANEL_ORDER: readonly FullscreenMasteringPane
 function cacheMasteringAnalysisValue<T>(
   cache: Map<string, T>,
   key: string,
-  value: T,
-  limit: number = MASTERING_ANALYSIS_CACHE_LIMIT
+  value: T
 ): void {
-  if (!key) {
-    return;
-  }
-
-  if (cache.has(key)) {
-    cache.delete(key);
-  }
-
-  cache.set(key, value);
-
-  while (cache.size > limit) {
-    const oldestKey = cache.keys().next().value as string | undefined;
-    if (!oldestKey) {
-      break;
-    }
-    cache.delete(oldestKey);
-  }
+  cacheAnalysisValue(cache, key, value);
 }
 
 // Item #10 (v3.110) — track-switch precompute / cache.
@@ -2778,12 +2766,12 @@ export function App(): JSX.Element {
     null
   );
   const [masteringCacheUpdatedAt, setMasteringCacheUpdatedAt] = useState<string | null>(null);
+  const [masteringAnalysisCacheLoaded, setMasteringAnalysisCacheLoaded] = useState(false);
   const [masteringCacheByVersionId, setMasteringCacheByVersionId] = useState<
     Record<string, MasteringCacheEntry>
   >({});
   const masteringCacheByVersionIdRef = useRef<Record<string, MasteringCacheEntry>>({});
   const masteringCachePendingVersionIdsRef = useRef<Set<string>>(new Set());
-  const previewAnalysisPreloadPendingVersionIdsRef = useRef<Set<string>>(new Set());
   const latestTrackWarmupDebugRef = useRef<{
     runId: number;
     activeVersionId: string | null;
@@ -3105,6 +3093,31 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  const getCachedMasteringAnalysisForVersion = useCallback((version: SongVersion) => {
+    const cacheKey = buildMasteringCacheKey(version);
+    const previewAnalysis = previewAnalysisCacheRef.current.get(cacheKey) ?? null;
+    let measuredAnalysis = measuredAnalysisCacheRef.current.get(cacheKey) ?? null;
+
+    // v3.141 — strict shared cache contract. The persisted mastering cache is
+    // the source of truth for ffmpeg/LUFS stats; foreground selection should
+    // read a fresh durable entry instead of re-running ffmpeg just because the
+    // renderer memory map has not been hydrated yet. The cache key includes
+    // schema + path + size + mtime, so a replaced file invalidates safely.
+    if (!measuredAnalysis) {
+      const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
+      if (isMasteringCacheEntryFresh(cachedEntry, version)) {
+        measuredAnalysis = cachedEntry.measuredAnalysis;
+        cacheMasteringAnalysisValue(
+          measuredAnalysisCacheRef.current,
+          cacheKey,
+          measuredAnalysis
+        );
+      }
+    }
+
+    return { cacheKey, previewAnalysis, measuredAnalysis };
+  }, []);
+
   const cacheMasteringAnalysis = useCallback(
     (
       cacheKey: string,
@@ -3385,8 +3398,8 @@ export function App(): JSX.Element {
       return;
     }
 
-    const analysisCacheKey = buildMasteringCacheKey(selectedVersion);
-    const cached = getCachedMasteringAnalysis(analysisCacheKey);
+    const cached = getCachedMasteringAnalysisForVersion(selectedVersion);
+    const analysisCacheKey = cached.cacheKey;
 
     if (cached.previewAnalysis && cached.measuredAnalysis) {
       setAnalysis(cached.previewAnalysis);
@@ -3518,7 +3531,7 @@ export function App(): JSX.Element {
   }, [
     cacheMasteringAnalysis,
     createMasteringCacheEntry,
-    getCachedMasteringAnalysis,
+    getCachedMasteringAnalysisForVersion,
     mixPlaybackSource?.url,
     mixPlaybackSourceSelectedFilePath,
     selectedPlaybackVersionId,
@@ -5938,7 +5951,12 @@ export function App(): JSX.Element {
         setMasteringCacheFilePath(state.cacheFilePath);
         setMasteringCacheUpdatedAt(state.payload.updatedAt);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          setMasteringAnalysisCacheLoaded(true);
+        }
+      });
 
     return () => {
       cancelled = true;
@@ -6453,6 +6471,10 @@ export function App(): JSX.Element {
     playbackPreviewMode === 'reference' ? null : selectedPlaybackVersionId;
 
   useEffect(() => {
+    if (!masteringAnalysisCacheLoaded) {
+      return;
+    }
+
     if (libraryActiveVersions.length === 0 && visibleActiveVersions.length === 0) {
       return;
     }
@@ -6467,25 +6489,27 @@ export function App(): JSX.Element {
       pausedForUrgentCount: 0,
     };
 
-    // v3.130 follow-up — startup/main-view instant-switch warmup. The previous pass
-    // only warmed ffmpeg measured analysis (LUFS / platform-normalization),
-    // so visible but never-selected rows still hit `analyzeTrackFromUrl` on
-    // first click and flashed/loading-blocked the mastering panel. Warm BOTH
-    // caches for the latest version of every visible row immediately.
+    // v3.130 follow-up originally warmed both ffmpeg measured analysis and
+    // WebAudio preview decode so graphs were also instant. Ethan clarified in
+    // v3.141 that graph readiness is not the product invariant: waveform and
+    // loudness-history UI can load lazily. The user-visible bug is delayed LUFS
+    // / platform-normalization when switching tracks, so startup warmup now
+    // preloads only measured scalar analysis (integrated LUFS, true peak,
+    // sample rate) and derived platform normalization cache entries.
     //
     // v3.137 — Ethan's follow-up: the latest version of every linked-library
     // track is now part of startup warmup itself, not an optional second-tier
     // background fill. Hidden/search-filtered/other-folder latest rows use the
     // same NEIGHBOR priority as visible rows and are not gated by the pause
     // toggle, so once the startup warmup drains, double-click switching hits
-    // the in-memory measured + preview caches immediately.
+    // measured LUFS / normalization data immediately.
     //
-    // v3.140 — Ethan's follow-up: do NOT blast the whole latest-track library
-    // into the queues at once. Startup warmup now walks the visible-then-
-    // hidden list sequentially, while each track's measured + preview work runs
-    // in parallel. Between tracks it yields to USER_SELECTED queue work, so a
+    // v3.140/v3.141 — do NOT blast the whole latest-track library into the
+    // queues at once. Startup warmup now walks the visible-then-hidden list
+    // sequentially. Between tracks it yields to USER_SELECTED queue work, so a
     // double-click/reference/listen action can jump the line and the warmup
-    // resumes from the next remaining latest track afterwards.
+    // resumes from the next remaining latest track afterwards. It intentionally
+    // does not enqueue preview decode; decoded-audio-derived graphs are lazy.
     const visibleVersionIds = new Set(
       visibleActiveVersions.map(({ version }) => version.id)
     );
@@ -6548,61 +6572,6 @@ export function App(): JSX.Element {
         };
       }
     };
-
-    async function warmPreviewAnalysis(
-      version: SongVersion,
-      cacheKey: string,
-      priority: AnalysisPriority
-    ): Promise<void> {
-      if (
-        previewAnalysisCacheRef.current.has(cacheKey) ||
-        previewAnalysisPreloadPendingVersionIdsRef.current.has(version.id)
-      ) {
-        return;
-      }
-
-      previewAnalysisPreloadPendingVersionIdsRef.current.add(version.id);
-
-      try {
-        const playbackSource = await window.producerPlayer.resolvePlaybackSource(
-          version.filePath
-        );
-
-        if (playbackSource.exists === false || !playbackSource.url) {
-          return;
-        }
-
-        if (previewAnalysisCacheRef.current.has(cacheKey)) {
-          return;
-        }
-
-        const previewAnalysis = await analyzeTrackFromUrl(
-          playbackSource.url,
-          undefined,
-          {
-            priority,
-            key: cacheKey,
-          }
-        );
-
-        cacheMasteringAnalysisValue(
-          previewAnalysisCacheRef.current,
-          cacheKey,
-          previewAnalysis
-        );
-      } catch (error: unknown) {
-        void window.producerPlayer.rendererLog(
-          'warn',
-          'Track preview warmup failed',
-          {
-            filePath: version.filePath,
-            error: error instanceof Error ? error.message : String(error),
-          }
-        );
-      } finally {
-        previewAnalysisPreloadPendingVersionIdsRef.current.delete(version.id);
-      }
-    }
 
     async function warmMeasuredAnalysis(
       entry: (typeof orderedPreloadEntries)[number],
@@ -6678,10 +6647,10 @@ export function App(): JSX.Element {
       }
     }
 
-    // Measured + preview processing for EACH track is parallel, but the
-    // top-level walk is sequential. That keeps startup gentle and avoids a
-    // 9-at-once decode/ffmpeg burst while preserving the existing cache-
-    // readiness invariant once the warmup drains.
+    // Measured processing is sequential at the top level. That keeps startup
+    // gentle and avoids a many-at-once ffmpeg burst while preserving the LUFS /
+    // normalization readiness invariant once the warmup drains. Preview decode
+    // remains user-selected/lazy because it is only needed for graphs.
     const runPromise = latestTrackWarmupTailRef.current
       .catch(() => undefined)
       .then(() =>
@@ -6700,13 +6669,9 @@ export function App(): JSX.Element {
             // background bucket. The selected-track effect can still promote the
             // same key to USER_SELECTED if Ethan clicks it.
             promoteMeasuredAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
-            promotePreviewAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
 
             markWarmupStarted(version.id);
-            await Promise.allSettled([
-              warmPreviewAnalysis(version, cacheKey, ANALYSIS_PRIORITY_NEIGHBOR),
-              warmMeasuredAnalysis(entry, cacheKey),
-            ]);
+            await warmMeasuredAnalysis(entry, cacheKey);
             markWarmupCompleted(version.id);
           },
         })
@@ -6737,6 +6702,7 @@ export function App(): JSX.Element {
       }
     };
   }, [
+    masteringAnalysisCacheLoaded,
     libraryActiveVersionAnalysisKey,
     libraryActiveVersions,
     // v3.121 (Concern 3) — re-run when the visible-songs subset changes

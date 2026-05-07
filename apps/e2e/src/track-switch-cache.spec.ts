@@ -9,16 +9,17 @@ import { launchProducerPlayer } from './helpers/electron-app';
 //
 // These tests pin down the *user-felt* invariant of the precompute layer:
 // once the startup latest-version warmup has run, switching to a visible,
-// search-hidden, or other-folder latest track must come back from cache without
-// re-running ffmpeg or preview decode.
+// search-hidden, or other-folder latest track must have measured LUFS / platform
+// normalization ready from cache without re-running ffmpeg. WebAudio preview
+// decode is allowed to load lazily for graphs.
 // We verify this two ways:
 //   1. The persisted mastering-analysis cache (`getMasteringAnalysisCache()`
 //      IPC) contains entries for every latest linked-library version — proof that
-//      the measured background pool fanned the work out concurrently and
-//      finished within a sensible bound.
-//   2. The renderer-side warmup hooks report both measured+preview caches
-//      ready, then a first jump to a never-selected row has no
-//      synchronous 'Loading' flash.
+//      the measured warmup filled LUFS / true-peak stats and finished within a
+//      sensible bound.
+//   2. The renderer-side warmup hooks report measured cache readiness, then a
+//      first jump to a never-selected row has immediate normalization gain even
+//      if graph/preview decode is still cold.
 //
 // The pool is a renderer-side concern; the cache is a main-process JSON file
 // keyed by filePath + sizeBytes + modifiedAtMs. Both layers cooperate to make
@@ -180,6 +181,11 @@ function countBackgroundEnqueues(snapshot: AnalysisQueueSnapshot): number {
     snapshot.preview.totalEnqueuedByPriority.background +
     snapshot.measured.totalEnqueuedByPriority.background
   );
+}
+
+function countMeasuredEnqueues(snapshot: AnalysisQueueSnapshot): number {
+  const measured = snapshot.measured.totalEnqueuedByPriority;
+  return measured.user + measured.neighbor + measured.background;
 }
 
 async function expectDoubleClickSwitchIsInstantlyReady(
@@ -478,7 +484,6 @@ test.describe('Track-switch precompute cache @smoke', () => {
                 visible.map((entry) => entry.fileName).sort()
               ),
               libraryFileNames: state.map((entry) => entry.fileName).sort(),
-              allPreviewReady: state.every((entry) => entry.previewReady),
               allMeasuredReady: state.every((entry) => entry.measuredReady),
             };
           },
@@ -487,7 +492,6 @@ test.describe('Track-switch precompute cache @smoke', () => {
         .toEqual({
           visibleFileNames: ['Alpha v1.wav'],
           libraryFileNames: ['Alpha v1.wav', 'Bravo v1.wav', 'Charlie v2.wav'],
-          allPreviewReady: true,
           allMeasuredReady: true,
         });
 
@@ -509,12 +513,31 @@ test.describe('Track-switch precompute cache @smoke', () => {
         .filter({ hasText: 'Bravo' })
         .first();
       await expect(bravoRow).toBeVisible();
+      const bravoWarmupState = (await readLibraryWarmupState(page)).find(
+        (entry) => entry.fileName === 'Bravo v1.wav'
+      );
+      expect(bravoWarmupState).toBeTruthy();
+      const bravoNormalizationGain = await readCachedNormalizationPreviewGainForVersion(
+        page,
+        bravoWarmupState!.versionId
+      );
+      expect(typeof bravoNormalizationGain).toBe('number');
+      await dropPreviewAnalysisCacheForVersion(page, bravoWarmupState!.versionId);
+      const measuredEnqueuesBeforeBravoSwitch = countMeasuredEnqueues(await readAnalysisQueues(page));
       await expectDoubleClickSwitchIsInstantlyReady(
         page,
         bravoRow,
         1,
-        'search-hidden latest row should switch from startup warmup cache'
+        'search-hidden latest row should switch from startup measured/LUFS cache even while preview decode is cold',
+        {
+          requireFullAnalysisReady: false,
+          expectedNormalizationPreviewGainDb: bravoNormalizationGain,
+        }
       );
+      expect(
+        countMeasuredEnqueues(await readAnalysisQueues(page)),
+        'double-clicking an already-warmed version must reuse measured LUFS cache, not enqueue ffmpeg reprocessing'
+      ).toBe(measuredEnqueuesBeforeBravoSwitch);
 
       await page.evaluate(() => {
         (
@@ -548,9 +571,7 @@ test.describe('Track-switch precompute cache @smoke', () => {
         charlieWarmupState!.versionId
       );
       expect(typeof charlieNormalizationGain).toBe('number');
-      expect(await dropPreviewAnalysisCacheForVersion(page, charlieWarmupState!.versionId)).toBe(
-        true
-      );
+      await dropPreviewAnalysisCacheForVersion(page, charlieWarmupState!.versionId);
       await expectDoubleClickSwitchIsInstantlyReady(
         page,
         charlieRow,
@@ -678,18 +699,15 @@ test.describe('Track-switch precompute cache @smoke', () => {
           { status: 'ready', loading: false },
         ]);
 
-      // v3.130 follow-up — startup warmup must cover the full selected-track
-      // analysis path for every visible latest-version row, not just the
-      // persisted ffmpeg/LUFS cache. Otherwise the first click on a
-      // never-selected visible track still flashes "Preparing" / "Loading"
-      // while the renderer decodes its preview waveform.
+      // v3.141 — startup warmup covers the measured LUFS / true-peak path for
+      // every visible latest-version row. WebAudio preview decode is graph/UI
+      // data and may remain cold until the user selects a track.
       await expect
         .poll(
           async () => {
             const state = await readVisibleWarmupState(page);
             return {
               fileNames: state.map((entry) => entry.fileName).sort(),
-              allPreviewReady: state.every((entry) => entry.previewReady),
               allMeasuredReady: state.every((entry) => entry.measuredReady),
             };
           },
@@ -697,7 +715,6 @@ test.describe('Track-switch precompute cache @smoke', () => {
         )
         .toEqual({
           fileNames: ['Alpha v1.wav', 'Bravo v1.wav', 'Charlie v2.wav'],
-          allPreviewReady: true,
           allMeasuredReady: true,
         });
 
@@ -712,12 +729,96 @@ test.describe('Track-switch precompute cache @smoke', () => {
         .getByTestId('main-list-row')
         .filter({ hasText: 'Charlie' })
         .first();
+      const charlieNormalizationGain = await readCachedNormalizationPreviewGainForVersion(
+        page,
+        charlieWarmupState!.versionId
+      );
+      expect(typeof charlieNormalizationGain).toBe('number');
+      await dropPreviewAnalysisCacheForVersion(page, charlieWarmupState!.versionId);
       await expectDoubleClickSwitchIsInstantlyReady(
         page,
         charlieRow,
         2,
-        'never-selected visible latest rows should be fully prewarmed on startup'
+        'never-selected visible latest rows should have measured LUFS warm on startup even while preview decode is cold',
+        {
+          requireFullAnalysisReady: false,
+          expectedNormalizationPreviewGainDb: charlieNormalizationGain,
+        }
       );
+
+      // v3.141 — strict cache invariant from Ethan's A↔B↔A complaint:
+      // once a version is processed under the same file identity (cache key =
+      // schema + canonical file path + size + mtime), switching away and back
+      // must hit the completed shared measured cache. It must not enqueue
+      // another ffmpeg measured-analysis job. Preview decode is graph/UI data
+      // and may be requested lazily.
+      const alphaRow = page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Alpha' })
+        .first();
+      const bravoRow = page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Bravo' })
+        .first();
+      await expect(alphaRow).toBeVisible();
+      await expect(bravoRow).toBeVisible();
+      const alphaWarmupState = await readVisibleWarmupState(page).then((state) =>
+        state.find((entry) => entry.songTitle === 'Alpha') ?? null
+      );
+      const bravoWarmupState = await readVisibleWarmupState(page).then((state) =>
+        state.find((entry) => entry.songTitle === 'Bravo') ?? null
+      );
+      expect(alphaWarmupState).toBeTruthy();
+      expect(bravoWarmupState).toBeTruthy();
+      const alphaNormalizationGain = await readCachedNormalizationPreviewGainForVersion(
+        page,
+        alphaWarmupState!.versionId
+      );
+      const bravoNormalizationGain = await readCachedNormalizationPreviewGainForVersion(
+        page,
+        bravoWarmupState!.versionId
+      );
+      expect(typeof alphaNormalizationGain).toBe('number');
+      expect(typeof bravoNormalizationGain).toBe('number');
+      await dropPreviewAnalysisCacheForVersion(page, alphaWarmupState!.versionId);
+      await dropPreviewAnalysisCacheForVersion(page, bravoWarmupState!.versionId);
+      const measuredEnqueuesBeforeBackAndForth = countMeasuredEnqueues(await readAnalysisQueues(page));
+
+      await expectDoubleClickSwitchIsInstantlyReady(
+        page,
+        alphaRow,
+        1,
+        'A↔B↔A first switch should reuse Alpha cached measured analysis',
+        {
+          requireFullAnalysisReady: false,
+          expectedNormalizationPreviewGainDb: alphaNormalizationGain,
+        }
+      );
+      await expectDoubleClickSwitchIsInstantlyReady(
+        page,
+        bravoRow,
+        1,
+        'A↔B↔A middle switch should reuse Bravo cached measured analysis',
+        {
+          requireFullAnalysisReady: false,
+          expectedNormalizationPreviewGainDb: bravoNormalizationGain,
+        }
+      );
+      await expectDoubleClickSwitchIsInstantlyReady(
+        page,
+        alphaRow,
+        1,
+        'A↔B↔A return switch should reuse Alpha cached measured analysis again',
+        {
+          requireFullAnalysisReady: false,
+          expectedNormalizationPreviewGainDb: alphaNormalizationGain,
+        }
+      );
+
+      expect(
+        countMeasuredEnqueues(await readAnalysisQueues(page)),
+        'A↔B↔A switching between unchanged versions must not enqueue duplicate ffmpeg measured analysis'
+      ).toBe(measuredEnqueuesBeforeBackAndForth);
 
     } finally {
       await electronApp.close();

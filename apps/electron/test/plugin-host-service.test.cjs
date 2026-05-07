@@ -29,6 +29,7 @@ const {
   defaultGlobalPluginScanRoots,
   discoverGlobalPlugins,
   resolveSidecarBinary,
+  resolveSidecarBinaryCandidates,
   diffChainReconciliation,
 } = require('../dist/plugin-host-service.test.cjs');
 
@@ -105,8 +106,29 @@ async function withTempPluginRoot(fn) {
 // ---------------------------------------------------------------------------
 
 test('resolveSidecarBinary returns null when no build output exists in a pristine cwd', () => {
-  const found = resolveSidecarBinary('/tmp/pp-does-not-exist-here');
+  const found = resolveSidecarBinary('/tmp/pp-does-not-exist-here', { resourcesPath: null });
   assert.equal(found, null);
+});
+
+test('resolveSidecarBinary uses Electron process.resourcesPath by default in packaged apps', async () => {
+  await withTempPluginRoot((root) => {
+    const resourcesPath = join(root, 'Producer Player.app', 'Contents', 'Resources');
+    const binDir = join(resourcesPath, 'app.asar.unpacked', 'apps/electron/dist/bin');
+    mkdirSync(binDir, { recursive: true });
+    const binPath = join(binDir, 'pp-audio-host');
+    writeFileSync(binPath, 'fake sidecar');
+
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
+    Object.defineProperty(process, 'resourcesPath', { value: resourcesPath, configurable: true });
+    try {
+      const candidates = resolveSidecarBinaryCandidates('/tmp/pp-packaged-cwd', { platform: 'darwin' });
+      assert.equal(candidates[0], binPath);
+      assert.equal(resolveSidecarBinary('/tmp/pp-packaged-cwd', { platform: 'darwin' }), binPath);
+    } finally {
+      if (descriptor) Object.defineProperty(process, 'resourcesPath', descriptor);
+      else delete process.resourcesPath;
+    }
+  });
 });
 
 test('resolveSidecarBinary finds the packaged sidecar via resourcesPath/app.asar.unpacked', () => {
@@ -311,6 +333,48 @@ test('scanPlugins keeps validated sidecar metadata when sidecar finds plugins', 
     assert.equal(library.plugins.length, 1);
     assert.equal(library.plugins[0].id, 'vst3:validated');
     assert.equal(library.plugins[0].vendor, 'Unit Test');
+  });
+});
+
+test('scanPlugins merges filesystem discovery when sidecar returns partial metadata with failures', async () => {
+  await withTempPluginRoot(async (root) => {
+    const validatedPath = join(root, 'Validated EQ.vst3');
+    const fallbackPath = join(root, 'Fallback Candidate.vst3');
+    mkdirSync(validatedPath);
+    mkdirSync(fallbackPath);
+
+    const fake = makeFakeChild({
+      replies: {
+        scan_plugins: {
+          plugins: [
+            {
+              id: 'vst3:validated',
+              name: 'Validated EQ',
+              vendor: 'Unit Test',
+              format: 'vst3',
+              version: '1.0',
+              path: validatedPath,
+              categories: ['Fx'],
+              isSupported: true,
+              failureReason: null,
+            },
+          ],
+          failed: [{ format: 'vst3', path: fallbackPath, failureReason: 'scanner reported failure' }],
+        },
+      },
+    });
+    const service = new PluginHostService('/fake/path', () => fake);
+    const library = await service.scanPlugins({ paths: [root], format: 'all' });
+
+    assert.deepEqual(
+      library.plugins.map((plugin) => plugin.name).sort(),
+      ['Fallback Candidate', 'Validated EQ'],
+    );
+    assert.equal(library.plugins.find((plugin) => plugin.name === 'Validated EQ').vendor, 'Unit Test');
+    assert.equal(
+      library.plugins.find((plugin) => plugin.name === 'Fallback Candidate').id.startsWith('vst3:fs-'),
+      true,
+    );
   });
 });
 

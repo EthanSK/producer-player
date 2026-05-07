@@ -483,6 +483,58 @@ describe('AnalysisQueue', () => {
     }
   });
 
+  it('dump() exposes labels for currently running jobs', async () => {
+    const queue = new AnalysisQueue({ concurrency: 1, maxUserBypassSlots: 1 });
+    const backgroundGate = deferred<void>();
+    const userGate = deferred<void>();
+
+    const background = queue.enqueue(
+      async () => {
+        await backgroundGate.promise;
+      },
+      {
+        key: 'cache-key-alpha',
+        label: 'Alpha v1.wav',
+        priority: ANALYSIS_PRIORITY_BACKGROUND,
+      }
+    );
+
+    await flushMicrotasks();
+
+    const user = queue.enqueue(
+      async () => {
+        await userGate.promise;
+      },
+      {
+        key: 'cache-key-bravo',
+        label: 'Bravo v2.wav',
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+      }
+    );
+
+    await flushMicrotasks();
+
+    expect(queue.dump().runningJobs).toEqual([
+      {
+        key: 'cache-key-alpha',
+        priority: ANALYSIS_PRIORITY_BACKGROUND,
+        label: 'Alpha v1.wav',
+        slot: 'regular',
+      },
+      {
+        key: 'cache-key-bravo',
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+        label: 'Bravo v2.wav',
+        slot: 'user-bypass',
+      },
+    ]);
+
+    userGate.resolve();
+    backgroundGate.resolve();
+    await Promise.all([background, user]);
+    expect(queue.dump().runningJobs).toEqual([]);
+  });
+
   // --- v3.120 (Item #14 follow-up) — task timeout tests ---
 
   it('rejects a stuck task after taskTimeoutMs and frees the slot', async () => {

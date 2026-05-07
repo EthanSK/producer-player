@@ -617,10 +617,9 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     // unrestricted file-system + shell access. User opts in via the
     // explicitly-labeled-DANGEROUS toggle in AgentSettings.
     agentDangerouslyBypassPermissions: false,
-    // v3.120 (Item #14 follow-up) — bg analysis precompute kill-switch.
-    // Default ON so the precompute behavior matches every prior version.
-    // Toggled OFF when the user clicks the pause button in the status
-    // sidebar header to stop new bg precompute jobs from being enqueued.
+    // v3.145 — legacy bg-analysis precompute kill-switch field. The visible
+    // pause control is gone; keep the field true so older OFF state cannot
+    // accidentally suppress startup warmup after upgrade.
     agentBackgroundPrecomputeEnabled: true,
     songDawOffsets: {},
     checklistDawOffsetDefaultSeconds: 0,
@@ -712,14 +711,10 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.agentDangerouslyBypassPermissions === 'boolean'
         ? raw.agentDangerouslyBypassPermissions
         : fallback.agentDangerouslyBypassPermissions,
-    // v3.120 (Item #14 follow-up) — bg precompute pause toggle. Falls back
-    // to the default (true) so old state files implicitly opt in to the
-    // historical precompute behavior. Only an explicit boolean false in
-    // persisted state actually pauses precompute.
-    agentBackgroundPrecomputeEnabled:
-      typeof raw.agentBackgroundPrecomputeEnabled === 'boolean'
-        ? raw.agentBackgroundPrecomputeEnabled
-        : fallback.agentBackgroundPrecomputeEnabled,
+    // v3.145 — migrate the removed bg-precompute pause toggle to ON. Older
+    // state files may contain `false`; the renderer no longer exposes a pause
+    // UI, so preserving OFF would silently block useful startup warmup.
+    agentBackgroundPrecomputeEnabled: fallback.agentBackgroundPrecomputeEnabled,
     songDawOffsets: parseSongDawOffsets(raw.songDawOffsets),
     // Migration: if the new "default" fields are missing but the legacy
     // app-global `checklistDawOffsetSeconds`/`checklistDawOffsetEnabled`

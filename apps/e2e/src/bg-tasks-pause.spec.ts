@@ -116,6 +116,26 @@ test.describe('Background tasks status jobs @smoke', () => {
       440
     );
 
+    // Library startup still reads the legacy Electron-state slice, while the
+    // removed pause flag lived in unified user state. Seed both so this launch
+    // covers the real upgrade shape: existing linked folder + old paused/off
+    // preference before the renderer has had a chance to write anything.
+    await fs.writeFile(
+      path.join(directories.userDataDirectory, 'producer-player-electron-state.json'),
+      JSON.stringify(
+        {
+          version: 3,
+          linkedFolderPaths: [directories.fixtureDirectory],
+          linkedFolderBookmarks: {},
+          autoMoveOld: true,
+          songOrder: [],
+          updatedAt: '2026-05-07T00:00:00.000Z',
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
     await fs.writeFile(
       path.join(directories.userDataDirectory, 'producer-player-user-state.json'),
       JSON.stringify(

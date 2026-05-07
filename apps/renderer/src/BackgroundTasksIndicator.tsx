@@ -17,27 +17,10 @@
 //   - dumpPreviewAnalysisQueue() — preview WAV decoder
 //   - measured queue dump passed via prop (App.tsx owns the singleton)
 //
-// v3.120 (Item #14 follow-up) — pause/stop button next to the pill.
-//   Clicking flips `agentBackgroundPrecomputeEnabled` in user state. When
-//   paused: the pill stays mounted (so the button is always reachable) and
-//   renders in a muted "paused" treatment with a "paused" label. Optional
-//   bg-preload effects in App.tsx short-circuit while paused, so no new
-//   priority-2 jobs flow through the queues. v3.137 keeps startup latest-track
-//   warmup independent of this pause so switching can still become instantly
-//   ready after launch. In-flight jobs keep going until they finish naturally
-//   (no abort signal — letting them finish matches the queue's existing
-//   cancellation policy and avoids partial-write artifacts in the mastering
-//   cache).
-//
-// v3.121 (Concern 1) — hover/focus popover that explains the
-//   "active / queued" pill at a glance. Ethan kept asking what the two
-//   numbers mean; the answer (active = currently processing,
-//   queued = waiting, priority bypass for clicks, pause stops new jobs,
-//   60s task timeout) belongs right next to the pill rather than buried
-//   in a help-tooltip elsewhere. Opens on mouseenter and on keyboard focus
-//   (focus visibility shows it; Esc dismisses it). Click does NOT toggle
-//   the popover — Ethan asked specifically for hover semantics, not a
-//   click modal.
+// v3.145 — the popover now lists the jobs currently running in both queues
+//   and the user-facing pause/resume control is gone. The legacy persisted
+//   `agentBackgroundPrecomputeEnabled=false` flag is ignored by App.tsx so a
+//   stale paused state can no longer hide/start-stop warmup by accident.
 import {
   type CSSProperties,
   useCallback,
@@ -46,6 +29,15 @@ import {
   useState,
 } from 'react';
 import { dumpPreviewAnalysisQueue } from './audioAnalysis';
+import {
+  ANALYSIS_PRIORITY_BACKGROUND,
+  ANALYSIS_PRIORITY_NEIGHBOR,
+  ANALYSIS_PRIORITY_USER_SELECTED,
+  type AnalysisPriority,
+  type AnalysisQueueJobSnapshot,
+} from './audioAnalysisQueue';
+
+type QueueDump = ReturnType<typeof dumpPreviewAnalysisQueue>;
 
 export interface BackgroundTasksIndicatorProps {
   /**
@@ -53,52 +45,114 @@ export interface BackgroundTasksIndicatorProps {
    * imported) because the measured queue lives in App.tsx — keeps
    * audioAnalysisQueue.ts decoupled from renderer state.
    */
-  getMeasuredDump: () => {
-    active: number;
-    userBypassActive: number;
-    pending: number;
-    pendingByPriority: { user: number; neighbor: number; background: number };
-  };
-  /**
-   * v3.120 — current pause state. When true, the indicator renders in the
-   * muted "paused" treatment regardless of queue activity. Bound to user
-   * state's `agentBackgroundPrecomputeEnabled` (inverted) in App.tsx.
-   */
-  paused?: boolean;
-  /**
-   * v3.120 — fired when the user clicks the pause/play button. App.tsx
-   * uses this to flip `agentBackgroundPrecomputeEnabled`. Optional so the
-   * indicator can still mount in legacy callsites without the toggle.
-   */
-  onTogglePaused?: () => void;
+  getMeasuredDump: () => QueueDump;
+}
+
+export interface BackgroundTaskRunningJob {
+  queue: 'Measured' | 'Preview';
+  key: string | null;
+  priority: AnalysisPriority;
+  label: string | null;
+  slot: AnalysisQueueJobSnapshot['slot'];
 }
 
 interface AggregateSnapshot {
   active: number;
   pending: number;
   bgPending: number;
+  runningJobs: BackgroundTaskRunningJob[];
 }
 
-function aggregate(
-  preview: ReturnType<typeof dumpPreviewAnalysisQueue>,
-  measured: BackgroundTasksIndicatorProps['getMeasuredDump'] extends () => infer R ? R : never
-): AggregateSnapshot {
+function priorityLabel(priority: AnalysisPriority): string {
+  if (priority === ANALYSIS_PRIORITY_USER_SELECTED) {
+    return 'selected';
+  }
+  if (priority === ANALYSIS_PRIORITY_NEIGHBOR) {
+    return 'warmup';
+  }
+  if (priority === ANALYSIS_PRIORITY_BACKGROUND) {
+    return 'background';
+  }
+  return `priority ${priority}`;
+}
+
+function compactFallbackKey(key: string | null): string | null {
+  if (!key) {
+    return null;
+  }
+
+  const filename = key.split(/[\\/]/).filter(Boolean).pop();
+  const fallback = filename && filename.length > 0 ? filename : key;
+  return fallback.length > 72 ? `${fallback.slice(0, 69)}…` : fallback;
+}
+
+function jobDisplayName(job: BackgroundTaskRunningJob): string {
+  const label = job.label?.trim();
+  if (label) {
+    return label;
+  }
+  return compactFallbackKey(job.key) ?? 'unlabelled analysis job';
+}
+
+export function formatBackgroundTaskRunningJob(
+  job: BackgroundTaskRunningJob
+): string {
+  return `${job.queue}: ${jobDisplayName(job)} (${priorityLabel(job.priority)})`;
+}
+
+function collectRunningJobs(
+  queue: BackgroundTaskRunningJob['queue'],
+  dump: QueueDump
+): BackgroundTaskRunningJob[] {
+  return dump.runningJobs.map((job) => ({
+    queue,
+    key: job.key,
+    priority: job.priority,
+    label: job.label,
+    slot: job.slot,
+  }));
+}
+
+function runningJobSignature(jobs: BackgroundTaskRunningJob[]): string {
+  return jobs
+    .map(
+      (job) =>
+        `${job.queue}:${job.slot}:${job.priority}:${job.label ?? ''}:${job.key ?? ''}`
+    )
+    .join('|');
+}
+
+function snapshotsEqual(left: AggregateSnapshot, right: AggregateSnapshot): boolean {
+  return (
+    left.active === right.active &&
+    left.pending === right.pending &&
+    left.bgPending === right.bgPending &&
+    runningJobSignature(left.runningJobs) === runningJobSignature(right.runningJobs)
+  );
+}
+
+function aggregate(preview: QueueDump, measured: QueueDump): AggregateSnapshot {
   const active =
     preview.active + preview.userBypassActive + measured.active + measured.userBypassActive;
   const pending = preview.pending + measured.pending;
   const bgPending =
     preview.pendingByPriority.background + measured.pendingByPriority.background;
-  return { active, pending, bgPending };
+  const runningJobs = [
+    ...collectRunningJobs('Measured', measured),
+    ...collectRunningJobs('Preview', preview),
+  ];
+  return { active, pending, bgPending, runningJobs };
 }
 
 const POLL_INTERVAL_MS = 500;
 const POPOVER_MAX_WIDTH_PX = 520;
 const POPOVER_VIEWPORT_MARGIN_PX = 12;
+const MAX_RUNNING_JOBS_SHOWN = 5;
 
 export function BackgroundTasksIndicator(
   props: BackgroundTasksIndicatorProps
 ): JSX.Element | null {
-  const { getMeasuredDump, paused = false, onTogglePaused } = props;
+  const { getMeasuredDump } = props;
   const [snapshot, setSnapshot] = useState<AggregateSnapshot>(() =>
     aggregate(dumpPreviewAnalysisQueue(), getMeasuredDump())
   );
@@ -143,17 +197,7 @@ export function BackgroundTasksIndicator(
         return;
       }
       const next = aggregate(dumpPreviewAnalysisQueue(), getMeasuredDump());
-      // Cheap shallow compare to avoid spurious re-renders.
-      setSnapshot((previous) => {
-        if (
-          previous.active === next.active &&
-          previous.pending === next.pending &&
-          previous.bgPending === next.bgPending
-        ) {
-          return previous;
-        }
-        return next;
-      });
+      setSnapshot((previous) => (snapshotsEqual(previous, next) ? previous : next));
     };
 
     tick();
@@ -192,8 +236,8 @@ export function BackgroundTasksIndicator(
 
   const handleMouseEnter = useCallback(() => setPopoverOpen(true), []);
   const handleMouseLeave = useCallback((event: React.MouseEvent) => {
-    // Don't close when the cursor moves between sibling children (button,
-    // dot, label, popover itself). Only close when leaving the pill.
+    // Don't close when the cursor moves between sibling children (dot, label,
+    // popover itself). Only close when leaving the pill.
     const related = event.relatedTarget as Node | null;
     if (
       related &&
@@ -217,106 +261,50 @@ export function BackgroundTasksIndicator(
     setPopoverOpen(false);
   }, []);
 
-  // v3.120 — pre-3.120 we returned null when both queues were idle. Now
-  // we keep the pill mounted whenever the user has paused precompute so
-  // the resume button is always reachable. The pill is still hidden in
-  // the steady state (idle + not paused) to avoid visual noise.
   const idle = snapshot.active === 0 && snapshot.pending === 0;
-  if (idle && !paused) {
+  if (idle) {
     return null;
   }
 
   // v3.121 (Concern 1) — short native title kept as a fallback for
   // screenreaders / touch users who can't hover. The full explanation
   // lives in the popover below.
-  const tooltip = paused
-    ? 'Background measured analysis paused. Hover for details.'
-    : `Audio analysis: ${snapshot.active} processing` +
-      (snapshot.pending > 0 ? `, ${snapshot.pending} queued` : '') +
-      '. Hover for details.';
-
-  const buttonLabel = paused
-    ? 'Resume background analysis'
-    : 'Pause background analysis';
+  const tooltip =
+    `Audio analysis: ${snapshot.active} processing` +
+    (snapshot.pending > 0 ? `, ${snapshot.pending} queued` : '') +
+    '. Hover for details.';
   const popoverStyle: CSSProperties | undefined = popoverPosition
     ? {
         left: popoverPosition.left,
         top: popoverPosition.top,
       }
     : undefined;
+  const visibleRunningJobs = snapshot.runningJobs.slice(0, MAX_RUNNING_JOBS_SHOWN);
+  const hiddenRunningJobCount = Math.max(
+    0,
+    snapshot.runningJobs.length - visibleRunningJobs.length
+  );
 
   return (
     <span
       ref={containerRef}
-      className={
-        paused ? 'bg-tasks-indicator bg-tasks-indicator-paused' : 'bg-tasks-indicator'
-      }
+      className="bg-tasks-indicator"
       role="status"
       aria-live="polite"
       title={tooltip}
       data-testid="bg-tasks-indicator"
-      data-paused={paused ? 'true' : 'false'}
       data-popover-open={popoverOpen ? 'true' : 'false'}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onFocusCapture={handleFocusCapture}
       onBlurCapture={handleBlurCapture}
     >
-      <span
-        className={
-          paused
-            ? 'bg-tasks-indicator-dot bg-tasks-indicator-dot-paused'
-            : 'bg-tasks-indicator-dot'
-        }
-        aria-hidden="true"
-      />
+      <span className="bg-tasks-indicator-dot" aria-hidden="true" />
       <span className="bg-tasks-indicator-label">
-        {paused
-          ? 'paused'
-          : `${snapshot.active > 0 ? snapshot.active : '·'}${
-              snapshot.pending > 0 ? ` / ${snapshot.pending}` : ''
-            }`}
+        {`${snapshot.active > 0 ? snapshot.active : '·'}${
+          snapshot.pending > 0 ? ` / ${snapshot.pending}` : ''
+        }`}
       </span>
-      {onTogglePaused ? (
-        <button
-          type="button"
-          className="bg-tasks-indicator-toggle"
-          onClick={(event) => {
-            // Stop the click from bubbling to anything that wraps the pill
-            // (e.g. focus stealers in the sidebar header).
-            event.stopPropagation();
-            onTogglePaused();
-          }}
-          aria-label={buttonLabel}
-          title={buttonLabel}
-          data-testid="bg-tasks-indicator-toggle"
-        >
-          {paused ? (
-            // Play triangle (▶) — resume
-            <svg
-              viewBox="0 0 12 12"
-              width="9"
-              height="9"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M3 1.5 L10 6 L3 10.5 Z" fill="currentColor" />
-            </svg>
-          ) : (
-            // Pause bars (⏸) — stop new bg jobs
-            <svg
-              viewBox="0 0 12 12"
-              width="9"
-              height="9"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <rect x="2.5" y="1.5" width="2.5" height="9" fill="currentColor" />
-              <rect x="7" y="1.5" width="2.5" height="9" fill="currentColor" />
-            </svg>
-          )}
-        </button>
-      ) : null}
       {popoverOpen && popoverStyle ? (
         <span
           className="bg-tasks-indicator-popover"
@@ -331,9 +319,31 @@ export function BackgroundTasksIndicator(
             <strong className="bg-tasks-indicator-popover-row-label">
               Active / queued:
             </strong>{' '}
-            {paused
-              ? 'paused — optional background jobs are stopped; startup measured warmup may finish.'
-              : `${snapshot.active} job${snapshot.active === 1 ? '' : 's'} running, ${snapshot.pending} waiting in line.`}
+            {`${snapshot.active} job${snapshot.active === 1 ? '' : 's'} running, ${snapshot.pending} waiting in line.`}
+          </span>
+          <span className="bg-tasks-indicator-popover-row">
+            <strong className="bg-tasks-indicator-popover-row-label">
+              Running now:
+            </strong>{' '}
+            {visibleRunningJobs.length > 0 ? (
+              <span className="bg-tasks-indicator-job-list">
+                {visibleRunningJobs.map((job, index) => (
+                  <span
+                    key={`${job.queue}-${job.key ?? job.label ?? index}-${index}`}
+                    className="bg-tasks-indicator-job"
+                  >
+                    {formatBackgroundTaskRunningJob(job)}
+                  </span>
+                ))}
+                {hiddenRunningJobCount > 0 ? (
+                  <span className="bg-tasks-indicator-job bg-tasks-indicator-job-muted">
+                    +{hiddenRunningJobCount} more
+                  </span>
+                ) : null}
+              </span>
+            ) : (
+              'No job is actively running yet; the next queued item will start when a slot opens.'
+            )}
           </span>
           <span className="bg-tasks-indicator-popover-row">
             <strong className="bg-tasks-indicator-popover-row-label">
@@ -349,15 +359,6 @@ export function BackgroundTasksIndicator(
             jobs waiting for an open slot. Clicking a track jumps the queue
             (user-priority bypasses up to 3 background jobs so a click
             never stalls behind precompute).
-          </span>
-          <span className="bg-tasks-indicator-popover-row">
-            <strong className="bg-tasks-indicator-popover-row-label">
-              Pause:
-            </strong>{' '}
-            stops optional background-precompute jobs. Startup latest-track
-            measured warmup can still finish so LUFS/stat switching is ready;
-            in-flight jobs finish naturally — no partial-write artifacts in the
-            cache.
           </span>
           <span className="bg-tasks-indicator-popover-row">
             <strong className="bg-tasks-indicator-popover-row-label">

@@ -55,10 +55,18 @@ export interface AnalysisPriorityCounts {
 interface QueuedTask<T> {
   key: string | null;
   priority: AnalysisPriority;
+  label: string | null;
   insertionOrder: number;
   task: () => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason: unknown) => void;
+}
+
+export interface AnalysisQueueJobSnapshot {
+  key: string | null;
+  priority: AnalysisPriority;
+  label: string | null;
+  slot: 'regular' | 'user-bypass';
 }
 
 export interface AnalysisQueueOptions {
@@ -144,6 +152,15 @@ export class AnalysisTaskTimeoutError extends Error {
   }
 }
 
+
+function sanitizeJobLabel(label: string | undefined): string | null {
+  if (typeof label !== 'string') {
+    return null;
+  }
+  const trimmed = label.trim().replace(/\s+/g, ' ');
+  return trimmed.length > 0 ? trimmed.slice(0, 160) : null;
+}
+
 export interface EnqueueOptions {
   /**
    * Optional de-dupe key. If a task with the same key is already pending or
@@ -155,6 +172,13 @@ export interface EnqueueOptions {
    * Priority bucket. Lower runs first. Default: BACKGROUND.
    */
   priority?: AnalysisPriority;
+  /**
+   * v3.145 — short human-readable job label for status/debug UI.
+   * Examples: "Alpha v2.wav" or "Reference — Pro Master.wav". The queue
+   * still de-dupes by key; this label is display-only and never participates
+   * in scheduling decisions.
+   */
+  label?: string;
 }
 
 export class AnalysisQueue {
@@ -196,6 +220,10 @@ export class AnalysisQueue {
     neighbor: 0,
     background: 0,
   };
+  private readonly runningTasks = new Map<
+    QueuedTask<unknown>,
+    'regular' | 'user-bypass'
+  >();
 
   constructor(options: AnalysisQueueOptions) {
     if (!Number.isFinite(options.concurrency) || options.concurrency < 1) {
@@ -223,6 +251,7 @@ export class AnalysisQueue {
   enqueue<T>(task: () => Promise<T>, options: EnqueueOptions = {}): Promise<T> {
     const priority = options.priority ?? ANALYSIS_PRIORITY_BACKGROUND;
     const key = options.key ?? null;
+    const label = sanitizeJobLabel(options.label);
 
     if (key !== null) {
       const existing = this.inflightByKey.get(key);
@@ -230,6 +259,9 @@ export class AnalysisQueue {
         // Promote the existing task if the caller asked for a higher priority.
         // No-op if it's already running.
         this.promote(key, priority);
+        if (label !== null) {
+          this.updatePendingLabel(key, label);
+        }
         return existing as Promise<T>;
       }
     }
@@ -246,6 +278,7 @@ export class AnalysisQueue {
       const queued: QueuedTask<T> = {
         key,
         priority,
+        label,
         insertionOrder: this.nextInsertionOrder++,
         task,
         resolve,
@@ -326,6 +359,7 @@ export class AnalysisQueue {
     active: number;
     userBypassActive: number;
     pending: number;
+    runningJobs: AnalysisQueueJobSnapshot[];
     activeByPriority: AnalysisPriorityCounts;
     pendingByPriority: AnalysisPriorityCounts;
     totalEnqueuedByPriority: AnalysisPriorityCounts;
@@ -348,10 +382,24 @@ export class AnalysisQueue {
       active: this.active,
       userBypassActive: this.userBypassActive,
       pending: this.pending.length,
+      runningJobs: Array.from(this.runningTasks.entries()).map(([task, slot]) => ({
+        key: task.key,
+        priority: task.priority,
+        label: task.label,
+        slot,
+      })),
       activeByPriority: { ...this.activeByPriority },
       pendingByPriority: { user, neighbor, background },
       totalEnqueuedByPriority: { ...this.totalEnqueuedByPriority },
     };
+  }
+
+  private updatePendingLabel(key: string, label: string): void {
+    for (const task of this.pending) {
+      if (task.key === key && task.label === null) {
+        task.label = label;
+      }
+    }
   }
 
   private priorityBucket(priority: AnalysisPriority): keyof AnalysisPriorityCounts {
@@ -411,6 +459,7 @@ export class AnalysisQueue {
       }
     }
     this.activeByPriority[activePriorityBucket] += 1;
+    this.runningTasks.set(next, isUserBypass ? 'user-bypass' : 'regular');
     if (next.key !== null) {
       this.runningKeys.add(next.key);
     }
@@ -437,6 +486,7 @@ export class AnalysisQueue {
         }
       }
       this.activeByPriority[activePriorityBucket] -= 1;
+      this.runningTasks.delete(next);
       if (next.key !== null) {
         this.runningKeys.delete(next.key);
         this.inflightByKey.delete(next.key);

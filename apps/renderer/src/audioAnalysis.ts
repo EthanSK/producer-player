@@ -89,7 +89,7 @@ function amplitudeToDbfs(value: number): number {
 // Internal: enqueue a preview-analysis task with the shared priority queue.
 function runPreviewAnalysis<T>(
   task: () => Promise<T>,
-  options: { priority?: AnalysisPriority; key?: string } = {}
+  options: { priority?: AnalysisPriority; key?: string; label?: string } = {}
 ): Promise<T> {
   return previewAnalysisQueue.enqueue(task, options);
 }
@@ -126,16 +126,7 @@ export function getPreviewAnalysisQueueStats(): {
  * Item #14 (v3.118) — full per-priority dump for the background-tasks
  * indicator UI in the status sidebar.
  */
-export function dumpPreviewAnalysisQueue(): {
-  label: string;
-  concurrency: number;
-  active: number;
-  userBypassActive: number;
-  pending: number;
-  activeByPriority: { user: number; neighbor: number; background: number };
-  pendingByPriority: { user: number; neighbor: number; background: number };
-  totalEnqueuedByPriority: { user: number; neighbor: number; background: number };
-} {
+export function dumpPreviewAnalysisQueue(): ReturnType<AnalysisQueue['dump']> {
   return previewAnalysisQueue.dump();
 }
 
@@ -314,7 +305,7 @@ function computeWaveformPeaks(mono: Float32Array, bucketCount: number): Float32A
 export async function analyzeTrackFromUrl(
   url: string,
   signal?: AbortSignal,
-  options: { priority?: AnalysisPriority; key?: string } = {}
+  options: { priority?: AnalysisPriority; key?: string; label?: string } = {}
 ): Promise<TrackAnalysisResult> {
   return runPreviewAnalysis(async () => {
     ensureNotAborted(signal);

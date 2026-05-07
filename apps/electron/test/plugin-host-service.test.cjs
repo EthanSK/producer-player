@@ -109,6 +109,25 @@ test('resolveSidecarBinary returns null when no build output exists in a pristin
   assert.equal(found, null);
 });
 
+test('resolveSidecarBinary finds the packaged sidecar via resourcesPath/app.asar.unpacked', () => {
+  // Reproduce the packaged-Electron layout: process.cwd()=/, but the app
+  // sidecar lives under <resourcesPath>/app.asar.unpacked/apps/electron/dist/bin/.
+  // Without the resourcesPath option resolveSidecarBinary returns null;
+  // with it set, the bundled sidecar must be discovered.
+  const root = mkdtempSync(join(tmpdir(), 'pp-resources-'));
+  try {
+    const binaryName = process.platform === 'win32' ? 'pp-audio-host.exe' : 'pp-audio-host';
+    const binDir = join(root, 'app.asar.unpacked', 'apps', 'electron', 'dist', 'bin');
+    mkdirSync(binDir, { recursive: true });
+    const sidecarPath = join(binDir, binaryName);
+    writeFileSync(sidecarPath, '#!/bin/sh\nexit 0\n');
+    const found = resolveSidecarBinary('/tmp/pp-does-not-exist-here', { resourcesPath: root });
+    assert.equal(found, sidecarPath);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('defaultGlobalPluginScanRoots targets macOS global VST3/AU install folders', () => {
   const roots = defaultGlobalPluginScanRoots({
     platform: 'darwin',

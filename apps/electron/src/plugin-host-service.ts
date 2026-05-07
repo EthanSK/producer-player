@@ -251,7 +251,6 @@ function mergeWithFilesystemDiscovery(
   plugins: PluginInfo[],
   discovery: GlobalPluginDiscoveryResult,
 ): PluginInfo[] {
-  if (plugins.length > 0) return plugins;
   if (discovery.plugins.length === 0) return plugins;
 
   const existingPaths = sidecarPluginPaths(plugins);
@@ -271,19 +270,61 @@ function mergeWithFilesystemDiscovery(
  * `native/pp-audio-host/build/bin/pp-audio-host` (`.exe` on Windows).
  * Packaged: copied into `apps/electron/dist/bin/pp-audio-host` by
  * `apps/electron/scripts/build-main.mjs`, then captured by electron-builder's
- * `asarUnpack: ["apps/electron/dist/bin/**"]` rule.
+ * `asarUnpack: ["apps/electron/dist/bin/**"]` rule, which puts it under
+ * `<resourcesPath>/app.asar.unpacked/apps/electron/dist/bin/pp-audio-host`.
  */
-export function resolveSidecarBinaryCandidates(cwd: string = process.cwd()): string[] {
-  const binaryName = process.platform === 'win32' ? 'pp-audio-host.exe' : 'pp-audio-host';
-  return [
+export interface ResolveSidecarBinaryOptions {
+  platform?: NodeJS.Platform;
+  /**
+   * Electron's `process.resourcesPath` (or null in non-Electron contexts).
+   * When set, the packaged-app candidate
+   * `<resourcesPath>/app.asar.unpacked/apps/electron/dist/bin/<binaryName>`
+   * is checked FIRST, ahead of the dev-tree candidates relative to `cwd`.
+   * In packaged Producer Player builds `process.cwd()` resolves to `/`, so
+   * the dev candidates never resolve and the sidecar reads as missing
+   * unless we explicitly look under resourcesPath.
+   */
+  resourcesPath?: string | null;
+}
+
+/**
+ * Read Electron's `process.resourcesPath` defensively. Returns null in
+ * non-Electron Node contexts (tests, CLI scripts) where the property is
+ * absent. Avoids a hard cast that would force a TS error in pure-Node.
+ */
+export function getElectronResourcesPath(): string | null {
+  const electronProcess = process as NodeJS.Process & { resourcesPath?: unknown };
+  const value = electronProcess.resourcesPath;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+export function resolveSidecarBinaryCandidates(
+  cwd: string = process.cwd(),
+  opts: ResolveSidecarBinaryOptions = {},
+): string[] {
+  const platform = opts.platform ?? process.platform;
+  const binaryName = platform === 'win32' ? 'pp-audio-host.exe' : 'pp-audio-host';
+  const resourcesPath = opts.resourcesPath ?? getElectronResourcesPath();
+  const candidates: string[] = [];
+  if (resourcesPath) {
+    candidates.push(
+      resolve(resourcesPath, 'app.asar.unpacked/apps/electron/dist/bin', binaryName),
+      resolve(resourcesPath, 'apps/electron/dist/bin', binaryName),
+    );
+  }
+  candidates.push(
     resolve(cwd, 'native/pp-audio-host/build/bin', binaryName),
     resolve(cwd, 'apps/electron/dist/bin', binaryName),
-  ];
+  );
+  return uniqueStrings(candidates);
 }
 
 /** Resolved path to the built sidecar binary, or null when it isn't present. */
-export function resolveSidecarBinary(cwd: string = process.cwd()): string | null {
-  const candidates = resolveSidecarBinaryCandidates(cwd);
+export function resolveSidecarBinary(
+  cwd: string = process.cwd(),
+  opts: ResolveSidecarBinaryOptions = {},
+): string | null {
+  const candidates = resolveSidecarBinaryCandidates(cwd, opts);
   for (const candidate of candidates) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -425,7 +466,7 @@ export class PluginHostService {
   private expectingExit = false;
 
   constructor(
-    binaryPath: string | null = resolveSidecarBinary(),
+    binaryPath: string | null = resolveSidecarBinary(process.cwd(), { resourcesPath: getElectronResourcesPath() }),
     spawnFn: SpawnFn = defaultSpawn,
   ) {
     this.binaryPath = binaryPath;
@@ -728,22 +769,29 @@ export class PluginHostService {
       };
       return [info];
     });
-    const discovery = discoverGlobalPlugins(scanOptions);
-    if (plugins.length === 0 && discovery.plugins.length > 0) {
-      log.info(
-        `[plugin-host] sidecar returned no plugin metadata; using filesystem global discovery fallback (${discovery.plugins.length} bundles)`,
-      );
-    }
-    if (discovery.skippedPaths.length > 0) {
-      const skippedPreview = discovery.skippedPaths
-        .filter((entry) => entry.reason !== 'missing')
-        .slice(0, 5)
-        .map((entry) => `${entry.path} (${entry.reason})`);
-      if (skippedPreview.length > 0) {
-        log.warn(`[plugin-host] skipped unreadable plugin scan paths: ${skippedPreview.join('; ')}`);
+    const shouldMergeFilesystemDiscovery = plugins.length === 0 || failedRaw.length > 0;
+    if (shouldMergeFilesystemDiscovery) {
+      const discovery = discoverGlobalPlugins(scanOptions);
+      if (plugins.length === 0 && discovery.plugins.length > 0) {
+        log.info(
+          `[plugin-host] sidecar returned no plugin metadata; using filesystem global discovery fallback (${discovery.plugins.length} bundles)`,
+        );
+      } else if (plugins.length > 0 && failedRaw.length > 0 && discovery.plugins.length > 0) {
+        log.info(
+          `[plugin-host] sidecar returned partial plugin metadata; merging filesystem global discovery fallback (${discovery.plugins.length} bundles)`,
+        );
       }
+      if (discovery.skippedPaths.length > 0) {
+        const skippedPreview = discovery.skippedPaths
+          .filter((entry) => entry.reason !== 'missing')
+          .slice(0, 5)
+          .map((entry) => `${entry.path} (${entry.reason})`);
+        if (skippedPreview.length > 0) {
+          log.warn(`[plugin-host] skipped unreadable plugin scan paths: ${skippedPreview.join('; ')}`);
+        }
+      }
+      plugins = mergeWithFilesystemDiscovery(plugins, discovery);
     }
-    plugins = mergeWithFilesystemDiscovery(plugins, discovery);
 
     const scanVersion =
       typeof reply.scanVersion === 'number' && Number.isFinite(reply.scanVersion)

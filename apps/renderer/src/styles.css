@@ -1315,6 +1315,11 @@ input[type='range'] {
   filter: saturate(0.6);
 }
 
+.analysis-overlay-section.drop-target.is-drag-source {
+  opacity: 0.82;
+  filter: none;
+}
+
 .analysis-normalization-header {
   display: flex;
   justify-content: space-between;

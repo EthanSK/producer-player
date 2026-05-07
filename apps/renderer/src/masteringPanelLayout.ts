@@ -108,3 +108,40 @@ export function movePanelBefore<T extends string>(
   nextOrder.splice(insertionIndex, 0, draggedPanelId);
   return nextOrder;
 }
+
+export function calculateEdgeAutoScrollVelocity({
+  pointerY,
+  containerTop,
+  containerBottom,
+  edgeThresholdPx,
+  maxVelocityPx,
+}: {
+  pointerY: number;
+  containerTop: number;
+  containerBottom: number;
+  edgeThresholdPx: number;
+  maxVelocityPx: number;
+}): number {
+  const containerHeight = Math.max(0, containerBottom - containerTop);
+  const threshold = Math.max(0, Math.min(edgeThresholdPx, containerHeight / 2));
+  const maxVelocity = Math.max(0, maxVelocityPx);
+
+  if (threshold <= 0 || maxVelocity <= 0) {
+    return 0;
+  }
+
+  const distanceFromTop = pointerY - containerTop;
+  const distanceFromBottom = containerBottom - pointerY;
+
+  if (distanceFromTop >= 0 && distanceFromTop < threshold) {
+    const intensity = (threshold - distanceFromTop) / threshold;
+    return -Math.ceil(maxVelocity * intensity * intensity);
+  }
+
+  if (distanceFromBottom >= 0 && distanceFromBottom < threshold) {
+    const intensity = (threshold - distanceFromBottom) / threshold;
+    return Math.ceil(maxVelocity * intensity * intensity);
+  }
+
+  return 0;
+}

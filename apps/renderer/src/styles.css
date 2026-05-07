@@ -1612,6 +1612,13 @@ h3 .normalization-preview-header-icon.analysis-platform-icon {
 }
 
 .analysis-overlay {
+  /*
+   * Clearance for the fixed mastering transport + floating Mix/Reference
+   * level-match controls. Kept intentionally generous so the last fullscreen
+   * mastering panel can scroll well above the overlay instead of sitting under it.
+   */
+  --mastering-overlay-floating-controls-clearance: clamp(220px, 50vh, 520px);
+  --mastering-overlay-floating-controls-clearance: clamp(220px, 50dvh, 520px);
   position: fixed;
   inset: 0;
   background: rgba(4, 9, 15, 0.88);
@@ -1628,7 +1635,8 @@ h3 .normalization-preview-header-icon.analysis-platform-icon {
   background: var(--bg-1);
   border: 1px solid var(--border);
   border-radius: 18px;
-  padding: 20px;
+  padding: 20px 20px calc(20px + var(--mastering-overlay-floating-controls-clearance));
+  scroll-padding-bottom: var(--mastering-overlay-floating-controls-clearance);
   overflow: auto;
   display: grid;
   gap: 18px;
@@ -5301,7 +5309,7 @@ button.checklist-play-toggle[data-playing='true'] {
 
   .analysis-overlay-card {
     border-radius: 14px;
-    padding: 14px;
+    padding: 14px 14px calc(14px + var(--mastering-overlay-floating-controls-clearance));
     gap: 12px;
   }
 

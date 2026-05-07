@@ -6546,15 +6546,14 @@ export function App(): JSX.Element {
     };
 
     const hasUrgentAnalysisWork = (): boolean => {
-      const preview = dumpPreviewAnalysisQueue();
       const measured = MEASURED_ANALYSIS_QUEUE.dump();
 
+      // v3.141 — only measured user-selected jobs can pause startup measured
+      // warmup. Preview decode is graph/UI work; letting it pause LUFS/stat
+      // warmup would reintroduce the exact coupling Ethan rejected.
       return (
-        preview.activeByPriority.user > 0 ||
         measured.activeByPriority.user > 0 ||
-        preview.userBypassActive > 0 ||
         measured.userBypassActive > 0 ||
-        preview.pendingByPriority.user > 0 ||
         measured.pendingByPriority.user > 0
       );
     };

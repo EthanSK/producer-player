@@ -401,11 +401,20 @@ const bridge: ProducerPlayerBridge = {
   },
 
   // v3.39 Phase 1a — plugin hosting (data model + sidecar scaffold; UI 1b).
-  async scanPluginLibrary() {
-    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SCAN_LIBRARY);
+  async scanPluginLibrary(options) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SCAN_LIBRARY, options);
   },
   async getPluginLibrary() {
     return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_GET_LIBRARY);
+  },
+  async getPluginScanSettings() {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_GET_SCAN_SETTINGS);
+  },
+  async setPluginScanPaths(paths) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SET_SCAN_PATHS, paths);
+  },
+  async pickPluginScanPaths() {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PICK_SCAN_PATHS);
   },
   async getTrackPluginChain(songId: string) {
     return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_GET_TRACK_CHAIN, songId);

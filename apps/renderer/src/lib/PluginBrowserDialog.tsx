@@ -4,12 +4,13 @@
  * Modal overlay that lets the user pick a plugin to append to the chain.
  *
  * - Search filters by plugin name + vendor (case-insensitive substring).
- * - Empty / stale library surfaces a "Scan installed plugins" call-to-action.
+ * - Empty / stale library surfaces an explicit scan action (no auto-scan).
+ * - Scan roots are user-controlled: choose folders or type a path, then scan.
  * - Keyboard: Esc → close, `/` → focus search, Enter → add highlighted.
  * - Styling uses the existing dark-theme tokens only (see styles.css).
  *
- * The dialog is unaware of IPC — parents pass `onPick(pluginId)` and
- * `onScan()`; actual calls happen in App.tsx.
+ * The dialog is unaware of IPC — parents pass callbacks; actual persistence,
+ * folder-picking, and scan calls happen in App.tsx/Electron main.
  */
 
 import {
@@ -21,15 +22,19 @@ import {
 } from 'react';
 import type {
   PluginInfo,
+  PluginScanSettings,
   ScannedPluginLibrary,
 } from '@producer-player/contracts';
 
 export interface PluginBrowserDialogProps {
   library: ScannedPluginLibrary | null;
   scanning: boolean;
+  scanSettings?: PluginScanSettings;
   onClose: () => void;
   onPick: (pluginId: string) => void;
-  onScan: () => void;
+  onScan: (paths?: string[]) => void;
+  onSetScanPaths?: (paths: string[]) => void;
+  onPickScanPaths?: () => void;
 }
 
 function formatTypeBadge(format: PluginInfo['format']): string {
@@ -45,9 +50,35 @@ function formatTypeBadge(format: PluginInfo['format']): string {
   }
 }
 
+function mergePathList(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const path of paths) {
+    const trimmed = path.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function formatPathLabel(path: string): string {
+  return path.replace(/^\/Users\/[^/]+\//, '~/');
+}
+
 export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Element {
-  const { library, scanning, onClose, onPick, onScan } = props;
+  const {
+    library,
+    scanning,
+    scanSettings,
+    onClose,
+    onPick,
+    onScan,
+    onSetScanPaths,
+    onPickScanPaths,
+  } = props;
   const [query, setQuery] = useState('');
+  const [manualPath, setManualPath] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -65,6 +96,15 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
     });
   }, [allPlugins, query]);
 
+  const customPaths = scanSettings?.customPaths ?? [];
+  const effectivePaths = scanSettings?.effectivePaths ?? [];
+  const usingDefaultPaths = scanSettings?.usingDefaultPaths ?? (customPaths.length === 0);
+  const scanButtonLabel = scanning
+    ? 'Scanning…'
+    : usingDefaultPaths
+      ? 'Scan standard folders'
+      : 'Scan selected paths';
+
   // Keep highlight in range as the filter narrows.
   useEffect(() => {
     if (filteredPlugins.length === 0) {
@@ -78,30 +118,26 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
     });
   }, [filteredPlugins.length]);
 
-  // v3.45 — lazy first-time scan.
-  //
-  // Startup no longer kicks off a background plugin scan (that triggered
-  // macOS network-volume permission prompts at every launch — see
-  // App.tsx `pluginLibraryBootstrappedRef` comment). Instead, the FIRST
-  // time the user opens this dialog and finds the cached library empty,
-  // we auto-start a scan here. Mounting the dialog == user clicked the
-  // "+ Add plugin" button, so the permission prompt (if any) is now
-  // contextual to a user action rather than firing out of nowhere.
-  const autoScanAttemptedRef = useRef(false);
-  useEffect(() => {
-    if (autoScanAttemptedRef.current) return;
-    if (scanning) return;
-    const isEmpty = !library || library.plugins.length === 0;
-    if (!isEmpty) return;
-    autoScanAttemptedRef.current = true;
-    onScan();
-  }, [library, scanning, onScan]);
-
-  // Autofocus search on mount.
+  // Autofocus search on mount. Scanning is intentionally explicit: opening
+  // the plugin browser should not spawn the sidecar or crawl plugin folders.
   useEffect(() => {
     const input = searchInputRef.current;
     if (input) input.focus();
   }, []);
+
+  const handleAddManualPath = useCallback(() => {
+    const trimmed = manualPath.trim();
+    if (!trimmed) return;
+    onSetScanPaths?.(mergePathList([...customPaths, trimmed]));
+    setManualPath('');
+  }, [customPaths, manualPath, onSetScanPaths]);
+
+  const handleRemovePath = useCallback(
+    (pathToRemove: string) => {
+      onSetScanPaths?.(customPaths.filter((path) => path !== pathToRemove));
+    },
+    [customPaths, onSetScanPaths],
+  );
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -133,10 +169,13 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
         return;
       }
       if (event.key === 'Enter') {
-        const candidate = filteredPlugins[highlightedIndex];
-        if (candidate?.isSupported) {
-          event.preventDefault();
-          onPick(candidate.id);
+        const target = event.target as HTMLElement | null;
+        if (target === searchInputRef.current) {
+          const candidate = filteredPlugins[highlightedIndex];
+          if (candidate?.isSupported) {
+            event.preventDefault();
+            onPick(candidate.id);
+          }
         }
       }
     },
@@ -189,14 +228,99 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
           <button
             type="button"
             className="plugin-browser-dialog__scan ghost"
-            onClick={onScan}
+            onClick={() => onScan(customPaths)}
             disabled={scanning}
             data-testid="plugin-browser-dialog-scan"
-            title="Re-scan installed VST3/AU plugins"
+            title="Scan the listed plugin paths"
           >
-            {scanning ? 'Scanning…' : 'Scan installed plugins'}
+            {scanButtonLabel}
           </button>
         </div>
+
+        <section className="plugin-browser-dialog__paths" aria-label="Plugin scan paths">
+          <div className="plugin-browser-dialog__paths-header">
+            <div>
+              <h3>Scan paths</h3>
+              <p>
+                {usingDefaultPaths
+                  ? 'Using standard macOS VST3/AU folders until you add custom paths.'
+                  : 'Scanning only the paths listed below.'}
+              </p>
+            </div>
+            <div className="plugin-browser-dialog__paths-actions">
+              <button
+                type="button"
+                className="plugin-browser-dialog__path-action ghost"
+                onClick={onPickScanPaths}
+                disabled={!onPickScanPaths}
+                data-testid="plugin-browser-dialog-pick-path"
+              >
+                Choose folder…
+              </button>
+              <button
+                type="button"
+                className="plugin-browser-dialog__path-action ghost"
+                onClick={() => onSetScanPaths?.([])}
+                disabled={customPaths.length === 0 || !onSetScanPaths}
+                data-testid="plugin-browser-dialog-reset-paths"
+              >
+                Reset to standard
+              </button>
+            </div>
+          </div>
+
+          <div className="plugin-browser-dialog__manual-path-row">
+            <input
+              type="text"
+              className="plugin-browser-dialog__manual-path"
+              placeholder="Paste or type a plugin folder path…"
+              value={manualPath}
+              onChange={(event) => setManualPath(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  handleAddManualPath();
+                }
+              }}
+              data-testid="plugin-browser-dialog-manual-path"
+            />
+            <button
+              type="button"
+              className="plugin-browser-dialog__path-action ghost"
+              onClick={handleAddManualPath}
+              disabled={!manualPath.trim() || !onSetScanPaths}
+              data-testid="plugin-browser-dialog-add-path"
+            >
+              Add path
+            </button>
+          </div>
+
+          <div className="plugin-browser-dialog__path-list" data-testid="plugin-browser-dialog-path-list">
+            {customPaths.length > 0 ? (
+              customPaths.map((path) => (
+                <span className="plugin-browser-dialog__path-chip" key={path}>
+                  <span title={path}>{formatPathLabel(path)}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${path} from plugin scan paths`}
+                    onClick={() => handleRemovePath(path)}
+                    disabled={!onSetScanPaths}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))
+            ) : effectivePaths.length > 0 ? (
+              effectivePaths.map((path) => (
+                <span className="plugin-browser-dialog__path-chip plugin-browser-dialog__path-chip--default" key={path}>
+                  <span title={path}>{formatPathLabel(path)}</span>
+                </span>
+              ))
+            ) : (
+              <span className="plugin-browser-dialog__path-note">Default plugin paths will be used.</span>
+            )}
+          </div>
+        </section>
 
         {libraryIsEmpty ? (
           <div
@@ -205,8 +329,10 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
           >
             <p>
               {scanning
-                ? 'Scanning installed VST3/AU plugins…'
-                : 'No installed plugins found. Click “Scan installed plugins” to scan your Mac’s standard VST3/AU folders.'}
+                ? usingDefaultPaths
+                  ? 'Scanning standard VST3/AU folders…'
+                  : 'Scanning the selected plugin paths…'
+                : 'No plugins loaded yet. Set paths if needed, then click the scan button when you want to search.'}
             </p>
           </div>
         ) : (

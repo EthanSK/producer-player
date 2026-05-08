@@ -196,6 +196,29 @@ test('setPluginLibrary / getPluginLibrary round-trip through disk', async () => 
   }
 });
 
+test('plugin scan paths round-trip through disk with trim/dedupe', async () => {
+  const tmp = mktmp();
+  try {
+    migrateStateIfNeeded(tmp);
+    const writer = new UserStateService(tmp);
+
+    await writer.setPluginScanPaths([
+      ' /Library/Audio/Plug-Ins/VST3 ',
+      '/Users/tester/Audio/Plug-Ins',
+      '/Library/Audio/Plug-Ins/VST3',
+      '',
+    ]);
+
+    const reader = await reload(tmp);
+    assert.deepEqual(await reader.getPluginScanPaths(), [
+      '/Library/Audio/Plug-Ins/VST3',
+      '/Users/tester/Audio/Plug-Ins',
+    ]);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('renderer full-state sync preserves plugin library and per-track chains', async () => {
   const tmp = mktmp();
   try {
@@ -220,10 +243,12 @@ test('renderer full-state sync preserves plugin library and per-track chains', a
       scanVersion: 1,
     };
     await service.setPluginLibrary(library);
+    await service.setPluginScanPaths(['/custom/VST3']);
     await service.addPluginToChain('song-critical', 'vst3:critical-preserve');
 
     const syncPayload = JSON.parse(JSON.stringify(await service.readUserState()));
     syncPayload.pluginLibrary = undefined;
+    syncPayload.pluginScanPaths = [];
     syncPayload.perTrackPluginChains = {};
     syncPayload.albumTitle = 'Renderer sync payload';
 
@@ -237,6 +262,7 @@ test('renderer full-state sync preserves plugin library and per-track chains', a
     assert.equal(preservedLibrary.plugins[0].id, 'vst3:critical-preserve');
     assert.equal(preservedChain.items.length, 1);
     assert.equal(preservedChain.items[0].pluginId, 'vst3:critical-preserve');
+    assert.deepEqual(await reader.getPluginScanPaths(), ['/custom/VST3']);
     assert.equal((await reader.readUserState()).albumTitle, 'Renderer sync payload');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

@@ -95,6 +95,8 @@ import type {
   SongChecklistItem,
   PlaylistOrderExportV1,
   PlaybackSourceInfo,
+  PluginScanRequest,
+  PluginScanSettings,
   ProducerPlayerAppVersion,
   ProducerPlayerEnvironment,
   ProjectFileSelection,
@@ -132,7 +134,11 @@ import {
   migrateStateIfNeeded,
 } from './state-service';
 import { openFileWithDetachedSystemHandler } from './file-open';
-import { PluginHostService, resolveSidecarBinaryCandidates } from './plugin-host-service';
+import {
+  PluginHostService,
+  defaultGlobalPluginScanPaths,
+  resolveSidecarBinaryCandidates,
+} from './plugin-host-service';
 import { PluginPresetLibraryStore } from './plugin-preset-library';
 import {
   buildUiZoomState,
@@ -458,6 +464,30 @@ const playbackAllowedPaths = new Set<string>();
 const playbackTranscodeJobs = new Map<string, Promise<string>>();
 const linkedFolderSecurityBookmarks = new Map<string, string>();
 const linkedFolderSecurityAccessStops = new Map<string, () => void>();
+
+function sanitizePluginScanPathsForIpc(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function buildPluginScanSettings(customPaths: string[]): PluginScanSettings {
+  const sanitized = sanitizePluginScanPathsForIpc(customPaths);
+  const usingDefaultPaths = sanitized.length === 0;
+  return {
+    customPaths: sanitized,
+    effectivePaths: usingDefaultPaths ? defaultGlobalPluginScanPaths('all') : sanitized,
+    usingDefaultPaths,
+  };
+}
 
 interface GithubReleaseAsset {
   name: string;
@@ -5191,8 +5221,42 @@ function registerIpcHandlers(service: FileLibraryService): void {
   // asks it to enumerate plugins, persists the result so future launches
   // can render the browser offline, and returns the fresh library.
 
-  ipcMain.handle(IPC_CHANNELS.PLUGIN_SCAN_LIBRARY, async () => {
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_GET_SCAN_SETTINGS, async () => {
     if (!userStateService) throw new Error('User state service not initialized');
+    return buildPluginScanSettings(await userStateService.getPluginScanPaths());
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_SET_SCAN_PATHS, async (_event, paths: unknown) => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    const savedPaths = await userStateService.setPluginScanPaths(sanitizePluginScanPathsForIpc(paths));
+    return buildPluginScanSettings(savedPaths);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_PICK_SCAN_PATHS, async () => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    const currentPaths = await userStateService.getPluginScanPaths();
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Choose plugin scan folder',
+      properties: ['openDirectory', 'multiSelections', 'createDirectory'],
+    };
+    const defaultPath = resolveDialogDefaultPath(currentPaths[0] ?? null);
+    if (defaultPath) dialogOptions.defaultPath = defaultPath;
+
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    if (result.canceled || result.filePaths.length === 0) return null;
+    rememberDialogDirectory(result.filePaths[0]);
+    return sanitizePluginScanPathsForIpc(result.filePaths);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_SCAN_LIBRARY, async (_event, options?: PluginScanRequest) => {
+    if (!userStateService) throw new Error('User state service not initialized');
+    const scanPaths = Array.isArray(options?.paths)
+      ? await userStateService.setPluginScanPaths(options.paths)
+      : await userStateService.getPluginScanPaths();
+
     if (!pluginHostService) pluginHostService = new PluginHostService();
     ensurePluginHostForwarders(pluginHostService);
     // v3.50 — log availability + the resolved sidecar path up front so
@@ -5219,7 +5283,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
         'pp-audio-host sidecar binary is not built yet. Run `bash native/pp-audio-host/scripts/build-sidecar.sh` once to bootstrap it, then retry the scan.',
       );
     }
-    const library = await pluginHostService.scanPlugins();
+    const library = await pluginHostService.scanPlugins({
+      paths: scanPaths.length > 0 ? scanPaths : undefined,
+    });
     log.info(`[plugin-host] scan complete: ${library.plugins.length} plugins`);
     await userStateService.setPluginLibrary(library);
     // Phase 2 (v3.41): keep the service's cached library in sync so

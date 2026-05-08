@@ -188,6 +188,7 @@ import type {
   AgentStaticAnalysis,
   MasteringCacheEntry,
   PluginPresetEntry,
+  PluginScanSettings,
   ScannedPluginLibrary,
   TrackPluginChain,
 } from '@producer-player/contracts';
@@ -2854,6 +2855,11 @@ export function App(): JSX.Element {
     items: [],
   });
   const [pluginLibrary, setPluginLibrary] = useState<ScannedPluginLibrary | null>(null);
+  const [pluginScanSettings, setPluginScanSettings] = useState<PluginScanSettings>({
+    customPaths: [],
+    effectivePaths: [],
+    usingDefaultPaths: true,
+  });
   const [pluginLibraryScanning, setPluginLibraryScanning] = useState(false);
   const [pluginPresetsByPluginId, setPluginPresetsByPluginId] = useState<
     Record<string, PluginPresetEntry[]>
@@ -10916,9 +10922,9 @@ export function App(): JSX.Element {
   // every launch even though nothing user-facing requires it yet. This
   // aligns the implementation with docs/PLUGIN_HOSTING_PLAN.md §4.5
   // "Lifecycle" — the sidecar only spawns on first real plugin-UI
-  // interaction. A scan is triggered lazily the first time the plugin
-  // browser is opened and the cache is empty (see handlePluginScan call
-  // sites wiring the dialog onOpen).
+  // interaction. Scanning is now a deliberate button action inside the
+  // plugin browser, with user-editable scan paths, so opening the plugin
+  // section never makes the UI feel stuck behind an unavoidable scan.
   //
   // E2E tests can suppress this hydration by setting
   // `window.__producerPlayerDisablePluginLibraryBootstrap = true` before
@@ -10941,6 +10947,19 @@ export function App(): JSX.Element {
         void window.producerPlayer.rendererLog(
           'error',
           '[plugin-chain] getPluginLibrary failed',
+          { error: String(err) },
+        );
+      });
+    void window.producerPlayer
+      .getPluginScanSettings()
+      .then((settings) => {
+        if (scanSuppressed()) return;
+        setPluginScanSettings(settings);
+      })
+      .catch((err) => {
+        void window.producerPlayer.rendererLog(
+          'error',
+          '[plugin-chain] getPluginScanSettings failed',
           { error: String(err) },
         );
       });
@@ -11293,17 +11312,51 @@ export function App(): JSX.Element {
     });
   }, [pluginChain.items]);
 
-  const handlePluginScan = useCallback(() => {
+  const handlePluginSetScanPaths = useCallback((paths: string[]) => {
+    void window.producerPlayer
+      .setPluginScanPaths(paths)
+      .then(setPluginScanSettings)
+      .catch((err) => {
+        void window.producerPlayer.rendererLog('error', '[plugin-chain] set scan paths failed', {
+          error: String(err),
+        });
+      });
+  }, []);
+
+  const handlePluginPickScanPaths = useCallback(() => {
+    void window.producerPlayer
+      .pickPluginScanPaths()
+      .then((pickedPaths) => {
+        if (!pickedPaths || pickedPaths.length === 0) return undefined;
+        const seen = new Set<string>();
+        const merged = [...pluginScanSettings.customPaths, ...pickedPaths].filter((path) => {
+          const trimmed = path.trim();
+          if (!trimmed || seen.has(trimmed)) return false;
+          seen.add(trimmed);
+          return true;
+        });
+        return window.producerPlayer.setPluginScanPaths(merged).then(setPluginScanSettings);
+      })
+      .catch((err) => {
+        void window.producerPlayer.rendererLog('error', '[plugin-chain] pick scan paths failed', {
+          error: String(err),
+        });
+      });
+  }, [pluginScanSettings.customPaths]);
+
+  const handlePluginScan = useCallback((paths?: string[]) => {
     if (pluginLibraryScanning) return;
+    const scanPaths = Array.isArray(paths) ? paths : pluginScanSettings.customPaths;
+    const usesCustomPaths = scanPaths.length > 0;
     setPluginLibraryScanning(true);
     toast.show({
       id: 'plugin-scan',
       kind: 'info',
-      text: 'Scanning installed plugins…',
+      text: usesCustomPaths ? 'Scanning selected plugin paths…' : 'Scanning standard plugin folders…',
       durationMs: 0, // sticky until scan finishes (we overwrite on success/fail)
     });
     void window.producerPlayer
-      .scanPluginLibrary()
+      .scanPluginLibrary({ paths: scanPaths })
       .then((library) => {
         setPluginLibrary(library);
         const count = library?.plugins.length ?? 0;
@@ -11312,7 +11365,9 @@ export function App(): JSX.Element {
           kind: 'success',
           text: count
             ? `Found ${count} plugin${count === 1 ? '' : 's'}.`
-            : 'Plugin scan finished (no installed VST3/AU plugins found).',
+            : usesCustomPaths
+              ? 'Plugin scan finished (no plugins found in the selected paths).'
+              : 'Plugin scan finished (no installed VST3/AU plugins found).',
         });
       })
       .catch((err) => {
@@ -11341,8 +11396,14 @@ export function App(): JSX.Element {
             });
           });
       })
-      .finally(() => setPluginLibraryScanning(false));
-  }, [pluginLibraryScanning, toast]);
+      .finally(() => {
+        setPluginLibraryScanning(false);
+        void window.producerPlayer
+          .getPluginScanSettings()
+          .then(setPluginScanSettings)
+          .catch(() => undefined);
+      });
+  }, [pluginLibraryScanning, pluginScanSettings.customPaths, toast]);
 
   // Restore per-song live EQ state when song changes
   const autoLoadEqLiveSongIdRef = useRef<string | null>(null);
@@ -14980,6 +15041,7 @@ export function App(): JSX.Element {
                       library={pluginLibrary}
                       layout="compact"
                       scanning={pluginLibraryScanning}
+                      scanSettings={pluginScanSettings}
                       onAdd={handlePluginAdd}
                       onRemove={handlePluginRemove}
                       onToggle={handlePluginToggle}
@@ -14989,6 +15051,8 @@ export function App(): JSX.Element {
                       onRecallPreset={handlePluginRecallPreset}
                       onDeletePreset={handlePluginDeletePreset}
                       onScan={handlePluginScan}
+                      onSetScanPaths={handlePluginSetScanPaths}
+                      onPickScanPaths={handlePluginPickScanPaths}
                       presetsByPluginId={pluginPresetsByPluginId}
                       openEditorInstanceIds={openEditorInstanceIds}
                       loadedInstanceIds={loadedInstanceIds}
@@ -18231,6 +18295,7 @@ export function App(): JSX.Element {
                       library={pluginLibrary}
                       layout="fullscreen"
                       scanning={pluginLibraryScanning}
+                      scanSettings={pluginScanSettings}
                       onAdd={handlePluginAdd}
                       onRemove={handlePluginRemove}
                       onToggle={handlePluginToggle}
@@ -18240,6 +18305,8 @@ export function App(): JSX.Element {
                       onRecallPreset={handlePluginRecallPreset}
                       onDeletePreset={handlePluginDeletePreset}
                       onScan={handlePluginScan}
+                      onSetScanPaths={handlePluginSetScanPaths}
+                      onPickScanPaths={handlePluginPickScanPaths}
                       presetsByPluginId={pluginPresetsByPluginId}
                       openEditorInstanceIds={openEditorInstanceIds}
                       loadedInstanceIds={loadedInstanceIds}

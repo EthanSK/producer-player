@@ -46,6 +46,7 @@ import type {
   PluginChainItem,
   PluginInfo,
   PluginPresetEntry,
+  PluginScanSettings,
   ScannedPluginLibrary,
   TrackPluginChain,
 } from '@producer-player/contracts';
@@ -57,6 +58,7 @@ export interface PluginChainStripProps {
   library: ScannedPluginLibrary | null;
   layout: 'fullscreen' | 'compact';
   scanning?: boolean;
+  scanSettings?: PluginScanSettings;
   onAdd: (pluginId: string) => void;
   onRemove: (instanceId: string) => void;
   onToggle: (instanceId: string) => void;
@@ -65,7 +67,9 @@ export interface PluginChainStripProps {
   onSavePreset?: (instanceId: string, name: string) => void;
   onRecallPreset?: (instanceId: string, name: string) => void;
   onDeletePreset?: (pluginId: string, name: string) => void;
-  onScan: () => void;
+  onScan: (paths?: string[]) => void;
+  onSetScanPaths?: (paths: string[]) => void;
+  onPickScanPaths?: () => void;
   presetsByPluginId?: Record<string, PluginPresetEntry[]>;
   hideHeader?: boolean;
   /**
@@ -401,6 +405,7 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     library,
     layout,
     scanning = false,
+    scanSettings,
     onAdd,
     onRemove,
     onToggle,
@@ -410,6 +415,8 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     onRecallPreset,
     onDeletePreset,
     onScan,
+    onSetScanPaths,
+    onPickScanPaths,
     presetsByPluginId,
     hideHeader = false,
     openEditorInstanceIds,
@@ -577,12 +584,15 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
         <PluginBrowserDialog
           library={library}
           scanning={scanning}
+          scanSettings={scanSettings}
           onClose={() => setBrowserOpen(false)}
           onPick={(pluginId) => {
             onAdd(pluginId);
             setBrowserOpen(false);
           }}
           onScan={onScan}
+          onSetScanPaths={onSetScanPaths}
+          onPickScanPaths={onPickScanPaths}
         />
       ) : null}
     </section>

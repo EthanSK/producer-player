@@ -263,6 +263,9 @@ export const IPC_CHANNELS = {
   // UI lands in Phase 1b.
   PLUGIN_SCAN_LIBRARY: 'producer-player:plugin-scan-library',
   PLUGIN_GET_LIBRARY: 'producer-player:plugin-get-library',
+  PLUGIN_GET_SCAN_SETTINGS: 'producer-player:plugin-get-scan-settings',
+  PLUGIN_SET_SCAN_PATHS: 'producer-player:plugin-set-scan-paths',
+  PLUGIN_PICK_SCAN_PATHS: 'producer-player:plugin-pick-scan-paths',
   PLUGIN_GET_TRACK_CHAIN: 'producer-player:plugin-get-track-chain',
   PLUGIN_SET_TRACK_CHAIN: 'producer-player:plugin-set-track-chain',
   PLUGIN_ADD_TO_CHAIN: 'producer-player:plugin-add-to-chain',
@@ -433,6 +436,22 @@ export interface ScannedPluginLibrary {
   scannedAt: string;
   /** Bumped whenever the scan schema/layout changes. */
   scanVersion: number;
+}
+
+export interface PluginScanRequest {
+  /**
+   * Optional explicit roots to scan. Empty/missing means “use the app's
+   * standard DAW plugin folders” (macOS VST3 + AU defaults today).
+   */
+  paths?: string[];
+}
+
+export interface PluginScanSettings {
+  /** User-saved custom roots. Empty means scan the standard folders. */
+  customPaths: string[];
+  /** The paths the next scan will actually use after applying defaults. */
+  effectivePaths: string[];
+  usingDefaultPaths: boolean;
 }
 
 /**
@@ -690,11 +709,16 @@ export interface ProducerPlayerUserState {
   // scan. Optional so pre-v3.39 state files load cleanly; `parseUserState`
   // substitutes `undefined` when the field is missing or malformed.
   //
+  // `pluginScanPaths` is a user preference for explicit scan roots. Empty or
+  // missing means scan the standard VST3/AU locations instead of forcing the
+  // user through an unavoidable whole-machine scan path.
+  //
   // `perTrackPluginChains` is keyed by songId and MUST be listed in
   // PER_TRACK_KEYS so the v3.29 split-to-disk pipeline hoists it into
   // per-track files automatically. When a song has no chain entry, the chain
   // is a no-op pass-through (Ethan's "no plugins → no effect" constraint).
   pluginLibrary?: ScannedPluginLibrary;
+  pluginScanPaths?: string[];
   perTrackPluginChains?: Record<string, TrackPluginChain>;
 
   // Main window bounds — persisted across relaunches so the app reopens where
@@ -1296,8 +1320,11 @@ export interface ProducerPlayerBridge {
 
   // v3.39 — Plugin hosting (Phase 1a storage + sidecar wiring; UI lands 1b).
   // Renderer consumers arrive in Phase 1b.
-  scanPluginLibrary(): Promise<ScannedPluginLibrary>;
+  scanPluginLibrary(options?: PluginScanRequest): Promise<ScannedPluginLibrary>;
   getPluginLibrary(): Promise<ScannedPluginLibrary | null>;
+  getPluginScanSettings(): Promise<PluginScanSettings>;
+  setPluginScanPaths(paths: string[]): Promise<PluginScanSettings>;
+  pickPluginScanPaths(): Promise<string[] | null>;
   getTrackPluginChain(songId: string): Promise<TrackPluginChain>;
   setTrackPluginChain(songId: string, chain: TrackPluginChain): Promise<TrackPluginChain>;
   addPluginToChain(songId: string, pluginId: string): Promise<TrackPluginChain>;

@@ -503,6 +503,20 @@ function parsePluginInfo(value: unknown): PluginInfo | null {
   return { id, name, vendor, format, version, path: pluginPath, categories, isSupported, failureReason };
 }
 
+function sanitizePluginScanPaths(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
 function parseScannedPluginLibrary(value: unknown): ScannedPluginLibrary | undefined {
   if (!isRecord(value)) return undefined;
   const scannedAt = typeof value.scannedAt === 'string' && value.scannedAt.length > 0 ? value.scannedAt : null;
@@ -626,9 +640,11 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     checklistDawOffsetDefaultEnabled: false,
     lastFileDialogDirectory: '',
     // v3.39 Phase 1a — plugin hosting. pluginLibrary stays undefined until the
-    // first scan; perTrackPluginChains is an empty map so chain operations can
-    // target any songId without an existence check.
+    // first scan; pluginScanPaths defaults to [] which means "use standard
+    // VST3/AU folders"; perTrackPluginChains is an empty map so chain
+    // operations can target any songId without an existence check.
     pluginLibrary: undefined,
+    pluginScanPaths: [],
     perTrackPluginChains: {},
     windowBounds: null,
   };
@@ -748,9 +764,10 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     })(),
     lastFileDialogDirectory:
       typeof raw.lastFileDialogDirectory === 'string' ? raw.lastFileDialogDirectory : '',
-    // v3.39 Phase 1a — plugin hosting storage. Both fields are tolerant of
+    // v3.39 Phase 1a — plugin hosting storage. These fields are tolerant of
     // missing/malformed inputs so pre-v3.39 state files load unchanged.
     pluginLibrary: parseScannedPluginLibrary(raw.pluginLibrary),
+    pluginScanPaths: sanitizePluginScanPaths(raw.pluginScanPaths),
     perTrackPluginChains: parsePerTrackPluginChains(raw.perTrackPluginChains),
     windowBounds: parseWindowBounds(raw.windowBounds),
   };
@@ -1038,6 +1055,7 @@ export class UserStateService {
         ...incoming,
         perTrackAiRecommendations: current.perTrackAiRecommendations,
         pluginLibrary: current.pluginLibrary,
+        pluginScanPaths: current.pluginScanPaths,
         perTrackPluginChains: current.perTrackPluginChains,
       };
       return this.writeUserState(merged);
@@ -1805,6 +1823,19 @@ export class UserStateService {
   async getPluginLibrary(): Promise<ScannedPluginLibrary | null> {
     const state = await this.readUserState();
     return state.pluginLibrary ?? null;
+  }
+
+  async getPluginScanPaths(): Promise<string[]> {
+    const state = await this.readUserState();
+    return sanitizePluginScanPaths(state.pluginScanPaths);
+  }
+
+  async setPluginScanPaths(paths: string[]): Promise<string[]> {
+    const pluginScanPaths = sanitizePluginScanPaths(paths);
+    return this.enqueueStateMutation(async () => {
+      await this.patchUserStateUnlocked({ pluginScanPaths });
+      return pluginScanPaths;
+    });
   }
 
   /** Store a fresh scan result. Called after the sidecar completes scan_plugins. */

@@ -73,6 +73,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <iostream>
 #include <atomic>
 #include <memory>
@@ -369,70 +370,263 @@ juce::var describePlugin (const juce::PluginDescription& desc)
     return juce::var (obj.get());
 }
 
+juce::var makeScanFailure (const juce::String& formatId,
+                           const juce::String& path,
+                           const juce::String& reason)
+{
+    juce::DynamicObject::Ptr f (new juce::DynamicObject());
+    f->setProperty ("format", formatId);
+    f->setProperty ("path", path);
+    f->setProperty ("failureReason", reason);
+    return juce::var (f.get());
+}
+
+juce::String normaliseScanFormatId (const juce::String& raw)
+{
+    if (raw.equalsIgnoreCase ("all"))       return "all";
+    if (raw.equalsIgnoreCase ("vst3"))      return "vst3";
+    if (raw.equalsIgnoreCase ("VST3"))      return "vst3";
+    if (raw.equalsIgnoreCase ("au"))        return "au";
+    if (raw.equalsIgnoreCase ("AudioUnit")) return "au";
+    return raw.toLowerCase();
+}
+
+juce::String bundleFormatForPath (const juce::File& file)
+{
+    auto ext = file.getFileExtension();
+    if (ext.equalsIgnoreCase (".vst3"))      return "vst3";
+    if (ext.equalsIgnoreCase (".component")) return "au";
+    return {};
+}
+
+bool scanFormatMatches (const juce::String& requestedFormat,
+                        const juce::String& candidateFormat)
+{
+    return requestedFormat == "all" || candidateFormat.equalsIgnoreCase (requestedFormat);
+}
+
+struct PluginScanCandidate
+{
+    juce::String formatId;
+    juce::String path;
+};
+
+void addPluginScanCandidate (std::vector<PluginScanCandidate>& out,
+                             juce::StringArray& seen,
+                             const juce::String& formatId,
+                             const juce::String& path)
+{
+    auto key = (formatId + "\n" + path).toLowerCase();
+    if (seen.contains (key)) return;
+    seen.add (key);
+    out.push_back ({ formatId, path });
+}
+
+void collectPluginScanCandidatesFromRoot (const juce::File& root,
+                                          const juce::String& requestedFormat,
+                                          std::vector<PluginScanCandidate>& out,
+                                          juce::StringArray& seen,
+                                          int depth = 0)
+{
+    // Mirrors the Electron-side discovery cap generously while preventing
+    // accidental symlink/deep-tree walks from turning a user-specified scan
+    // path into an unbounded traversal. Real VST3/AU installs are shallow.
+    constexpr int maxDepth = 32;
+
+    auto directFormat = bundleFormatForPath (root);
+    if (directFormat.isNotEmpty())
+    {
+        if (root.exists() && scanFormatMatches (requestedFormat, directFormat))
+            addPluginScanCandidate (out, seen, directFormat, root.getFullPathName());
+        return;
+    }
+
+    if (depth > maxDepth || ! root.exists() || ! root.isDirectory())
+        return;
+
+    juce::Array<juce::File> children;
+    root.findChildFiles (children, juce::File::findDirectories, false);
+    for (auto& child : children)
+        collectPluginScanCandidatesFromRoot (child, requestedFormat, out, seen, depth + 1);
+}
+
+juce::StringArray defaultPluginSearchPathsForRequest (const juce::String& requestedFormat)
+{
+    juce::StringArray paths;
+    if (requestedFormat == "all" || requestedFormat == "vst3")
+        paths.addArray (defaultPluginSearchPaths ("VST3"));
+    if (requestedFormat == "all" || requestedFormat == "au")
+        paths.addArray (defaultPluginSearchPaths ("AudioUnit"));
+    paths.removeDuplicates (false);
+    return paths;
+}
+
+std::unique_ptr<juce::AudioPluginFormat> createPluginFormatForScan (const juce::String& formatId)
+{
+    if (formatId.equalsIgnoreCase ("vst3")) return std::make_unique<juce::VST3PluginFormat>();
+  #if JUCE_PLUGINHOST_AU && JUCE_MAC
+    if (formatId.equalsIgnoreCase ("au")) return std::make_unique<juce::AudioUnitPluginFormat>();
+  #else
+    juce::ignoreUnused (formatId);
+  #endif
+    return nullptr;
+}
+
+juce::var scanOnePluginInProcess (const juce::String& formatIdRaw, const juce::String& path)
+{
+    auto formatId = normaliseScanFormatId (formatIdRaw);
+    juce::Array<juce::var> plugins;
+    juce::Array<juce::var> failed;
+
+    auto format = createPluginFormatForScan (formatId);
+    if (! format)
+    {
+        failed.add (makeScanFailure (formatId, path, "unsupported plugin format"));
+    }
+    else
+    {
+        try
+        {
+            juce::OwnedArray<juce::PluginDescription> descs;
+            format->findAllTypesForFile (descs, path);
+            for (auto* desc : descs)
+                if (desc != nullptr)
+                    plugins.add (describePlugin (*desc));
+
+            if (descs.isEmpty())
+                failed.add (makeScanFailure (formatId, path, "metadata scan returned no plugin descriptions"));
+        }
+        catch (const std::exception& e)
+        {
+            failed.add (makeScanFailure (formatId, path, juce::String ("metadata scan threw: ") + e.what()));
+        }
+        catch (...)
+        {
+            failed.add (makeScanFailure (formatId, path, "metadata scan threw an unknown exception"));
+        }
+    }
+
+    juce::DynamicObject::Ptr result (new juce::DynamicObject());
+    result->setProperty ("ok", true);
+    result->setProperty ("plugins", plugins);
+    result->setProperty ("failed", failed);
+    result->setProperty ("scanVersion", 2);
+    return juce::var (result.get());
+}
+
+juce::var parseLastJsonObjectLine (const juce::String& output)
+{
+    juce::StringArray lines;
+    lines.addLines (output);
+    for (int i = lines.size(); --i >= 0; )
+    {
+        auto line = lines[i].trim();
+        if (! line.startsWithChar ('{')) continue;
+        auto parsed = juce::JSON::parse (line);
+        if (parsed.isObject()) return parsed;
+    }
+    return juce::var();
+}
+
+void appendScanChildResult (const PluginScanCandidate& candidate,
+                            juce::Array<juce::var>& plugins,
+                            juce::Array<juce::var>& failed)
+{
+    auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName();
+    juce::StringArray args;
+    args.add (exe);
+    args.add ("--scan-one");
+    args.add (candidate.formatId);
+    args.add (candidate.path);
+
+    juce::ChildProcess child;
+    if (! child.start (args, juce::ChildProcess::wantStdOut))
+    {
+        failed.add (makeScanFailure (candidate.formatId, candidate.path,
+                                     "metadata scan child could not be launched"));
+        return;
+    }
+
+    constexpr int scanTimeoutMs = 30000;
+    if (! child.waitForProcessToFinish (scanTimeoutMs))
+    {
+        child.kill();
+        child.waitForProcessToFinish (2000);
+        failed.add (makeScanFailure (candidate.formatId, candidate.path,
+                                     "metadata scan child timed out"));
+        return;
+    }
+
+    auto output = child.readAllProcessOutput();
+    auto parsed = parseLastJsonObjectLine (output);
+    if (! parsed.isObject())
+    {
+        auto exitCode = (int) child.getExitCode();
+        failed.add (makeScanFailure (candidate.formatId, candidate.path,
+                                     "metadata scan child exited without a JSON result (exit code "
+                                         + juce::String (exitCode) + ")"));
+        return;
+    }
+
+    if (! (bool) parsed["ok"])
+    {
+        auto error = parsed["error"].toString();
+        if (error.isEmpty()) error = "metadata scan child returned failure";
+        failed.add (makeScanFailure (candidate.formatId, candidate.path, error));
+        return;
+    }
+
+    if (parsed["plugins"].isArray())
+        if (auto* arr = parsed["plugins"].getArray())
+            for (auto& plugin : *arr)
+                plugins.add (plugin);
+
+    if (parsed["failed"].isArray())
+        if (auto* arr = parsed["failed"].getArray())
+            for (auto& failure : *arr)
+                failed.add (failure);
+}
+
 juce::var handleScanPlugins (const juce::var& params)
 {
-    juce::OwnedArray<juce::AudioPluginFormat> ownedFormats;
-    ownedFormats.add (new juce::VST3PluginFormat());
-  #if JUCE_PLUGINHOST_AU && JUCE_MAC
-    ownedFormats.add (new juce::AudioUnitPluginFormat());
-  #endif
-
     juce::String requestedFormat = "all";
     if (auto* obj = params.getDynamicObject())
         if (obj->hasProperty ("format"))
-            requestedFormat = params["format"].toString();
-
-    juce::KnownPluginList known;
+            requestedFormat = normaliseScanFormatId (params["format"].toString());
 
     juce::Array<juce::var> plugins;
     juce::Array<juce::var> failed;
 
-    for (auto* format : ownedFormats)
+    juce::StringArray searchPaths;
+    if (auto* obj = params.getDynamicObject())
     {
-        if (requestedFormat != "all"
-            && ! formatToContractId (format->getName()).equalsIgnoreCase (requestedFormat))
-            continue;
-
-        juce::StringArray searchPaths;
-        if (auto* obj = params.getDynamicObject())
+        if (obj->hasProperty ("paths") && params["paths"].isArray())
         {
-            if (obj->hasProperty ("paths") && params["paths"].isArray())
-            {
-                if (auto* arr = params["paths"].getArray())
-                    for (auto& p : *arr)
-                        searchPaths.add (p.toString());
-            }
-        }
-        if (searchPaths.isEmpty())
-            searchPaths = defaultPluginSearchPaths (format->getName());
-
-        juce::FileSearchPath fsp;
-        for (auto& p : searchPaths)
-            fsp.add (juce::File (p));
-
-        juce::PluginDirectoryScanner scanner (known, *format, fsp,
-                                              /* recursive */ true,
-                                              /* deadMansPedalFile */ juce::File(),
-                                              /* allowPluginsWhichRequireAsyncInstantiation */ true);
-
-        juce::String pluginBeingScanned;
-        while (scanner.scanNextFile (/* dontRescanIfAlreadyInList */ true, pluginBeingScanned))
-        {
-            // no-op — we collect results from the KnownPluginList below
-        }
-
-        for (auto& reason : scanner.getFailedFiles())
-        {
-            juce::DynamicObject::Ptr f (new juce::DynamicObject());
-            f->setProperty ("format", formatToContractId (format->getName()));
-            f->setProperty ("path", reason);
-            f->setProperty ("failureReason", "scanner reported failure");
-            failed.add (juce::var (f.get()));
+            if (auto* arr = params["paths"].getArray())
+                for (auto& p : *arr)
+                    searchPaths.add (p.toString());
         }
     }
+    if (searchPaths.isEmpty())
+        searchPaths = defaultPluginSearchPathsForRequest (requestedFormat);
 
-    for (auto& desc : known.getTypes())
-        plugins.add (describePlugin (desc));
+    std::vector<PluginScanCandidate> candidates;
+    juce::StringArray seenCandidates;
+    for (auto& path : searchPaths)
+        collectPluginScanCandidatesFromRoot (juce::File (path), requestedFormat, candidates, seenCandidates);
+
+    std::sort (candidates.begin(), candidates.end(), [] (const auto& a, const auto& b) {
+        auto byFormat = a.formatId.compareIgnoreCase (b.formatId);
+        if (byFormat != 0) return byFormat < 0;
+        return a.path.compareIgnoreCase (b.path) < 0;
+    });
+
+    // Crash-hardening: each plugin's metadata probe happens in a fresh copy
+    // of this sidecar (`--scan-one`). If a vendor plugin aborts or segfaults
+    // inside JUCE's findAllTypesForFile path, only the child dies; this parent
+    // sidecar/scan job records that bundle as failed and continues.
+    for (auto& candidate : candidates)
+        appendScanChildResult (candidate, plugins, failed);
 
     juce::DynamicObject::Ptr result (new juce::DynamicObject());
     result->setProperty ("ok", true);
@@ -894,6 +1088,19 @@ void runRepl()
 
 int main (int argc, char** argv)
 {
+    if (argc > 1 && juce::String (argv[1]) == "--scan-one")
+    {
+        juce::ScopedJuceInitialiser_GUI juceInit;
+        if (argc < 4)
+        {
+            emit (makeError ("--scan-one requires <format> <path>"));
+            return 2;
+        }
+
+        emit (scanOnePluginInProcess (juce::String (argv[2]), juce::String (argv[3])));
+        return 0;
+    }
+
     if (argc > 1 && juce::String (argv[1]) == "--scan")
     {
         juce::ScopedJuceInitialiser_GUI juceInit;

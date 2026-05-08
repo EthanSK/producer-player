@@ -279,6 +279,33 @@ test('scanPlugins sends explicit global plugin paths by default', async () => {
   }
 });
 
+test('scanPlugins preserves caller-provided explicit scan paths', async () => {
+  const requests = [];
+  const explicitPaths = [
+    '/tmp/Producer Player Manual/Manual EQ.vst3',
+    '/tmp/Producer Player Manual/Nested Folder',
+  ];
+  const fake = makeFakeChild({
+    requests,
+    replies: {
+      scan_plugins: {
+        plugins: [],
+        scanVersion: 2,
+      },
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.scanPlugins({ format: 'vst3', paths: explicitPaths });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'scan_plugins');
+  assert.deepEqual(
+    requests[0].params,
+    { format: 'vst3', paths: explicitPaths },
+    'manual plugin scan paths must be passed through to the native sidecar unchanged',
+  );
+});
+
 test('scanPlugins falls back to filesystem global discovery when sidecar returns no plugin metadata', async () => {
   await withTempPluginRoot(async (root) => {
     mkdirSync(join(root, 'Nested'));
@@ -375,6 +402,34 @@ test('scanPlugins merges filesystem discovery when sidecar returns partial metad
       library.plugins.find((plugin) => plugin.name === 'Fallback Candidate').id.startsWith('vst3:fs-'),
       true,
     );
+  });
+});
+
+test('scanPlugins treats isolated native scan child crashes as recoverable failures', async () => {
+  await withTempPluginRoot(async (root) => {
+    const crashedPath = join(root, 'Crashed Vendor.vst3');
+    mkdirSync(crashedPath);
+
+    const fake = makeFakeChild({
+      replies: {
+        scan_plugins: {
+          plugins: [],
+          failed: [
+            {
+              format: 'vst3',
+              path: crashedPath,
+              failureReason: 'metadata scan child exited without a JSON result (exit code 0)',
+            },
+          ],
+          scanVersion: 2,
+        },
+      },
+    });
+    const service = new PluginHostService('/fake/path', () => fake);
+    const library = await service.scanPlugins({ paths: [root], format: 'vst3' });
+
+    assert.deepEqual(library.plugins.map((plugin) => plugin.name), ['Crashed Vendor']);
+    assert.equal(library.plugins[0].id.startsWith('vst3:fs-'), true);
   });
 });
 

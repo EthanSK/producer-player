@@ -16831,6 +16831,45 @@ export function App(): JSX.Element {
               className={`checklist-input-row${checklistCapturedTimestamp !== null ? ' has-timestamp-preview' : ''}`}
               data-testid="song-checklist-input-row"
             >
+              {checklistCapturedTimestamp !== null ? (
+                <div className="checklist-timestamp-preview-group">
+                  <button
+                    type="button"
+                    className="checklist-set-now-button"
+                    data-testid="song-checklist-set-now"
+                    onClick={handleChecklistSetNow}
+                    title="Set the timestamp to the exact current playback position"
+                    aria-label="Set timestamp to current playback position"
+                  >
+                    <svg className="checklist-set-now-icon" viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="8" cy="8" r="6.5" />
+                      <path d="M8 4v4.5l3 1.5" />
+                    </svg>
+                    <span>Set now</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="checklist-timestamp-badge checklist-input-timestamp-preview"
+                    title={`Seek to ${formatTime(checklistCapturedTimestamp)} — scroll or drag vertically to adjust; hold Shift for coarser steps`}
+                    data-testid="song-checklist-input-timestamp-preview"
+                    onClick={() => {
+                      if (checklistPreviewSuppressNextClickRef.current) {
+                        checklistPreviewSuppressNextClickRef.current = false;
+                        return;
+                      }
+                      handleChecklistTimestampClick(checklistCapturedTimestamp);
+                    }}
+                    onWheel={handleChecklistTimestampPreviewWheel}
+                    onPointerDown={handleChecklistTimestampPreviewPointerDown}
+                    onPointerMove={handleChecklistTimestampPreviewPointerMove}
+                    onPointerUp={handleChecklistTimestampPreviewPointerUp}
+                    onPointerCancel={handleChecklistTimestampPreviewPointerCancel}
+                    onKeyDown={handleChecklistTimestampPreviewKeyDown}
+                  >
+                    {formatTime(checklistCapturedTimestamp)}
+                  </button>
+                </div>
+              ) : null}
               <textarea
                 ref={checklistComposerTextareaRef}
                 className="checklist-composer-text"
@@ -16874,45 +16913,6 @@ export function App(): JSX.Element {
                 placeholder="Add a checklist item"
                 data-testid="song-checklist-input"
               />
-              {checklistCapturedTimestamp !== null ? (
-                <div className="checklist-timestamp-preview-group">
-                  <button
-                    type="button"
-                    className="checklist-set-now-button"
-                    data-testid="song-checklist-set-now"
-                    onClick={handleChecklistSetNow}
-                    title="Set the timestamp to the exact current playback position"
-                    aria-label="Set timestamp to current playback position"
-                  >
-                    <svg className="checklist-set-now-icon" viewBox="0 0 16 16" aria-hidden="true">
-                      <circle cx="8" cy="8" r="6.5" />
-                      <path d="M8 4v4.5l3 1.5" />
-                    </svg>
-                    <span>Set now</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="checklist-timestamp-badge checklist-input-timestamp-preview"
-                    title={`Seek to ${formatTime(checklistCapturedTimestamp)} — scroll or drag vertically to adjust; hold Shift for coarser steps`}
-                    data-testid="song-checklist-input-timestamp-preview"
-                    onClick={() => {
-                      if (checklistPreviewSuppressNextClickRef.current) {
-                        checklistPreviewSuppressNextClickRef.current = false;
-                        return;
-                      }
-                      handleChecklistTimestampClick(checklistCapturedTimestamp);
-                    }}
-                    onWheel={handleChecklistTimestampPreviewWheel}
-                    onPointerDown={handleChecklistTimestampPreviewPointerDown}
-                    onPointerMove={handleChecklistTimestampPreviewPointerMove}
-                    onPointerUp={handleChecklistTimestampPreviewPointerUp}
-                    onPointerCancel={handleChecklistTimestampPreviewPointerCancel}
-                    onKeyDown={handleChecklistTimestampPreviewKeyDown}
-                  >
-                    {formatTime(checklistCapturedTimestamp)}
-                  </button>
-                </div>
-              ) : null}
               <div className="checklist-add-device-group">
                 <button
                   type="button"

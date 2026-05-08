@@ -3396,7 +3396,7 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 }
 
 .checklist-input-row.has-timestamp-preview {
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .checklist-add-device-group {

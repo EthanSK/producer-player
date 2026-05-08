@@ -127,6 +127,7 @@ import {
   coerceChecklistFindActiveIndex,
   formatChecklistFindStatus,
   getNextChecklistFindIndex,
+  isChecklistFindKeyboardShortcut,
   type ChecklistFindDirection,
 } from './checklistFind';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
@@ -5084,23 +5085,7 @@ export function App(): JSX.Element {
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      const platform = window.navigator.platform.toLowerCase();
-      const isApplePlatform =
-        platform.includes('mac') ||
-        platform.includes('iphone') ||
-        platform.includes('ipad') ||
-        platform.includes('ipod');
-      const primaryFindModifierPressed = isApplePlatform
-        ? event.metaKey && !event.ctrlKey
-        : event.ctrlKey && !event.metaKey;
-      const isFindShortcut =
-        key === 'f' &&
-        primaryFindModifierPressed &&
-        !event.shiftKey &&
-        !event.altKey;
-
-      if (isFindShortcut) {
+      if (isChecklistFindKeyboardShortcut(event, window.navigator.platform)) {
         event.preventDefault();
         event.stopPropagation();
         handleOpenChecklistFind();

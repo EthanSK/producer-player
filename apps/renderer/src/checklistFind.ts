@@ -1,5 +1,13 @@
 export type ChecklistFindDirection = 'next' | 'previous';
 
+export type ChecklistFindKeyboardEventLike = {
+  key: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+};
+
 export type ChecklistFindItem = {
   id: string;
   text: string;
@@ -12,6 +20,28 @@ export type ChecklistFindMatch = {
 
 export function normalizeChecklistFindQuery(query: string): string {
   return query.trim().toLocaleLowerCase();
+}
+
+export function isChecklistFindKeyboardShortcut(
+  event: ChecklistFindKeyboardEventLike,
+  platform: string,
+): boolean {
+  const normalizedPlatform = platform.toLocaleLowerCase();
+  const isApplePlatform =
+    normalizedPlatform.includes('mac') ||
+    normalizedPlatform.includes('iphone') ||
+    normalizedPlatform.includes('ipad') ||
+    normalizedPlatform.includes('ipod');
+  const primaryModifierPressed = isApplePlatform
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey;
+
+  return (
+    event.key.toLocaleLowerCase() === 'f' &&
+    primaryModifierPressed &&
+    !event.shiftKey &&
+    !event.altKey
+  );
 }
 
 export function buildChecklistFindMatches(

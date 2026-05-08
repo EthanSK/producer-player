@@ -4,6 +4,7 @@ import {
   coerceChecklistFindActiveIndex,
   formatChecklistFindStatus,
   getNextChecklistFindIndex,
+  isChecklistFindKeyboardShortcut,
 } from './checklistFind';
 
 const items = [
@@ -52,5 +53,32 @@ describe('checklist find helpers', () => {
     expect(formatChecklistFindStatus('', -1, 0)).toBe('Type to find checklist items');
     expect(formatChecklistFindStatus('snare', -1, 0)).toBe('No results for “snare”');
     expect(formatChecklistFindStatus('bass', 1, 4)).toBe('2 / 4');
+  });
+
+  it('uses Cmd+F on Apple platforms and Ctrl+F elsewhere without shifted variants', () => {
+    expect(
+      isChecklistFindKeyboardShortcut(
+        { key: 'f', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false },
+        'MacIntel',
+      ),
+    ).toBe(true);
+    expect(
+      isChecklistFindKeyboardShortcut(
+        { key: 'f', metaKey: false, ctrlKey: true, shiftKey: false, altKey: false },
+        'Win32',
+      ),
+    ).toBe(true);
+    expect(
+      isChecklistFindKeyboardShortcut(
+        { key: 'f', metaKey: false, ctrlKey: true, shiftKey: false, altKey: false },
+        'MacIntel',
+      ),
+    ).toBe(false);
+    expect(
+      isChecklistFindKeyboardShortcut(
+        { key: 'f', metaKey: true, ctrlKey: false, shiftKey: true, altKey: false },
+        'MacIntel',
+      ),
+    ).toBe(false);
   });
 });

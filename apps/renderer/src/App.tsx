@@ -122,6 +122,13 @@ import {
   CHECKLIST_TODO_OPACITY_RANGE,
   computeChecklistOpacitiesByRemainingTodoCount,
 } from './checklistTodoOpacity';
+import {
+  buildChecklistFindMatches,
+  coerceChecklistFindActiveIndex,
+  formatChecklistFindStatus,
+  getNextChecklistFindIndex,
+  type ChecklistFindDirection,
+} from './checklistFind';
 import producerPlayerIconUrl from '../../../assets/icon/source/producer-player-icon.svg';
 import { ENABLE_AGENT_FEATURES, SHOW_3000AD_BRANDING } from './featureFlags';
 import { SpectrumAnalyzer } from './SpectrumAnalyzer';
@@ -302,6 +309,7 @@ type ChecklistSortableRowProps = {
   style?: CSSProperties;
   children: ReactNode;
   isCurrentVersionTag: boolean;
+  onElement?: (node: HTMLLIElement | null) => void;
   onKeyDown: (event: ReactKeyboardEvent<HTMLLIElement>) => void;
   dropIndicatorPosition: DragOverPosition | null;
 };
@@ -313,6 +321,7 @@ function ChecklistSortableRow({
   style,
   children,
   isCurrentVersionTag,
+  onElement,
   onKeyDown,
   dropIndicatorPosition,
 }: ChecklistSortableRowProps): JSX.Element {
@@ -333,7 +342,10 @@ function ChecklistSortableRow({
 
   return (
     <li
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node);
+        onElement?.(node);
+      }}
       {...attributes}
       {...listeners}
       tabIndex={0}
@@ -2662,6 +2674,9 @@ export function App(): JSX.Element {
   // ideal stem curves plus disabled stem-separation CTAs for the future build.
   const [idealsModalOpen, setIdealsModalOpen] = useState(false);
   const [checklistDraftText, setChecklistDraftText] = useState('');
+  const [checklistFindOpen, setChecklistFindOpen] = useState(false);
+  const [checklistFindQuery, setChecklistFindQuery] = useState('');
+  const [checklistFindActiveIndex, setChecklistFindActiveIndex] = useState(-1);
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
   const [checklistTimestampMode, setChecklistTimestampMode] = useState<'live' | 'frozen'>('live');
   // DAW time offset — pure display transform applied to checklist timestamps
@@ -2988,6 +3003,9 @@ export function App(): JSX.Element {
   const checklistUnderlyingAnalysisPaneRef = useRef<HTMLElement | null>(null);
   const checklistUnderlyingSidePaneScrollRef = useRef<HTMLDivElement | null>(null);
   const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const checklistFindInputRef = useRef<HTMLInputElement | null>(null);
+  const checklistFindReturnFocusRef = useRef<HTMLElement | null>(null);
+  const checklistFindRowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
   // DAW offset MM / SS inputs — refs used for auto-advancing focus once the
   // minutes field has 2 digits, and for returning focus on backspace from an
   // empty seconds field (standard time-input UX).
@@ -5066,7 +5084,37 @@ export function App(): JSX.Element {
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const platform = window.navigator.platform.toLowerCase();
+      const isApplePlatform =
+        platform.includes('mac') ||
+        platform.includes('iphone') ||
+        platform.includes('ipad') ||
+        platform.includes('ipod');
+      const primaryFindModifierPressed = isApplePlatform
+        ? event.metaKey && !event.ctrlKey
+        : event.ctrlKey && !event.metaKey;
+      const isFindShortcut =
+        key === 'f' &&
+        primaryFindModifierPressed &&
+        !event.shiftKey &&
+        !event.altKey;
+
+      if (isFindShortcut) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleOpenChecklistFind();
+        return;
+      }
+
       if (event.key === 'Escape') {
+        if (checklistFindOpen) {
+          event.preventDefault();
+          event.stopPropagation();
+          handleCloseChecklistFind();
+          return;
+        }
+
         const active = document.activeElement;
         const isChecklistInputFocused =
           active instanceof HTMLElement &&
@@ -5084,11 +5132,11 @@ export function App(): JSX.Element {
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [checklistModalSongId]);
+  }, [checklistModalSongId, checklistFindOpen]);
 
   useEffect(() => {
     if (!migrationModalOpen) {
@@ -12045,6 +12093,90 @@ export function App(): JSX.Element {
     }
   }
 
+  function focusChecklistFindInput(): void {
+    requestAnimationFrame(() => {
+      const input = checklistFindInputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      input.select();
+    });
+  }
+
+  function handleOpenChecklistFind(): void {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      !active.closest('.checklist-find-bar')
+    ) {
+      checklistFindReturnFocusRef.current = active;
+    }
+
+    setChecklistFindOpen(true);
+    focusChecklistFindInput();
+  }
+
+  function handleCloseChecklistFind(options: { restoreFocus?: boolean } = {}): void {
+    const { restoreFocus = true } = options;
+    setChecklistFindOpen(false);
+    setChecklistFindQuery('');
+    setChecklistFindActiveIndex(-1);
+
+    if (!restoreFocus) {
+      checklistFindReturnFocusRef.current = null;
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      const returnTarget = checklistFindReturnFocusRef.current;
+      checklistFindReturnFocusRef.current = null;
+      if (returnTarget?.isConnected) {
+        returnTarget.focus();
+        return;
+      }
+      checklistComposerTextareaRef.current?.focus();
+    });
+  }
+
+  function handleChecklistFindQueryChange(nextQuery: string): void {
+    setChecklistFindQuery(nextQuery);
+    setChecklistFindActiveIndex(nextQuery.trim().length > 0 ? 0 : -1);
+  }
+
+  function handleChecklistFindStep(direction: ChecklistFindDirection): void {
+    setChecklistFindActiveIndex((current) =>
+      getNextChecklistFindIndex(current, checklistFindMatches.length, direction)
+    );
+  }
+
+  function handleChecklistFindRowElement(
+    itemId: string,
+    node: HTMLLIElement | null,
+  ): void {
+    if (node) {
+      checklistFindRowRefs.current.set(itemId, node);
+      return;
+    }
+    checklistFindRowRefs.current.delete(itemId);
+  }
+
+  function handleChecklistFindInputKeyDown(
+    event: ReactKeyboardEvent<HTMLInputElement>
+  ): void {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleChecklistFindStep(event.shiftKey ? 'previous' : 'next');
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      handleCloseChecklistFind();
+    }
+  }
+
   function handleOpenSongChecklist(songId: string): void {
     lastFocusedChecklistTransportRef.current = null;
     setChecklistModalSongId(songId);
@@ -12053,6 +12185,7 @@ export function App(): JSX.Element {
 
   function handleCloseSongChecklist(): void {
     lastFocusedChecklistTransportRef.current = null;
+    handleCloseChecklistFind({ restoreFocus: false });
     setChecklistModalSongId(null);
     setChecklistDraftText('');
     setChecklistCapturedTimestamp(null);
@@ -13125,6 +13258,52 @@ export function App(): JSX.Element {
     () => [...checklistModalItems].reverse(),
     [checklistModalItems]
   );
+  const checklistFindMatches = useMemo(
+    () =>
+      buildChecklistFindMatches(
+        checklistModalItemsChronological.map((item) => ({
+          id: item.id,
+          text: item.text,
+        })),
+        checklistFindQuery,
+      ),
+    [checklistModalItemsChronological, checklistFindQuery],
+  );
+  const checklistFindMatchIds = useMemo(
+    () => new Set(checklistFindMatches.map((match) => match.id)),
+    [checklistFindMatches],
+  );
+  const checklistFindActiveMatch =
+    checklistFindActiveIndex >= 0
+      ? checklistFindMatches[checklistFindActiveIndex] ?? null
+      : null;
+  const checklistFindStatusText = formatChecklistFindStatus(
+    checklistFindQuery,
+    checklistFindActiveIndex,
+    checklistFindMatches.length,
+  );
+  useEffect(() => {
+    const coercedIndex = coerceChecklistFindActiveIndex(
+      checklistFindActiveIndex,
+      checklistFindMatches.length,
+    );
+    if (coercedIndex !== checklistFindActiveIndex) {
+      setChecklistFindActiveIndex(coercedIndex);
+    }
+  }, [checklistFindActiveIndex, checklistFindMatches.length]);
+
+  useEffect(() => {
+    if (!checklistFindOpen || !checklistFindActiveMatch) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      checklistFindRowRefs.current
+        .get(checklistFindActiveMatch.id)
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }, [checklistFindOpen, checklistFindActiveMatch?.id]);
+
   const listeningDeviceRenameTarget = useMemo(
     () =>
       activeListeningDeviceId
@@ -16266,6 +16445,75 @@ export function App(): JSX.Element {
               </button>
             </div>
 
+            {checklistFindOpen ? (
+              <div
+                className={`checklist-find-bar${
+                  checklistFindQuery.trim().length > 0 && checklistFindMatches.length === 0
+                    ? ' has-no-results'
+                    : ''
+                }`}
+                data-testid="song-checklist-find-bar"
+                role="search"
+                aria-label="Find checklist items"
+              >
+                <span className="checklist-find-label" aria-hidden="true">Find</span>
+                <input
+                  ref={checklistFindInputRef}
+                  type="search"
+                  className="checklist-find-input"
+                  value={checklistFindQuery}
+                  onChange={(event) => handleChecklistFindQueryChange(event.currentTarget.value)}
+                  onKeyDown={handleChecklistFindInputKeyDown}
+                  placeholder="Search checklist items"
+                  aria-label="Find in checklist"
+                  aria-describedby="song-checklist-find-status"
+                  data-testid="song-checklist-find-input"
+                />
+                <span
+                  id="song-checklist-find-status"
+                  className="checklist-find-status"
+                  data-testid="song-checklist-find-status"
+                  aria-live="polite"
+                >
+                  {checklistFindStatusText}
+                </span>
+                <div className="checklist-find-actions" aria-label="Find navigation">
+                  <button
+                    type="button"
+                    className="ghost checklist-find-action"
+                    onClick={() => handleChecklistFindStep('previous')}
+                    disabled={checklistFindMatches.length === 0}
+                    aria-label="Previous checklist find match"
+                    title="Previous match (Shift+Enter)"
+                    data-testid="song-checklist-find-previous"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost checklist-find-action"
+                    onClick={() => handleChecklistFindStep('next')}
+                    disabled={checklistFindMatches.length === 0}
+                    aria-label="Next checklist find match"
+                    title="Next match (Enter)"
+                    data-testid="song-checklist-find-next"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost checklist-find-action checklist-find-close"
+                    onClick={() => handleCloseChecklistFind()}
+                    aria-label="Close checklist find"
+                    title="Close find (Esc)"
+                    data-testid="song-checklist-find-close"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <div className="listening-device-strip" data-testid="listening-device-strip">
               <div className="listening-device-editor">
                 <div className="listening-device-input-wrap">
@@ -16460,12 +16708,15 @@ export function App(): JSX.Element {
                       item.versionNumber === currentPlaybackVersionNumber &&
                       selectedPlaybackSongId !== null &&
                       checklistModalSong.id === selectedPlaybackSongId;
+                    const isChecklistFindMatch = checklistFindMatchIds.has(item.id);
+                    const isChecklistFindActiveMatch = checklistFindActiveMatch?.id === item.id;
                     return (
                     <ChecklistSortableRow
                       key={item.id}
                       itemId={item.id}
                       versionNumber={item.versionNumber}
                       isCurrentVersionTag={isCurrentVersionTag}
+                      onElement={(node) => handleChecklistFindRowElement(item.id, node)}
                       dropIndicatorPosition={
                         checklistDropIndicator?.itemId === item.id
                           ? checklistDropIndicator.position
@@ -16499,6 +16750,8 @@ export function App(): JSX.Element {
                         hasItemMetadata ? ' has-metadata' : ''
                       }${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}${
                         isGroupedHighlight ? ' is-group-highlighted' : ''
+                      }${isChecklistFindMatch ? ' is-find-match' : ''}${
+                        isChecklistFindActiveMatch ? ' is-find-active-match' : ''
                       }${
                         isCurrentVersionTag ? ' checklist-item--current-version' : ''
                       }`}

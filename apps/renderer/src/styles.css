@@ -3200,6 +3200,76 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   font-weight: 600;
 }
 
+.checklist-find-bar {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(92, 167, 255, 0.28);
+  border-radius: 12px;
+  background: rgba(92, 167, 255, 0.08);
+  box-shadow: 0 0 0 1px rgba(92, 167, 255, 0.08);
+}
+
+.checklist-find-bar.has-no-results {
+  border-color: rgba(231, 76, 60, 0.42);
+  background: rgba(231, 76, 60, 0.08);
+}
+
+.checklist-find-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.checklist-find-input {
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text-main);
+  font: inherit;
+}
+
+.checklist-find-input:focus {
+  outline: none;
+  border-color: rgba(92, 167, 255, 0.68);
+  box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.16);
+}
+
+.checklist-find-status {
+  min-width: 74px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.checklist-find-bar.has-no-results .checklist-find-status {
+  color: #ff9f91;
+}
+
+.checklist-find-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.checklist-find-action {
+  min-width: 28px;
+  padding: 3px 7px;
+  line-height: 1.25;
+}
+
+.checklist-find-close {
+  font-size: 16px;
+  font-weight: 700;
+}
+
 /* DAW offset header widget — sits between the title and the Done button.
  * When the toggle is OFF, the numeric inputs stay visible but dim so the
  * user's last-typed offset value is still visible. */
@@ -3575,6 +3645,21 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   border-color: rgba(92, 167, 255, 0.65);
   background: rgba(92, 167, 255, 0.10);
   box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.12);
+}
+
+.checklist-item-row.is-find-match {
+  border-color: rgba(255, 214, 102, 0.55);
+  background: rgba(255, 214, 102, 0.08);
+}
+
+.checklist-item-row.is-find-active-match {
+  border-color: rgba(255, 214, 102, 0.92);
+  background: rgba(255, 214, 102, 0.14);
+  box-shadow: 0 0 0 2px rgba(255, 214, 102, 0.24), 0 0 22px rgba(255, 214, 102, 0.12);
+}
+
+.checklist-item-row.is-find-active-match .checklist-item-text {
+  border-color: rgba(255, 214, 102, 0.7);
 }
 
 .checklist-item-toggle {
@@ -5357,9 +5442,14 @@ button.checklist-play-toggle[data-playing='true'] {
   }
 
 
+  .checklist-find-bar,
   .checklist-input-row,
   .checklist-item-row {
     grid-template-columns: 1fr;
+  }
+
+  .checklist-find-status {
+    text-align: left;
   }
 }
 

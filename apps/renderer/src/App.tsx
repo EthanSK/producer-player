@@ -139,7 +139,7 @@ import { EqGainSliders, EQ_GAIN_DEFAULT_DB } from './EqGainSliders';
 import { HelpTooltip } from './HelpTooltip';
 import { TechnicalInfoPopover } from './TechnicalInfoPopover';
 import { KWeightingCurveModal } from './KWeightingCurveModal';
-import { IdealsModal } from './IdealsModal';
+import { IdealsModal, type IdealStemAnalysisSource } from './IdealsModal';
 import {
   TECH_INFO_INTEGRATED_LUFS,
   TECH_INFO_TRUE_PEAK,
@@ -6674,6 +6674,40 @@ export function App(): JSX.Element {
           fileName: selectedPlaybackVersion?.fileName ?? 'Selected track',
           subtitle: selectedSong?.title ?? 'Selected track',
         };
+  const idealsMixSource = useMemo<IdealStemAnalysisSource | null>(() => {
+    if (!selectedPlaybackVersion || !activeMixPlaybackSource) {
+      return null;
+    }
+
+    return {
+      kind: 'mix',
+      label: 'Your Mix',
+      fileName: selectedPlaybackVersion.fileName,
+      filePath: selectedPlaybackVersion.filePath,
+      url: activeMixPlaybackSource.url,
+      sizeBytes: selectedPlaybackVersion.sizeBytes,
+      modifiedAt: selectedPlaybackVersion.modifiedAt,
+      versionId: selectedPlaybackVersion.id,
+      sourceStrategy: activeMixPlaybackSource.sourceStrategy,
+      exists: activeMixPlaybackSource.exists,
+    };
+  }, [activeMixPlaybackSource, selectedPlaybackVersion]);
+  const idealsReferenceSource = useMemo<IdealStemAnalysisSource | null>(() => {
+    if (!referenceTrack) {
+      return null;
+    }
+
+    return {
+      kind: 'reference',
+      label: 'Reference',
+      fileName: referenceTrack.fileName,
+      filePath: referenceTrack.filePath,
+      url: referenceTrack.playbackSource.url,
+      referenceIdentity: referenceTrack.filePath,
+      sourceStrategy: referenceTrack.playbackSource.sourceStrategy,
+      exists: referenceTrack.playbackSource.exists,
+    };
+  }, [referenceTrack]);
   const shortTermLufsEstimate = analysis
     ? estimateShortTermLufs(analysis, currentTimeSeconds)
     : null;
@@ -19875,12 +19909,15 @@ export function App(): JSX.Element {
         onClose={() => setErrorDetails(null)}
       />
       {/*
-       * v3.159 — Spectrum Analyzer Ideals modal. Rendered at the App root so
-       * it can sit above the analysis overlay without wiring stem separation yet.
+       * v3.160 — Spectrum Analyzer Ideals modal. Rendered at the App root so
+       * it can sit above the analysis overlay while receiving the current mix
+       * and reference audio identities for cached proxy-stem analysis.
        */}
       <IdealsModal
         open={idealsModalOpen}
         onClose={() => setIdealsModalOpen(false)}
+        mixSource={idealsMixSource}
+        referenceSource={idealsReferenceSource}
       />
       {/*
        * v3.126 — K-weighting / LUFS frequency-weighting curve modal.

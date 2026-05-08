@@ -139,6 +139,7 @@ import { EqGainSliders, EQ_GAIN_DEFAULT_DB } from './EqGainSliders';
 import { HelpTooltip } from './HelpTooltip';
 import { TechnicalInfoPopover } from './TechnicalInfoPopover';
 import { KWeightingCurveModal } from './KWeightingCurveModal';
+import { IdealsModal } from './IdealsModal';
 import {
   TECH_INFO_INTEGRATED_LUFS,
   TECH_INFO_TRUE_PEAK,
@@ -2657,6 +2658,9 @@ export function App(): JSX.Element {
   // shape so producers can see the per-frequency weight LUFS applies
   // before integrating loudness.
   const [kWeightingModalOpen, setKWeightingModalOpen] = useState(false);
+  // v3.159 — Spectrum Analyzer Ideals dialog. Phase 1 is UI-only: educational
+  // ideal stem curves plus disabled stem-separation CTAs for the future build.
+  const [idealsModalOpen, setIdealsModalOpen] = useState(false);
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistCapturedTimestamp, setChecklistCapturedTimestamp] = useState<number | null>(null);
   const [checklistTimestampMode, setChecklistTimestampMode] = useState<'live' | 'frozen'>('live');
@@ -3502,13 +3506,13 @@ export function App(): JSX.Element {
     // view, not just the mastering fullscreen. Order: version switcher
     // (innermost control) → song/quick switcher → mastering overlay.
     //
-    // v3.110 — when the K-weighting curve modal is open, it owns Escape
+    // v3.110/v3.159 — when a mastering help modal is open, it owns Escape
     // (its own handler dismisses it). Skip this handler entirely so the
     // mastering overlay isn't co-dismissed underneath the modal.
     if (!analysisExpanded && !quickSwitcherOpen && !versionSwitcherOpen) {
       return;
     }
-    if (kWeightingModalOpen) {
+    if (kWeightingModalOpen || idealsModalOpen) {
       return;
     }
 
@@ -3528,7 +3532,7 @@ export function App(): JSX.Element {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [analysisExpanded, quickSwitcherOpen, versionSwitcherOpen, kWeightingModalOpen]);
+  }, [analysisExpanded, quickSwitcherOpen, versionSwitcherOpen, kWeightingModalOpen, idealsModalOpen]);
 
   // Track viewport width so the inspector collapses into a drawer at narrow
   // widths. The threshold matches the matching CSS media query in styles.css.
@@ -7393,14 +7397,17 @@ export function App(): JSX.Element {
   function renderMasteringPanelDragHandle(
     surface: 'compact',
     panelId: CompactMasteringPanelId,
+    leadingControls?: ReactNode,
   ): JSX.Element;
   function renderMasteringPanelDragHandle(
     surface: 'fullscreen',
     panelId: FullscreenMasteringPanelId,
+    leadingControls?: ReactNode,
   ): JSX.Element;
   function renderMasteringPanelDragHandle(
     surface: 'compact' | 'fullscreen',
     panelId: CompactMasteringPanelId | FullscreenMasteringPanelId,
+    leadingControls?: ReactNode,
   ): JSX.Element {
     const isCompact = surface === 'compact';
     const panelMeta = MASTERING_PANEL_ASK_AI_META[panelId];
@@ -7413,6 +7420,7 @@ export function App(): JSX.Element {
 
     return (
       <div className="analysis-panel-controls-row">
+        {leadingControls}
         {ENABLE_AGENT_FEATURES ? (
           <button
             type="button"
@@ -17475,7 +17483,7 @@ export function App(): JSX.Element {
                           setShowAiRecommendationsFullscreen(event.target.checked)
                         }
                       />
-                      <span>Show AI recommendations</span>
+                      <span>AI Recs</span>
                     </label>
                   </div>
                   <button
@@ -17531,7 +17539,18 @@ export function App(): JSX.Element {
                           <p className="analysis-section-subtitle">Real-time frequency content — click a band to solo; Shift+click to replace the selection with just that band.</p>
                         </div>
                         {/* v3.54: drag handle parity verified — panel is already grid-draggable as 'visualizations'. */}
-                        {renderMasteringPanelDragHandle('fullscreen', 'visualizations')}
+                        {renderMasteringPanelDragHandle('fullscreen', 'visualizations', (
+                          <button
+                            type="button"
+                            className="ideals-trigger-button"
+                            data-testid="ideals-open"
+                            onClick={() => setIdealsModalOpen(true)}
+                            aria-label="Open ideal stem EQ curves"
+                            title="Open educational ideal EQ curves for vocals, drums, bass, and other stems."
+                          >
+                            Ideals
+                          </button>
+                        ))}
                       </div>
                       <SpectrumAnalyzer
                         analyserNode={analyserNode}
@@ -19854,6 +19873,14 @@ export function App(): JSX.Element {
         title={errorDetails?.title ?? 'Error details'}
         message={errorDetails?.message ?? ''}
         onClose={() => setErrorDetails(null)}
+      />
+      {/*
+       * v3.159 — Spectrum Analyzer Ideals modal. Rendered at the App root so
+       * it can sit above the analysis overlay without wiring stem separation yet.
+       */}
+      <IdealsModal
+        open={idealsModalOpen}
+        onClose={() => setIdealsModalOpen(false)}
       />
       {/*
        * v3.126 — K-weighting / LUFS frequency-weighting curve modal.

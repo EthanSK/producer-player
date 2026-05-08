@@ -130,8 +130,9 @@ spctl --assess --type execute --verbose=2 \
 
 ## How It Works (for reference)
 
-1. **`package.json` → `build.mac`** enables `hardenedRuntime` and points to
-   `build/entitlements.mac.plist`.
+1. **`package.json` → `build.mac`** enables `hardenedRuntime` and points the main app to
+   `build/entitlements.mac.plist`, with child processes/sidecars inheriting
+   `build/entitlements.mac.inherit.plist`.
 2. **electron-builder** reads `CSC_LINK` / `CSC_KEY_PASSWORD` from the
    environment and signs the app automatically.
 3. **`afterSign` → `scripts/notarize.js`** runs after signing. It calls
@@ -143,7 +144,8 @@ spctl --assess --type execute --verbose=2 \
 ### Files involved
 
 ```
-build/entitlements.mac.plist     ← runtime entitlements for direct distribution
+build/entitlements.mac.plist     ← main-app runtime entitlements for direct distribution
+build/entitlements.mac.inherit.plist ← child-process runtime entitlements for the native sidecar/plugin host
 build/entitlements.mas.plist     ← sandbox entitlements for Mac App Store
 build/entitlements.mas.inherit.plist
 scripts/notarize.js              ← afterSign notarization hook

@@ -242,7 +242,7 @@ Renderer shows a "plugin editor" button per slot. Click → sidecar opens native
 
 - Sidecar binary must be Developer-ID-signed and included in notarization (existing flow in `scripts/notarize.js`).
 - Loaded third-party plugins are NOT our signing responsibility — Gatekeeper handles them at load time. If a plugin is unsigned, AU/VST3 load may fail; surface that error cleanly.
-- Hardened runtime entitlements need `com.apple.security.cs.disable-library-validation` to load third-party dylibs (VST3 and CLAP are dylibs). Add to `build/entitlements.mac.plist`.
+- Hardened runtime entitlements need `com.apple.security.cs.disable-library-validation` on the native sidecar/child-process signature to load third-party dylibs (VST3 and CLAP are dylibs). Keep the main app entitlements in `build/entitlements.mac.plist`; add plugin-host child-process entitlements in `build/entitlements.mac.inherit.plist`.
 
 ## 8. Phased delivery plan
 

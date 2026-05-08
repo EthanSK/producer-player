@@ -21,7 +21,7 @@ import {
  * We bypass the native `pp-audio-host` sidecar by seeding a fake plugin
  * library through `setUserState`. The renderer treats the cached library
  * as authoritative for rendering (it only hits the sidecar when the user
- * clicks "Scan installed plugins"), so the full flow exercises without needing the
+ * explicitly clicks the scan button), so the full flow exercises without needing the
  * compiled JUCE binary to exist in the E2E environment.
  */
 
@@ -94,9 +94,8 @@ const FAKE_LIBRARY = {
 };
 
 /**
- * Suppress the background plugin scan (which would otherwise overwrite our
- * seeded library with real installed AudioUnits on the test host) and push
- * a deterministic fake library into the renderer via the v3.40 test hook.
+ * Push a deterministic fake library into the renderer via the v3.40 test hook.
+ * The disable flag is retained as a guard against older bootstrap paths.
  */
 async function seedFakePluginLibrary(page: import('@playwright/test').Page): Promise<void> {
   await page.waitForFunction(
@@ -127,9 +126,9 @@ test.describe('Plugin chain strip @smoke', () => {
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
 
     try {
-      // Suppress the background native scan + seed a deterministic fake
-      // library BEFORE selecting a track (so the renderer's chain-load
-      // effect sees a populated library when the Add button is clicked).
+      // Seed a deterministic fake library BEFORE selecting a track (so the
+      // renderer's chain-load effect sees a populated library when Add is
+      // clicked, without touching the native sidecar).
       await seedFakePluginLibrary(page);
 
       // --- Link folder + select track -----------------------------------
@@ -162,6 +161,10 @@ test.describe('Plugin chain strip @smoke', () => {
       await strip.getByTestId('plugin-chain-strip-add').click();
       const dialog = page.getByTestId('plugin-browser-dialog');
       await expect(dialog).toBeVisible();
+      await expect(page.getByTestId('plugin-browser-dialog-path-list')).toBeVisible();
+      await expect(page.getByTestId('plugin-browser-dialog-scan')).toContainText(
+        'Scan standard folders',
+      );
       await expect(page.getByTestId('plugin-browser-dialog-row')).toHaveCount(2);
 
       // Scenario 3: Pick a plugin → pill appears in the chain.

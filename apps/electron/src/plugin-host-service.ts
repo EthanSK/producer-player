@@ -93,6 +93,15 @@ interface Pending {
   resolve: PendingResolver;
   reject: PendingRejecter;
   timer: NodeJS.Timeout;
+  /**
+   * Optional keepalive resetter — when a sidecar event tied to this request
+   * arrives (e.g. `scan_progress` for a long-running `scan_plugins` call),
+   * the in-flight timer is restarted from `0`. Lets the renderer wait
+   * minutes for a long scan without bumping the global per-RPC timeout to
+   * the same minutes-long worst case.
+   */
+  resetTimer?: () => void;
+  method?: string;
 }
 
 const DEFAULT_PLUGIN_SCAN_MAX_DEPTH = 4;
@@ -389,6 +398,14 @@ export type EditorClosedListener = (instanceId: string) => void;
 export type InstanceLoadedListener = (payload: PluginInstanceLoadedPayload) => void;
 export type SidecarExitedListener = (info: { code: number | null; signal: string | null; expected: boolean }) => void;
 
+export interface ScanProgressEvent {
+  done: number;
+  total: number;
+  /** Filesystem path of the plugin bundle that just finished its metadata probe. */
+  current: string;
+}
+export type ScanProgressListener = (event: ScanProgressEvent) => void;
+
 /**
  * Plan produced by `diffChainReconciliation`. Split out so tests can
  * assert the diff logic without touching the sidecar.
@@ -460,6 +477,7 @@ export class PluginHostService {
   private editorClosedListeners = new Set<EditorClosedListener>();
   private instanceLoadedListeners = new Set<InstanceLoadedListener>();
   private sidecarExitedListeners = new Set<SidecarExitedListener>();
+  private scanProgressListeners = new Set<ScanProgressListener>();
   /** Editor instance ids currently open (tracked from open/close requests + editor_closed events). */
   private openEditorIds = new Set<string>();
   private instanceLatencies = new Map<string, number>();
@@ -632,6 +650,32 @@ export class PluginHostService {
       return;
     }
 
+    // v3.170 — sidecar streams `scan_progress` events while a long-running
+    // `scan_plugins` request is in flight. Each one acts as a per-RPC
+    // keepalive: we reset the pending request's timer so the renderer can
+    // wait for the full scan (often several minutes for large plugin
+    // catalogues) without bumping the global timeout to the same worst-case.
+    if (obj.event === 'scan_progress') {
+      const done = typeof obj.done === 'number' && Number.isFinite(obj.done) ? Math.max(0, Math.floor(obj.done)) : 0;
+      const total = typeof obj.total === 'number' && Number.isFinite(obj.total) ? Math.max(0, Math.floor(obj.total)) : 0;
+      const current = typeof obj.current === 'string' ? obj.current : '';
+      // Reset every in-flight scan_plugins timer. Currently only one scan
+      // can be in-flight at a time, but iterating costs nothing and keeps
+      // this resilient if we ever batch.
+      for (const pending of this.pending.values()) {
+        if (pending.method === 'scan_plugins' && pending.resetTimer) pending.resetTimer();
+      }
+      const event: ScanProgressEvent = { done, total, current };
+      for (const listener of this.scanProgressListeners) {
+        try {
+          listener(event);
+        } catch (err) {
+          log.warn('[plugin-host] scan progress listener threw', err);
+        }
+      }
+      return;
+    }
+
     // v3.42 Phase 3 — unsolicited editor_closed event from the sidecar.
     // No `id` because the renderer never asked for it (user clicked the
     // OS close button). Notify listeners so React state can clear the
@@ -677,14 +721,28 @@ export class PluginHostService {
     const timeoutMs = opts.timeoutMs ?? 30_000;
 
     return new Promise<T>((resolvePromise, rejectPromise) => {
-      const timer = setTimeout(() => {
+      // Wrap the timer in a holder so progress events can reset it without
+      // tearing down the pending entry. We re-arm the same `timeoutMs`
+      // window every time the sidecar emits a per-RPC keepalive event
+      // (currently only `scan_progress`).
+      let timer: NodeJS.Timeout;
+      const onTimeout = () => {
         this.pending.delete(id);
         if (this.child && !this.child.killed) {
           this.expectingExit = true;
           this.child.kill('SIGTERM');
         }
         rejectPromise(new Error(`pp-audio-host ${method} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
+      };
+      const armTimer = () => {
+        timer = setTimeout(onTimeout, timeoutMs);
+      };
+      const resetTimer = () => {
+        clearTimeout(timer);
+        armTimer();
+      };
+      armTimer();
+
       this.pending.set(id, {
         resolve: (v) => {
           clearTimeout(timer);
@@ -694,13 +752,15 @@ export class PluginHostService {
           clearTimeout(timer);
           rejectPromise(err);
         },
-        timer,
+        timer: timer!,
+        resetTimer,
+        method,
       });
       try {
         this.child!.stdin.write(payload);
       } catch (err) {
         this.pending.delete(id);
-        clearTimeout(timer);
+        clearTimeout(timer!);
         rejectPromise(err instanceof Error ? err : new Error(String(err)));
       }
     });
@@ -712,14 +772,39 @@ export class PluginHostService {
    * folders (user + machine-wide), matching a DAW-style global plugin browser
    * instead of any Producer Player project/library-local directory.
    */
-  async scanPlugins(opts?: { format?: PluginScanFormat; paths?: string[] }): Promise<ScannedPluginLibrary> {
+  async scanPlugins(opts?: {
+    format?: PluginScanFormat;
+    paths?: string[];
+    /**
+     * Optional per-call progress callback. Receives `scan_progress` events
+     * the sidecar emits as it works through the candidate list. Subscribed
+     * for the lifetime of the call and unsubscribed before the promise
+     * settles so callers don't have to manage cleanup themselves.
+     */
+    onProgress?: ScanProgressListener;
+  }): Promise<ScannedPluginLibrary> {
     const scanOptions = normalizeScanOptions(opts);
     log.info(
       `[plugin-host] scanPlugins starting (format=${scanOptions.format}, paths=${
         scanOptions.paths.length > 0 ? scanOptions.paths.join('|') : 'none'
       })`,
     );
-    const reply = await this.send<Record<string, unknown>>('scan_plugins', scanOptions, { timeoutMs: 120_000 });
+    // The native sidecar can take several minutes for large plugin
+    // catalogs (Ethan: ~430 plugins ≈ 5 min serial, ~75 s parallel as of
+    // v3.170). Each per-plugin probe is bounded to 30 s in main.cpp, so
+    // any gap between `scan_progress` events longer than 90 s means the
+    // sidecar is genuinely stuck; that's our keepalive window. The hard
+    // ceiling stays at 600_000 ms as a backstop in case the sidecar
+    // crashed without emitting an exit.
+    const unsubscribeOnProgress = opts?.onProgress
+      ? this.onScanProgress(opts.onProgress)
+      : null;
+    let reply: Record<string, unknown>;
+    try {
+      reply = await this.send<Record<string, unknown>>('scan_plugins', scanOptions, { timeoutMs: 90_000 });
+    } finally {
+      if (unsubscribeOnProgress) unsubscribeOnProgress();
+    }
     // v3.50 — surface sidecar-reported scan failures in the main log so a
     // "Plugin scan failed" toast has something to point at beyond the
     // generic error message. main.cpp's handleScanPlugins fills `failed`
@@ -1038,6 +1123,18 @@ export class PluginHostService {
     this.sidecarExitedListeners.add(listener);
     return () => {
       this.sidecarExitedListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Subscribe to per-plugin progress events the sidecar emits during a
+   * `scanPlugins` call. Returns an unsubscribe function. See
+   * `ScanProgressEvent` for shape.
+   */
+  onScanProgress(listener: ScanProgressListener): () => void {
+    this.scanProgressListeners.add(listener);
+    return () => {
+      this.scanProgressListeners.delete(listener);
     };
   }
 

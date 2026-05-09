@@ -77,6 +77,7 @@
 #include <iostream>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -528,9 +529,15 @@ juce::var parseLastJsonObjectLine (const juce::String& output)
     return juce::var();
 }
 
-void appendScanChildResult (const PluginScanCandidate& candidate,
-                            juce::Array<juce::var>& plugins,
-                            juce::Array<juce::var>& failed)
+// Run one --scan-one child for `candidate`, blocking until it exits or
+// `scanTimeoutMs` is reached. Result is appended to `plugins` / `failed`.
+//
+// Internally identical to the original sequential implementation; pulled out
+// into a per-candidate function so handleScanPlugins can drive a fixed-size
+// pool of these in parallel without changing the result shape.
+void runScanOneChild (const PluginScanCandidate& candidate,
+                      juce::Array<juce::var>& plugins,
+                      juce::Array<juce::var>& failed)
 {
     auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName();
     juce::StringArray args;
@@ -587,6 +594,30 @@ void appendScanChildResult (const PluginScanCandidate& candidate,
                 failed.add (failure);
 }
 
+void emitScanProgress (int done, int total, const juce::String& currentPath)
+{
+    juce::DynamicObject::Ptr ev (new juce::DynamicObject());
+    ev->setProperty ("event", "scan_progress");
+    ev->setProperty ("done", done);
+    ev->setProperty ("total", total);
+    ev->setProperty ("current", currentPath);
+    emit (juce::var (ev.get()));
+}
+
+// Compute the scan worker pool size. Bounded by the candidate count and
+// hardware concurrency; capped at 8 to stay polite on developer laptops and
+// avoid bursts of plugin DLLs / AU components hammering CoreAudio at once.
+int computeScanWorkerCount (int candidateCount)
+{
+    if (candidateCount <= 1) return 1;
+    auto hw = (int) std::thread::hardware_concurrency();
+    if (hw <= 0) hw = 4;
+    int n = std::min (hw, 8);
+    n = std::min (n, candidateCount);
+    if (n < 1) n = 1;
+    return n;
+}
+
 juce::var handleScanPlugins (const juce::var& params)
 {
     juce::String requestedFormat = "all";
@@ -625,8 +656,70 @@ juce::var handleScanPlugins (const juce::var& params)
     // of this sidecar (`--scan-one`). If a vendor plugin aborts or segfaults
     // inside JUCE's findAllTypesForFile path, only the child dies; this parent
     // sidecar/scan job records that bundle as failed and continues.
-    for (auto& candidate : candidates)
-        appendScanChildResult (candidate, plugins, failed);
+    //
+    // v3.170 — parallel pool.
+    // The previous serial `runScanOneChild` loop took ~700 ms per plugin; on
+    // a typical mastering rig with ~430 installed VST3/AU bundles that's a
+    // 5-minute wall-clock walk that exceeds the renderer's 120 s IPC timeout.
+    // We now run a small pool of `--scan-one` children in parallel
+    // (`computeScanWorkerCount`) so wall-clock drops to ~30-60 s for the same
+    // catalog. Each worker still gets its own process / address space, so
+    // crashing plugins remain isolated from the parent and from each other.
+    //
+    // Per-candidate progress events `{"event":"scan_progress","done":k,
+    // "total":n,"current":path}` are emitted as workers complete, giving the
+    // Electron side a keepalive signal so the IPC timeout no longer fires
+    // mid-scan and the renderer can show "Scanning plugins (k/n: name)…".
+    const int total = (int) candidates.size();
+    const int workerCount = computeScanWorkerCount (total);
+
+    std::atomic<int> nextIndex { 0 };
+    std::atomic<int> completed { 0 };
+    std::mutex resultsMutex;
+    std::mutex progressMutex;
+
+    std::vector<std::thread> workers;
+    workers.reserve ((size_t) workerCount);
+
+    auto workerBody = [&]() {
+        for (;;)
+        {
+            int idx = nextIndex.fetch_add (1, std::memory_order_relaxed);
+            if (idx >= total) return;
+
+            const auto& candidate = candidates[(size_t) idx];
+
+            juce::Array<juce::var> localPlugins;
+            juce::Array<juce::var> localFailed;
+            runScanOneChild (candidate, localPlugins, localFailed);
+
+            {
+                std::lock_guard<std::mutex> lock (resultsMutex);
+                for (int i = 0; i < localPlugins.size(); ++i) plugins.add (localPlugins[i]);
+                for (int i = 0; i < localFailed.size(); ++i) failed.add (localFailed[i]);
+            }
+
+            int done = completed.fetch_add (1, std::memory_order_relaxed) + 1;
+            {
+                // Serialize progress emits so two workers can't interleave a
+                // partial JSON line on stdout.
+                std::lock_guard<std::mutex> lock (progressMutex);
+                emitScanProgress (done, total, candidate.path);
+            }
+        }
+    };
+
+    if (workerCount <= 1 || total == 0)
+    {
+        workerBody();
+    }
+    else
+    {
+        for (int w = 0; w < workerCount; ++w)
+            workers.emplace_back (workerBody);
+        for (auto& t : workers)
+            if (t.joinable()) t.join();
+    }
 
     juce::DynamicObject::Ptr result (new juce::DynamicObject());
     result->setProperty ("ok", true);

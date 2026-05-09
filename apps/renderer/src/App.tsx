@@ -11462,6 +11462,25 @@ export function App(): JSX.Element {
       text: usesCustomPaths ? 'Scanning selected plugin paths…' : 'Scanning standard plugin folders…',
       durationMs: 0, // sticky until scan finishes (we overwrite on success/fail)
     });
+    // v3.170 — stream per-plugin progress into the same toast id so the
+    // sticky message updates in place as the sidecar walks the catalogue.
+    // The sidecar (parallel pool of --scan-one children) emits a
+    // `{event:"scan_progress",done,total,current}` line per plugin; main.ts
+    // forwards each one over PLUGIN_SCAN_PROGRESS_EVENT and we subscribe
+    // here for the duration of this one scan call.
+    const unsubscribeProgress = window.producerPlayer.onPluginScanProgress((event) => {
+      const name = (() => {
+        const m = event.current.match(/[^/\\]+$/);
+        const base = m ? m[0] : event.current;
+        return base.replace(/\.(vst3|component|clap)$/i, '');
+      })();
+      toast.show({
+        id: 'plugin-scan',
+        kind: 'info',
+        text: `Scanning plugins (${event.done}/${event.total}): ${name}`,
+        durationMs: 0,
+      });
+    });
     void window.producerPlayer
       .scanPluginLibrary({ paths: scanPaths })
       .then((library) => {
@@ -11504,6 +11523,7 @@ export function App(): JSX.Element {
           });
       })
       .finally(() => {
+        unsubscribeProgress();
         setPluginLibraryScanning(false);
         void window.producerPlayer
           .getPluginScanSettings()

@@ -5433,6 +5433,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
   let editorClosedForwarderRegistered = false;
   let instanceLoadedForwarderRegistered = false;
   let sidecarExitedForwarderRegistered = false;
+  let scanProgressForwarderRegistered = false;
   const ensureEditorClosedForwarder = (service: PluginHostService): void => {
     if (editorClosedForwarderRegistered) return;
     editorClosedForwarderRegistered = true;
@@ -5460,10 +5461,20 @@ function registerIpcHandlers(service: FileLibraryService): void {
       }
     });
   };
+  const ensureScanProgressForwarder = (service: PluginHostService): void => {
+    if (scanProgressForwarderRegistered) return;
+    scanProgressForwarderRegistered = true;
+    service.onScanProgress((event) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_CHANNELS.PLUGIN_SCAN_PROGRESS_EVENT, event);
+      }
+    });
+  };
   const ensurePluginHostForwarders = (service: PluginHostService): void => {
     ensureEditorClosedForwarder(service);
     ensureInstanceLoadedForwarder(service);
     ensureSidecarExitedForwarder(service);
+    ensureScanProgressForwarder(service);
   };
 
   const getOrCreatePluginHost = (): PluginHostService => {

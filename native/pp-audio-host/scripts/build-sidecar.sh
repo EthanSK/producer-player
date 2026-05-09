@@ -86,6 +86,12 @@ if [ ! -x "$BIN" ]; then
 fi
 
 echo "✓ built $BIN"
-echo "→ smoke test: --scan"
-"$BIN" --scan | head -c 200
+echo "→ smoke test: --scan-one (no progress chatter, fast)"
+# v3.170 — `--scan` now streams `scan_progress` events while a parallel
+# pool of children scans the user's full plugin catalogue, which can take
+# minutes on a real machine. Piping that into `head -c 200` would race the
+# producer and SIGPIPE-kill the parent (exit 141). Use `--scan-one` against
+# a known-empty path instead: it produces a single bounded JSON line and
+# exercises the same JUCE init / format-manager / argv parser paths.
+"$BIN" --scan-one vst3 /tmp/pp-audio-host-smoke-nonexistent.vst3 || true
 echo

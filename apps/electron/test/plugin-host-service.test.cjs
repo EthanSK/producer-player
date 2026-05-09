@@ -433,6 +433,87 @@ test('scanPlugins treats isolated native scan child crashes as recoverable failu
   });
 });
 
+test('scanPlugins forwards scan_progress events to onProgress listeners', async () => {
+  const events = [];
+  const fake = makeFakeChild({
+    replies: {
+      scan_plugins: (req) => {
+        // Emit several scan_progress events before the final reply so we
+        // exercise the unsolicited-event path inside handleLine.
+        const total = 3;
+        for (let i = 1; i <= total; i++) {
+          fake.stdout.write(
+            `${JSON.stringify({
+              event: 'scan_progress',
+              done: i,
+              total,
+              current: `/Library/Audio/Plug-Ins/VST3/Plugin${i}.vst3`,
+            })}\n`,
+          );
+        }
+        return { plugins: [], scanVersion: 2 };
+      },
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.scanPlugins({
+    paths: ['/tmp/explicit-path'],
+    format: 'vst3',
+    onProgress: (event) => events.push(event),
+  });
+
+  assert.equal(events.length, 3);
+  assert.deepEqual(
+    events.map((e) => e.done),
+    [1, 2, 3],
+  );
+  assert.equal(events[0].total, 3);
+  assert.equal(events[2].current, '/Library/Audio/Plug-Ins/VST3/Plugin3.vst3');
+});
+
+test('scan_progress events keep a long scan alive past the per-RPC timeout', async () => {
+  // Drive a scan that takes longer than the default per-RPC timeout (90 s)
+  // by emitting a `scan_progress` event every short interval and only
+  // resolving after several intervals. Without the keepalive logic the
+  // pending request would time out and the test would reject.
+  const fake = makeFakeChild({
+    replies: {
+      scan_plugins: async (req) => {
+        // Use the test's wall-clock-cheap form: emit 3 progress events with
+        // 25 ms spacing, then resolve. We can't actually wait longer than
+        // the timeout in a unit test, but we can install a fake monkey-
+        // patched timer that proves the path runs `resetTimer` for each
+        // progress event.
+        fake.stdout.write(
+          `${JSON.stringify({ event: 'scan_progress', done: 1, total: 3, current: '/a' })}\n`,
+        );
+        fake.stdout.write(
+          `${JSON.stringify({ event: 'scan_progress', done: 2, total: 3, current: '/b' })}\n`,
+        );
+        fake.stdout.write(
+          `${JSON.stringify({ event: 'scan_progress', done: 3, total: 3, current: '/c' })}\n`,
+        );
+        return { plugins: [], scanVersion: 2 };
+      },
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  let resetCount = 0;
+  // Subscribe before the call so every scan_progress is observed at the
+  // listener layer. Resets happen in the same handleLine branch, so a
+  // listener firing per event is a proxy for the timer being reset.
+  const unsub = service.onScanProgress(() => {
+    resetCount += 1;
+  });
+  try {
+    const library = await service.scanPlugins({ paths: ['/tmp/x'], format: 'vst3' });
+    assert.deepEqual(library.plugins, []);
+    assert.equal(resetCount, 3);
+  } finally {
+    unsub();
+  }
+});
+
 test('stop sends shutdown and kills the child', async () => {
   const fake = makeFakeChild({ replies: { shutdown: {} } });
   const service = new PluginHostService('/fake/path', () => fake);

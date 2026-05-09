@@ -287,6 +287,11 @@ export const IPC_CHANNELS = {
   PLUGIN_EDITOR_CLOSED_EVENT: 'producer-player:plugin-editor-closed-event',
   PLUGIN_INSTANCE_LOADED_EVENT: 'producer-player:plugin-instance-loaded-event',
   PLUGIN_SIDECAR_EXITED_EVENT: 'producer-player:plugin-sidecar-exited-event',
+  // v3.170 — per-plugin progress events streamed from the sidecar during a
+  // long-running plugin scan. Used to keep the user oriented (toast
+  // shows "Scanning plugins (k/n: name)…") and to keep the scan IPC
+  // alive past its per-RPC timeout while real work is still happening.
+  PLUGIN_SCAN_PROGRESS_EVENT: 'producer-player:plugin-scan-progress-event',
 } as const;
 
 export type SnapshotListener = (snapshot: LibrarySnapshot) => void;
@@ -301,6 +306,12 @@ export type PluginSidecarExitedListener = (info: {
   signal: string | null;
   expected: boolean;
 }) => void;
+export interface PluginScanProgress {
+  done: number;
+  total: number;
+  current: string;
+}
+export type PluginScanProgressListener = (event: PluginScanProgress) => void;
 
 export interface SongChecklistItem {
   id: string;
@@ -1347,6 +1358,12 @@ export interface ProducerPlayerBridge {
   onPluginEditorClosed(listener: (instanceId: string) => void): () => void;
   onPluginInstanceLoaded(listener: PluginInstanceLoadedListener): () => void;
   onPluginSidecarExited(listener: PluginSidecarExitedListener): () => void;
+  /**
+   * Fires for each plugin the sidecar finishes scanning. Driven by
+   * `scan_progress` events emitted from the native sidecar's `--scan-one`
+   * pool. Total/done lets the renderer show "Scanning plugins (k/n: …)".
+   */
+  onPluginScanProgress(listener: PluginScanProgressListener): () => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -24,6 +24,7 @@ import {
   type ProducerPlayerUserState,
   type PluginInstanceLoadedListener,
   type PluginSidecarExitedListener,
+  type PluginScanProgressListener,
   type SnapshotListener,
   type TransportCommand,
   type TransportCommandListener,
@@ -511,6 +512,28 @@ const bridge: ProducerPlayerBridge = {
     ipcRenderer.on(IPC_CHANNELS.PLUGIN_SIDECAR_EXITED_EVENT, wrappedListener);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.PLUGIN_SIDECAR_EXITED_EVENT, wrappedListener);
+    };
+  },
+
+  onPluginScanProgress(listener: PluginScanProgressListener) {
+    const wrappedListener = (_event: unknown, payload: unknown) => {
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+      const record = payload as Record<string, unknown>;
+      if (
+        typeof record.done === 'number' &&
+        typeof record.total === 'number' &&
+        typeof record.current === 'string'
+      ) {
+        listener({
+          done: record.done,
+          total: record.total,
+          current: record.current,
+        });
+      }
+    };
+    ipcRenderer.on(IPC_CHANNELS.PLUGIN_SCAN_PROGRESS_EVENT, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PLUGIN_SCAN_PROGRESS_EVENT, wrappedListener);
     };
   },
 };

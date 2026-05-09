@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import ffmpegStatic from 'ffmpeg-static';
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { access, chmod, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -188,6 +188,53 @@ async function fileExists(path) {
   }
 }
 
+// v3.170 — detect a stale on-disk sidecar so local dev builds don't ship a
+// binary built from older source than what's on disk now. Without this
+// check, editing `native/pp-audio-host/src/main.cpp` and running
+// `npm run build` would silently bundle the previous binary because the
+// existence check below short-circuited the rebuild. CI builds on a fresh
+// runner so this only affects local-dev flows, but a stale local build is
+// still a problem (we shipped the v3.169 release expecting the v3.165
+// fix to be in the bundled binary).
+async function newestMtimeUnder(dir) {
+  let newest = 0;
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    if (entry.name === 'JUCE' || entry.name === 'build' || entry.name.startsWith('.')) continue;
+    const full = resolve(dir, entry.name);
+    if (entry.isDirectory()) {
+      const childNewest = await newestMtimeUnder(full);
+      if (childNewest > newest) newest = childNewest;
+    } else if (entry.isFile()) {
+      try {
+        const s = await stat(full);
+        const t = s.mtimeMs ?? 0;
+        if (t > newest) newest = t;
+      } catch {
+        // ignore unreadable files
+      }
+    }
+  }
+  return newest;
+}
+
+async function sidecarBinaryIsStale(binaryPath, sourceDirectory) {
+  if (!(await fileExists(binaryPath))) return true;
+  try {
+    const binaryStat = await stat(binaryPath);
+    const binaryMtime = binaryStat.mtimeMs ?? 0;
+    const sourceMtime = await newestMtimeUnder(sourceDirectory);
+    return sourceMtime > binaryMtime;
+  } catch {
+    return true;
+  }
+}
+
 function runSidecarBuild() {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn('bash', [sidecarBuildScript], {
@@ -218,12 +265,16 @@ if (!shouldBundleSidecar) {
     console.info('[producer-player/electron] Skipping bundled pp-audio-host sidecar for this build target.');
   }
 } else {
-  // Build the sidecar if it isn't already on disk. This is the path that
-  // was missing in v3.46–v3.49: `npm run build` -> this script -> ffmpeg-only
-  // copy, and the JUCE sidecar never made it into the .app bundle. Rebuild-
-  // on-demand mirrors how other native deps (ffmpeg universal) are handled.
-  if (!(await fileExists(sidecarSourceBinary))) {
-    console.info('[producer-player/electron] pp-audio-host sidecar not built yet — building now.');
+  // Build the sidecar if it isn't already on disk OR if the source has been
+  // modified since the binary was last built (v3.170 fix — see comment on
+  // `sidecarBinaryIsStale`). Without the staleness check, edits to
+  // `native/pp-audio-host/src/main.cpp` could silently ship the previous
+  // binary because `existsSync` short-circuited the rebuild. CI builds on a
+  // fresh runner so this only affected local-dev flows, but it's the safer
+  // default everywhere.
+  const sidecarSrcDir = resolve(sidecarDirectory, 'src');
+  if (await sidecarBinaryIsStale(sidecarSourceBinary, sidecarSrcDir)) {
+    console.info('[producer-player/electron] pp-audio-host sidecar missing or stale — building now.');
     await runSidecarBuild();
   }
   if (!(await fileExists(sidecarSourceBinary))) {

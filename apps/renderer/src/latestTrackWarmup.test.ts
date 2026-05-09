@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { runSequentialLatestTrackWarmup } from './latestTrackWarmup';
+import {
+  orderLatestTrackWarmupEntries,
+  runSequentialLatestTrackWarmup,
+} from './latestTrackWarmup';
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -21,6 +24,41 @@ async function flushMicrotasks(times: number = 5): Promise<void> {
     await Promise.resolve();
   }
 }
+
+
+describe('orderLatestTrackWarmupEntries', () => {
+  it('keeps the normal visible-then-hidden plan when no new version was detected', () => {
+    const entries = orderLatestTrackWarmupEntries({
+      visibleEntries: ['visible-a', 'visible-b'],
+      libraryEntries: ['visible-a', 'hidden-c'],
+      getVersionId: (entry) => entry,
+    });
+
+    expect(entries).toEqual(['visible-a', 'visible-b', 'hidden-c']);
+  });
+
+  it('front-loads detected latest versions before the ordinary warmup backlog', () => {
+    const entries = orderLatestTrackWarmupEntries({
+      visibleEntries: ['visible-a', 'visible-b'],
+      libraryEntries: ['visible-a', 'hidden-new', 'hidden-old'],
+      getVersionId: (entry) => entry,
+      detectedVersionIds: new Set(['hidden-new']),
+    });
+
+    expect(entries).toEqual(['hidden-new', 'visible-a', 'visible-b', 'hidden-old']);
+  });
+
+  it('dedupes a detected visible version instead of processing it twice', () => {
+    const entries = orderLatestTrackWarmupEntries({
+      visibleEntries: ['visible-new'],
+      libraryEntries: ['visible-new', 'hidden-old'],
+      getVersionId: (entry) => entry,
+      detectedVersionIds: new Set(['visible-new']),
+    });
+
+    expect(entries).toEqual(['visible-new', 'hidden-old']);
+  });
+});
 
 describe('runSequentialLatestTrackWarmup', () => {
   it('processes warmup entries sequentially instead of starting a batch', async () => {

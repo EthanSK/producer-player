@@ -85,7 +85,10 @@ import {
   isMasteringCacheEntryFresh,
   parseVersionModifiedAtMs,
 } from './masteringAnalysisCache';
-import { runSequentialLatestTrackWarmup } from './latestTrackWarmup';
+import {
+  orderLatestTrackWarmupEntries,
+  runSequentialLatestTrackWarmup,
+} from './latestTrackWarmup';
 import {
   getMasteringChecklistRuleById,
   getMasteringChecklistRuleMeta,
@@ -2764,6 +2767,8 @@ export function App(): JSX.Element {
   >({});
   const masteringCacheByVersionIdRef = useRef<Record<string, MasteringCacheEntry>>({});
   const masteringCachePendingVersionIdsRef = useRef<Set<string>>(new Set());
+  const latestTrackWarmupKnownActiveVersionKeysRef = useRef<Map<string, string>>(new Map());
+  const latestTrackWarmupDetectedVersionIdsRef = useRef<Set<string>>(new Set());
   const latestTrackWarmupDebugRef = useRef<{
     runId: number;
     activeVersionId: string | null;
@@ -6439,15 +6444,40 @@ export function App(): JSX.Element {
     // double-click/reference/listen action can jump the line and the warmup
     // resumes from the next remaining latest track afterwards. It intentionally
     // does not enqueue preview decode; decoded-audio-derived graphs are lazy.
-    const visibleVersionIds = new Set(
-      visibleActiveVersions.map(({ version }) => version.id)
-    );
-    const orderedPreloadEntries = [
-      ...visibleActiveVersions,
-      ...libraryActiveVersions.filter(
-        ({ version }) => !visibleVersionIds.has(version.id)
-      ),
-    ];
+    const previousActiveVersionKeys = latestTrackWarmupKnownActiveVersionKeysRef.current;
+    const nextActiveVersionKeys = new Map<string, string>();
+
+    for (const { version } of libraryActiveVersions) {
+      nextActiveVersionKeys.set(version.id, buildMasteringCacheKey(version));
+    }
+
+    // A watched-folder rescan can discover a brand-new latest export while the
+    // ordinary startup/latest-track warmup still has unrelated tracks ahead of
+    // it. Keep a small sticky set of newly detected/latest-changed active
+    // versions so LUFS + platform-normalization precompute jumps to those
+    // versions first and stays prioritized across quick snapshot re-renders.
+    if (previousActiveVersionKeys.size > 0) {
+      for (const [versionId, cacheKey] of nextActiveVersionKeys) {
+        if (previousActiveVersionKeys.get(versionId) !== cacheKey) {
+          latestTrackWarmupDetectedVersionIdsRef.current.add(versionId);
+        }
+      }
+    }
+
+    for (const versionId of [...latestTrackWarmupDetectedVersionIdsRef.current]) {
+      if (!nextActiveVersionKeys.has(versionId)) {
+        latestTrackWarmupDetectedVersionIdsRef.current.delete(versionId);
+      }
+    }
+
+    latestTrackWarmupKnownActiveVersionKeysRef.current = nextActiveVersionKeys;
+
+    const orderedPreloadEntries = orderLatestTrackWarmupEntries({
+      visibleEntries: visibleActiveVersions,
+      libraryEntries: libraryActiveVersions,
+      getVersionId: ({ version }) => version.id,
+      detectedVersionIds: latestTrackWarmupDetectedVersionIdsRef.current,
+    });
     latestTrackWarmupDebugRef.current = {
       ...latestTrackWarmupDebugRef.current,
       plannedEntries: orderedPreloadEntries.map(({ song, version }) => ({
@@ -6517,6 +6547,7 @@ export function App(): JSX.Element {
       const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
 
       if (isFresh) {
+        latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
         if (!cancelled) {
           setMasteringCacheStatusByVersionId((previous) => ({
             ...previous,
@@ -6580,6 +6611,7 @@ export function App(): JSX.Element {
         }));
       } finally {
         masteringCachePendingVersionIdsRef.current.delete(version.id);
+        latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
       }
     }
 

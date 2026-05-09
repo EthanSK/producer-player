@@ -10,6 +10,59 @@ export interface RunSequentialLatestTrackWarmupOptions<TEntry> {
   urgentPollMs?: number;
 }
 
+export interface OrderLatestTrackWarmupEntriesOptions<TEntry> {
+  visibleEntries: readonly TEntry[];
+  libraryEntries: readonly TEntry[];
+  getVersionId: (entry: TEntry) => string;
+  detectedVersionIds?: ReadonlySet<string>;
+}
+
+/**
+ * Build the latest-track warmup plan without duplicating visible entries.
+ * Newly detected/latest-changed versions can be front-loaded so their measured
+ * LUFS and derived platform-normalization payload are ready soon after the
+ * watched folder notices the export, instead of waiting behind an unrelated
+ * visible/hidden library backlog.
+ */
+export function orderLatestTrackWarmupEntries<TEntry>(
+  options: OrderLatestTrackWarmupEntriesOptions<TEntry>
+): TEntry[] {
+  const seenVersionIds = new Set<string>();
+  const baseEntries: TEntry[] = [];
+
+  for (const entry of options.visibleEntries) {
+    const versionId = options.getVersionId(entry);
+    if (seenVersionIds.has(versionId)) continue;
+    seenVersionIds.add(versionId);
+    baseEntries.push(entry);
+  }
+
+  for (const entry of options.libraryEntries) {
+    const versionId = options.getVersionId(entry);
+    if (seenVersionIds.has(versionId)) continue;
+    seenVersionIds.add(versionId);
+    baseEntries.push(entry);
+  }
+
+  const detectedVersionIds = options.detectedVersionIds;
+  if (!detectedVersionIds || detectedVersionIds.size === 0) {
+    return baseEntries;
+  }
+
+  const detectedEntries: TEntry[] = [];
+  const remainingEntries: TEntry[] = [];
+
+  for (const entry of baseEntries) {
+    if (detectedVersionIds.has(options.getVersionId(entry))) {
+      detectedEntries.push(entry);
+    } else {
+      remainingEntries.push(entry);
+    }
+  }
+
+  return [...detectedEntries, ...remainingEntries];
+}
+
 /**
  * Runs startup latest-track warmup top-to-bottom without flooding the shared
  * analysis queues. The runner yields before every track, waits while urgent

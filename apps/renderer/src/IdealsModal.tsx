@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   IDEAL_CURVE_MAX_FREQ,
   IDEAL_CURVE_MIN_FREQ,
@@ -159,6 +167,37 @@ function isAbortError(cause: unknown): boolean {
   return cause instanceof DOMException && cause.name === 'AbortError';
 }
 
+interface CurveReadoutValue {
+  id: IdealsLayerId;
+  label: string;
+  className: string;
+  point: IdealCurvePoint;
+}
+
+function xToFreq(viewBoxX: number): number {
+  const plotWidth = GRAPH_WIDTH - PADDING_LEFT - PADDING_RIGHT;
+  const ratio = Math.max(0, Math.min(1, (viewBoxX - PADDING_LEFT) / plotWidth));
+  const logMin = Math.log10(IDEAL_CURVE_MIN_FREQ);
+  const logMax = Math.log10(IDEAL_CURVE_MAX_FREQ);
+  return 10 ** (logMin + ratio * (logMax - logMin));
+}
+
+function findNearestCurvePoint(
+  curve: readonly IdealCurvePoint[] | undefined,
+  freq: number,
+): IdealCurvePoint | null {
+  if (!curve || curve.length === 0) return null;
+  return curve.reduce((nearest, point) => {
+    const currentDistance = Math.abs(Math.log10(point.freq) - Math.log10(freq));
+    const nearestDistance = Math.abs(Math.log10(nearest.freq) - Math.log10(freq));
+    return currentDistance < nearestDistance ? point : nearest;
+  }, curve[0]);
+}
+
+function formatGainDb(gainDb: number): string {
+  return `${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB`;
+}
+
 function IdealsCurveGraph({
   idealCurve,
   mixCurve,
@@ -176,12 +215,56 @@ function IdealsCurveGraph({
   showMix: boolean;
   showReference: boolean;
 }): JSX.Element {
+  const [activeFreq, setActiveFreq] = useState<number | null>(null);
   const strokeGradientId = `ideals-curve-stroke-${guide.id}`;
   const fillGradientId = `ideals-curve-fill-${guide.id}`;
+  const readoutId = `ideals-curve-readout-desc-${guide.id}`;
   const idealPath = buildCurvePath(idealCurve);
   const fillPath = buildFilledCurvePath(idealCurve);
   const mixPath = mixCurve ? buildCurvePath(mixCurve) : '';
   const referencePath = referenceCurve ? buildCurvePath(referenceCurve) : '';
+
+  const readoutValues: CurveReadoutValue[] = activeFreq
+    ? [
+        showIdeal
+          ? {
+              id: 'ideal' as const,
+              label: 'Ideal',
+              className: 'ideals-curve-readout-dot--ideal',
+              point: findNearestCurvePoint(idealCurve, activeFreq),
+            }
+          : null,
+        showMix
+          ? {
+              id: 'mix' as const,
+              label: 'Your Mix',
+              className: 'ideals-curve-readout-dot--mix',
+              point: findNearestCurvePoint(mixCurve, activeFreq),
+            }
+          : null,
+        showReference
+          ? {
+              id: 'reference' as const,
+              label: 'Reference',
+              className: 'ideals-curve-readout-dot--reference',
+              point: findNearestCurvePoint(referenceCurve, activeFreq),
+            }
+          : null,
+      ].flatMap((value) => (value?.point ? [{ ...value, point: value.point }] : []))
+    : [];
+
+  const updateActiveFrequencyFromPointer = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>): void => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      if (!rect.width) return;
+      const viewBoxX = ((event.clientX - rect.left) / rect.width) * GRAPH_WIDTH;
+      setActiveFreq(xToFreq(viewBoxX));
+    },
+    [],
+  );
+
+  const readoutX = activeFreq ? freqToX(activeFreq) : null;
+  const readoutFreqLabel = activeFreq ? `${formatFreq(activeFreq)}Hz` : 'Hover the graph';
 
   return (
     <svg
@@ -189,8 +272,17 @@ function IdealsCurveGraph({
       viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`}
       role="img"
       aria-label={`${guide.label} ideal, mix, and reference EQ curves`}
+      aria-describedby={readoutId}
       data-testid={`ideals-curve-${guide.id}`}
+      tabIndex={0}
+      onPointerMove={updateActiveFrequencyFromPointer}
+      onPointerLeave={() => setActiveFreq(null)}
+      onFocus={() => setActiveFreq((current) => current ?? 1000)}
+      onBlur={() => setActiveFreq(null)}
     >
+      <desc id={readoutId}>
+        Interactive EQ curve graph. Hover or focus to read the nearest frequency and dB values for visible layers.
+      </desc>
       <defs>
         <linearGradient id={strokeGradientId} x1="0" x2="1" y1="0" y2="0">
           <stop offset="0%" stopColor="#5ca7ff" />
@@ -263,6 +355,43 @@ function IdealsCurveGraph({
         />
       ) : null}
 
+      {readoutX !== null && readoutValues.length > 0 ? (
+        <g className="ideals-curve-readout" data-testid={`ideals-curve-readout-${guide.id}`}>
+          <line
+            className="ideals-curve-readout-line"
+            x1={readoutX}
+            x2={readoutX}
+            y1={PADDING_TOP}
+            y2={GRAPH_HEIGHT - PADDING_BOTTOM}
+          />
+          {readoutValues.map((value) => (
+            <circle
+              key={value.id}
+              className={`ideals-curve-readout-dot ${value.className}`}
+              cx={freqToX(value.point.freq)}
+              cy={dbToY(value.point.gainDb)}
+              r="4"
+            />
+          ))}
+          <rect
+            className="ideals-curve-readout-box"
+            x={PADDING_LEFT + 7}
+            y={PADDING_TOP + 7}
+            width="160"
+            height={24 + readoutValues.length * 14}
+            rx="8"
+          />
+          <text className="ideals-curve-readout-text" x={PADDING_LEFT + 17} y={PADDING_TOP + 24}>
+            <tspan className="ideals-curve-readout-title">{readoutFreqLabel}</tspan>
+            {readoutValues.map((value, index) => (
+              <tspan key={value.id} x={PADDING_LEFT + 17} dy={index === 0 ? 15 : 14}>
+                {value.label}: {formatGainDb(value.point.gainDb)}
+              </tspan>
+            ))}
+          </text>
+        </g>
+      ) : null}
+
       <rect
         x={PADDING_LEFT + 0.5}
         y={PADDING_TOP + 0.5}
@@ -272,6 +401,113 @@ function IdealsCurveGraph({
         className="ideals-curve-frame"
       />
     </svg>
+  );
+}
+
+type StemAuditionTarget = 'stem' | 'mix';
+
+function syncAudioTime(source: HTMLAudioElement | null, target: HTMLAudioElement | null): void {
+  if (!source || !target) return;
+  const sourceTime = source.currentTime;
+  const targetDuration = target.duration;
+  const safeDuration = Number.isFinite(targetDuration) && targetDuration > 0 ? targetDuration : sourceTime;
+  try {
+    target.currentTime = Math.max(0, Math.min(sourceTime, Math.max(0, safeDuration - 0.05)));
+  } catch {
+    // Some browsers can reject currentTime updates before metadata is ready; playback still works.
+  }
+}
+
+function StemAuditionCompare({
+  stemId,
+  mixSource,
+  mixState,
+}: {
+  stemId: IdealStemId;
+  mixSource: IdealStemAnalysisSource | null;
+  mixState: StemSourceState;
+}): JSX.Element {
+  const [target, setTarget] = useState<StemAuditionTarget>('stem');
+  const stemAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mixAudioRef = useRef<HTMLAudioElement | null>(null);
+  const stem = mixState.result?.stems[stemId] ?? null;
+  const mixUrl = mixSource?.url ?? null;
+  const ready = Boolean(stem && mixUrl);
+  const guide = IDEAL_STEM_GUIDES[stemId];
+
+  const switchAuditionTarget = useCallback(
+    (nextTarget: StemAuditionTarget): void => {
+      if (!ready || nextTarget === target) return;
+      const currentAudio = target === 'stem' ? stemAudioRef.current : mixAudioRef.current;
+      const nextAudio = nextTarget === 'stem' ? stemAudioRef.current : mixAudioRef.current;
+      const wasPlaying = currentAudio ? !currentAudio.paused : false;
+      syncAudioTime(currentAudio, nextAudio);
+      currentAudio?.pause();
+      setTarget(nextTarget);
+      if (wasPlaying && nextAudio) {
+        void nextAudio.play().catch(() => undefined);
+      }
+    },
+    [ready, target],
+  );
+
+  return (
+    <div className="ideals-stem-ab" data-testid={`ideals-stem-ab-${stemId}`}>
+      <div className="ideals-stem-ab-header">
+        <strong>A/B Your Stem vs Mix</strong>
+        <span>{ready ? `${guide.shortLabel} proxy against the full mix` : 'Run Stem Separate Yours first'}</span>
+      </div>
+      <div className="ideals-stem-ab-toggle" role="group" aria-label={`${guide.label} A/B audition source`}>
+        <button
+          type="button"
+          className={target === 'stem' ? 'active' : ''}
+          aria-pressed={target === 'stem'}
+          disabled={!ready}
+          onClick={() => switchAuditionTarget('stem')}
+          data-testid={`ideals-stem-ab-stem-${stemId}`}
+        >
+          Stem Proxy
+        </button>
+        <button
+          type="button"
+          className={target === 'mix' ? 'active' : ''}
+          aria-pressed={target === 'mix'}
+          disabled={!ready}
+          onClick={() => switchAuditionTarget('mix')}
+          data-testid={`ideals-stem-ab-mix-${stemId}`}
+        >
+          Full Mix
+        </button>
+      </div>
+      {stem && mixUrl ? (
+        <div className="ideals-stem-ab-audio">
+          <audio
+            ref={stemAudioRef}
+            className="ideals-stem-audio"
+            controls={target === 'stem'}
+            hidden={target !== 'stem'}
+            preload="none"
+            src={stem.audioUrl}
+            aria-label={`${guide.label} proxy stem audition`}
+            data-testid={`ideals-stem-ab-stem-audio-${stemId}`}
+          />
+          <audio
+            ref={mixAudioRef}
+            className="ideals-stem-audio"
+            controls={target === 'mix'}
+            hidden={target !== 'mix'}
+            preload="none"
+            src={mixUrl}
+            aria-label={`${guide.label} full mix audition`}
+            data-testid={`ideals-stem-ab-mix-audio-${stemId}`}
+          />
+        </div>
+      ) : (
+        <p className="ideals-stem-ab-empty">
+          Analyze your mix to compare this proxy stem against the full mix at the same playback position.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -730,6 +966,11 @@ export function IdealsModal({
                       source={referenceSource}
                     />
                   </div>
+                  <StemAuditionCompare
+                    stemId={stemId}
+                    mixSource={mixSource}
+                    mixState={sourceStates.mix}
+                  />
                 </section>
               );
             })}
@@ -817,6 +1058,11 @@ export function IdealsModal({
                   source={referenceSource}
                 />
               </div>
+              <StemAuditionCompare
+                stemId={fullscreenStemId}
+                mixSource={mixSource}
+                mixState={sourceStates.mix}
+              />
               <div className="ideals-stem-details">
                 <p>{fullscreenGuide.explanation}</p>
                 <ul>

@@ -56,8 +56,12 @@ describe('IdealsModal', () => {
     expect(markup).toContain('Current provider: Web Audio proxy stems');
     expect(markup).toContain('not ML-grade source separation');
     expect(markup).toContain('not clean or lossless stem exports');
+    expect(markup).toContain('A/B Your Stem vs Mix');
+    expect(markup).toContain('Stem Proxy');
+    expect(markup).toContain('Full Mix');
     expect(markup).toContain('data-testid="ideals-mix-slot-vocals"');
     expect(markup).toContain('data-testid="ideals-reference-slot-vocals"');
+    expect(markup).toContain('data-testid="ideals-stem-ab-vocals"');
     expect(markup).not.toMatch(blockedCopyPattern);
   });
 
@@ -77,6 +81,7 @@ describe('IdealsModal', () => {
     expect(markup).toContain('data-testid="ideals-stem-fullscreen-close"');
     expect(markup).toContain('Focused stem view');
     expect(markup).toContain('Production note:');
+    expect(markup).toContain('data-testid="ideals-stem-ab-vocals"');
     expect(markup).not.toMatch(blockedCopyPattern);
   });
 
@@ -89,6 +94,16 @@ describe('IdealsModal', () => {
     expect(styles).toMatch(
       /\.ideals-stem-fullscreen-overlay\s*\{[\s\S]*position:\s*fixed;[\s\S]*z-index:\s*var\(--z-ideals-stem-fullscreen\);[\s\S]*background:\s*rgba\(4, 8, 14, 0\.92\);[\s\S]*overscroll-behavior:\s*contain;/,
     );
+    expect(styles).toMatch(/\.ideals-stem-grid\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
+  });
+
+  it('makes full-view stem graphs interactive and adds a stem-vs-mix A/B control', () => {
+    expect(idealsSource).toContain('onPointerMove={updateActiveFrequencyFromPointer}');
+    expect(idealsSource).toContain('data-testid={`ideals-curve-readout-${guide.id}`}');
+    expect(idealsSource).toContain('findNearestCurvePoint');
+    expect(idealsSource).toContain('function StemAuditionCompare');
+    expect(idealsSource).toContain('switchAuditionTarget');
+    expect(idealsSource).toContain('syncAudioTime');
   });
 
   it('handles Escape and backdrop clicks at the focused-dialog layer before closing Ideals', () => {

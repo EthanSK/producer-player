@@ -76,6 +76,7 @@
 #include <algorithm>
 #include <iostream>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -818,31 +819,83 @@ juce::var handleScanPlugins (const juce::var& params)
     // The previous serial `runScanOneChild` loop took ~700 ms per plugin; on
     // a typical mastering rig with ~430 installed VST3/AU bundles that's a
     // 5-minute wall-clock walk that exceeds the renderer's 120 s IPC timeout.
-    // We now run a small pool of `--scan-one` children in parallel
-    // (`computeScanWorkerCount`) so wall-clock drops to ~30-60 s for the same
-    // catalog. Each worker still gets its own process / address space, so
-    // crashing plugins remain isolated from the parent and from each other.
+    // We run a small pool of `--scan-one` children in parallel for the cache
+    // misses (`computeScanWorkerCount`). Each worker still gets its own
+    // process / address space, so crashing plugins remain isolated from the
+    // parent and from each other.
+    //
+    // v3.171 — per-plugin metadata cache.
+    // Before launching workers we load
+    // ~/Library/Caches/com.ethansk.producerplayer/plugin-scan-cache.json and,
+    // for each candidate whose (mtime,size) signature matches the cached
+    // entry, append the cached `plugins`/`failed` directly. Repeat scans on
+    // an unchanged catalogue go from ~75-90 s to ~1-2 s (Ableton-style fast
+    // re-scan). Only first-time / changed bundles still pay the JUCE
+    // `findAllTypesForFile` cost. Cache misses still go through `--scan-one`
+    // so vendor crashes stay sandboxed; the resulting plugins/failed are
+    // written back to the cache so a future scan hits.
     //
     // Per-candidate progress events `{"event":"scan_progress","done":k,
-    // "total":n,"current":path}` are emitted as workers complete, giving the
-    // Electron side a keepalive signal so the IPC timeout no longer fires
-    // mid-scan and the renderer can show "Scanning plugins (k/n: name)…".
+    // "total":n,"current":path}` are emitted as we complete each candidate
+    // (cached or fresh-scanned), giving the Electron side a keepalive signal
+    // so the IPC timeout no longer fires mid-scan and the renderer can show
+    // "Scanning plugins (k/n: name)…".
     const int total = (int) candidates.size();
-    const int workerCount = computeScanWorkerCount (total);
 
-    std::atomic<int> nextIndex { 0 };
+    // Load the prior cache and partition candidates into hits / misses.
+    auto cache = loadPluginScanCache();
+    std::unordered_map<PluginCacheKey, PluginCacheEntry, PluginCacheKeyHash> nextCache;
+    nextCache.reserve ((size_t) total);
+
+    std::vector<int> missIndexes;
+    missIndexes.reserve ((size_t) total);
+
     std::atomic<int> completed { 0 };
     std::mutex resultsMutex;
     std::mutex progressMutex;
+    std::mutex cacheMutex;
 
-    std::vector<std::thread> workers;
-    workers.reserve ((size_t) workerCount);
+    auto recordCandidateProgress = [&] (const juce::String& path) {
+        int done = completed.fetch_add (1, std::memory_order_relaxed) + 1;
+        std::lock_guard<std::mutex> lock (progressMutex);
+        emitScanProgress (done, total, path);
+    };
+
+    for (int idx = 0; idx < total; ++idx)
+    {
+        const auto& candidate = candidates[(size_t) idx];
+        juce::int64 mtime = 0, size = 0;
+        computePluginSignature (candidate.path, mtime, size);
+
+        PluginCacheKey key { candidate.formatId, candidate.path };
+        auto it = cache.find (key);
+        if (it != cache.end() && it->second.mtimeMs == mtime && it->second.size == size)
+        {
+            // Cache hit — replay the prior result.
+            for (int i = 0; i < it->second.plugins.size(); ++i)
+                plugins.add (it->second.plugins[i]);
+            for (int i = 0; i < it->second.failed.size(); ++i)
+                failed.add (it->second.failed[i]);
+            nextCache.emplace (key, it->second);
+            recordCandidateProgress (candidate.path);
+        }
+        else
+        {
+            missIndexes.push_back (idx);
+        }
+    }
+
+    const int missTotal = (int) missIndexes.size();
+    const int workerCount = computeScanWorkerCount (missTotal);
+
+    std::atomic<int> nextMissIdx { 0 };
 
     auto workerBody = [&]() {
         for (;;)
         {
-            int idx = nextIndex.fetch_add (1, std::memory_order_relaxed);
-            if (idx >= total) return;
+            int slot = nextMissIdx.fetch_add (1, std::memory_order_relaxed);
+            if (slot >= missTotal) return;
+            int idx = missIndexes[(size_t) slot];
 
             const auto& candidate = candidates[(size_t) idx];
 
@@ -850,32 +903,57 @@ juce::var handleScanPlugins (const juce::var& params)
             juce::Array<juce::var> localFailed;
             runScanOneChild (candidate, localPlugins, localFailed);
 
+            // Snapshot signature at the time we actually probed so a later
+            // race (file replaced mid-scan) doesn't poison the cache with
+            // stale-mtime + new-result.
+            juce::int64 mtime = 0, size = 0;
+            computePluginSignature (candidate.path, mtime, size);
+
             {
                 std::lock_guard<std::mutex> lock (resultsMutex);
                 for (int i = 0; i < localPlugins.size(); ++i) plugins.add (localPlugins[i]);
                 for (int i = 0; i < localFailed.size(); ++i) failed.add (localFailed[i]);
             }
 
-            int done = completed.fetch_add (1, std::memory_order_relaxed) + 1;
             {
-                // Serialize progress emits so two workers can't interleave a
-                // partial JSON line on stdout.
-                std::lock_guard<std::mutex> lock (progressMutex);
-                emitScanProgress (done, total, candidate.path);
+                std::lock_guard<std::mutex> lock (cacheMutex);
+                PluginCacheKey key { candidate.formatId, candidate.path };
+                PluginCacheEntry entry;
+                entry.mtimeMs = mtime;
+                entry.size    = size;
+                entry.plugins = localPlugins;
+                entry.failed  = localFailed;
+                nextCache.emplace (std::move (key), std::move (entry));
             }
+
+            recordCandidateProgress (candidate.path);
         }
     };
 
-    if (workerCount <= 1 || total == 0)
+    if (workerCount <= 1 || missTotal == 0)
     {
         workerBody();
     }
     else
     {
+        std::vector<std::thread> workers;
+        workers.reserve ((size_t) workerCount);
         for (int w = 0; w < workerCount; ++w)
             workers.emplace_back (workerBody);
         for (auto& t : workers)
             if (t.joinable()) t.join();
+    }
+
+    // Persist the refreshed cache. Entries for plugins that are no longer on
+    // disk are dropped because we only re-add the candidates we just walked.
+    try
+    {
+        writePluginScanCache (nextCache);
+    }
+    catch (...)
+    {
+        // Cache I/O is best-effort; a failure here just means the next scan
+        // re-probes everything. Don't let it break the live scan response.
     }
 
     juce::DynamicObject::Ptr result (new juce::DynamicObject());

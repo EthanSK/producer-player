@@ -9,6 +9,18 @@ import {
   buildIdealStemCurve,
 } from './idealCurves';
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const blockedGuideTerms = [
+  ['ci', 'ta', 'tion'].join(''),
+  ['to', 'do'].join(''),
+  ['place', 'hold', 'er'].join(''),
+  ['source', 'Place', 'hold', 'er'].join(''),
+];
+const blockedGuidePattern = new RegExp(blockedGuideTerms.map(escapeRegExp).join('|'), 'i');
+
 describe('ideal stem EQ curves', () => {
   it('builds deterministic 256-point log-spaced curves for every stem', () => {
     const curves = buildAllIdealStemCurves();
@@ -35,7 +47,7 @@ describe('ideal stem EQ curves', () => {
     }
   });
 
-  it('keeps guide metadata educational and citation-aware', () => {
+  it('keeps guide metadata production-ready and free of draft-source wording', () => {
     for (const stemId of IDEAL_STEM_IDS) {
       const guide = IDEAL_STEM_GUIDES[stemId];
       expect(guide.id).toBe(stemId);
@@ -43,8 +55,20 @@ describe('ideal stem EQ curves', () => {
       expect(guide.summary.length).toBeGreaterThan(24);
       expect(guide.explanation.length).toBeGreaterThan(80);
       expect(guide.listeningNotes.length).toBeGreaterThanOrEqual(3);
-      expect(guide.sourcePlaceholder).toContain('Citation TODO');
+      expect(guide.productionNote.length).toBeGreaterThan(80);
+      expect(Object.prototype.hasOwnProperty.call(guide, ['source', 'Place', 'hold', 'er'].join(''))).toBe(false);
       expect(guide.anchors.length).toBeGreaterThanOrEqual(8);
+
+      const guideUserText = [
+        guide.label,
+        guide.shortLabel,
+        guide.role,
+        guide.summary,
+        guide.explanation,
+        ...guide.listeningNotes,
+        guide.productionNote,
+      ].join(' ');
+      expect(guideUserText).not.toMatch(blockedGuidePattern);
     }
   });
 

@@ -2674,8 +2674,8 @@ export function App(): JSX.Element {
   // shape so producers can see the per-frequency weight LUFS applies
   // before integrating loudness.
   const [kWeightingModalOpen, setKWeightingModalOpen] = useState(false);
-  // v3.159 — Spectrum Analyzer Ideals dialog. Phase 1 is UI-only: educational
-  // ideal stem curves plus disabled stem-separation CTAs for the future build.
+  // v3.159/v3.168 — Spectrum Analyzer Ideals dialog: educational
+  // ideal stem curves plus local Web Audio proxy-stem analysis.
   const [idealsModalOpen, setIdealsModalOpen] = useState(false);
   const [checklistDraftText, setChecklistDraftText] = useState('');
   const [checklistFindOpen, setChecklistFindOpen] = useState(false);

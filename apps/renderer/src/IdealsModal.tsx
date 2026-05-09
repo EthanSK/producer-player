@@ -28,6 +28,7 @@ interface IdealsModalProps {
   onClose: () => void;
   mixSource: IdealStemAnalysisSource | null;
   referenceSource: IdealStemAnalysisSource | null;
+  initialFullscreenStemId?: IdealStemId | null;
 }
 
 type IdealsLayerId = 'ideal' | 'reference' | 'mix';
@@ -91,15 +92,6 @@ function buildFilledCurvePath(curve: readonly IdealCurvePoint[]): string {
   const firstX = freqToX(curve[0].freq).toFixed(2);
   const lastX = freqToX(curve[curve.length - 1].freq).toFixed(2);
   return `${curvePath} L${lastX},${zeroY.toFixed(2)} L${firstX},${zeroY.toFixed(2)} Z`;
-}
-
-function buildStemExpandedDefaults(): Record<IdealStemId, boolean> {
-  return {
-    vocals: true,
-    drums: true,
-    bass: false,
-    other: false,
-  };
 }
 
 function buildInitialSourceState(): Record<IdealStemSourceKind, StemSourceState> {
@@ -338,10 +330,11 @@ export function IdealsModal({
   onClose,
   mixSource,
   referenceSource,
+  initialFullscreenStemId = null,
 }: IdealsModalProps): JSX.Element | null {
   const curvesByStem = useMemo(() => buildAllIdealStemCurves(), []);
-  const [expandedByStem, setExpandedByStem] = useState<Record<IdealStemId, boolean>>(
-    buildStemExpandedDefaults,
+  const [selectedFullscreenStemId, setSelectedFullscreenStemId] = useState<IdealStemId | null>(
+    initialFullscreenStemId,
   );
   const [layers, setLayers] = useState<Record<IdealsLayerId, boolean>>({
     ideal: true,
@@ -355,6 +348,7 @@ export function IdealsModal({
     mix: null,
     reference: null,
   });
+  const fullscreenDialogRef = useRef<HTMLDivElement | null>(null);
 
   const sources = useMemo(
     () => ({ mix: mixSource, reference: referenceSource }),
@@ -380,11 +374,29 @@ export function IdealsModal({
   useEffect(() => {
     if (!open) return;
     function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (selectedFullscreenStemId) {
+        setSelectedFullscreenStemId(null);
+        return;
+      }
+      onClose();
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, selectedFullscreenStemId]);
+
+  useEffect(() => {
+    if (!open) {
+      setSelectedFullscreenStemId(null);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!selectedFullscreenStemId) return;
+    fullscreenDialogRef.current?.focus();
+  }, [selectedFullscreenStemId]);
 
   useEffect(() => {
     return () => {
@@ -483,6 +495,14 @@ export function IdealsModal({
   const referenceReady =
     sourceStates.reference.status === 'ready' && sourceStates.reference.result !== null;
   const anyRunning = sourceStates.mix.status === 'running' || sourceStates.reference.status === 'running';
+  const fullscreenStemId = selectedFullscreenStemId;
+  const fullscreenGuide = fullscreenStemId ? IDEAL_STEM_GUIDES[fullscreenStemId] : null;
+  const fullscreenMixCurve = fullscreenStemId
+    ? sourceStates.mix.result?.stems[fullscreenStemId]?.curve
+    : undefined;
+  const fullscreenReferenceCurve = fullscreenStemId
+    ? sourceStates.reference.result?.stems[fullscreenStemId]?.curve
+    : undefined;
 
   if (!open) return null;
 
@@ -500,7 +520,7 @@ export function IdealsModal({
         }
       }}
     >
-      <div className="ideals-card">
+      <div className="ideals-card" onClick={(event) => event.stopPropagation()}>
         <div className="ideals-header">
           <div>
             <p className="ideals-eyebrow">Mastering spectrum guide</p>
@@ -509,8 +529,8 @@ export function IdealsModal({
             </h2>
             <p id="ideals-modal-subtitle" className="muted">
               Educational ideal curves plus live stem-like analysis for your mix and reference.
-              The local fallback is usable end-to-end now: it creates Web Audio proxy stems for
-              graphs and audition, with honest labels until an approved ML separator is added.
+              The current provider creates local Web Audio proxy stems for diagnostic graphs and
+              audition; these are balance tools, not clean or lossless stem exports.
             </p>
           </div>
           <button
@@ -561,61 +581,67 @@ export function IdealsModal({
             </button>
           </div>
 
-          <div className="ideals-separation-actions" role="group" aria-label="Stem separation and analysis actions">
-            {(['mix', 'reference'] as const).map((kind) => {
-              const source = sources[kind];
-              const state = sourceStates[kind];
-              const running = state.status === 'running';
-              return (
-                <span key={kind} className="ideals-source-action-cluster">
-                  <button
-                    type="button"
-                    disabled={!source || running || source.exists === false}
-                    onClick={() => void startAnalysis(kind, false)}
-                    data-testid={`ideals-separate-${kind}`}
-                    title={source ? getSourceActionLabel(kind) : formatSourceStatus(kind, source, state)}
-                  >
-                    {getSourceActionLabel(kind)}
-                  </button>
-                  {running ? (
+          <div className="ideals-toolbar-analysis">
+            <div className="ideals-separation-actions" role="group" aria-label="Stem separation and analysis actions">
+              {(['mix', 'reference'] as const).map((kind) => {
+                const source = sources[kind];
+                const state = sourceStates[kind];
+                const running = state.status === 'running';
+                return (
+                  <span key={kind} className="ideals-source-action-cluster">
                     <button
                       type="button"
-                      onClick={() => cancelAnalysis(kind)}
-                      data-testid={`ideals-cancel-${kind}`}
+                      disabled={!source || running || source.exists === false}
+                      onClick={() => void startAnalysis(kind, false)}
+                      data-testid={`ideals-separate-${kind}`}
+                      title={source ? getSourceActionLabel(kind) : formatSourceStatus(kind, source, state)}
                     >
-                      Cancel
+                      {getSourceActionLabel(kind)}
                     </button>
-                  ) : null}
-                  {state.status === 'error' || state.status === 'cancelled' ? (
-                    <button
-                      type="button"
-                      disabled={!source}
-                      onClick={() => void startAnalysis(kind, true)}
-                      data-testid={`ideals-retry-${kind}`}
-                    >
-                      Retry
-                    </button>
-                  ) : null}
-                  {state.result || state.status === 'error' || state.status === 'cancelled' ? (
-                    <button
-                      type="button"
-                      onClick={() => clearSource(kind)}
-                      data-testid={`ideals-clear-${kind}`}
-                    >
-                      Clear
-                    </button>
-                  ) : null}
-                </span>
-              );
-            })}
-            <button
-              type="button"
-              disabled={(!mixSource && !referenceSource) || anyRunning}
-              onClick={startAll}
-              data-testid="ideals-separate-all"
-            >
-              Stem Separate Both
-            </button>
+                    {running ? (
+                      <button
+                        type="button"
+                        onClick={() => cancelAnalysis(kind)}
+                        data-testid={`ideals-cancel-${kind}`}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                    {state.status === 'error' || state.status === 'cancelled' ? (
+                      <button
+                        type="button"
+                        disabled={!source}
+                        onClick={() => void startAnalysis(kind, true)}
+                        data-testid={`ideals-retry-${kind}`}
+                      >
+                        Retry
+                      </button>
+                    ) : null}
+                    {state.result || state.status === 'error' || state.status === 'cancelled' ? (
+                      <button
+                        type="button"
+                        onClick={() => clearSource(kind)}
+                        data-testid={`ideals-clear-${kind}`}
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </span>
+                );
+              })}
+              <button
+                type="button"
+                disabled={(!mixSource && !referenceSource) || anyRunning}
+                onClick={startAll}
+                data-testid="ideals-separate-all"
+              >
+                Stem Separate Both
+              </button>
+            </div>
+            <p className="ideals-toolbar-note">
+              Local Web Audio proxy analysis for diagnostic balance and audition — not clean
+              ML-separated stem exports.
+            </p>
           </div>
         </div>
 
@@ -648,13 +674,12 @@ export function IdealsModal({
           <div className="ideals-stem-grid" data-testid="ideals-stem-grid">
             {IDEAL_STEM_IDS.map((stemId) => {
               const guide = IDEAL_STEM_GUIDES[stemId];
-              const expanded = expandedByStem[stemId];
               const mixCurve = sourceStates.mix.result?.stems[stemId]?.curve;
               const referenceCurve = sourceStates.reference.result?.stems[stemId]?.curve;
               return (
                 <section
                   key={stemId}
-                  className={`ideals-stem-card${expanded ? ' ideals-stem-card--expanded' : ' ideals-stem-card--mini'}`}
+                  className="ideals-stem-card ideals-stem-card--mini"
                   data-testid={`ideals-stem-card-${stemId}`}
                   style={{ '--stem-accent': guide.accentColor } as CSSProperties}
                 >
@@ -669,17 +694,12 @@ export function IdealsModal({
                     <button
                       type="button"
                       className="ideals-expand-toggle"
-                      onClick={() =>
-                        setExpandedByStem((current) => ({
-                          ...current,
-                          [stemId]: !current[stemId],
-                        }))
-                      }
-                      aria-expanded={expanded}
+                      onClick={() => setSelectedFullscreenStemId(stemId)}
+                      aria-haspopup="dialog"
                       data-testid={`ideals-expand-${stemId}`}
-                      title={expanded ? `Collapse ${guide.label} to mini view` : `Expand ${guide.label} to full view`}
+                      title={`Open ${guide.label} in a focused dialog`}
                     >
-                      {expanded ? 'Mini view' : 'Full view'}
+                      Full view
                     </button>
                   </div>
 
@@ -710,26 +730,108 @@ export function IdealsModal({
                       source={referenceSource}
                     />
                   </div>
-
-                  {expanded ? (
-                    <div className="ideals-stem-details">
-                      <p>{guide.explanation}</p>
-                      <ul>
-                        {guide.listeningNotes.map((note) => (
-                          <li key={note}>{note}</li>
-                        ))}
-                      </ul>
-                      <p className="ideals-source-placeholder">
-                        <strong>Source placeholder:</strong> {guide.sourcePlaceholder}
-                      </p>
-                    </div>
-                  ) : null}
                 </section>
               );
             })}
           </div>
         </div>
       </div>
+
+      {fullscreenStemId && fullscreenGuide ? (
+        <div
+          ref={fullscreenDialogRef}
+          className="ideals-stem-fullscreen-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={`ideals-stem-fullscreen-title-${fullscreenStemId}`}
+          data-testid="ideals-stem-fullscreen"
+          tabIndex={-1}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (event.target === event.currentTarget) {
+              setSelectedFullscreenStemId(null);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              setSelectedFullscreenStemId(null);
+            }
+          }}
+        >
+          <section
+            className="ideals-stem-fullscreen-card"
+            style={{ '--stem-accent': fullscreenGuide.accentColor } as CSSProperties}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="ideals-stem-fullscreen-header">
+              <div className="ideals-stem-title-block">
+                <span className="ideals-stem-chip">{fullscreenGuide.shortLabel}</span>
+                <div>
+                  <p className="ideals-eyebrow">Focused stem view</p>
+                  <h3 id={`ideals-stem-fullscreen-title-${fullscreenStemId}`}>
+                    {fullscreenGuide.label}
+                  </h3>
+                  <p>{fullscreenGuide.role}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setSelectedFullscreenStemId(null)}
+                data-testid="ideals-stem-fullscreen-close"
+                aria-label={`Close ${fullscreenGuide.label} focused view`}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="ideals-stem-fullscreen-body">
+              <p className="ideals-stem-summary">{fullscreenGuide.summary}</p>
+              <div className="ideals-curve-legend" aria-label={`${fullscreenGuide.label} curve legend`}>
+                <span className="ideals-legend-item ideals-legend-item--ideal">Ideal</span>
+                <span className="ideals-legend-item ideals-legend-item--mix">Your Mix</span>
+                <span className="ideals-legend-item ideals-legend-item--reference">Reference</span>
+              </div>
+              <IdealsCurveGraph
+                idealCurve={curvesByStem[fullscreenStemId]}
+                mixCurve={fullscreenMixCurve}
+                referenceCurve={fullscreenReferenceCurve}
+                guide={fullscreenGuide}
+                showIdeal={layers.ideal}
+                showMix={layers.mix && mixReady}
+                showReference={layers.reference && referenceReady}
+              />
+              <div className="ideals-stem-slots" aria-label={`${fullscreenGuide.label} stem slots`}>
+                <StemSlot
+                  kind="mix"
+                  stemId={fullscreenStemId}
+                  state={sourceStates.mix}
+                  source={mixSource}
+                />
+                <StemSlot
+                  kind="reference"
+                  stemId={fullscreenStemId}
+                  state={sourceStates.reference}
+                  source={referenceSource}
+                />
+              </div>
+              <div className="ideals-stem-details">
+                <p>{fullscreenGuide.explanation}</p>
+                <ul>
+                  {fullscreenGuide.listeningNotes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+                <p className="ideals-production-note">
+                  <strong>Production note:</strong> {fullscreenGuide.productionNote}
+                </p>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

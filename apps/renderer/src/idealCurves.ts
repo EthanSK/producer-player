@@ -24,7 +24,7 @@ export interface IdealStemGuide {
   summary: string;
   explanation: string;
   listeningNotes: readonly string[];
-  sourcePlaceholder: string;
+  productionNote: string;
   anchors: readonly IdealCurveAnchor[];
 }
 
@@ -43,8 +43,8 @@ const IDEAL_STEM_GUIDE_LIST: readonly IdealStemGuide[] = [
       'Keep 200–600 Hz even; too much creates mud, too little makes the vocal feel hollow.',
       'Use the 2–6 kHz lift as a clue for intelligibility, not a command to over-brighten every singer.',
     ],
-    sourcePlaceholder:
-      'Citation TODO: verify against vocal-mixing references, mastering engineer notes, and genre-specific reference tracks before publishing as a claim.',
+    productionNote:
+      'Treat this as a translation baseline, not a published scientific target. The right vocal curve still depends on singer tone, mic choice, arrangement density, genre, and how the vocal sits against the reference track.',
     anchors: [
       { freq: 20, gainDb: -18 },
       { freq: 60, gainDb: -10 },
@@ -72,8 +72,8 @@ const IDEAL_STEM_GUIDE_LIST: readonly IdealStemGuide[] = [
       'A restrained 250–600 Hz area leaves room for vocals and bass harmonics.',
       'Presence above 3 kHz should feel like snap and air; if it feels splashy, compare against the reference layer later.',
     ],
-    sourcePlaceholder:
-      'Citation TODO: verify against drum bus EQ references, transient-balance literature, and mastered multitrack references before publication.',
+    productionNote:
+      'Use this to judge punch versus clutter in context. Real drum balances vary heavily with acoustic kits, programmed drums, sample choice, room tone, parallel compression, and the kick/bass relationship.',
     anchors: [
       { freq: 20, gainDb: -7 },
       { freq: 50, gainDb: 2.8 },
@@ -101,8 +101,8 @@ const IDEAL_STEM_GUIDE_LIST: readonly IdealStemGuide[] = [
       'Too much 180–400 Hz can mask warmth as mud once the full mix returns.',
       'Some basses need 700 Hz–2 kHz definition, but the curve treats that as harmonic detail rather than the main energy center.',
     ],
-    sourcePlaceholder:
-      'Citation TODO: verify with bass translation references, low-end monitoring guidance, and genre-specific mastered stems before publication.',
+    productionNote:
+      'Check this against the kick and the full master before changing EQ. Bass curves are especially room- and genre-dependent, so the goal is stable translation rather than matching the line exactly.',
     anchors: [
       { freq: 20, gainDb: -7.5 },
       { freq: 38, gainDb: 1.2 },
@@ -130,8 +130,8 @@ const IDEAL_STEM_GUIDE_LIST: readonly IdealStemGuide[] = [
       'Use the midrange to check musical identity: chords, hooks, and texture should remain readable.',
       'Highs should support depth and excitement without competing with vocal consonants or cymbals.',
     ],
-    sourcePlaceholder:
-      'Citation TODO: verify with arrangement/stem mastering references and real separated reference tracks before publication.',
+    productionNote:
+      'Because this bucket combines instruments and FX, expect more variation than the focused stems. Use it to spot masking and missing midrange identity, then confirm the decision in the full mix.',
     anchors: [
       { freq: 20, gainDb: -12 },
       { freq: 70, gainDb: -5 },

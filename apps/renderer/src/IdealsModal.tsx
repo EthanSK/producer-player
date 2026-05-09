@@ -134,7 +134,7 @@ function getSourceLabel(kind: IdealStemSourceKind): string {
 }
 
 function getSourceActionLabel(kind: IdealStemSourceKind): string {
-  return kind === 'mix' ? 'Separate/analyse yours' : 'Separate/analyse reference';
+  return kind === 'mix' ? 'Stem Separate Yours' : 'Stem Separate Reference';
 }
 
 function formatSourceStatus(
@@ -614,7 +614,7 @@ export function IdealsModal({
               onClick={startAll}
               data-testid="ideals-separate-all"
             >
-              Separate/analyse all
+              Stem Separate Both
             </button>
           </div>
         </div>

@@ -26,8 +26,9 @@ describe('IdealsModal', () => {
       />,
     );
 
-    expect(markup).toContain('Separate/analyse yours');
-    expect(markup).toContain('Separate/analyse all');
+    expect(markup).toContain('Stem Separate Yours');
+    expect(markup).toContain('Stem Separate Reference');
+    expect(markup).toContain('Stem Separate Both');
     expect(markup).toContain('No reference loaded');
     expect(markup).toContain('Current provider: Web Audio proxy stems');
     expect(markup).toContain('data-testid="ideals-mix-slot-vocals"');

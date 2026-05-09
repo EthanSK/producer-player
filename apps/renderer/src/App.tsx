@@ -200,6 +200,7 @@ import type {
   AgentStaticAnalysis,
   MasteringCacheEntry,
   PluginPresetEntry,
+  PluginScanProgress,
   PluginScanSettings,
   ScannedPluginLibrary,
   TrackPluginChain,
@@ -2886,6 +2887,11 @@ export function App(): JSX.Element {
     usingDefaultPaths: true,
   });
   const [pluginLibraryScanning, setPluginLibraryScanning] = useState(false);
+  // v3.171 — latest `scan_progress` event from the sidecar so the plugin
+  // browser dialog can render "Scanning plugins (k/n: name)" inline instead
+  // of staring at a static "Scanning standard VST3/AU folders…" placeholder
+  // for the full ~90 s walk. Cleared when the scan settles.
+  const [pluginScanProgress, setPluginScanProgress] = useState<PluginScanProgress | null>(null);
   const [pluginPresetsByPluginId, setPluginPresetsByPluginId] = useState<
     Record<string, PluginPresetEntry[]>
   >({});
@@ -11468,12 +11474,17 @@ export function App(): JSX.Element {
     // `{event:"scan_progress",done,total,current}` line per plugin; main.ts
     // forwards each one over PLUGIN_SCAN_PROGRESS_EVENT and we subscribe
     // here for the duration of this one scan call.
+    setPluginScanProgress(null);
     const unsubscribeProgress = window.producerPlayer.onPluginScanProgress((event) => {
       const name = (() => {
         const m = event.current.match(/[^/\\]+$/);
         const base = m ? m[0] : event.current;
         return base.replace(/\.(vst3|component|clap)$/i, '');
       })();
+      // Mirror progress into renderer state so the plugin browser dialog
+      // body can render "Scanning plugins (k/n): name" inline instead of
+      // sitting on a static placeholder for the full scan duration.
+      setPluginScanProgress(event);
       toast.show({
         id: 'plugin-scan',
         kind: 'info',
@@ -11525,6 +11536,7 @@ export function App(): JSX.Element {
       .finally(() => {
         unsubscribeProgress();
         setPluginLibraryScanning(false);
+        setPluginScanProgress(null);
         void window.producerPlayer
           .getPluginScanSettings()
           .then(setPluginScanSettings)
@@ -15299,6 +15311,7 @@ export function App(): JSX.Element {
                       library={pluginLibrary}
                       layout="compact"
                       scanning={pluginLibraryScanning}
+                      scanProgress={pluginScanProgress}
                       scanSettings={pluginScanSettings}
                       onAdd={handlePluginAdd}
                       onRemove={handlePluginRemove}
@@ -18638,6 +18651,7 @@ export function App(): JSX.Element {
                       library={pluginLibrary}
                       layout="fullscreen"
                       scanning={pluginLibraryScanning}
+                      scanProgress={pluginScanProgress}
                       scanSettings={pluginScanSettings}
                       onAdd={handlePluginAdd}
                       onRemove={handlePluginRemove}

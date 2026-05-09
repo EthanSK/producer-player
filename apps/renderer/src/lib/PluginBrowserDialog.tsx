@@ -22,6 +22,7 @@ import {
 } from 'react';
 import type {
   PluginInfo,
+  PluginScanProgress,
   PluginScanSettings,
   ScannedPluginLibrary,
 } from '@producer-player/contracts';
@@ -29,6 +30,14 @@ import type {
 export interface PluginBrowserDialogProps {
   library: ScannedPluginLibrary | null;
   scanning: boolean;
+  /**
+   * v3.171 — latest `scan_progress` event from the sidecar. Used to render
+   * "Scanning plugins (k/n): name" inline in the empty-state placeholder
+   * while a long catalogue walk is in flight, instead of leaving the user
+   * staring at a static "Scanning standard VST3/AU folders…" message for
+   * the full ~90 s duration.
+   */
+  scanProgress?: PluginScanProgress | null;
   scanSettings?: PluginScanSettings;
   onClose: () => void;
   onPick: (pluginId: string) => void;
@@ -70,6 +79,7 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
   const {
     library,
     scanning,
+    scanProgress = null,
     scanSettings,
     onClose,
     onPick,
@@ -327,13 +337,30 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
             className="plugin-browser-dialog__empty"
             data-testid="plugin-browser-dialog-empty"
           >
-            <p>
-              {scanning
-                ? usingDefaultPaths
-                  ? 'Scanning standard VST3/AU folders…'
-                  : 'Scanning the selected plugin paths…'
-                : 'No plugins loaded yet. Set paths if needed, then click the scan button when you want to search.'}
-            </p>
+            {scanning ? (
+              <>
+                <p data-testid="plugin-browser-dialog-empty-status">
+                  {usingDefaultPaths
+                    ? 'Scanning standard VST3/AU folders…'
+                    : 'Scanning the selected plugin paths…'}
+                </p>
+                {scanProgress && scanProgress.total > 0 ? (
+                  <p
+                    className="plugin-browser-dialog__progress"
+                    data-testid="plugin-browser-dialog-empty-progress"
+                  >
+                    {(() => {
+                      const m = scanProgress.current.match(/[^/\\]+$/);
+                      const base = m ? m[0] : scanProgress.current;
+                      const name = base.replace(/\.(vst3|component|clap)$/i, '');
+                      return `Scanned ${scanProgress.done} of ${scanProgress.total}: ${name}`;
+                    })()}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p>No plugins loaded yet. Set paths if needed, then click the scan button when you want to search.</p>
+            )}
           </div>
         ) : (
           <div

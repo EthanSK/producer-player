@@ -8027,6 +8027,14 @@ button.reference-action.active {
   font-size: 13px;
 }
 
+.plugin-browser-dialog__progress {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, var(--text-muted));
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .plugin-pill,
   .plugin-pill__toggle,

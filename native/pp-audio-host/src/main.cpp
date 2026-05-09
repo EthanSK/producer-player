@@ -412,6 +412,163 @@ struct PluginScanCandidate
     juce::String path;
 };
 
+// ---------------------------------------------------------------------------
+// v3.171 — per-plugin metadata cache.
+//
+// Goal: Ableton-style fast repeat scans. The expensive part of a scan is the
+// `--scan-one` child per plugin (~700 ms of JUCE plugin format discovery
+// each). On a typical mastering rig with 400-500 installed plugins almost
+// none of them change between sessions, so re-running findAllTypesForFile on
+// every bundle every time is pure waste. Once we have a successful metadata
+// blob for a plugin at <path>, we keep it; only re-scan when the bundle's
+// mtime/size signature changes (install, update, removal).
+//
+// Cache file: ~/Library/Caches/com.ethansk.producerplayer/plugin-scan-cache.json
+//   {
+//     "version": 1,
+//     "entries": [
+//       { "format": "vst3", "path": "...", "mtime": <ms>, "size": <bytes>,
+//         "plugins": [<describePlugin objects>], "failed": [<entries>] }
+//     ]
+//   }
+//
+// Cache key: format + path. Validity check: stored mtime/size match the
+// bundle directory's current mtime + Info.plist size. Mismatched / missing
+// entries fall back to a fresh `--scan-one`. After every full scan we
+// rewrite the cache to drop entries for plugins that no longer exist.
+//
+// Crash-safety: a hung/crashed --scan-one still records a "failed" entry
+// (with the failure reason) which we cache. A future scan only retries that
+// bundle if its mtime/size changed, so a chronically-crashing plugin no
+// longer takes the parent down on every restart. To force a full re-probe
+// the user can delete the cache file or hit the existing manual rescan.
+// ---------------------------------------------------------------------------
+
+struct PluginCacheKey
+{
+    juce::String formatId;
+    juce::String path;
+    bool operator== (const PluginCacheKey& other) const
+    {
+        return formatId == other.formatId && path == other.path;
+    }
+};
+
+struct PluginCacheKeyHash
+{
+    std::size_t operator() (const PluginCacheKey& k) const noexcept
+    {
+        return std::hash<std::string> {} ((k.formatId + "\n" + k.path).toStdString());
+    }
+};
+
+struct PluginCacheEntry
+{
+    juce::int64 mtimeMs = 0;
+    juce::int64 size = 0;
+    juce::Array<juce::var> plugins;
+    juce::Array<juce::var> failed;
+};
+
+juce::File getPluginScanCacheFile()
+{
+    auto caches = juce::File::getSpecialLocation (juce::File::userHomeDirectory)
+                      .getChildFile ("Library")
+                      .getChildFile ("Caches")
+                      .getChildFile ("com.ethansk.producerplayer");
+    if (! caches.exists())
+        caches.createDirectory();
+    return caches.getChildFile ("plugin-scan-cache.json");
+}
+
+// Compute a (mtime,size) signature for a plugin bundle. We use the bundle
+// directory's modification time plus the size of its Contents/Info.plist
+// (both formats are .vst3 / .component directory bundles on macOS that ship
+// an Info.plist). If Info.plist isn't readable we fall back to the bundle
+// dir's own mtime + 0; that still catches re-installs since the dir mtime
+// updates whenever a child file is replaced.
+void computePluginSignature (const juce::String& path,
+                             juce::int64& outMtimeMs,
+                             juce::int64& outSize)
+{
+    juce::File bundle (path);
+    outMtimeMs = bundle.getLastModificationTime().toMilliseconds();
+    auto plist = bundle.getChildFile ("Contents/Info.plist");
+    outSize = plist.existsAsFile() ? plist.getSize() : 0;
+}
+
+std::unordered_map<PluginCacheKey, PluginCacheEntry, PluginCacheKeyHash>
+loadPluginScanCache()
+{
+    std::unordered_map<PluginCacheKey, PluginCacheEntry, PluginCacheKeyHash> out;
+    auto cacheFile = getPluginScanCacheFile();
+    if (! cacheFile.existsAsFile()) return out;
+
+    auto text = cacheFile.loadFileAsString();
+    if (text.isEmpty()) return out;
+
+    auto parsed = juce::JSON::parse (text);
+    if (! parsed.isObject()) return out;
+
+    auto version = (int) parsed.getProperty ("version", 0);
+    if (version != 1) return out; // schema bump → invalidate the cache
+
+    auto entries = parsed.getProperty ("entries", juce::var());
+    if (! entries.isArray()) return out;
+    if (auto* arr = entries.getArray())
+    {
+        for (auto& entry : *arr)
+        {
+            if (! entry.isObject()) continue;
+            PluginCacheKey key;
+            key.formatId = entry.getProperty ("format", "").toString();
+            key.path     = entry.getProperty ("path",   "").toString();
+            if (key.formatId.isEmpty() || key.path.isEmpty()) continue;
+            PluginCacheEntry value;
+            value.mtimeMs = (juce::int64) entry.getProperty ("mtime", 0);
+            value.size    = (juce::int64) entry.getProperty ("size",  0);
+            auto plugins = entry.getProperty ("plugins", juce::var());
+            if (plugins.isArray())
+                if (auto* p = plugins.getArray())
+                    for (auto& v : *p) value.plugins.add (v);
+            auto failed = entry.getProperty ("failed", juce::var());
+            if (failed.isArray())
+                if (auto* f = failed.getArray())
+                    for (auto& v : *f) value.failed.add (v);
+            out.emplace (key, std::move (value));
+        }
+    }
+    return out;
+}
+
+void writePluginScanCache (
+    const std::unordered_map<PluginCacheKey, PluginCacheEntry, PluginCacheKeyHash>& cache)
+{
+    juce::Array<juce::var> entries;
+    for (const auto& kv : cache)
+    {
+        juce::DynamicObject::Ptr e (new juce::DynamicObject());
+        e->setProperty ("format", kv.first.formatId);
+        e->setProperty ("path",   kv.first.path);
+        e->setProperty ("mtime",  kv.second.mtimeMs);
+        e->setProperty ("size",   kv.second.size);
+        e->setProperty ("plugins", kv.second.plugins);
+        e->setProperty ("failed",  kv.second.failed);
+        entries.add (juce::var (e.get()));
+    }
+
+    juce::DynamicObject::Ptr root (new juce::DynamicObject());
+    root->setProperty ("version", 1);
+    root->setProperty ("entries", entries);
+
+    auto serialized = juce::JSON::toString (juce::var (root.get()));
+    auto cacheFile = getPluginScanCacheFile();
+    auto temp = cacheFile.getParentDirectory()
+                     .getChildFile (cacheFile.getFileName() + ".tmp");
+    temp.replaceWithText (serialized);
+    temp.moveFileTo (cacheFile);
+}
+
 void addPluginScanCandidate (std::vector<PluginScanCandidate>& out,
                              juce::StringArray& seen,
                              const juce::String& formatId,

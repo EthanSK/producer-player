@@ -47,6 +47,7 @@ import type {
   PluginInfo,
   PluginPresetEntry,
   PluginScanSettings,
+  PluginScanProgress,
   ScannedPluginLibrary,
   TrackPluginChain,
 } from '@producer-player/contracts';
@@ -58,6 +59,11 @@ export interface PluginChainStripProps {
   library: ScannedPluginLibrary | null;
   layout: 'fullscreen' | 'compact';
   scanning?: boolean;
+  /**
+   * v3.171 — latest `scan_progress` event surfaced from the sidecar so the
+   * plugin browser dialog can render live progress in its empty placeholder.
+   */
+  scanProgress?: PluginScanProgress | null;
   scanSettings?: PluginScanSettings;
   onAdd: (pluginId: string) => void;
   onRemove: (instanceId: string) => void;
@@ -405,6 +411,7 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     library,
     layout,
     scanning = false,
+    scanProgress = null,
     scanSettings,
     onAdd,
     onRemove,
@@ -584,6 +591,7 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
         <PluginBrowserDialog
           library={library}
           scanning={scanning}
+          scanProgress={scanProgress}
           scanSettings={scanSettings}
           onClose={() => setBrowserOpen(false)}
           onPick={(pluginId) => {

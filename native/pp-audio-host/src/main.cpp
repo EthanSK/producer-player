@@ -74,6 +74,7 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <atomic>
 #include <functional>
@@ -1159,11 +1160,16 @@ juce::var handleProcessBlock (const juce::var& params)
     if (channels > 8 || frames > 262144)
         return makeError ("process_block: buffer dimensions too large");
 
+    double sampleRate = (double) obj->getProperty ("sampleRate");
+    int blockSize = (int) obj->getProperty ("blockSize");
+    if (sampleRate <= 0.0) sampleRate = 48000.0;
+    if (blockSize <= 0) blockSize = frames;
+
     // Collect enabled instances, in declared order. Unknown/disabled slots
     // are skipped silently (the Electron side is the source of truth for
     // chain membership; if a load_plugin race hasn't finished we'd rather
     // pass audio through than drop it).
-    juce::Array<juce::AudioPluginInstance*> enabledChain;
+    juce::Array<LoadedInstance*> enabledChain;
     if (auto chainVar = obj->getProperty ("chain"); chainVar.isArray())
     {
         if (auto* arr = chainVar.getArray())
@@ -1176,7 +1182,7 @@ juce::var handleProcessBlock (const juce::var& params)
                 auto slotId = entry["instanceId"].toString().toStdString();
                 auto it = g_instances.find (slotId);
                 if (it == g_instances.end() || ! it->second.plugin) continue;
-                enabledChain.add (it->second.plugin.get());
+                enabledChain.add (&it->second);
             }
         }
     }
@@ -1200,8 +1206,19 @@ juce::var handleProcessBlock (const juce::var& params)
         return makeError ("process_block: bufferBase64 size does not match frames/channels");
 
     juce::MidiBuffer emptyMidi;
-    for (auto* plugin : enabledChain)
-        plugin->processBlock (buffer, emptyMidi);
+    for (auto* loaded : enabledChain)
+    {
+        if (! loaded || ! loaded->plugin) continue;
+        if (std::abs (loaded->preparedSampleRate - sampleRate) > 0.01
+            || loaded->preparedBlockSize != blockSize)
+        {
+            loaded->plugin->releaseResources();
+            loaded->plugin->prepareToPlay (sampleRate, blockSize);
+            loaded->preparedSampleRate = sampleRate;
+            loaded->preparedBlockSize = blockSize;
+        }
+        loaded->plugin->processBlock (buffer, emptyMidi);
+    }
 
     juce::DynamicObject::Ptr reply (new juce::DynamicObject());
     reply->setProperty ("ok", true);

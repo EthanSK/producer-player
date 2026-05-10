@@ -52,6 +52,8 @@ import type {
   PluginChainItem,
   PluginFormat,
   PluginInfo,
+  PluginProcessBlockItem,
+  PluginProcessBlockResult,
   ScannedPluginLibrary,
   TrackPluginChain,
 } from '@producer-player/contracts';
@@ -365,18 +367,6 @@ export interface LoadPluginResult {
 export interface PluginInstanceLoadedPayload {
   instanceId: string;
   reportedLatencySamples: number;
-}
-
-export interface ProcessBlockItem {
-  instanceId: string;
-  enabled: boolean;
-}
-
-export interface ProcessBlockResult {
-  frames: number;
-  channels: number;
-  bufferBase64: string;
-  processedSlots: number;
 }
 
 /**
@@ -1011,13 +1001,13 @@ export class PluginHostService {
    * double-enforcement matches Ethan's "zero plugins → zero effect" invariant.
    */
   async processBlock(opts: {
-    chain: ProcessBlockItem[];
+    chain: PluginProcessBlockItem[];
     bufferBase64: string;
     frames: number;
     channels?: number;
     sampleRate?: number;
     blockSize?: number;
-  }): Promise<ProcessBlockResult> {
+  }): Promise<PluginProcessBlockResult> {
     const reply = await this.send<Record<string, unknown>>('process_block', {
       chain: opts.chain,
       bufferBase64: opts.bufferBase64,

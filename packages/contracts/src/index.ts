@@ -259,8 +259,7 @@ export const IPC_CHANNELS = {
   AI_RECOMMENDATIONS_SET: 'producer-player:ai-recommendations-set',
   AI_RECOMMENDATIONS_CLEAR: 'producer-player:ai-recommendations-clear',
   AI_RECOMMENDATIONS_MARK_STALE: 'producer-player:ai-recommendations-mark-stale',
-  // v3.39 — Plugin hosting Phase 1a (data model + JUCE sidecar scaffold).
-  // UI lands in Phase 1b.
+  // v3.39+ — Plugin hosting (data model, UI, sidecar, and live audio bridge).
   PLUGIN_SCAN_LIBRARY: 'producer-player:plugin-scan-library',
   PLUGIN_GET_LIBRARY: 'producer-player:plugin-get-library',
   PLUGIN_GET_SCAN_SETTINGS: 'producer-player:plugin-get-scan-settings',
@@ -273,6 +272,7 @@ export const IPC_CHANNELS = {
   PLUGIN_REORDER_CHAIN: 'producer-player:plugin-reorder-chain',
   PLUGIN_TOGGLE_ENABLED: 'producer-player:plugin-toggle-enabled',
   PLUGIN_SET_STATE: 'producer-player:plugin-set-state',
+  PLUGIN_PROCESS_BLOCK: 'producer-player:plugin-process-block',
   // v3.43 Phase 4 — Plugin preset save/recall.
   PLUGIN_PRESET_SAVE: 'producer-player:plugin-preset-save',
   PLUGIN_PRESET_RECALL: 'producer-player:plugin-preset-recall',
@@ -380,10 +380,9 @@ export interface PersistedEqLiveState {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin hosting (v3.39, Phase 1a — data model + JUCE sidecar scaffold)
+// Plugin hosting (v3.39+ — data model + JUCE sidecar bridge)
 //
 // Effects-only, per-song insert chain. macOS-first (VST3 + AU + CLAP).
-// UI lands in Phase 1b; audio path + real plugin loading land in later phases.
 // ---------------------------------------------------------------------------
 
 export type PluginFormat = 'vst3' | 'au' | 'clap';
@@ -435,6 +434,27 @@ export interface PluginChainItem {
 export interface TrackPluginChain {
   songId: string;
   items: PluginChainItem[];
+}
+
+export interface PluginProcessBlockItem {
+  instanceId: string;
+  enabled: boolean;
+}
+
+export interface PluginProcessBlockRequest {
+  chain: PluginProcessBlockItem[];
+  bufferBase64: string;
+  frames: number;
+  channels?: number;
+  sampleRate?: number;
+  blockSize?: number;
+}
+
+export interface PluginProcessBlockResult {
+  frames: number;
+  channels: number;
+  bufferBase64: string;
+  processedSlots: number;
 }
 
 /**
@@ -1329,8 +1349,7 @@ export interface ProducerPlayerBridge {
     newAnalysisVersion: string,
   ): Promise<void>;
 
-  // v3.39 — Plugin hosting (Phase 1a storage + sidecar wiring; UI lands 1b).
-  // Renderer consumers arrive in Phase 1b.
+  // v3.39+ — Plugin hosting.
   scanPluginLibrary(options?: PluginScanRequest): Promise<ScannedPluginLibrary>;
   getPluginLibrary(): Promise<ScannedPluginLibrary | null>;
   getPluginScanSettings(): Promise<PluginScanSettings>;
@@ -1343,6 +1362,7 @@ export interface ProducerPlayerBridge {
   reorderPluginChain(songId: string, orderedInstanceIds: string[]): Promise<TrackPluginChain>;
   togglePluginEnabled(songId: string, instanceId: string, enabled: boolean): Promise<TrackPluginChain>;
   setPluginState(songId: string, instanceId: string, state: string): Promise<TrackPluginChain>;
+  processPluginAudioBlock(request: PluginProcessBlockRequest): Promise<PluginProcessBlockResult>;
   savePluginPreset(songId: string, instanceId: string, name: string): Promise<PluginPresetEntry>;
   recallPluginPreset(songId: string, instanceId: string, name: string): Promise<TrackPluginChain>;
   listPluginPresets(pluginIdentifier: string): Promise<PluginPresetEntry[]>;

@@ -100,6 +100,7 @@ import type {
   ProducerPlayerAppVersion,
   ProducerPlayerEnvironment,
   ProjectFileSelection,
+  PluginProcessBlockRequest,
   ReferenceTrackSelection,
   SongVersion,
   UpdateCheckResult,
@@ -5357,7 +5358,9 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.PLUGIN_GET_TRACK_CHAIN, async (_event, songId: string) => {
     if (!userStateService) throw new Error('User state service not initialized');
-    return userStateService.getTrackPluginChain(songId);
+    const chain = await userStateService.getTrackPluginChain(songId);
+    reconcileChainIfPossible(chain);
+    return chain;
   });
 
   ipcMain.handle(
@@ -5416,6 +5419,49 @@ function registerIpcHandlers(service: FileLibraryService): void {
     async (_event, songId: string, instanceId: string, stateBase64: string) => {
       if (!userStateService) throw new Error('User state service not initialized');
       return userStateService.setPluginState(songId, instanceId, stateBase64);
+    },
+  );
+
+  let lastPluginProcessBlockWarningAt = 0;
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_PROCESS_BLOCK,
+    async (_event, request: PluginProcessBlockRequest) => {
+      const fallback = {
+        frames: request.frames,
+        channels: request.channels ?? 2,
+        bufferBase64: request.bufferBase64,
+        processedSlots: 0,
+      };
+      const chain = Array.isArray(request.chain)
+        ? request.chain
+            .filter((item) => item && typeof item.instanceId === 'string')
+            .map((item) => ({
+              instanceId: item.instanceId,
+              enabled: Boolean(item.enabled),
+            }))
+        : [];
+      if (chain.every((item) => !item.enabled)) return fallback;
+
+      const service = getOrCreatePluginHost();
+      if (!service.isAvailable()) return fallback;
+
+      try {
+        return await service.processBlock({
+          chain,
+          bufferBase64: request.bufferBase64,
+          frames: request.frames,
+          channels: request.channels,
+          sampleRate: request.sampleRate,
+          blockSize: request.blockSize,
+        });
+      } catch (err) {
+        const now = Date.now();
+        if (now - lastPluginProcessBlockWarningAt > 5000) {
+          lastPluginProcessBlockWarningAt = now;
+          log.warn('[plugin-host] process block failed; falling back to dry passthrough', err);
+        }
+        return fallback;
+      }
     },
   );
 
@@ -5500,10 +5546,27 @@ function registerIpcHandlers(service: FileLibraryService): void {
     return { chain, item };
   };
 
-  const ensurePresetSidecarReady = (instanceId: string): PluginHostService => {
+  const ensurePresetSidecarReady = async (
+    chain: TrackPluginChain,
+    instanceId: string,
+  ): Promise<PluginHostService> => {
     const service = getOrCreatePluginHost();
-    if (!service.isAvailable() || !service.getLoadedInstanceIds().includes(instanceId)) {
-      throw new Error('Plugin is still loading — try again in a moment.');
+    if (!service.isAvailable()) {
+      throw new Error('Plugin host is not available in this build.');
+    }
+    if (!service.getLoadedInstanceIds().includes(instanceId)) {
+      if (userStateService) {
+        service.rememberLibrary(await userStateService.getPluginLibrary());
+      }
+      const result = await service.reconcileTrackChain(chain);
+      if (!service.getLoadedInstanceIds().includes(instanceId)) {
+        const failure = result.failed.find((entry) => entry.instanceId === instanceId);
+        throw new Error(
+          failure
+            ? `Plugin failed to load: ${failure.error}`
+            : 'Plugin is still loading — try again in a moment.',
+        );
+      }
     }
     return service;
   };
@@ -5513,8 +5576,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(
     IPC_CHANNELS.PLUGIN_PRESET_SAVE,
     async (_event, args: { songId: string; instanceId: string; name: string }) => {
-      const { item } = await getLoadedPluginSlot(args.songId, args.instanceId);
-      const service = ensurePresetSidecarReady(args.instanceId);
+      const { chain, item } = await getLoadedPluginSlot(args.songId, args.instanceId);
+      const service = await ensurePresetSidecarReady(chain, args.instanceId);
       let stateBase64 = '';
       try {
         stateBase64 = await service.getPluginState(args.instanceId);
@@ -5529,12 +5592,12 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(
     IPC_CHANNELS.PLUGIN_PRESET_RECALL,
     async (_event, args: { songId: string; instanceId: string; name: string }) => {
-      const { item } = await getLoadedPluginSlot(args.songId, args.instanceId);
+      const { chain, item } = await getLoadedPluginSlot(args.songId, args.instanceId);
       const preset = await getOrCreatePluginPresetLibrary().getPreset(item.pluginId, args.name);
       if (!preset) {
         throw new Error('Preset not found.');
       }
-      const service = ensurePresetSidecarReady(args.instanceId);
+      const service = await ensurePresetSidecarReady(chain, args.instanceId);
       try {
         await service.setPluginState(args.instanceId, preset.stateBase64);
       } catch (err) {

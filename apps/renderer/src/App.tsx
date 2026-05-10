@@ -146,6 +146,14 @@ import { MidSideSpectrum } from './MidSideSpectrum';
 import { LoudnessHistogram } from './LoudnessHistogram';
 import { Spectrogram } from './Spectrogram';
 import { FREQUENCY_BANDS, createBandSoloFilter, createPeakingEqFilter, computeEqGainCurve } from './audioEngine';
+import {
+  PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE,
+  base64ToFloat32Interleaved,
+  float32InterleavedToBase64,
+  getEnabledPluginProcessChain,
+  interleaveStereoSamples,
+  writeInterleavedStereoSamples,
+} from './pluginAudioPipeline';
 import { EqGainSliders, EQ_GAIN_DEFAULT_DB } from './EqGainSliders';
 import { HelpTooltip } from './HelpTooltip';
 import { TechnicalInfoPopover } from './TechnicalInfoPopover';
@@ -2874,10 +2882,10 @@ export function App(): JSX.Element {
   const [agentChatPromptRequest, setAgentChatPromptRequest] =
     useState<AgentChatPromptRequest | null>(null);
 
-  // v3.40 — Plugin hosting Phase 1b (UI only). Chain state is fetched
+  // v3.40+ — Plugin hosting. Chain state is fetched
   // per-song from the main process (per-track persisted JSON) and the
-  // library is cached in unified state. Both are pure render data for
-  // this phase — no audio wiring yet.
+  // library is cached in unified state. Enabled, loaded inserts are wired
+  // into the live playback graph below via the native sidecar bridge.
   const [pluginChain, setPluginChain] = useState<TrackPluginChain>({
     songId: '',
     items: [],
@@ -2969,6 +2977,7 @@ export function App(): JSX.Element {
     return stored !== null ? stored === 'true' : true;
   });
   const midSideProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const pluginAudioProcessorRef = useRef<ScriptProcessorNode | null>(null);
 
   const [migrationModalOpen, setMigrationModalOpen] = useState(false);
   const [migrationJsonInput, setMigrationJsonInput] = useState('');
@@ -5813,8 +5822,14 @@ export function App(): JSX.Element {
       playbackAnalyserNodeRef.current = null;
       setAnalyserNode(null);
 
+      if (pluginAudioProcessorRef.current) {
+        try { pluginAudioProcessorRef.current.disconnect(); } catch { /* ignore */ }
+        pluginAudioProcessorRef.current.onaudioprocess = null;
+        pluginAudioProcessorRef.current = null;
+      }
       if (midSideProcessorRef.current) {
         try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
+        midSideProcessorRef.current.onaudioprocess = null;
         midSideProcessorRef.current = null;
       }
       for (const f of bandSoloFiltersRef.current) {
@@ -7585,8 +7600,8 @@ export function App(): JSX.Element {
   }, [appliedNormalizationGainDb, applyPlaybackGain, volume]);
 
   // Consolidated playback chain:
-  // preview gain → [mid/side processor] → [EQ filters] → [band solo filters]
-  // → live analyser/meters → final player volume.
+  // preview gain → [plugin chain] → [mid/side processor] → [EQ filters]
+  // → [band solo filters] → live analyser/meters → final player volume.
   // There is still only one user-facing volume slider; Platform Preview and
   // Level Match are explicit preview transforms before that final slider.
   useEffect(() => {
@@ -7597,8 +7612,14 @@ export function App(): JSX.Element {
     if (!audioContext || !transformGainNode || !gainNode || !playbackAnalyserNode) return;
 
     // --- Tear down previous chain ---
+    if (pluginAudioProcessorRef.current) {
+      try { pluginAudioProcessorRef.current.disconnect(); } catch { /* ignore */ }
+      pluginAudioProcessorRef.current.onaudioprocess = null;
+      pluginAudioProcessorRef.current = null;
+    }
     if (midSideProcessorRef.current) {
       try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
+      midSideProcessorRef.current.onaudioprocess = null;
       midSideProcessorRef.current = null;
     }
     for (const f of bandSoloFiltersRef.current) {
@@ -7613,6 +7634,82 @@ export function App(): JSX.Element {
 
     // --- Determine the node that feeds into the live analyser/player volume ---
     let outputNode: AudioNode = transformGainNode;
+    let pluginProcessorStopped = false;
+    const pluginProcessChain = getEnabledPluginProcessChain(pluginChain, loadedInstanceIds, {
+      referencePlayback: playbackPreviewMode === 'reference',
+    });
+
+    if (pluginProcessChain.length > 0) {
+      const processedQueue: Float32Array[] = [];
+      let pendingBlocks = 0;
+      let processingTail = Promise.resolve();
+      let lastProcessErrorLogAt = 0;
+      const processor = audioContext.createScriptProcessor(
+        PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE,
+        2,
+        2,
+      );
+
+      processor.onaudioprocess = (event) => {
+        const frames = event.inputBuffer.length;
+        const inputL = event.inputBuffer.getChannelData(0);
+        const inputR =
+          event.inputBuffer.numberOfChannels > 1
+            ? event.inputBuffer.getChannelData(1)
+            : inputL;
+        const outputL = event.outputBuffer.getChannelData(0);
+        const outputR = event.outputBuffer.getChannelData(1);
+        const queued = processedQueue.shift();
+
+        if (!queued || !writeInterleavedStereoSamples(queued, outputL, outputR, frames)) {
+          outputL.set(inputL);
+          outputR.set(inputR);
+        }
+
+        if (pendingBlocks >= 4) return;
+        const bufferBase64 = float32InterleavedToBase64(
+          interleaveStereoSamples(inputL, inputR, frames),
+        );
+        pendingBlocks += 1;
+        processingTail = processingTail
+          .then(() =>
+            window.producerPlayer.processPluginAudioBlock({
+              chain: pluginProcessChain,
+              bufferBase64,
+              frames,
+              channels: 2,
+              sampleRate: audioContext.sampleRate,
+              blockSize: frames,
+            }),
+          )
+          .then((result) => {
+            if (pluginProcessorStopped || result.processedSlots <= 0 || !result.bufferBase64) {
+              return;
+            }
+            const processed = base64ToFloat32Interleaved(result.bufferBase64);
+            if (processedQueue.length >= 6) processedQueue.shift();
+            processedQueue.push(processed);
+          })
+          .catch((err) => {
+            const now = Date.now();
+            if (now - lastProcessErrorLogAt > 5000) {
+              lastProcessErrorLogAt = now;
+              void window.producerPlayer.rendererLog(
+                'error',
+                '[plugin-chain] audio process block failed',
+                { error: String(err) },
+              );
+            }
+          })
+          .finally(() => {
+            pendingBlocks = Math.max(0, pendingBlocks - 1);
+          });
+      };
+
+      outputNode.connect(processor);
+      pluginAudioProcessorRef.current = processor;
+      outputNode = processor;
+    }
 
     if (midSideMode !== 'stereo') {
       const bufferSize = 4096;
@@ -7636,7 +7733,7 @@ export function App(): JSX.Element {
         }
       };
 
-      transformGainNode.connect(processor);
+      outputNode.connect(processor);
       midSideProcessorRef.current = processor;
       outputNode = processor;
     }
@@ -7672,8 +7769,15 @@ export function App(): JSX.Element {
     }
 
     return () => {
+      pluginProcessorStopped = true;
+      if (pluginAudioProcessorRef.current) {
+        try { pluginAudioProcessorRef.current.disconnect(); } catch { /* ignore */ }
+        pluginAudioProcessorRef.current.onaudioprocess = null;
+        pluginAudioProcessorRef.current = null;
+      }
       if (midSideProcessorRef.current) {
         try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
+        midSideProcessorRef.current.onaudioprocess = null;
         midSideProcessorRef.current = null;
       }
       for (const f of bandSoloFiltersRef.current) {
@@ -7689,7 +7793,16 @@ export function App(): JSX.Element {
         transformGainNode.connect(playbackAnalyserNode);
       } catch { /* ignore */ }
     };
-  }, [midSideMode, soloedBands, eqBandGains, eqEnabled, desiredPlaybackKey, playbackPreviewMode]);
+  }, [
+    midSideMode,
+    soloedBands,
+    eqBandGains,
+    eqEnabled,
+    desiredPlaybackKey,
+    playbackPreviewMode,
+    pluginChain,
+    loadedInstanceIds,
+  ]);
 
   async function resumePlaybackContextIfNeeded(): Promise<void> {
     const playbackAudioContext = playbackAudioContextRef.current;

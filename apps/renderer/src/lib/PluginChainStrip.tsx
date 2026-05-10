@@ -141,8 +141,9 @@ function PluginPillDragGhost({
   const displayName = info?.name ?? 'Unknown plugin';
   const latencyText =
     typeof latencySamples === 'number' && Number.isFinite(latencySamples)
-      ? `${latencySamples} smp`
+      ? `${latencySamples} samples`
       : null;
+  const latencyTitle = 'Plugin-reported latency in samples. 0 means this plugin reported no added delay.';
 
   return (
     <div
@@ -155,7 +156,7 @@ function PluginPillDragGhost({
       <span className="plugin-pill__name">
         <span className="plugin-pill__label">{displayName}</span>
         {latencyText ? (
-          <span className="plugin-pill__latency" title="Plugin reported latency">
+          <span className="plugin-pill__latency" title={latencyTitle}>
             {latencyText}
           </span>
         ) : null}
@@ -196,8 +197,10 @@ function SortablePluginPill({
   const vendor = info?.vendor ?? '';
   const latencyText =
     typeof latencySamples === 'number' && Number.isFinite(latencySamples)
-      ? `${latencySamples} smp`
+      ? `${latencySamples} samples`
       : null;
+  const latencyTitle = 'Plugin-reported latency in samples. 0 means this plugin reported no added delay.';
+  const loadingText = editDisabled && item.enabled ? 'loading' : null;
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -232,12 +235,19 @@ function SortablePluginPill({
         className="plugin-pill__name"
         onClick={() => onOpenEditor(item.instanceId)}
         data-testid="plugin-pill-name"
+        disabled={editDisabled}
         aria-label={`Open editor for ${displayName}`}
+        title={editDisabled ? 'Plugin audio is loading before the native editor can open.' : undefined}
       >
         <span className="plugin-pill__label">{displayName}</span>
         {latencyText ? (
-          <span className="plugin-pill__latency" title="Plugin reported latency">
+          <span className="plugin-pill__latency" title={latencyTitle}>
             {latencyText}
+          </span>
+        ) : null}
+        {loadingText ? (
+          <span className="plugin-pill__latency" title="Plugin audio is loading.">
+            {loadingText}
           </span>
         ) : null}
         {!item.enabled ? (

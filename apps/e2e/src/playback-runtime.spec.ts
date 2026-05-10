@@ -2261,6 +2261,97 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
+  test('reset all times clears remembered per-song playheads', async () => {
+    const fixtureDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-reset-all-times-fixture-')
+    );
+    const userDataDirectory = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'producer-player-e2e-reset-all-times-user-data-')
+    );
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=370:duration=14',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Reset Times Alpha v1.wav'),
+    ]);
+
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=470:duration=14',
+      '-c:a',
+      'pcm_s16le',
+      path.join(fixtureDirectory, 'Reset Times Beta v1.wav'),
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Reset Times Alpha' })
+        .first()
+        .click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.waitForTimeout(700);
+
+      await page.getByTestId('player-scrubber').evaluate((element) => {
+        const input = element as HTMLInputElement;
+        input.value = '5.2';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      await page.waitForTimeout(250);
+
+      await page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Reset Times Beta' })
+        .first()
+        .dblclick();
+      await expect(page.getByTestId('player-track-name')).toContainText('Reset Times Beta');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+
+      await page.getByTestId('reset-all-times-button').click();
+      await expect(page.getByText('Playback time reset to zero on all tracks.')).toBeVisible();
+      expect(Number(await page.getByTestId('player-scrubber').inputValue())).toBeLessThan(0.1);
+
+      await page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Reset Times Alpha' })
+        .first()
+        .click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.waitForTimeout(500);
+
+      const restartedSeconds = Number(await page.getByTestId('player-scrubber').inputValue());
+      expect(restartedSeconds).toBeGreaterThan(0.05);
+      expect(restartedSeconds).toBeLessThan(1.2);
+      await expect(page.getByTestId('playback-error')).toHaveCount(0);
+    } finally {
+      await electronApp.close();
+      await fs.rm(fixtureDirectory, { recursive: true, force: true });
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
   test('repeat-all wraps from the last track back to the first track', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-repeat-all-fixture-')

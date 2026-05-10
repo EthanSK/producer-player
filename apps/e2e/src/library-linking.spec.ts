@@ -136,7 +136,11 @@ test.describe('Producer Player desktop shell', () => {
       await expect(page.getByTestId('naming-guide')).not.toContainText('opinionated by design');
       await expect(page.getByRole('heading', { name: 'Album' })).toHaveCount(1);
       await expect(page.getByTestId('organize-button')).toHaveText('Organize');
-      await expect(page.getByTestId('track-order-hint')).toContainText('positions are preserved');
+      await expect(page.getByTestId('track-order-hint')).toContainText(
+        'track positions are preserved across versions'
+      );
+      await expect(page.getByTestId('reset-all-times-button')).toHaveText('Reset All Times');
+      await expect(page.getByTestId('reset-all-times-button')).toBeDisabled();
       await expect(page.locator('.panel-left [data-testid="status-card"]')).toHaveCount(1);
       await expect(page.locator('.panel-right [data-testid="status-card"]')).toHaveCount(0);
       await expect(page.getByTestId('folder-tools-card')).toBeVisible();
@@ -147,6 +151,9 @@ test.describe('Producer Player desktop shell', () => {
 
       // Nested folders are ignored by scan policy.
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(page.getByTestId('reset-all-times-button')).toBeEnabled();
+      await page.getByTestId('reset-all-times-button').click();
+      await expect(page.getByText('Playback time reset to zero on all tracks.')).toBeVisible();
       await expect(page.getByTestId('main-list-row').first()).toContainText('Midnight Echo');
       await expect(page.locator('.track-number').first()).toHaveText('1');
       await expect(page.getByRole('button', { name: /^Versions$/ })).toHaveCount(0);

@@ -2524,12 +2524,29 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   width: 100%;
 }
 
-.list-hint {
-  margin: 0;
-  padding: 7px 14px;
+.track-order-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px 7px 14px;
   border-bottom: 1px solid var(--border);
+}
+
+.list-hint {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.reset-all-times-button {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .main-list {

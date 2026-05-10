@@ -8029,7 +8029,7 @@ export function App(): JSX.Element {
   const canImportPlaylistOrder = snapshot.linkedFolders.length > 0;
   const listHintText = isSearching
     ? 'Search is filtering the list — clear it to reorder tracks.'
-    : 'Drag tracks to reorder — track positions are preserved.';
+    : 'Drag tracks to reorder — track positions are preserved across versions.';
   const showEmptyStateAddFolder = songs.length === 0 && !isSearching && !loading;
   const emptyStateText = isSearching
     ? 'No matching tracks or versions.'
@@ -10273,6 +10273,33 @@ export function App(): JSX.Element {
 
     rememberSongPlayhead(lastLoadedSongIdRef.current, nextTimeSeconds, {
       durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
+    });
+  }
+
+  function handleResetAllPlaybackTimes(): void {
+    playbackPositionBySongIdRef.current.clear();
+    pendingRestoreTimeRef.current = null;
+
+    const audio = audioRef.current;
+    if (audio) {
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // Ignore transient seek errors while metadata is still settling.
+      }
+    }
+
+    setCurrentTimeSeconds(0);
+    rememberSongPlayhead(lastLoadedSongIdRef.current, 0, {
+      durationSeconds: audio && Number.isFinite(audio.duration) ? audio.duration : undefined,
+    });
+    logPlaybackEvent('reset-all-playback-times', {
+      songCount: songs.length,
+    });
+    toast.show({
+      id: 'reset-all-playback-times',
+      kind: 'success',
+      text: 'Playback time reset to zero on all tracks.',
     });
   }
 
@@ -15632,13 +15659,29 @@ export function App(): JSX.Element {
           </div>
         </header>
 
-        <p
-          className="list-hint"
-          data-testid="track-order-hint"
-          title="Drag tracks to reorder. Order is saved automatically."
-        >
-          {listHintText}
-        </p>
+        <div className="track-order-toolbar" data-testid="track-order-toolbar">
+          <p
+            className="list-hint"
+            data-testid="track-order-hint"
+            title="Drag tracks to reorder. Track positions are preserved across versions."
+          >
+            {listHintText}
+          </p>
+          <button
+            type="button"
+            className="reset-all-times-button"
+            data-testid="reset-all-times-button"
+            onClick={handleResetAllPlaybackTimes}
+            disabled={songs.length === 0}
+            title={
+              songs.length > 0
+                ? 'Set playback time to zero for every track.'
+                : 'Link tracks before resetting playback times.'
+            }
+          >
+            Reset All Times
+          </button>
+        </div>
 
         <ul
           className={`main-list ${dragSongId ? 'drag-active' : ''}`}

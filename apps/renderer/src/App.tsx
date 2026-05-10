@@ -253,6 +253,13 @@ import {
   persistPanelOrder,
   readPanelOrderFromStorage,
 } from './masteringPanelLayout';
+import {
+  agentChatRectToAnchoredBounds,
+  clampAgentChatBounds,
+  parseStoredAgentChatBounds,
+  type AgentChatPanelBounds,
+  type AgentChatViewport,
+} from './agentChatPanelBounds';
 import { computeEffectiveReferenceLevelMatchGainDb } from './referenceLevelMatchGain';
 
 type RepeatMode = 'off' | 'one' | 'all';
@@ -286,9 +293,33 @@ type FullscreenMasteringPanelId =
 
 type MasteringPanelId = CompactMasteringPanelId | FullscreenMasteringPanelId;
 type MasteringPanelSurface = 'compact' | 'fullscreen';
+type FloatingSwitcherId = 'quick' | 'version';
+type FloatingSwitcherResizeEdge =
+  | 'top'
+  | 'right'
+  | 'bottom'
+  | 'left'
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right';
 
 const FULLSCREEN_MASTERING_DRAG_AUTOSCROLL_EDGE_PX = 112;
 const FULLSCREEN_MASTERING_DRAG_AUTOSCROLL_MAX_VELOCITY_PX = 24;
+const FLOATING_SWITCHER_MIN_WIDTH = 280;
+const FLOATING_SWITCHER_MIN_HEIGHT = 200;
+const QUICK_SWITCHER_BOUNDS_STORAGE_KEY = 'producer-player.quick-switcher-bounds.v1';
+const VERSION_SWITCHER_BOUNDS_STORAGE_KEY = 'producer-player.version-switcher-bounds.v1';
+const FLOATING_SWITCHER_RESIZE_EDGES: FloatingSwitcherResizeEdge[] = [
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+];
 
 const PLUGIN_CHAIN_HELP_TEXT =
   'The Plugin Chain lets you insert VST3/AU plugins into the mastering signal path. Add plugins with the + button, drag the ⋮⋮ handle to reorder, click a plugin name to open its native editor, and use the power toggle to bypass any slot without removing it. Your chain is saved per-song. Use the ⋯ preset menu to save and recall per-plugin presets — great for standardizing mastering chains across an album.';
@@ -313,6 +344,58 @@ class ChecklistPointerSensor extends PointerSensor {
       },
     },
   ];
+}
+
+function readStoredFloatingSwitcherBounds(storageKey: string): AgentChatPanelBounds | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    return parseStoredAgentChatBounds(window.localStorage.getItem(storageKey), {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredFloatingSwitcherBounds(
+  storageKey: string,
+  bounds: AgentChatPanelBounds | null
+): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (bounds === null) {
+      window.localStorage.removeItem(storageKey);
+      return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(bounds));
+  } catch {
+    // Best-effort UI preference persistence.
+  }
+}
+
+function clampFloatingSwitcherBounds(
+  bounds: AgentChatPanelBounds,
+  viewport: AgentChatViewport
+): AgentChatPanelBounds {
+  const base = clampAgentChatBounds(bounds, viewport);
+  const width = Math.max(FLOATING_SWITCHER_MIN_WIDTH, base.width);
+  const height = Math.max(FLOATING_SWITCHER_MIN_HEIGHT, base.height);
+  return clampAgentChatBounds({ ...base, width, height }, viewport);
+}
+
+function floatingSwitcherRectToBounds(
+  rect: { x: number; y: number; width: number; height: number },
+  viewport: AgentChatViewport
+): AgentChatPanelBounds {
+  return clampFloatingSwitcherBounds(agentChatRectToAnchoredBounds(rect, viewport), viewport);
 }
 
 type ChecklistSortableRowProps = {
@@ -2828,11 +2911,29 @@ export function App(): JSX.Element {
   const inspectorVersionSampleRatePendingVersionIdsRef = useRef<Set<string>>(new Set());
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+  const [quickSwitcherBounds, setQuickSwitcherBounds] = useState<AgentChatPanelBounds | null>(
+    () => readStoredFloatingSwitcherBounds(QUICK_SWITCHER_BOUNDS_STORAGE_KEY)
+  );
   // v3.24: floating per-version switcher. Mirrors the song switcher but lists
   // the versions of the currently-playing/selected song instead of songs. Only
   // rendered when the current song has 2+ versions; otherwise there is nothing
   // to switch between and the trigger just creates visual noise.
   const [versionSwitcherOpen, setVersionSwitcherOpen] = useState(false);
+  const [versionSwitcherBounds, setVersionSwitcherBounds] = useState<AgentChatPanelBounds | null>(
+    () => readStoredFloatingSwitcherBounds(VERSION_SWITCHER_BOUNDS_STORAGE_KEY)
+  );
+  const [floatingSwitcherViewportSize, setFloatingSwitcherViewportSize] =
+    useState<AgentChatViewport>(() =>
+      typeof window !== 'undefined'
+        ? { width: window.innerWidth, height: window.innerHeight }
+        : { width: 0, height: 0 }
+    );
+  const [draggingFloatingSwitcherId, setDraggingFloatingSwitcherId] =
+    useState<FloatingSwitcherId | null>(null);
+  const [resizingFloatingSwitcherId, setResizingFloatingSwitcherId] =
+    useState<FloatingSwitcherId | null>(null);
+  const quickSwitcherPanelRef = useRef<HTMLDivElement | null>(null);
+  const versionSwitcherPanelRef = useRef<HTMLDivElement | null>(null);
   // Inspector drawer (v3.20). At narrow viewport widths the right-hand
   // inspector pane collapses into a slide-in drawer triggered from a toolbar
   // button next to the Agent Chat Trigger. Open-state persists across reloads.
@@ -3574,6 +3675,294 @@ export function App(): JSX.Element {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [analysisExpanded, quickSwitcherOpen, versionSwitcherOpen, kWeightingModalOpen, idealsModalOpen]);
+
+  useEffect(() => {
+    writeStoredFloatingSwitcherBounds(QUICK_SWITCHER_BOUNDS_STORAGE_KEY, quickSwitcherBounds);
+  }, [quickSwitcherBounds]);
+
+  useEffect(() => {
+    writeStoredFloatingSwitcherBounds(VERSION_SWITCHER_BOUNDS_STORAGE_KEY, versionSwitcherBounds);
+  }, [versionSwitcherBounds]);
+
+  useEffect(() => {
+    function handleFloatingSwitcherWindowResize(): void {
+      setFloatingSwitcherViewportSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    }
+
+    window.addEventListener('resize', handleFloatingSwitcherWindowResize);
+    return () => window.removeEventListener('resize', handleFloatingSwitcherWindowResize);
+  }, []);
+
+  useEffect(() => {
+    const active = draggingFloatingSwitcherId !== null || resizingFloatingSwitcherId !== null;
+    if (active) {
+      document.body.classList.add('floating-switcher-panel-dragging');
+    } else {
+      document.body.classList.remove('floating-switcher-panel-dragging');
+    }
+
+    return () => {
+      document.body.classList.remove('floating-switcher-panel-dragging');
+    };
+  }, [draggingFloatingSwitcherId, resizingFloatingSwitcherId]);
+
+  const setFloatingSwitcherBounds = useCallback(
+    (switcherId: FloatingSwitcherId, bounds: AgentChatPanelBounds | null): void => {
+      if (switcherId === 'quick') {
+        setQuickSwitcherBounds(bounds);
+        return;
+      }
+
+      setVersionSwitcherBounds(bounds);
+    },
+    []
+  );
+
+  const getFloatingSwitcherPanel = useCallback(
+    (switcherId: FloatingSwitcherId): HTMLDivElement | null =>
+      switcherId === 'quick'
+        ? quickSwitcherPanelRef.current
+        : versionSwitcherPanelRef.current,
+    []
+  );
+
+  const handleFloatingSwitcherHeaderPointerDown = useCallback(
+    (switcherId: FloatingSwitcherId, event: ReactPointerEvent<HTMLDivElement>): void => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('button, input, textarea, select, a')) {
+        return;
+      }
+
+      const panel = getFloatingSwitcherPanel(switcherId);
+      if (!panel) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const rect = panel.getBoundingClientRect();
+      const startRect = {
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startViewport = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+
+      setDraggingFloatingSwitcherId(switcherId);
+      setFloatingSwitcherBounds(
+        switcherId,
+        floatingSwitcherRectToBounds(startRect, startViewport)
+      );
+
+      function onMove(moveEvent: PointerEvent): void {
+        const currentViewport = {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        };
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+        setFloatingSwitcherBounds(
+          switcherId,
+          floatingSwitcherRectToBounds(
+            {
+              x: startRect.x + dx,
+              y: startRect.y + dy,
+              width: startRect.width,
+              height: startRect.height,
+            },
+            currentViewport
+          )
+        );
+      }
+
+      function onEnd(): void {
+        setDraggingFloatingSwitcherId(null);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onEnd);
+        window.removeEventListener('pointercancel', onEnd);
+      }
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onEnd);
+      window.addEventListener('pointercancel', onEnd);
+    },
+    [getFloatingSwitcherPanel, setFloatingSwitcherBounds]
+  );
+
+  const startFloatingSwitcherResize = useCallback(
+    (
+      switcherId: FloatingSwitcherId,
+      edge: FloatingSwitcherResizeEdge,
+      event: ReactPointerEvent<HTMLDivElement>
+    ): void => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const panel = getFloatingSwitcherPanel(switcherId);
+      if (!panel) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const rect = panel.getBoundingClientRect();
+      const startRect = {
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startViewport = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+
+      setResizingFloatingSwitcherId(switcherId);
+      setFloatingSwitcherBounds(
+        switcherId,
+        floatingSwitcherRectToBounds(startRect, startViewport)
+      );
+
+      function onMove(moveEvent: PointerEvent): void {
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+        let nextX = startRect.x;
+        let nextY = startRect.y;
+        let nextWidth = startRect.width;
+        let nextHeight = startRect.height;
+
+        switch (edge) {
+          case 'top':
+            nextHeight = startRect.height - dy;
+            nextY = startRect.y + dy;
+            break;
+          case 'right':
+            nextWidth = startRect.width + dx;
+            break;
+          case 'bottom':
+            nextHeight = startRect.height + dy;
+            break;
+          case 'left':
+            nextWidth = startRect.width - dx;
+            nextX = startRect.x + dx;
+            break;
+          case 'top-left':
+            nextWidth = startRect.width - dx;
+            nextHeight = startRect.height - dy;
+            nextX = startRect.x + dx;
+            nextY = startRect.y + dy;
+            break;
+          case 'top-right':
+            nextWidth = startRect.width + dx;
+            nextHeight = startRect.height - dy;
+            nextY = startRect.y + dy;
+            break;
+          case 'bottom-left':
+            nextWidth = startRect.width - dx;
+            nextHeight = startRect.height + dy;
+            nextX = startRect.x + dx;
+            break;
+          case 'bottom-right':
+            nextWidth = startRect.width + dx;
+            nextHeight = startRect.height + dy;
+            break;
+        }
+
+        if (nextWidth < FLOATING_SWITCHER_MIN_WIDTH) {
+          const overflow = FLOATING_SWITCHER_MIN_WIDTH - nextWidth;
+          nextWidth = FLOATING_SWITCHER_MIN_WIDTH;
+          if (edge === 'left' || edge === 'top-left' || edge === 'bottom-left') {
+            nextX -= overflow;
+          }
+        }
+
+        if (nextHeight < FLOATING_SWITCHER_MIN_HEIGHT) {
+          const overflow = FLOATING_SWITCHER_MIN_HEIGHT - nextHeight;
+          nextHeight = FLOATING_SWITCHER_MIN_HEIGHT;
+          if (edge === 'top' || edge === 'top-left' || edge === 'top-right') {
+            nextY -= overflow;
+          }
+        }
+
+        setFloatingSwitcherBounds(
+          switcherId,
+          floatingSwitcherRectToBounds(
+            {
+              x: nextX,
+              y: nextY,
+              width: nextWidth,
+              height: nextHeight,
+            },
+            {
+              width: window.innerWidth,
+              height: window.innerHeight,
+            }
+          )
+        );
+      }
+
+      function onEnd(): void {
+        setResizingFloatingSwitcherId(null);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onEnd);
+        window.removeEventListener('pointercancel', onEnd);
+      }
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onEnd);
+      window.addEventListener('pointercancel', onEnd);
+    },
+    [getFloatingSwitcherPanel, setFloatingSwitcherBounds]
+  );
+
+  const resetFloatingSwitcherBounds = useCallback(
+    (switcherId: FloatingSwitcherId): void => {
+      setFloatingSwitcherBounds(switcherId, null);
+    },
+    [setFloatingSwitcherBounds]
+  );
+
+  const handleFloatingSwitcherHeaderDoubleClick = useCallback(
+    (switcherId: FloatingSwitcherId, event: ReactMouseEvent<HTMLDivElement>): void => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('button, input, textarea, select, a')) {
+        return;
+      }
+
+      resetFloatingSwitcherBounds(switcherId);
+    },
+    [resetFloatingSwitcherBounds]
+  );
+
+  const renderFloatingSwitcherResizeHandles = useCallback(
+    (switcherId: FloatingSwitcherId): ReactNode =>
+      FLOATING_SWITCHER_RESIZE_EDGES.map((edge) => (
+        <div
+          key={edge}
+          className={`floating-switcher-resize-handle floating-switcher-resize-handle--${edge}`}
+          data-testid={`${switcherId}-switcher-resize-handle-${edge}`}
+          onPointerDown={(event) => startFloatingSwitcherResize(switcherId, edge, event)}
+        />
+      )),
+    [startFloatingSwitcherResize]
+  );
 
   // Track viewport width so the inspector collapses into a drawer at narrow
   // widths. The threshold matches the matching CSS media query in styles.css.
@@ -14455,6 +14844,46 @@ export function App(): JSX.Element {
     .map((bandIndex) => FREQUENCY_BANDS[bandIndex]?.label)
     .filter((label): label is string => Boolean(label))
     .join(' + ');
+  const visibleQuickSwitcherBounds = quickSwitcherBounds
+    ? clampFloatingSwitcherBounds(quickSwitcherBounds, floatingSwitcherViewportSize)
+    : null;
+  const visibleVersionSwitcherBounds = versionSwitcherBounds
+    ? clampFloatingSwitcherBounds(versionSwitcherBounds, floatingSwitcherViewportSize)
+    : null;
+  const quickSwitcherPanelStyle: CSSProperties | undefined = visibleQuickSwitcherBounds
+    ? {
+        right: visibleQuickSwitcherBounds.right,
+        bottom: visibleQuickSwitcherBounds.bottom,
+        width: visibleQuickSwitcherBounds.width,
+        height: visibleQuickSwitcherBounds.height,
+      }
+    : undefined;
+  const versionSwitcherPanelStyle: CSSProperties | undefined = visibleVersionSwitcherBounds
+    ? {
+        right: visibleVersionSwitcherBounds.right,
+        bottom: visibleVersionSwitcherBounds.bottom,
+        width: visibleVersionSwitcherBounds.width,
+        height: visibleVersionSwitcherBounds.height,
+      }
+    : undefined;
+  const quickSwitcherPanelClassName = [
+    'quick-switcher-panel',
+    'floating-switcher-panel',
+    quickSwitcherBounds ? 'floating-switcher-panel--positioned' : '',
+    draggingFloatingSwitcherId === 'quick' ? 'floating-switcher-panel--dragging' : '',
+    resizingFloatingSwitcherId === 'quick' ? 'floating-switcher-panel--resizing' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const versionSwitcherPanelClassName = [
+    'version-switcher-panel',
+    'floating-switcher-panel',
+    versionSwitcherBounds ? 'floating-switcher-panel--positioned' : '',
+    draggingFloatingSwitcherId === 'version' ? 'floating-switcher-panel--dragging' : '',
+    resizingFloatingSwitcherId === 'version' ? 'floating-switcher-panel--resizing' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div
@@ -20182,12 +20611,20 @@ export function App(): JSX.Element {
       </button>
       {quickSwitcherOpen ? (
         <div
-          className="quick-switcher-panel"
+          ref={quickSwitcherPanelRef}
+          className={quickSwitcherPanelClassName}
+          style={quickSwitcherPanelStyle}
           role="listbox"
           aria-label="Quick song switcher"
           data-testid="quick-switcher-panel"
         >
-          <div className="quick-switcher-header">
+          <div
+            className="quick-switcher-header floating-switcher-header"
+            data-testid="quick-switcher-header"
+            onPointerDown={(event) => handleFloatingSwitcherHeaderPointerDown('quick', event)}
+            onDoubleClick={(event) => handleFloatingSwitcherHeaderDoubleClick('quick', event)}
+            title="Drag to move. Double-click to reset."
+          >
             <h4>Songs</h4>
             <button
               type="button"
@@ -20226,6 +20663,7 @@ export function App(): JSX.Element {
               <p className="quick-switcher-empty muted">No songs in this album.</p>
             ) : null}
           </div>
+          {renderFloatingSwitcherResizeHandles('quick')}
         </div>
       ) : null}
 
@@ -20267,12 +20705,22 @@ export function App(): JSX.Element {
           </button>
           {versionSwitcherOpen ? (
             <div
-              className="version-switcher-panel"
+              ref={versionSwitcherPanelRef}
+              className={versionSwitcherPanelClassName}
+              style={versionSwitcherPanelStyle}
               role="listbox"
               aria-label="Version switcher"
               data-testid="version-switcher-panel"
             >
-              <div className="version-switcher-header">
+              <div
+                className="version-switcher-header floating-switcher-header"
+                data-testid="version-switcher-header"
+                onPointerDown={(event) =>
+                  handleFloatingSwitcherHeaderPointerDown('version', event)
+                }
+                onDoubleClick={(event) => handleFloatingSwitcherHeaderDoubleClick('version', event)}
+                title="Drag to move. Double-click to reset."
+              >
                 <h4>Versions{versionSwitcherSong ? ` — ${getSongDisplayTitle(versionSwitcherSong)}` : ''}</h4>
                 <button
                   type="button"
@@ -20331,6 +20779,7 @@ export function App(): JSX.Element {
                   );
                 })}
               </div>
+              {renderFloatingSwitcherResizeHandles('version')}
             </div>
           ) : null}
         </>

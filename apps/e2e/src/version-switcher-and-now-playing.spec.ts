@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   cleanupE2ETestDirectories,
   createE2ETestDirectories,
@@ -116,6 +116,58 @@ async function cueSongVersionFromInspector(
   await expect(page.getByTestId('player-track-name')).toContainText(fileName);
 }
 
+async function getRequiredBox(locator: Locator): Promise<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}> {
+  const box = await locator.boundingBox();
+  if (!box) {
+    throw new Error('Expected locator to have a bounding box');
+  }
+  return box;
+}
+
+async function dragLocatorBy(
+  page: Page,
+  locator: Locator,
+  deltaX: number,
+  deltaY: number,
+  options: { xRatio?: number; yRatio?: number } = {}
+): Promise<void> {
+  const box = await getRequiredBox(locator);
+  const startX = box.x + box.width * (options.xRatio ?? 0.5);
+  const startY = box.y + box.height * (options.yRatio ?? 0.5);
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 8 });
+  await page.mouse.up();
+}
+
+async function readStoredSwitcherBounds(
+  page: Page,
+  storageKey: string
+): Promise<{ right: number; bottom: number; width: number; height: number } | null> {
+  return page.evaluate((key) => {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  }, storageKey);
+}
+
+async function expectStoredBounds(
+  page: Page,
+  storageKey: string
+): Promise<{ right: number; bottom: number; width: number; height: number }> {
+  const bounds = await readStoredSwitcherBounds(page, storageKey);
+  expect(bounds).not.toBeNull();
+  expect(Number.isFinite(bounds?.right)).toBe(true);
+  expect(Number.isFinite(bounds?.bottom)).toBe(true);
+  expect(Number.isFinite(bounds?.width)).toBe(true);
+  expect(Number.isFinite(bounds?.height)).toBe(true);
+  return bounds!;
+}
+
 test.describe('v3.24 floating version switcher + now-playing highlight', () => {
   test('scenario A: switcher lists all versions and switching cues the chosen version', async () => {
     const directories = await createE2ETestDirectories(
@@ -160,11 +212,7 @@ test.describe('v3.24 floating version switcher + now-playing highlight', () => {
       await rows.filter({ hasText: 'Song A v2.wav' }).first().click();
       await expect(page.getByTestId('player-track-name')).toContainText('Song A v2.wav');
 
-      // Panel auto-closes on a successful switch.
-      await expect(panel).toBeHidden();
-
-      // Re-open and verify "now playing" state moved to v2.
-      await trigger.click();
+      // The panel stays open so users can audition versions in a row.
       await expect(panel).toBeVisible();
       const v2Row = panel.locator('[data-testid^="version-switcher-item-"]').filter({
         hasText: 'Song A v2.wav',
@@ -294,6 +342,117 @@ test.describe('v3.24 floating version switcher + now-playing highlight', () => {
       await expect(v1ItemRow).toHaveClass(/checklist-item--current-version/);
       await expect(v2ItemRow).toHaveAttribute('data-current-version', 'false');
       await expect(v2ItemRow).not.toHaveClass(/checklist-item--current-version/);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('scenario C: song and version switchers move, resize, and persist bounds', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-switcher-panel-bounds'
+    );
+
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Song A v1.wav'), {
+      durationMs: 6_000,
+      frequencyHz: 220,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Song A v2.wav'), {
+      durationMs: 6_000,
+      frequencyHz: 440,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Song B v1.wav'), {
+      durationMs: 6_000,
+      frequencyHz: 330,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.setViewportSize({ width: 1280, height: 820 });
+      await suppressAgentPanelOnboarding(page);
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      // Song switcher: drag from the header, resize from the bottom-right
+      // handle, and prove the anchored bounds are saved.
+      await page.getByTestId('quick-switcher-button').click();
+      const quickPanel = page.getByTestId('quick-switcher-panel');
+      await expect(quickPanel).toBeVisible();
+      const quickBefore = await getRequiredBox(quickPanel);
+
+      await dragLocatorBy(page, page.getByTestId('quick-switcher-header'), -90, -70);
+      await expect.poll(async () => (await getRequiredBox(quickPanel)).x).toBeLessThan(
+        quickBefore.x - 40
+      );
+      const quickAfterDrag = await getRequiredBox(quickPanel);
+
+      await dragLocatorBy(
+        page,
+        page.getByTestId('quick-switcher-resize-handle-bottom-right'),
+        90,
+        70
+      );
+      await expect.poll(async () => (await getRequiredBox(quickPanel)).width).toBeGreaterThan(
+        quickAfterDrag.width + 40
+      );
+      const quickStored = await expectStoredBounds(
+        page,
+        'producer-player.quick-switcher-bounds.v1'
+      );
+      await page.getByTestId('quick-switcher-close').click();
+      await expect(quickPanel).toBeHidden();
+
+      // Version switcher: same behaviour once a multi-version song is cued.
+      await page.getByTestId('main-list-row').filter({ hasText: 'Song A' }).first().dblclick();
+      await expect(page.getByTestId('player-track-name')).toContainText('Song A v2.wav');
+      await page.getByTestId('version-switcher-trigger').click();
+      const versionPanel = page.getByTestId('version-switcher-panel');
+      await expect(versionPanel).toBeVisible();
+      const versionBefore = await getRequiredBox(versionPanel);
+
+      await dragLocatorBy(page, page.getByTestId('version-switcher-header'), -80, -65);
+      await expect.poll(async () => (await getRequiredBox(versionPanel)).x).toBeLessThan(
+        versionBefore.x - 35
+      );
+      const versionAfterDrag = await getRequiredBox(versionPanel);
+
+      await dragLocatorBy(
+        page,
+        page.getByTestId('version-switcher-resize-handle-bottom-right'),
+        85,
+        60
+      );
+      await expect.poll(async () => (await getRequiredBox(versionPanel)).width).toBeGreaterThan(
+        versionAfterDrag.width + 35
+      );
+      const versionStored = await expectStoredBounds(
+        page,
+        'producer-player.version-switcher-bounds.v1'
+      );
+
+      // Reload the app shell and verify both switchers reopen at the saved
+      // size. This catches regressions where drag works but persistence is
+      // disconnected from render.
+      await page.reload();
+      await page.waitForSelector('[data-testid="app-shell"]');
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      await page.getByTestId('quick-switcher-button').click();
+      await expect(quickPanel).toBeVisible();
+      const quickReloaded = await getRequiredBox(quickPanel);
+      expect(Math.round(quickReloaded.width)).toBe(Math.round(quickStored.width));
+      expect(Math.round(quickReloaded.height)).toBe(Math.round(quickStored.height));
+      await page.getByTestId('quick-switcher-close').click();
+      await expect(quickPanel).toBeHidden();
+
+      await page.getByTestId('main-list-row').filter({ hasText: 'Song A' }).first().dblclick();
+      await expect(page.getByTestId('player-track-name')).toContainText('Song A v2.wav');
+      await page.getByTestId('version-switcher-trigger').click();
+      await expect(versionPanel).toBeVisible();
+      const versionReloaded = await getRequiredBox(versionPanel);
+      expect(Math.round(versionReloaded.width)).toBe(Math.round(versionStored.width));
+      expect(Math.round(versionReloaded.height)).toBe(Math.round(versionStored.height));
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

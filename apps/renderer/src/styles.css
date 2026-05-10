@@ -2295,6 +2295,118 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   flex-shrink: 0;
 }
 
+/* v3.176 — Movable/resizable floating switchers. Shared with both the
+   song switcher and version switcher so their behaviour matches the Agent
+   Chat panel: drag the header, resize from any edge/corner, persist bounds. */
+.floating-switcher-panel {
+  min-width: 280px;
+  min-height: 200px;
+  max-width: calc(100vw - 24px);
+  max-height: min(420px, calc(100vh - 32px));
+}
+
+.floating-switcher-panel--positioned {
+  max-height: none;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
+}
+
+.floating-switcher-panel--dragging,
+.floating-switcher-panel--resizing {
+  transition: none;
+  user-select: none;
+}
+
+.floating-switcher-header {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.floating-switcher-header:active {
+  cursor: grabbing;
+}
+
+.floating-switcher-header button {
+  cursor: pointer;
+}
+
+body.floating-switcher-panel-dragging,
+body.floating-switcher-panel-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.floating-switcher-resize-handle {
+  position: absolute;
+  z-index: 2;
+  background: transparent;
+  touch-action: none;
+}
+
+.floating-switcher-resize-handle--top,
+.floating-switcher-resize-handle--bottom {
+  left: 12px;
+  right: 12px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.floating-switcher-resize-handle--top {
+  top: 0;
+}
+
+.floating-switcher-resize-handle--bottom {
+  bottom: 0;
+}
+
+.floating-switcher-resize-handle--left,
+.floating-switcher-resize-handle--right {
+  top: 12px;
+  bottom: 12px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.floating-switcher-resize-handle--left {
+  left: 0;
+}
+
+.floating-switcher-resize-handle--right {
+  right: 0;
+}
+
+.floating-switcher-resize-handle--top-left,
+.floating-switcher-resize-handle--top-right,
+.floating-switcher-resize-handle--bottom-left,
+.floating-switcher-resize-handle--bottom-right {
+  width: 16px;
+  height: 16px;
+}
+
+.floating-switcher-resize-handle--top-left {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.floating-switcher-resize-handle--top-right {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.floating-switcher-resize-handle--bottom-left {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.floating-switcher-resize-handle--bottom-right {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
 /* ── v3.24 Checklist "now-playing" version highlight ──
    Accent the version tag for the version currently loaded in the player.
    The row keeps its class for selectors, but the visual treatment belongs

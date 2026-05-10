@@ -1801,6 +1801,8 @@ const LISTENING_DEVICE_PALETTE: ReadonlyArray<{ fg: string; bg: string; border: 
   { fg: '#c5d9b6', bg: 'rgba(160, 195, 120, 0.18)', border: 'rgba(160, 195, 120, 0.55)' },// olive
 ];
 
+const LISTENING_DEVICE_MARKER = '🏷️';
+
 function hashListeningDeviceId(id: string): number {
   let hash = 5381;
   for (let i = 0; i < id.length; i += 1) {
@@ -16666,7 +16668,7 @@ export function App(): JSX.Element {
                           onClick={() => handleSelectListeningDevice(device.id)}
                           title={isActive ? `Clear "${device.name}" selection` : `Tag new items with "${device.name}"`}
                         >
-                          {isActive ? `🎧 ${device.name}` : device.name}
+                          {isActive ? `${LISTENING_DEVICE_MARKER} ${device.name}` : device.name}
                         </button>
                         <button
                           type="button"
@@ -17253,7 +17255,9 @@ export function App(): JSX.Element {
                         data-testid="checklist-now-listening-pill"
                         title="Jump to listening devices"
                       >
-                        <span className="now-listening-pill-label">🎧 {activeListeningDevice.name}</span>
+                        <span className="now-listening-pill-label">
+                          {LISTENING_DEVICE_MARKER} {activeListeningDevice.name}
+                        </span>
                         <button
                           type="button"
                           className="now-listening-pill-clear"

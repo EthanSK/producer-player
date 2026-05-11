@@ -176,6 +176,16 @@ public:
 
 std::unordered_map<std::string, std::unique_ptr<EditorWindow>> g_openEditors;
 
+static void bringEditorWindowToFront (EditorWindow& window)
+{
+    juce::Process::makeForegroundProcess();
+    window.setVisible (true);
+    window.setAlwaysOnTop (true);
+    window.toFront (true);
+    window.grabKeyboardFocus();
+    window.setAlwaysOnTop (false);
+}
+
 static bool eraseOpenEditor (const juce::String& instanceId)
 {
     auto it = g_openEditors.find (instanceId.toStdString());
@@ -204,7 +214,7 @@ juce::var handleOpenEditor (const juce::var& params)
     auto existing = g_openEditors.find (stdId);
     if (existing != g_openEditors.end() && existing->second)
     {
-        existing->second->toFront (true);
+        bringEditorWindowToFront (*existing->second);
         juce::DynamicObject::Ptr reply (new juce::DynamicObject());
         reply->setProperty ("ok", true);
         reply->setProperty ("instanceId", instanceId);
@@ -219,6 +229,7 @@ juce::var handleOpenEditor (const juce::var& params)
 
     auto title = plugin->getName();
     auto window = std::make_unique<EditorWindow> (instanceId, editor, title);
+    bringEditorWindowToFront (*window);
     g_openEditors.emplace (stdId, std::move (window));
 
     juce::DynamicObject::Ptr reply (new juce::DynamicObject());

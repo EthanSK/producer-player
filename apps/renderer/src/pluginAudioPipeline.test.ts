@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   base64ToFloat32Interleaved,
+  clampPluginChainOutputGainLinear,
   float32InterleavedToBase64,
   getEnabledPluginProcessChain,
+  getPluginChainOutputGainLinear,
   interleaveStereoSamples,
   writeInterleavedStereoSamples,
 } from './pluginAudioPipeline';
@@ -47,6 +49,20 @@ describe('pluginAudioPipeline', () => {
     expect(
       getEnabledPluginProcessChain(chain, new Set(['slot']), { referencePlayback: true }),
     ).toEqual([]);
+  });
+
+  it('normalizes plugin chain output gain for the live playback gain node', () => {
+    expect(getPluginChainOutputGainLinear({ songId: 'song-a', items: [] })).toBe(1);
+    expect(
+      getPluginChainOutputGainLinear({
+        songId: 'song-a',
+        outputGainLinear: 1.25,
+        items: [],
+      }),
+    ).toBe(1.25);
+    expect(clampPluginChainOutputGainLinear(-1)).toBe(0);
+    expect(clampPluginChainOutputGainLinear(3)).toBe(2);
+    expect(clampPluginChainOutputGainLinear(Number.NaN)).toBe(1);
   });
 
   it('round-trips stereo float32 blocks through base64', () => {

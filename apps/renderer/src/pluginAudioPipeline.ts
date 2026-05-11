@@ -4,7 +4,24 @@ import type {
 } from '@producer-player/contracts';
 
 export const PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE = 4096;
+export const PLUGIN_CHAIN_OUTPUT_GAIN_DEFAULT = 1;
+export const PLUGIN_CHAIN_OUTPUT_GAIN_MIN = 0;
+export const PLUGIN_CHAIN_OUTPUT_GAIN_MAX = 2;
 const BASE64_CHUNK_SIZE = 0x8000;
+
+export function clampPluginChainOutputGainLinear(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return PLUGIN_CHAIN_OUTPUT_GAIN_DEFAULT;
+  }
+  return Math.min(
+    PLUGIN_CHAIN_OUTPUT_GAIN_MAX,
+    Math.max(PLUGIN_CHAIN_OUTPUT_GAIN_MIN, value),
+  );
+}
+
+export function getPluginChainOutputGainLinear(chain: TrackPluginChain): number {
+  return clampPluginChainOutputGainLinear(chain.outputGainLinear);
+}
 
 export function getEnabledPluginProcessChain(
   chain: TrackPluginChain,

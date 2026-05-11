@@ -32,6 +32,12 @@ const {
   resolveSidecarBinaryCandidates,
   diffChainReconciliation,
 } = require('../dist/plugin-host-service.test.cjs');
+const {
+  decodeFloat32Interleaved,
+  encodeFloat32Interleaved,
+  makeMockPluginSidecar,
+  stateForGain,
+} = require('./fixtures/mock-plugin-sidecar.cjs');
 
 /** Build a fake ChildProcessWithoutNullStreams-like object we can script. */
 function makeFakeChild({ replies = {}, emitReady = true, requests = [] } = {}) {
@@ -877,6 +883,88 @@ test('processBlock with an empty chain is a pure passthrough (zero slots process
     channels: 1,
   });
   assert.equal(res.processedSlots, 0);
+});
+
+test('mock plugin sidecar applies deterministic gain to enabled processed audio', async () => {
+  const fake = makeMockPluginSidecar();
+  const service = new PluginHostService('/fake/path', () => fake);
+  await service.loadPlugin({
+    instanceId: 'gain-slot',
+    pluginPath: '/mock/Producer Player Mock Gain gain-2.vst3',
+    format: 'vst3',
+  });
+
+  const input = [0.25, -0.5, 0.125, 0];
+  const processed = await service.processBlock({
+    chain: [{ instanceId: 'gain-slot', enabled: true }],
+    bufferBase64: encodeFloat32Interleaved(input),
+    frames: 2,
+    channels: 2,
+  });
+
+  assert.equal(processed.processedSlots, 1);
+  assert.deepEqual(decodeFloat32Interleaved(processed.bufferBase64), [
+    0.5,
+    -1,
+    0.25,
+    0,
+  ]);
+
+  const bypassed = await service.processBlock({
+    chain: [{ instanceId: 'gain-slot', enabled: false }],
+    bufferBase64: encodeFloat32Interleaved(input),
+    frames: 2,
+    channels: 2,
+  });
+  assert.equal(bypassed.processedSlots, 0);
+  assert.deepEqual(decodeFloat32Interleaved(bypassed.bufferBase64), input);
+});
+
+test('reconcileTrackChain loads mock plugin state before audio processing', async () => {
+  const fake = makeMockPluginSidecar();
+  const service = new PluginHostService('/fake/path', () => fake);
+  service.rememberLibrary({
+    plugins: [
+      {
+        id: 'vst3:mock-gain',
+        name: 'Producer Player Mock Gain',
+        vendor: 'Producer Player Tests',
+        format: 'vst3',
+        version: '1.0.0',
+        path: '/mock/Producer Player Mock Gain gain-2.vst3',
+        categories: ['Fx', 'Utility'],
+        isSupported: true,
+        failureReason: null,
+      },
+    ],
+    scannedAt: new Date().toISOString(),
+    scanVersion: 1,
+  });
+
+  const result = await service.reconcileTrackChain({
+    songId: 'song-with-mock-gain',
+    items: [
+      {
+        instanceId: 'stateful-gain',
+        pluginId: 'vst3:mock-gain',
+        enabled: true,
+        order: 0,
+        state: stateForGain(0.5),
+      },
+    ],
+  });
+  assert.deepEqual(result.loaded, ['stateful-gain']);
+  assert.deepEqual(result.failed, []);
+
+  const processed = await service.processBlock({
+    chain: [{ instanceId: 'stateful-gain', enabled: true }],
+    bufferBase64: encodeFloat32Interleaved([1, -0.5]),
+    frames: 1,
+    channels: 2,
+  });
+
+  assert.equal(processed.processedSlots, 1);
+  assert.deepEqual(decodeFloat32Interleaved(processed.bufferBase64), [0.5, -0.25]);
 });
 
 // ---------------------------------------------------------------------------

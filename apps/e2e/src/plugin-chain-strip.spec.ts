@@ -117,6 +117,27 @@ async function seedFakePluginLibrary(page: import('@playwright/test').Page): Pro
   }, FAKE_LIBRARY);
 }
 
+async function getPersistedPluginOutputGainPercent(
+  page: import('@playwright/test').Page,
+): Promise<number> {
+  return page.evaluate(async () => {
+    const api = (window as unknown as {
+      producerPlayer?: {
+        getLibrarySnapshot: () => Promise<{ songs: Array<{ id: string }> }>;
+        getTrackPluginChain: (id: string) => Promise<{
+          outputGainLinear?: number;
+        }>;
+      };
+    }).producerPlayer;
+    if (!api) throw new Error('producerPlayer API unavailable');
+    const snap = await api.getLibrarySnapshot();
+    const songId = snap.songs[0]?.id;
+    if (!songId) throw new Error('no song');
+    const chain = await api.getTrackPluginChain(songId);
+    return Math.round((chain.outputGainLinear ?? 1) * 100);
+  });
+}
+
 test.describe('Plugin chain strip @smoke', () => {
   test('fullscreen chain strip add/toggle/remove + persistence @smoke', async () => {
     const directories = await createE2ETestDirectories('plugin-chain-strip');
@@ -173,6 +194,19 @@ test.describe('Plugin chain strip @smoke', () => {
       await expect(strip.getByTestId('plugin-pill')).toHaveCount(1);
       await expect(strip.getByTestId('plugin-pill-name').first()).toContainText('Fake Limiter');
 
+      // Scenario 3b: Plugin-section output volume slider updates and persists
+      // alongside the track's plugin chain.
+      const outputGainSlider = strip.getByTestId('plugin-chain-output-gain-slider');
+      await expect(outputGainSlider).toBeEnabled();
+      await expect(outputGainSlider).toHaveValue('100');
+      await outputGainSlider.fill('125');
+      await expect(strip.getByTestId('plugin-chain-output-gain-value')).toHaveText('125%');
+      await expect
+        .poll(() => getPersistedPluginOutputGainPercent(page), {
+          message: 'persisted plugin output gain should follow the slider',
+        })
+        .toBe(125);
+
       // Scenario 4: Toggle → switch flips aria-checked.
       const toggle = strip.getByTestId('plugin-pill-toggle').first();
       await expect(toggle).toHaveAttribute('aria-checked', 'true');
@@ -205,6 +239,11 @@ test.describe('Plugin chain strip @smoke', () => {
       await expect(
         page.getByTestId('plugin-chain-strip-fullscreen').getByTestId('plugin-pill'),
       ).toHaveCount(2);
+      await expect(
+        page
+          .getByTestId('plugin-chain-strip-fullscreen')
+          .getByTestId('plugin-chain-output-gain-slider'),
+      ).toHaveValue('125');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

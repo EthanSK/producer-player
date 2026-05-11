@@ -70,6 +70,43 @@ test('addPluginToChain appends in order and persists across a reload', async () 
   }
 });
 
+test('setTrackPluginChain stores plugin-chain output gain and mutations preserve it', async () => {
+  const tmp = mktmp();
+  try {
+    migrateStateIfNeeded(tmp);
+    const service = new UserStateService(tmp);
+
+    await service.setTrackPluginChain('song-gain', {
+      songId: 'song-gain',
+      outputGainLinear: 1.25,
+      items: [
+        {
+          instanceId: 'slot-a',
+          pluginId: 'vst3:gain-a',
+          enabled: true,
+          order: 0,
+        },
+      ],
+    });
+
+    let chain = await service.addPluginToChain('song-gain', 'vst3:gain-b', {
+      instanceId: 'slot-b',
+    });
+    assert.equal(chain.outputGainLinear, 1.25);
+
+    chain = await service.reorderPluginChain('song-gain', ['slot-b', 'slot-a']);
+    assert.equal(chain.outputGainLinear, 1.25);
+
+    chain = await service.togglePluginEnabled('song-gain', 'slot-b', false);
+    assert.equal(chain.outputGainLinear, 1.25);
+
+    chain = await (await reload(tmp)).getTrackPluginChain('song-gain');
+    assert.equal(chain.outputGainLinear, 1.25);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('togglePluginEnabled flips only the targeted slot', async () => {
   const tmp = mktmp();
   try {

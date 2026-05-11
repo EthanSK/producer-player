@@ -434,6 +434,11 @@ export interface PluginChainItem {
 export interface TrackPluginChain {
   songId: string;
   items: PluginChainItem[];
+  /**
+   * Output gain applied after the whole plugin insert chain.
+   * Linear multiplier, where 1 = unity. Missing means 1.
+   */
+  outputGainLinear?: number;
 }
 
 export interface PluginProcessBlockItem {

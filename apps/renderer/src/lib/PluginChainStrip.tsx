@@ -14,13 +14,13 @@
  *                    (docked) mastering preview.
  *
  * v3.42 Phase 3 — per-slot "Edit" button opens the plugin's native editor
- * window (owned by the JUCE sidecar). Clicking Edit toggles the window open
- * or brings it to the front. When the user closes the window via the OS
- * close button the sidecar pushes an `editor_closed` event back through
- * IPC, and App.tsx clears the id from `openEditorInstanceIds` so the
- * button visually toggles off. The button is disabled for slots that have
- * no loaded sidecar instance yet (e.g. during an in-flight reconcile, or
- * when the sidecar binary isn't built).
+ * window (owned by the JUCE sidecar). Repeated open requests bring the
+ * window to the front. When the user closes the window via the OS close
+ * button the sidecar pushes an `editor_closed` event back through IPC, and
+ * App.tsx clears the id from `openEditorInstanceIds` so the button visually
+ * toggles off. The button is disabled for slots that have no loaded sidecar
+ * instance yet (e.g. during an in-flight reconcile, or when the sidecar
+ * binary isn't built).
  */
 
 import { useMemo, useState, type CSSProperties } from 'react';
@@ -53,6 +53,7 @@ import type {
 } from '@producer-player/contracts';
 
 import { PluginBrowserDialog } from './PluginBrowserDialog';
+import { clampPluginChainOutputGainLinear } from '../pluginAudioPipeline';
 
 export interface PluginChainStripProps {
   chain: TrackPluginChain;
@@ -70,6 +71,7 @@ export interface PluginChainStripProps {
   onToggle: (instanceId: string) => void;
   onReorder: (orderedInstanceIds: string[]) => void;
   onOpenEditor: (instanceId: string) => void;
+  onOutputGainChange?: (outputGainLinear: number) => void;
   onSavePreset?: (instanceId: string, name: string) => void;
   onRecallPreset?: (instanceId: string, name: string) => void;
   onDeletePreset?: (pluginId: string, name: string) => void;
@@ -294,10 +296,10 @@ function SortablePluginPill({
         aria-pressed={editorOpen}
         aria-label={
           editorOpen
-            ? `Plugin editor open for ${displayName}`
+            ? `Bring plugin editor to front for ${displayName}`
             : `Open plugin editor for ${displayName}`
         }
-        title={editDisabled ? 'Plugin is loading…' : 'Edit plugin'}
+        title={editDisabled ? 'Plugin is loading…' : editorOpen ? 'Bring editor to front' : 'Edit plugin'}
         data-testid="plugin-pill-edit"
         data-open={editorOpen ? 'true' : 'false'}
       >
@@ -428,6 +430,7 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     onToggle,
     onReorder,
     onOpenEditor,
+    onOutputGainChange,
     onSavePreset,
     onRecallPreset,
     onDeletePreset,
@@ -488,6 +491,8 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
   };
 
   const isEmpty = orderedItems.length === 0;
+  const outputGainLinear = clampPluginChainOutputGainLinear(chain.outputGainLinear);
+  const outputGainPercent = Math.round(outputGainLinear * 100);
   const activeDragItem =
     activeDragInstanceId
       ? orderedItems.find((item) => item.instanceId === activeDragInstanceId) ?? null
@@ -514,6 +519,43 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
           </span>
         </header>
       ) : null}
+
+      <div
+        className="plugin-chain-strip__gain"
+        data-testid="plugin-chain-output-gain"
+      >
+        <label
+          className="plugin-chain-strip__gain-label"
+          htmlFor={`plugin-chain-output-gain-${layout}`}
+        >
+          Plugin Vol
+        </label>
+        <input
+          id={`plugin-chain-output-gain-${layout}`}
+          className="plugin-chain-strip__gain-slider"
+          data-testid="plugin-chain-output-gain-slider"
+          type="range"
+          min={0}
+          max={200}
+          step={1}
+          value={outputGainPercent}
+          disabled={isEmpty || !onOutputGainChange}
+          onChange={(event) => {
+            onOutputGainChange?.(
+              clampPluginChainOutputGainLinear(Number(event.currentTarget.value) / 100),
+            );
+          }}
+          aria-label="Plugin chain output volume"
+          title="Output volume after this track's plugin chain. 100% is unity."
+        />
+        <span
+          className="plugin-chain-strip__gain-value"
+          data-testid="plugin-chain-output-gain-value"
+          aria-live="polite"
+        >
+          {outputGainPercent}%
+        </span>
+      </div>
 
       <DndContext
         sensors={sensors}

@@ -149,8 +149,10 @@ import { FREQUENCY_BANDS, createBandSoloFilter, createPeakingEqFilter, computeEq
 import {
   PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE,
   base64ToFloat32Interleaved,
+  clampPluginChainOutputGainLinear,
   float32InterleavedToBase64,
   getEnabledPluginProcessChain,
+  getPluginChainOutputGainLinear,
   interleaveStereoSamples,
   writeInterleavedStereoSamples,
 } from './pluginAudioPipeline';
@@ -3079,6 +3081,7 @@ export function App(): JSX.Element {
   });
   const midSideProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const pluginAudioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const pluginOutputGainNodeRef = useRef<GainNode | null>(null);
 
   const [migrationModalOpen, setMigrationModalOpen] = useState(false);
   const [migrationJsonInput, setMigrationJsonInput] = useState('');
@@ -6216,6 +6219,10 @@ export function App(): JSX.Element {
         pluginAudioProcessorRef.current.onaudioprocess = null;
         pluginAudioProcessorRef.current = null;
       }
+      if (pluginOutputGainNodeRef.current) {
+        try { pluginOutputGainNodeRef.current.disconnect(); } catch { /* ignore */ }
+        pluginOutputGainNodeRef.current = null;
+      }
       if (midSideProcessorRef.current) {
         try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
         midSideProcessorRef.current.onaudioprocess = null;
@@ -8006,6 +8013,10 @@ export function App(): JSX.Element {
       pluginAudioProcessorRef.current.onaudioprocess = null;
       pluginAudioProcessorRef.current = null;
     }
+    if (pluginOutputGainNodeRef.current) {
+      try { pluginOutputGainNodeRef.current.disconnect(); } catch { /* ignore */ }
+      pluginOutputGainNodeRef.current = null;
+    }
     if (midSideProcessorRef.current) {
       try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
       midSideProcessorRef.current.onaudioprocess = null;
@@ -8033,6 +8044,8 @@ export function App(): JSX.Element {
       let pendingBlocks = 0;
       let processingTail = Promise.resolve();
       let lastProcessErrorLogAt = 0;
+      const pluginOutputGainNode = audioContext.createGain();
+      pluginOutputGainNode.gain.value = getPluginChainOutputGainLinear(pluginChain);
       const processor = audioContext.createScriptProcessor(
         PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE,
         2,
@@ -8096,8 +8109,10 @@ export function App(): JSX.Element {
       };
 
       outputNode.connect(processor);
+      processor.connect(pluginOutputGainNode);
       pluginAudioProcessorRef.current = processor;
-      outputNode = processor;
+      pluginOutputGainNodeRef.current = pluginOutputGainNode;
+      outputNode = pluginOutputGainNode;
     }
 
     if (midSideMode !== 'stereo') {
@@ -8163,6 +8178,10 @@ export function App(): JSX.Element {
         try { pluginAudioProcessorRef.current.disconnect(); } catch { /* ignore */ }
         pluginAudioProcessorRef.current.onaudioprocess = null;
         pluginAudioProcessorRef.current = null;
+      }
+      if (pluginOutputGainNodeRef.current) {
+        try { pluginOutputGainNodeRef.current.disconnect(); } catch { /* ignore */ }
+        pluginOutputGainNodeRef.current = null;
       }
       if (midSideProcessorRef.current) {
         try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
@@ -11739,6 +11758,31 @@ export function App(): JSX.Element {
     [commitPluginChain, selectedSongId],
   );
 
+  const handlePluginOutputGainChange = useCallback(
+    (outputGainLinear: number) => {
+      if (!selectedSongId) return;
+      const previousChain = pluginChainRef.current;
+      const nextOutputGainLinear = clampPluginChainOutputGainLinear(outputGainLinear);
+      const optimisticChain: TrackPluginChain = {
+        ...previousChain,
+        outputGainLinear: nextOutputGainLinear,
+      };
+      commitPluginChain(optimisticChain);
+      void window.producerPlayer
+        .setTrackPluginChain(selectedSongId, optimisticChain)
+        .then((chain) => commitPluginChain(chain))
+        .catch((err) => {
+          commitPluginChain(previousChain);
+          const message = err instanceof Error ? err.message : String(err);
+          setError(`Could not set plugin volume: ${message}`);
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] output gain failed', {
+            error: message,
+          });
+        });
+    },
+    [commitPluginChain, selectedSongId],
+  );
+
   const handlePluginSavePreset = useCallback(
     (instanceId: string, rawName: string) => {
       if (!selectedSongId) return;
@@ -11808,63 +11852,35 @@ export function App(): JSX.Element {
     [refreshPluginPresets],
   );
 
-  // v3.42 Phase 3 — toggle a plugin's native editor window. If the button
-  // is already "open" (editor currently visible), the click closes it.
-  // Otherwise we ask the sidecar to open it and optimistically mark it
-  // open so the button toggles immediately; if the open IPC fails we
-  // roll the state back. Close follows the same pattern: clear
-  // optimistically, then restore the marker if the sidecar rejects.
+  // v3.42 Phase 3 — open a plugin's native editor window. Repeated clicks
+  // call `open_editor` again so the sidecar can bring an existing editor to
+  // the front instead of turning the edit button into a hidden close action.
   const handlePluginOpenEditor = useCallback((instanceId: string) => {
     if (!instanceId) return;
     const isOpen = openEditorInstanceIds.has(instanceId);
-    if (isOpen) {
-      // Optimistically clear; if close fails, restore while the slot still
-      // belongs to the selected chain.
+    if (!isOpen) {
+      // Optimistic open — flip the button on immediately, then fall back on
+      // error. The sidecar answers within ~100ms on a loaded plugin.
       setOpenEditorInstanceIds((prev) => {
-        if (!prev.has(instanceId)) return prev;
+        if (prev.has(instanceId)) return prev;
         const next = new Set(prev);
-        next.delete(instanceId);
+        next.add(instanceId);
         return next;
       });
-      void window.producerPlayer
-        .closePluginEditor(instanceId)
-        .catch((err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          setError(`Could not close plugin editor: ${message}`);
-          setOpenEditorInstanceIds((prev) => {
-            if (prev.has(instanceId)) return prev;
-            const stillInCurrentChain = pluginChainRef.current.items.some((item) => item.instanceId === instanceId);
-            if (!stillInCurrentChain) return prev;
-            const next = new Set(prev);
-            next.add(instanceId);
-            return next;
-          });
-          void window.producerPlayer.rendererLog('error', '[plugin-chain] close editor failed', {
-            instanceId,
-            error: message,
-          });
-        });
-      return;
     }
-    // Optimistic open — flip the button on immediately, then fall back on
-    // error. The sidecar answers within ~100ms on a loaded plugin.
-    setOpenEditorInstanceIds((prev) => {
-      if (prev.has(instanceId)) return prev;
-      const next = new Set(prev);
-      next.add(instanceId);
-      return next;
-    });
     void window.producerPlayer
       .openPluginEditor(instanceId)
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
-        setError(`Could not open plugin editor: ${message}`);
-        setOpenEditorInstanceIds((prev) => {
-          if (!prev.has(instanceId)) return prev;
-          const next = new Set(prev);
-          next.delete(instanceId);
-          return next;
-        });
+        setError(`${isOpen ? 'Could not bring plugin editor to front' : 'Could not open plugin editor'}: ${message}`);
+        if (!isOpen) {
+          setOpenEditorInstanceIds((prev) => {
+            if (!prev.has(instanceId)) return prev;
+            const next = new Set(prev);
+            next.delete(instanceId);
+            return next;
+          });
+        }
         void window.producerPlayer.rendererLog('error', '[plugin-chain] open editor failed', {
           instanceId,
           error: message,
@@ -15889,6 +15905,7 @@ export function App(): JSX.Element {
                       onToggle={handlePluginToggle}
                       onReorder={handlePluginReorder}
                       onOpenEditor={handlePluginOpenEditor}
+                      onOutputGainChange={handlePluginOutputGainChange}
                       onSavePreset={handlePluginSavePreset}
                       onRecallPreset={handlePluginRecallPreset}
                       onDeletePreset={handlePluginDeletePreset}
@@ -19247,6 +19264,7 @@ export function App(): JSX.Element {
                       onToggle={handlePluginToggle}
                       onReorder={handlePluginReorder}
                       onOpenEditor={handlePluginOpenEditor}
+                      onOutputGainChange={handlePluginOutputGainChange}
                       onSavePreset={handlePluginSavePreset}
                       onRecallPreset={handlePluginRecallPreset}
                       onDeletePreset={handlePluginDeletePreset}

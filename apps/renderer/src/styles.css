@@ -7395,6 +7395,39 @@ button.reference-action.active {
   color: var(--text-muted);
 }
 
+.plugin-chain-strip__gain {
+  display: grid;
+  grid-template-columns: auto minmax(92px, 160px) 44px;
+  align-items: center;
+  justify-content: start;
+  gap: 8px;
+  width: min(340px, 100%);
+  min-width: 0;
+}
+
+.plugin-chain-strip__gain-label,
+.plugin-chain-strip__gain-value {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.plugin-chain-strip__gain-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.plugin-chain-strip__gain-slider {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.plugin-chain-strip__gain-slider:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
 .plugin-chain-strip__rail {
   display: flex;
   flex-wrap: wrap;
@@ -7406,6 +7439,11 @@ button.reference-action.active {
 .plugin-chain-strip--compact .plugin-chain-strip__rail {
   flex-direction: column;
   align-items: stretch;
+}
+
+.plugin-chain-strip--compact .plugin-chain-strip__gain {
+  grid-template-columns: auto minmax(96px, 1fr) 44px;
+  width: 100%;
 }
 
 .plugin-chain-strip__empty {

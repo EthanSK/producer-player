@@ -6686,17 +6686,16 @@ button.reference-action.active {
   align-items: center;
   gap: 8px;
   height: 34px;
-  padding: 0 14px;
+  padding: 0 16px;
   border: 0;
   border-radius: 999px;
   cursor: pointer;
   color: #ffffff;
   background:
     linear-gradient(125deg, rgba(92, 167, 255, 0.95) 0%, rgba(180, 110, 255, 0.9) 55%, rgba(255, 122, 182, 0.9) 100%);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
   box-shadow: 0 6px 18px rgba(94, 167, 255, 0.22),
     0 0 0 1px rgba(255, 255, 255, 0.18) inset;
   transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
@@ -7033,17 +7032,16 @@ button.reference-action.active {
 .ideals-action-primary {
   display: inline-flex;
   align-items: center;
-  height: 30px;
+  height: 28px;
   padding: 0 12px;
   border: 0;
   border-radius: 999px;
   background: linear-gradient(120deg, rgba(92, 167, 255, 0.85), rgba(180, 110, 255, 0.85));
   color: #ffffff;
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16) inset;
   transition: filter 0.16s ease, transform 0.16s ease;
 }
@@ -7063,7 +7061,7 @@ button.reference-action.active {
 .ideals-action-secondary {
   display: inline-flex;
   align-items: center;
-  height: 28px;
+  height: 26px;
   padding: 0 10px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 999px;
@@ -7072,8 +7070,7 @@ button.reference-action.active {
   cursor: pointer;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .ideals-action-secondary:hover,
@@ -7835,6 +7832,84 @@ button.reference-action.active {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.03em;
+  min-width: 64px;
+  text-align: right;
+}
+
+/* --- Live level meter -------------------------------------------------- */
+
+.ideals-audition-meter {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  transition: border-color 0.2s ease;
+}
+
+.ideals-audition-meter--active {
+  border-color: color-mix(in srgb, var(--stem-accent, #5ca7ff) 50%, transparent);
+}
+
+.ideals-audition-meter-label {
+  color: #8da2ba;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ideals-audition-meter-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.ideals-audition-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    #8ff7c5 0%,
+    #b9d6ff 55%,
+    #ffd166 80%,
+    #ff7ab6 100%
+  );
+  transition: width 0.04s linear;
+}
+
+.ideals-audition-meter-tick {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.ideals-audition-meter-tick--18db {
+  /* -18 dB → (60 - 18) / 60 = 70% from floor → 30% from ceiling */
+  left: 70%;
+}
+
+.ideals-audition-meter-tick--6db {
+  /* -6 dB → 54/60 = 90% */
+  left: 90%;
+  background: rgba(255, 122, 182, 0.5);
+}
+
+.ideals-audition-meter-value {
+  color: #cfdcec;
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   min-width: 64px;
   text-align: right;
 }

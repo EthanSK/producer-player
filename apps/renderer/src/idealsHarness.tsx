@@ -98,14 +98,19 @@ function perturbCurves(offsetDb: number, slopeBias: number) {
   const result: Record<IdealStemId, { curve: { freq: number; gainDb: number }[] }> = {} as never;
   for (const stemId of IDEAL_STEM_IDS) {
     const ideal = ideals[stemId];
+    // Use a single smooth low-frequency sinusoid keyed by stem id so each card
+    // shows a visually distinct mix vs ideal, but the line is smooth (not
+    // wiggly noise). The slope bias tilts the line up or down across the
+    // log-frequency axis.
+    const phase = stemId.length;
     result[stemId] = {
       curve: ideal.map((point, idx) => {
         const t = idx / Math.max(1, ideal.length - 1);
         const slope = (t - 0.5) * slopeBias;
-        const noise = Math.sin(idx * 1.3 + offsetDb) * 1.2;
+        const bump = Math.sin(t * Math.PI * 2 + phase) * 1.6;
         return {
           freq: point.freq,
-          gainDb: Math.max(-24, Math.min(6, point.gainDb + offsetDb + slope + noise)),
+          gainDb: Math.max(-24, Math.min(6, point.gainDb + offsetDb + slope + bump)),
         };
       }),
     };

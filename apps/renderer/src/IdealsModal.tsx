@@ -618,6 +618,15 @@ function StemAuditionPanel({
   const wasPlayingRef = useRef<boolean>(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  // Live level meter — uses an AnalyserNode hooked up to the audio element via
+  // Web Audio when it starts playing. Updates the peak level state at ~30 fps
+  // while playing.
+  const [peakLevel, setPeakLevel] = useState(-60);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const rafRef = useRef<number | null>(null);
+
   const handleTargetSwitch = useCallback(
     (nextTarget: AuditionTarget) => {
       const entry = available.find((e) => e.id === nextTarget);
@@ -645,6 +654,90 @@ function StemAuditionPanel({
       audio.pause();
     }
   }, [activeEntry?.src]);
+
+  // Lazily wire up the level meter the first time the user hits play.
+  // MediaElementAudioSourceNode can only be created once per audio element,
+  // so we cache the source/analyser refs.
+  const ensureAnalyser = useCallback((): AnalyserNode | null => {
+    const audio = audioRef.current;
+    if (!audio) return null;
+    if (analyserRef.current) return analyserRef.current;
+    try {
+      const AudioCtor =
+        (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext })
+          .AudioContext ??
+        (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (!AudioCtor) return null;
+      const ctx = audioContextRef.current ?? new AudioCtor();
+      audioContextRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.6;
+      const source = ctx.createMediaElementSource(audio);
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+      sourceNodeRef.current = source;
+      analyserRef.current = analyser;
+      return analyser;
+    } catch {
+      // MediaElementAudioSourceNode throws if the element is already wired.
+      return analyserRef.current;
+    }
+  }, []);
+
+  // Drive the meter RAF loop while playing.
+  useEffect(() => {
+    if (!isPlaying) {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      // Smooth decay back to silence floor when paused.
+      const decay = setInterval(() => {
+        setPeakLevel((current) => {
+          const next = current - 4;
+          if (next <= -60) {
+            clearInterval(decay);
+            return -60;
+          }
+          return next;
+        });
+      }, 33);
+      return () => clearInterval(decay);
+    }
+    const analyser = ensureAnalyser();
+    if (!analyser) return;
+    const buffer = new Uint8Array(analyser.fftSize);
+    const tick = (): void => {
+      analyser.getByteTimeDomainData(buffer);
+      let peak = 0;
+      for (let i = 0; i < buffer.length; i += 1) {
+        // 0..255 centered at 128; absolute deviation -> 0..1.
+        const v = Math.abs(buffer[i] - 128) / 128;
+        if (v > peak) peak = v;
+      }
+      const db = peak > 0 ? 20 * Math.log10(peak) : -60;
+      setPeakLevel((current) => Math.max(db, current - 0.8));
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [isPlaying, ensureAnalyser]);
+
+  // Clean up audio context on unmount.
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      try {
+        void audioContextRef.current?.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, []);
 
   // Keyboard shortcuts when this card is focused: A/B/C to switch, Space to
   // play/pause. Scoped to the container's focus so multiple cards in one
@@ -796,6 +889,7 @@ function StemAuditionPanel({
             </div>
             <span className="ideals-audition-time">{timeLabel}</span>
           </div>
+          <AuditionLevelMeter peakDb={peakLevel} active={isPlaying} testId={`ideals-audition-meter-${stemId}`} />
           <audio
             ref={audioRef}
             className="ideals-audition-audio-hidden"
@@ -829,6 +923,50 @@ function StemAuditionPanel({
           Full Mix
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Compact horizontal level meter for the audition transport. Renders peak dB
+ * as a 0-100% filled bar with a small peak-hold tick. Stays at the silence
+ * floor when nothing is playing. Mastering engineers use this as a quick
+ * loudness reference when A/B-ing between stem / mix / reference.
+ */
+function AuditionLevelMeter({
+  peakDb,
+  active,
+  testId,
+}: {
+  peakDb: number;
+  active: boolean;
+  testId?: string;
+}): JSX.Element {
+  // Map -60..0 dB to 0..100%.
+  const FLOOR = -60;
+  const CEIL = 0;
+  const ratio = Math.max(0, Math.min(1, (peakDb - FLOOR) / (CEIL - FLOOR)));
+  const dbLabel = peakDb <= FLOOR ? '−60 dB' : `${peakDb >= 0 ? '+' : ''}${peakDb.toFixed(1)} dB`;
+
+  return (
+    <div
+      className={`ideals-audition-meter${active ? ' ideals-audition-meter--active' : ''}`}
+      role="meter"
+      aria-label="Audition peak level"
+      aria-valuemin={FLOOR}
+      aria-valuemax={CEIL}
+      aria-valuenow={Math.round(peakDb)}
+      data-testid={testId}
+    >
+      <span className="ideals-audition-meter-label">PEAK</span>
+      <div className="ideals-audition-meter-track">
+        <div className="ideals-audition-meter-fill" style={{ width: `${ratio * 100}%` }} />
+        {/* tick at -6 dB threshold */}
+        <div className="ideals-audition-meter-tick ideals-audition-meter-tick--6db" />
+        {/* tick at -18 dB threshold */}
+        <div className="ideals-audition-meter-tick ideals-audition-meter-tick--18db" />
+      </div>
+      <span className="ideals-audition-meter-value">{dbLabel}</span>
     </div>
   );
 }

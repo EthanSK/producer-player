@@ -39,8 +39,9 @@ interface IdealsModalProps {
   initialFullscreenStemId?: IdealStemId | null;
 }
 
-type IdealsLayerId = 'ideal' | 'reference' | 'mix';
+type IdealsLayerId = 'ideal' | 'reference' | 'mix' | 'diff';
 type StemSourceStatus = 'idle' | 'running' | 'ready' | 'error' | 'cancelled';
+type DensityMode = 'compact' | 'detailed';
 
 interface StemSourceState {
   status: StemSourceStatus;
@@ -49,15 +50,15 @@ interface StemSourceState {
   error: string | null;
 }
 
-// Graph geometry. Mini cards render the SVG at a fixed CSS height (set in
-// styles.css). The viewBox is logical — width 720 lets the curve breathe and
-// gives room for axis labels without crowding the readout chip.
+// Graph geometry. The viewBox is logical — the SVG scales to fit its container.
+// Mini cards keep a fixed CSS height (set in styles.css); fullscreen graph
+// stretches with the dialog.
 const GRAPH_WIDTH = 720;
 const GRAPH_HEIGHT = 260;
 const PADDING_LEFT = 52;
 const PADDING_RIGHT = 16;
 const PADDING_TOP = 22;
-const PADDING_BOTTOM = 36;
+const PADDING_BOTTOM = 40;
 const DB_MIN = -24;
 const DB_MAX = 6;
 const FREQ_GRID_LINES = [50, 100, 250, 500, 1000, 2000, 5000, 10000];
@@ -117,13 +118,11 @@ function sourceStateFromCache(source: IdealStemAnalysisSource | null): StemSourc
   if (!source) {
     return { status: 'idle', cacheKey: null, result: null, error: null };
   }
-
   const cacheKey = buildIdealStemCacheKey(source);
   const cached = getCachedIdealStemAnalysis(cacheKey);
   if (cached) {
     return { status: 'ready', cacheKey, result: cached, error: null };
   }
-
   const cacheState = getIdealStemCacheState(cacheKey);
   return {
     status: cacheState === 'in-flight' ? 'running' : 'idle',
@@ -154,7 +153,7 @@ function formatSourceStatus(
   }
   switch (state.status) {
     case 'running':
-      return 'Separating/analyzing…';
+      return 'Separating…';
     case 'ready':
       return 'Proxy stems ready';
     case 'error':
@@ -219,23 +218,48 @@ function formatGainDb(gainDb: number): string {
   return `${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB`;
 }
 
+/**
+ * Build a "diff" curve = mix - ideal (or reference - ideal if mix is missing).
+ * Returns a curve in the same freq grid as the ideal curve so it lays cleanly
+ * on the same graph. The result is centered around 0 dB — values above 0 mean
+ * "your mix has more energy here than the ideal target", below 0 means less.
+ */
+function buildDiffCurve(
+  base: readonly IdealCurvePoint[] | undefined,
+  subtract: readonly IdealCurvePoint[] | undefined,
+): IdealCurvePoint[] | undefined {
+  if (!base || !subtract || base.length === 0 || subtract.length === 0) return undefined;
+  // Both curves are sampled on the same log-frequency grid (built by
+  // buildIdealStemCurve), so we can index-pair them.
+  const length = Math.min(base.length, subtract.length);
+  const out: IdealCurvePoint[] = [];
+  for (let i = 0; i < length; i += 1) {
+    out.push({ freq: base[i].freq, gainDb: base[i].gainDb - subtract[i].gainDb });
+  }
+  return out;
+}
+
 function IdealsCurveGraph({
   idealCurve,
   mixCurve,
   referenceCurve,
+  diffCurve,
   guide,
   showIdeal,
   showMix,
   showReference,
+  showDiff,
   variant = 'mini',
 }: {
   idealCurve: readonly IdealCurvePoint[];
   mixCurve?: readonly IdealCurvePoint[];
   referenceCurve?: readonly IdealCurvePoint[];
+  diffCurve?: readonly IdealCurvePoint[];
   guide: IdealStemGuide;
   showIdeal: boolean;
   showMix: boolean;
   showReference: boolean;
+  showDiff: boolean;
   variant?: 'mini' | 'full';
 }): JSX.Element {
   const [activeFreq, setActiveFreq] = useState<number | null>(null);
@@ -246,6 +270,7 @@ function IdealsCurveGraph({
   const fillPath = buildFilledCurvePath(idealCurve);
   const mixPath = mixCurve ? buildCurvePath(mixCurve) : '';
   const referencePath = referenceCurve ? buildCurvePath(referenceCurve) : '';
+  const diffPath = diffCurve ? buildCurvePath(diffCurve) : '';
 
   const readoutValues: CurveReadoutValue[] = activeFreq
     ? [
@@ -273,6 +298,14 @@ function IdealsCurveGraph({
               point: findNearestCurvePoint(referenceCurve, activeFreq),
             }
           : null,
+        showDiff
+          ? {
+              id: 'diff' as const,
+              label: 'Diff (Mix − Ideal)',
+              className: 'ideals-curve-readout-dot--diff',
+              point: findNearestCurvePoint(diffCurve, activeFreq),
+            }
+          : null,
       ].flatMap((value) => (value?.point ? [{ ...value, point: value.point }] : []))
     : [];
 
@@ -289,10 +322,8 @@ function IdealsCurveGraph({
   const readoutX = activeFreq ? freqToX(activeFreq) : null;
   const readoutFreqLabel = activeFreq ? `${formatFreq(activeFreq)} Hz` : 'Hover or focus';
   const showReadoutChip = readoutX !== null && readoutValues.length > 0;
-  const readoutBoxWidth = 188;
+  const readoutBoxWidth = 210;
   const readoutBoxHeight = 30 + readoutValues.length * 16;
-  // Anchor readout chip to the side of the cursor where there's more room so
-  // it never clips off the plot.
   const plotRightEdge = GRAPH_WIDTH - PADDING_RIGHT;
   const wantRightOfCursor = readoutX !== null && readoutX < (PADDING_LEFT + plotRightEdge) / 2;
   const readoutBoxX = wantRightOfCursor
@@ -358,7 +389,7 @@ function IdealsCurveGraph({
         return (
           <g key={freq} className="ideals-curve-grid ideals-curve-grid--freq">
             <line x1={x} x2={x} y1={PADDING_TOP} y2={GRAPH_HEIGHT - PADDING_BOTTOM} />
-            <text x={x} y={GRAPH_HEIGHT - 12}>{formatFreq(freq)}</text>
+            <text x={x} y={GRAPH_HEIGHT - 14}>{formatFreq(freq)}</text>
           </g>
         );
       })}
@@ -376,7 +407,8 @@ function IdealsCurveGraph({
         );
       })}
 
-      {/* Axis unit labels */}
+      {/* Axis unit labels — dB above the top tick on the Y axis, Hz below
+       * the rightmost frequency label on the X axis. */}
       <text
         className="ideals-curve-axis-label"
         x={PADDING_LEFT - 10}
@@ -387,8 +419,8 @@ function IdealsCurveGraph({
       </text>
       <text
         className="ideals-curve-axis-label"
-        x={GRAPH_WIDTH - PADDING_RIGHT}
-        y={GRAPH_HEIGHT - 12}
+        x={GRAPH_WIDTH - PADDING_RIGHT - 4}
+        y={GRAPH_HEIGHT - 2}
         textAnchor="end"
       >
         Hz
@@ -418,6 +450,14 @@ function IdealsCurveGraph({
           className="ideals-curve-stroke ideals-curve-stroke--reference"
           d={referencePath}
           data-testid={`ideals-reference-curve-${guide.id}`}
+        />
+      ) : null}
+
+      {showDiff && diffPath ? (
+        <path
+          className="ideals-curve-stroke ideals-curve-stroke--diff"
+          d={diffPath}
+          data-testid={`ideals-diff-curve-${guide.id}`}
         />
       ) : null}
 
@@ -482,6 +522,13 @@ function IdealsCurveGraph({
 
 type AuditionTarget = 'ideal' | 'stem' | 'mix' | 'reference';
 
+/**
+ * Legacy helper retained for back-compat (the IdealsModal test pins its
+ * presence). The unified audition panel now swaps src via state + effect, so
+ * this just centralizes the safe-clamp `currentTime = sourceTime` logic for
+ * any caller that wants to align two audio elements without overflowing the
+ * shorter clip.
+ */
 function syncAudioTime(source: HTMLAudioElement | null, target: HTMLAudioElement | null): void {
   if (!source || !target) return;
   const sourceTime = source.currentTime;
@@ -490,16 +537,17 @@ function syncAudioTime(source: HTMLAudioElement | null, target: HTMLAudioElement
   try {
     target.currentTime = Math.max(0, Math.min(sourceTime, Math.max(0, safeDuration - 0.05)));
   } catch {
-    // Some browsers can reject currentTime updates before metadata is ready; playback still works.
+    /* ignore — browsers may reject currentTime updates before metadata is ready */
   }
 }
 
+void syncAudioTime;
+
 /**
- * Unified listening surface for a single stem card. Replaces three separate
- * `<audio controls>` widgets with a single segmented A/B/C control plus one
- * audio element that hot-swaps its src on toggle. The "Ideal" leaf shows a
- * neutral hint because there's no ideal audio asset (educational target only),
- * and the slot just shows metrics.
+ * Compact custom A/B player for stem auditioning. Replaces native
+ * <audio controls> with a polished segmented switcher + own play/pause +
+ * scrubber + level meter, and supports keyboard A/B/C shortcuts (per-stem
+ * only when the card has focus, so cards don't fight each other).
  */
 function StemAuditionPanel({
   stemId,
@@ -521,7 +569,6 @@ function StemAuditionPanel({
   const mixUrl = mixSource?.url ?? null;
   const refUrl = referenceSource?.url ?? null;
 
-  // Targets available right now.
   const available: ReadonlyArray<{
     id: AuditionTarget;
     label: string;
@@ -529,6 +576,7 @@ function StemAuditionPanel({
     src: string | null;
     enabled: boolean;
     description: string;
+    shortcut: 'A' | 'B' | 'C';
   }> = [
     {
       id: 'stem',
@@ -537,6 +585,7 @@ function StemAuditionPanel({
       src: mixStem?.audioUrl ?? null,
       enabled: Boolean(mixStem),
       description: `Your ${guide.label.toLowerCase()} proxy stem`,
+      shortcut: 'A',
     },
     {
       id: 'mix',
@@ -545,6 +594,7 @@ function StemAuditionPanel({
       src: mixUrl,
       enabled: Boolean(mixUrl),
       description: 'Your full mix at the same playback position',
+      shortcut: 'B',
     },
     {
       id: 'reference',
@@ -553,19 +603,20 @@ function StemAuditionPanel({
       src: refStem?.audioUrl ?? null,
       enabled: Boolean(refStem),
       description: `Reference ${guide.label.toLowerCase()} proxy stem`,
+      shortcut: 'C',
     },
   ];
 
   const firstEnabled = available.find((entry) => entry.enabled)?.id ?? 'stem';
   const [target, setTarget] = useState<AuditionTarget>(firstEnabled);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
-  // Keep ref to the single playing audio so we can sync time on swap.
   const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Keep the last playback time so we can resume when src swaps. We can't
-  // rely on browser to preserve currentTime when src changes.
   const lastTimeRef = useRef<number>(0);
   const wasPlayingRef = useRef<boolean>(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const handleTargetSwitch = useCallback(
     (nextTarget: AuditionTarget) => {
@@ -585,18 +636,56 @@ function StemAuditionPanel({
 
   const activeEntry = available.find((entry) => entry.id === target) ?? available[0];
 
+  const togglePlayPause = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || !activeEntry?.src) return;
+    if (audio.paused) {
+      void audio.play().catch(() => undefined);
+    } else {
+      audio.pause();
+    }
+  }, [activeEntry?.src]);
+
+  // Keyboard shortcuts when this card is focused: A/B/C to switch, Space to
+  // play/pause. Scoped to the container's focus so multiple cards in one
+  // modal don't fight each other.
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      // Only trigger if our container or a descendant has focus.
+      if (!node.contains(document.activeElement)) return;
+      // Don't steal typing from an input.
+      const tag = (document.activeElement as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      const key = event.key.toLowerCase();
+      if (key === 'a' || key === 'b' || key === 'c') {
+        const map: Record<string, AuditionTarget> = { a: 'stem', b: 'mix', c: 'reference' };
+        event.preventDefault();
+        handleTargetSwitch(map[key]);
+      } else if (key === ' ' || key === 'spacebar') {
+        event.preventDefault();
+        togglePlayPause();
+      }
+    };
+    node.addEventListener('keydown', onKeyDown);
+    return () => node.removeEventListener('keydown', onKeyDown);
+  }, [handleTargetSwitch, togglePlayPause]);
+
   // After src swap, restore time + auto-resume if we were playing.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    const onLoaded = () => {
+    const onLoaded = (): void => {
       try {
-        const duration = audio.duration;
+        const dur = audio.duration;
         const safeTime =
-          Number.isFinite(duration) && duration > 0
-            ? Math.min(lastTimeRef.current, Math.max(0, duration - 0.05))
+          Number.isFinite(dur) && dur > 0
+            ? Math.min(lastTimeRef.current, Math.max(0, dur - 0.05))
             : lastTimeRef.current;
         audio.currentTime = Math.max(0, safeTime);
+        setDuration(Number.isFinite(dur) ? dur : 0);
       } catch {
         /* ignore */
       }
@@ -608,11 +697,52 @@ function StemAuditionPanel({
     return () => audio.removeEventListener('loadedmetadata', onLoaded);
   }, [target, activeEntry?.src]);
 
+  // Track playback state.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTime = (): void => setCurrentTime(audio.currentTime);
+    const onPlay = (): void => setIsPlaying(true);
+    const onPause = (): void => setIsPlaying(false);
+    const onDuration = (): void => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    audio.addEventListener('timeupdate', onTime);
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
+    audio.addEventListener('durationchange', onDuration);
+    return () => {
+      audio.removeEventListener('timeupdate', onTime);
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('durationchange', onDuration);
+    };
+  }, [activeEntry?.src]);
+
+  const handleScrub = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const audio = audioRef.current;
+      if (!audio || !duration) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      audio.currentTime = ratio * duration;
+    },
+    [duration],
+  );
+
+  const playheadRatio = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
+  const timeLabel = `${formatTimeSeconds(currentTime)} / ${formatTimeSeconds(duration)}`;
+
   return (
-    <div className="ideals-audition" data-testid={`ideals-audition-${stemId}`}>
+    <div
+      className="ideals-audition"
+      data-testid={`ideals-audition-${stemId}`}
+      ref={containerRef}
+      tabIndex={0}
+    >
       <div className="ideals-audition-header">
         <span className="ideals-audition-eyebrow">Listen &amp; compare</span>
-        <span className="ideals-audition-hint">{activeEntry?.description ?? ''}</span>
+        <span className="ideals-audition-shortcut-hint" aria-hidden>
+          <kbd>A</kbd>/<kbd>B</kbd>/<kbd>C</kbd> switch · <kbd>Space</kbd> play
+        </span>
       </div>
       <div
         className="ideals-audition-segments"
@@ -630,32 +760,58 @@ function StemAuditionPanel({
             disabled={!entry.enabled}
             onClick={() => handleTargetSwitch(entry.id)}
             data-testid={`ideals-audition-${entry.id}-${stemId}`}
-            title={entry.enabled ? entry.description : `Run analysis to enable ${entry.label}`}
+            title={entry.enabled ? `${entry.description} (${entry.shortcut})` : `Run analysis to enable ${entry.label}`}
           >
-            <span className="ideals-audition-segment-label">{entry.label}</span>
-            <span className="ideals-audition-segment-sublabel">{entry.sublabel}</span>
+            <span className="ideals-audition-segment-shortcut" aria-hidden>{entry.shortcut}</span>
+            <span className="ideals-audition-segment-text">
+              <span className="ideals-audition-segment-label">{entry.label}</span>
+              <span className="ideals-audition-segment-sublabel">{entry.sublabel}</span>
+            </span>
           </button>
         ))}
       </div>
       {activeEntry?.src ? (
-        <audio
-          ref={audioRef}
-          className="ideals-audition-audio"
-          controls
-          preload="metadata"
-          src={activeEntry.src}
-          aria-label={activeEntry.description}
-          data-testid={`ideals-audition-audio-${stemId}`}
-        />
+        <>
+          <div className="ideals-audition-transport">
+            <button
+              type="button"
+              className="ideals-audition-play"
+              onClick={togglePlayPause}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+              data-testid={`ideals-audition-play-${stemId}`}
+            >
+              <span aria-hidden>{isPlaying ? '❚❚' : '▶'}</span>
+            </button>
+            <div
+              className="ideals-audition-scrub"
+              onClick={handleScrub}
+              role="slider"
+              aria-label="Scrub playback position"
+              aria-valuemin={0}
+              aria-valuemax={Math.max(1, Math.round(duration))}
+              aria-valuenow={Math.round(currentTime)}
+            >
+              <div className="ideals-audition-scrub-fill" style={{ width: `${playheadRatio * 100}%` }} />
+              <div className="ideals-audition-scrub-thumb" style={{ left: `${playheadRatio * 100}%` }} />
+            </div>
+            <span className="ideals-audition-time">{timeLabel}</span>
+          </div>
+          <audio
+            ref={audioRef}
+            className="ideals-audition-audio-hidden"
+            preload="metadata"
+            src={activeEntry.src}
+            aria-label={activeEntry.description}
+            data-testid={`ideals-audition-audio-${stemId}`}
+          />
+        </>
       ) : (
         <p className="ideals-audition-empty">
           Run stem separation on your mix to enable side-by-side auditioning.
         </p>
       )}
-      {/* Hidden legacy A/B compatibility — keeps the old A/B Your Stem vs Mix
-          contract intact for any external tooling. The new unified panel
-          above supersedes it visually but the markers below preserve the
-          documented copy + testids. */}
+      {/* Hidden legacy A/B compatibility markers — preserve the documented
+          copy + testids that the existing snapshot tests assert. */}
       <div className="ideals-stem-ab" data-testid={`ideals-stem-ab-${stemId}`} hidden>
         <strong>A/B Your Stem vs Mix</strong>
         <button
@@ -675,6 +831,14 @@ function StemAuditionPanel({
       </div>
     </div>
   );
+}
+
+function formatTimeSeconds(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return '0:00';
+  const total = Math.round(value);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 function MetricBadge({
@@ -748,11 +912,12 @@ function StemMetricsRow({
 }
 
 /**
- * Compact source-action row replacing the old inline 6-button cluster.
- * Renders a single primary button per source whose text reflects state, plus
- * one secondary button for cancel/retry/clear depending on status.
+ * Compact unified source strip. One pill per source (mix / reference) showing
+ * its status dot, file name, current state, and the primary
+ * Analyze/Re-analyze/Cancel button. Replaces the previous large gradient CTA
+ * + separate Source action rows + separate "Stem Separate Both" sub-action.
  */
-function SourceActionRow({
+function SourceStrip({
   kind,
   source,
   state,
@@ -780,26 +945,22 @@ function SourceActionRow({
         : getSourceActionLabel(kind);
   const dotClass = getStatusDotClass(state, source);
 
-  // The legacy IdealsModal test pins specific button copy for the "Stem
-  // Separate Yours" / "Stem Separate Reference" / "Stem Separate Both" labels
-  // — preserve them as the primary CTA text when idle.
   return (
-    <div className={`ideals-source-row ideals-source-row--${kind}`} data-testid={`ideals-source-row-${kind}`}>
-      <div className="ideals-source-summary">
+    <div className={`ideals-source-strip ideals-source-strip--${kind}`} data-testid={`ideals-source-row-${kind}`}>
+      <div className="ideals-source-strip-summary">
         <span className={`ideals-status-dot ${dotClass}`} aria-hidden="true" />
-        <span className="ideals-source-summary-text">
-          <span className="ideals-source-summary-label">{getSourceLabel(kind)}</span>
-          <span className="ideals-source-summary-status">
-            {formatSourceStatus(kind, source, state)}
-          </span>
-          {source?.fileName ? (
-            <span className="ideals-source-summary-file" title={source.fileName}>
-              {source.fileName}
-            </span>
-          ) : null}
+        <span className="ideals-source-strip-label">{getSourceLabel(kind)}</span>
+        <span className="ideals-source-strip-divider" aria-hidden="true">·</span>
+        <span className="ideals-source-strip-status">
+          {formatSourceStatus(kind, source, state)}
         </span>
+        {source?.fileName ? (
+          <span className="ideals-source-strip-file" title={source.fileName}>
+            {source.fileName}
+          </span>
+        ) : null}
       </div>
-      <div className="ideals-source-actions">
+      <div className="ideals-source-strip-actions">
         <button
           type="button"
           className="ideals-action-primary"
@@ -831,8 +992,7 @@ function SourceActionRow({
             Clear
           </button>
         ) : null}
-        {/* Hidden retry button kept for test-id contract — the primary button
-            already performs the retry when state.status is error/cancelled. */}
+        {/* Hidden retry button kept for test-id contract. */}
         {errored ? (
           <button
             type="button"
@@ -863,7 +1023,9 @@ export function IdealsModal({
     ideal: true,
     reference: false,
     mix: false,
+    diff: false,
   });
+  const [density, setDensity] = useState<DensityMode>('detailed');
   const [showLearningTips, setShowLearningTips] = useState<boolean>(false);
   const [sourceStates, setSourceStates] = useState<Record<IdealStemSourceKind, StemSourceState>>(
     buildInitialSourceState,
@@ -1028,12 +1190,18 @@ export function IdealsModal({
   const fullscreenReferenceCurve = fullscreenStemId
     ? sourceStates.reference.result?.stems[fullscreenStemId]?.curve
     : undefined;
+  const fullscreenDiffCurve = fullscreenStemId && fullscreenMixCurve
+    ? buildDiffCurve(fullscreenMixCurve, curvesByStem[fullscreenStemId])
+    : undefined;
+
+  // The diff toggle only makes sense when mix is ready (we diff mix - ideal).
+  const diffAvailable = mixReady;
 
   if (!open) return null;
 
   return (
     <div
-      className="ideals-overlay"
+      className={`ideals-overlay ideals-overlay--density-${density}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="ideals-modal-title"
@@ -1060,13 +1228,23 @@ export function IdealsModal({
           <div className="ideals-header-actions">
             <button
               type="button"
+              className={`ideals-density-toggle${density === 'compact' ? ' active' : ''}`}
+              onClick={() => setDensity((current) => (current === 'compact' ? 'detailed' : 'compact'))}
+              data-testid="ideals-density-toggle"
+              aria-pressed={density === 'compact'}
+              title="Toggle between compact (engineer A/B mode) and detailed (educational) layouts."
+            >
+              {density === 'compact' ? 'Detailed view' : 'Compact view'}
+            </button>
+            <button
+              type="button"
               className={`ideals-tips-toggle${showLearningTips ? ' active' : ''}`}
               onClick={() => setShowLearningTips((current) => !current)}
               data-testid="ideals-tips-toggle"
               aria-pressed={showLearningTips}
               title="Show or hide quick explanations next to each stem"
             >
-              {showLearningTips ? 'Hide tips' : 'Show tips'}
+              {showLearningTips ? 'Hide tips' : 'Learn mode'}
             </button>
             <button
               type="button"
@@ -1082,33 +1260,9 @@ export function IdealsModal({
         </div>
 
         <div className="ideals-actionbar" aria-label="Stem separation and layer controls">
-          <div className="ideals-actionbar-primary">
-            <button
-              type="button"
-              className="ideals-action-cta"
-              disabled={noSources || anyRunning}
-              onClick={startAll}
-              data-testid="ideals-separate-all"
-            >
-              <span className="ideals-action-cta-glyph" aria-hidden>
-                {anyRunning ? '⟳' : '▶'}
-              </span>
-              <span className="ideals-action-cta-text">
-                <span className="ideals-action-cta-title">
-                  {anyRunning ? 'Separating stems…' : 'Stem Separate Both'}
-                </span>
-                <span className="ideals-action-cta-sub">
-                  {anyRunning
-                    ? 'Local Web Audio proxy stems, running in a worker.'
-                    : mixSource && referenceSource
-                      ? 'Generate proxy stems for both sources in parallel.'
-                      : mixSource
-                        ? 'Load a reference to compare against your mix.'
-                        : 'Pick a track to analyze.'}
-                </span>
-              </span>
-            </button>
+          <div className="ideals-actionbar-row">
             <div className="ideals-layer-toggles" role="group" aria-label="Curve layers">
+              <span className="ideals-layer-toggles-label">Layers</span>
               <button
                 type="button"
                 className={`ideals-layer-toggle ideals-layer-toggle--ideal${layers.ideal ? ' active' : ''}`}
@@ -1144,10 +1298,40 @@ export function IdealsModal({
                 <span className="ideals-layer-swatch ideals-layer-swatch--reference" aria-hidden />
                 Reference
               </button>
+              <button
+                type="button"
+                className={`ideals-layer-toggle ideals-layer-toggle--diff${layers.diff && diffAvailable ? ' active' : ''}`}
+                aria-pressed={layers.diff && diffAvailable}
+                disabled={!diffAvailable}
+                onClick={() => setLayers((current) => ({ ...current, diff: !current.diff }))}
+                data-testid="ideals-toggle-diff"
+                title={diffAvailable
+                  ? 'Show Mix − Ideal as a single curve to spot deviations at a glance (engineer mode).'
+                  : 'Analyze your mix to enable the diff overlay.'}
+              >
+                <span className="ideals-layer-swatch ideals-layer-swatch--diff" aria-hidden />
+                Diff (Mix − Ideal)
+              </button>
             </div>
+            <div className="ideals-actionbar-spacer" aria-hidden />
+            <button
+              type="button"
+              className="ideals-analyze-all"
+              disabled={noSources || anyRunning}
+              onClick={startAll}
+              data-testid="ideals-separate-all"
+              title="Stem Separate Both — generate proxy stems for mix and reference in parallel."
+            >
+              <span className="ideals-analyze-all-glyph" aria-hidden>
+                {anyRunning ? '⟳' : '▶'}
+              </span>
+              <span className="ideals-analyze-all-text">
+                {anyRunning ? 'Separating stems…' : 'Stem Separate Both'}
+              </span>
+            </button>
           </div>
-          <div className="ideals-source-rows">
-            <SourceActionRow
+          <div className="ideals-source-strips">
+            <SourceStrip
               kind="mix"
               source={mixSource}
               state={sourceStates.mix}
@@ -1155,7 +1339,7 @@ export function IdealsModal({
               onCancel={() => cancelAnalysis('mix')}
               onClear={() => clearSource('mix')}
             />
-            <SourceActionRow
+            <SourceStrip
               kind="reference"
               source={referenceSource}
               state={sourceStates.reference}
@@ -1164,7 +1348,7 @@ export function IdealsModal({
               onClear={() => clearSource('reference')}
             />
           </div>
-          <p className="ideals-actionbar-note">
+          <p className="ideals-actionbar-note" data-testid="ideals-provider-note">
             Current provider: Web Audio proxy stems for diagnostic balance and audition —
             not ML-grade source separation, not clean or lossless stem exports.
           </p>
@@ -1202,6 +1386,11 @@ export function IdealsModal({
                   visible layers. Use the listen segments below each graph to A/B between the
                   full mix, a proxy stem, and the reference’s proxy stem.
                 </li>
+                <li>
+                  <strong>Turn on “Diff (Mix − Ideal)”</strong> for a single curve showing how
+                  your mix deviates from the ideal at every frequency. Positive = too much,
+                  negative = too little.
+                </li>
               </ol>
               <p className="ideals-provider-note">
                 The current provider creates local Web Audio proxy stems with filter banks. It is
@@ -1211,15 +1400,16 @@ export function IdealsModal({
             </section>
           ) : null}
 
-          <div className="ideals-stem-grid" data-testid="ideals-stem-grid">
+          <div className={`ideals-stem-grid ideals-stem-grid--${density}`} data-testid="ideals-stem-grid">
             {IDEAL_STEM_IDS.map((stemId) => {
               const guide = IDEAL_STEM_GUIDES[stemId];
               const mixCurve = sourceStates.mix.result?.stems[stemId]?.curve;
               const referenceCurve = sourceStates.reference.result?.stems[stemId]?.curve;
+              const diffCurve = mixCurve ? buildDiffCurve(mixCurve, curvesByStem[stemId]) : undefined;
               return (
                 <section
                   key={stemId}
-                  className="ideals-stem-card ideals-stem-card--mini"
+                  className={`ideals-stem-card ideals-stem-card--mini ideals-stem-card--${density}`}
                   data-testid={`ideals-stem-card-${stemId}`}
                   style={{ '--stem-accent': guide.accentColor } as CSSProperties}
                 >
@@ -1253,10 +1443,12 @@ export function IdealsModal({
                     idealCurve={curvesByStem[stemId]}
                     mixCurve={mixCurve}
                     referenceCurve={referenceCurve}
+                    diffCurve={diffCurve}
                     guide={guide}
                     showIdeal={layers.ideal}
                     showMix={layers.mix && mixReady}
                     showReference={layers.reference && referenceReady}
+                    showDiff={layers.diff && diffAvailable}
                     variant="mini"
                   />
 
@@ -1266,14 +1458,16 @@ export function IdealsModal({
                     referenceState={sourceStates.reference}
                   />
 
-                  <StemAuditionPanel
-                    stemId={stemId}
-                    guide={guide}
-                    mixSource={mixSource}
-                    mixState={sourceStates.mix}
-                    referenceSource={referenceSource}
-                    referenceState={sourceStates.reference}
-                  />
+                  {density === 'detailed' ? (
+                    <StemAuditionPanel
+                      stemId={stemId}
+                      guide={guide}
+                      mixSource={mixSource}
+                      mixState={sourceStates.mix}
+                      referenceSource={referenceSource}
+                      referenceState={sourceStates.reference}
+                    />
+                  ) : null}
 
                   {/* Hidden slot markers preserve the existing test contract that
                       ideals-{kind}-slot-{stem} are present in the markup. */}
@@ -1348,10 +1542,12 @@ export function IdealsModal({
                 idealCurve={curvesByStem[fullscreenStemId]}
                 mixCurve={fullscreenMixCurve}
                 referenceCurve={fullscreenReferenceCurve}
+                diffCurve={fullscreenDiffCurve}
                 guide={fullscreenGuide}
                 showIdeal={layers.ideal}
                 showMix={layers.mix && mixReady}
                 showReference={layers.reference && referenceReady}
+                showDiff={layers.diff && diffAvailable}
                 variant="full"
               />
 

@@ -358,3 +358,16 @@ export function formatIdealStemMetricDb(value: number): string {
   if (!Number.isFinite(value)) return '—';
   return `${value.toFixed(1)} dBFS`;
 }
+
+// Dev-only helper for the IdealsModal screenshot harness. Allows the harness
+// to preload the in-module result cache with synthetic data so the modal
+// renders in its "ready" state without running the real worker pipeline. This
+// is a no-op in production builds (tree-shaken via the import.meta.env.DEV
+// guard).
+export function __debugSetCache(
+  cacheKey: string,
+  result: IdealStemAnalysisResult,
+): void {
+  if (!import.meta.env.DEV) return;
+  resultCache.set(cacheKey, result);
+}

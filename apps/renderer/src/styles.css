@@ -6527,9 +6527,9 @@ button.reference-action.active {
   inset: 0;
   z-index: var(--z-ideals-modal);
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  padding: 24px;
+  padding: 16px;
   background: rgba(7, 11, 18, 0.88);
   overscroll-behavior: contain;
   backdrop-filter: blur(10px);
@@ -6539,13 +6539,13 @@ button.reference-action.active {
 .ideals-card {
   position: relative;
   z-index: 1;
-  width: min(1480px, 100%);
-  max-height: calc(100vh - 48px);
+  width: min(1620px, 100%);
+  max-height: calc(100vh - 32px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 20px;
+  border-radius: 18px;
   background:
     radial-gradient(circle at 12% 0%, rgba(180, 110, 255, 0.14), transparent 36%),
     radial-gradient(circle at 88% 4%, rgba(94, 234, 212, 0.1), transparent 32%),
@@ -6659,84 +6659,75 @@ button.reference-action.active {
 /* --- Action bar --------------------------------------------------------- */
 
 .ideals-actionbar {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr);
-  gap: 16px;
-  align-items: stretch;
-  padding: 16px 26px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 22px 14px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(255, 255, 255, 0.018);
 }
 
-.ideals-actionbar-primary {
+.ideals-actionbar-row {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.ideals-action-cta {
-  display: inline-flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  flex-wrap: wrap;
+}
+
+.ideals-actionbar-spacer {
+  flex: 1 1 auto;
+}
+
+/* The Analyze-Both control is now a compact pill at the END of the layer-
+ * toggle row, not a giant gradient panel. Mastering engineers told us the
+ * giant CTA was screaming "marketing" rather than "workflow control". */
+.ideals-analyze-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
   border: 0;
-  border-radius: 16px;
+  border-radius: 999px;
   cursor: pointer;
-  text-align: left;
   color: #ffffff;
   background:
-    linear-gradient(125deg, rgba(92, 167, 255, 0.95) 0%, rgba(180, 110, 255, 0.9) 45%, rgba(255, 122, 182, 0.9) 100%);
-  box-shadow: 0 14px 28px rgba(94, 167, 255, 0.22),
+    linear-gradient(125deg, rgba(92, 167, 255, 0.95) 0%, rgba(180, 110, 255, 0.9) 55%, rgba(255, 122, 182, 0.9) 100%);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 6px 18px rgba(94, 167, 255, 0.22),
     0 0 0 1px rgba(255, 255, 255, 0.18) inset;
   transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
 }
 
-.ideals-action-cta:hover:not(:disabled),
-.ideals-action-cta:focus-visible:not(:disabled) {
+.ideals-analyze-all:hover:not(:disabled),
+.ideals-analyze-all:focus-visible:not(:disabled) {
   transform: translateY(-1px);
-  filter: brightness(1.06) saturate(1.05);
-  box-shadow: 0 18px 32px rgba(94, 167, 255, 0.28),
-    0 0 0 1px rgba(255, 255, 255, 0.26) inset;
+  filter: brightness(1.07) saturate(1.04);
 }
 
-.ideals-action-cta:disabled {
+.ideals-analyze-all:disabled {
   cursor: not-allowed;
   opacity: 0.55;
-  filter: saturate(0.7);
+  filter: saturate(0.65);
 }
 
-.ideals-action-cta-glyph {
+.ideals-analyze-all-glyph {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.18);
-  font-size: 14px;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-.ideals-action-cta-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.ideals-action-cta-title {
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-}
-
-.ideals-action-cta-sub {
   font-size: 11px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.84);
-  line-height: 1.35;
+  font-weight: 900;
+}
+
+.ideals-analyze-all-text {
+  white-space: nowrap;
 }
 
 .ideals-layer-toggles {
@@ -6744,6 +6735,15 @@ button.reference-action.active {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.ideals-layer-toggles-label {
+  margin-right: 4px;
+  color: #8da2ba;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .ideals-layer-toggle {
@@ -6792,6 +6792,13 @@ button.reference-action.active {
   box-shadow: 0 0 14px rgba(255, 159, 67, 0.2);
 }
 
+.ideals-layer-toggle--diff.active {
+  border-color: rgba(94, 234, 212, 0.82);
+  background: rgba(94, 234, 212, 0.16);
+  color: #c7fff1;
+  box-shadow: 0 0 14px rgba(94, 234, 212, 0.22);
+}
+
 .ideals-layer-swatch {
   display: inline-block;
   width: 18px;
@@ -6812,35 +6819,126 @@ button.reference-action.active {
   background: #ff9f43;
 }
 
-/* --- Source action rows ------------------------------------------------- */
+.ideals-layer-swatch--diff {
+  background: repeating-linear-gradient(
+    90deg,
+    #5eead4 0 4px,
+    transparent 4px 8px
+  );
+}
 
-.ideals-source-rows {
-  display: flex;
-  flex-direction: column;
+/* --- Density toggle ----------------------------------------------------- */
+
+.ideals-density-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #cfdcec;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.ideals-density-toggle:hover,
+.ideals-density-toggle:focus-visible {
+  border-color: rgba(159, 232, 255, 0.55);
+  background: rgba(159, 232, 255, 0.08);
+  color: #f0f8ff;
+}
+
+.ideals-density-toggle.active {
+  border-color: rgba(94, 234, 212, 0.7);
+  background: rgba(94, 234, 212, 0.14);
+  color: #c7fff1;
+}
+
+/* --- Source action strips ---------------------------------------------- */
+
+.ideals-source-strips {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   min-width: 0;
 }
 
-.ideals-source-row {
+@media (max-width: 1080px) {
+  .ideals-source-strips {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ideals-source-strip {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 14px;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.025);
   min-width: 0;
 }
 
-.ideals-source-row--mix {
+.ideals-source-strip--mix {
   border-left: 3px solid rgba(92, 167, 255, 0.7);
 }
 
-.ideals-source-row--reference {
+.ideals-source-strip--reference {
   border-left: 3px solid rgba(255, 159, 67, 0.7);
 }
 
+.ideals-source-strip-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ideals-source-strip-label {
+  color: #e5f2ff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ideals-source-strip-divider {
+  color: #6e8298;
+}
+
+.ideals-source-strip-status {
+  color: #b3c4d8;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ideals-source-strip-file {
+  color: #7f95ad;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ideals-source-strip-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Legacy alias for any external snapshot that grepped the old class name. */
 .ideals-source-summary {
   display: inline-flex;
   align-items: center;
@@ -7074,6 +7172,52 @@ button.reference-action.active {
   }
 }
 
+/* Compact density: tighter padding, smaller graphs, no audition panel — for
+ * mastering engineers who want all four stems visible at once for A/B work.
+ * Fills the available width with 4 columns on really wide screens. */
+.ideals-stem-grid--compact {
+  gap: 10px;
+}
+
+@media (min-width: 1480px) {
+  .ideals-stem-grid--compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.ideals-stem-card--compact .ideals-stem-card-header {
+  padding: 11px 12px 6px;
+}
+
+.ideals-stem-card--compact .ideals-stem-title-text h3 {
+  font-size: 14px;
+}
+
+.ideals-stem-card--compact .ideals-stem-title-text p {
+  font-size: 11px;
+}
+
+.ideals-stem-card--compact .ideals-stem-chip {
+  min-width: 44px;
+  min-height: 26px;
+  padding: 3px 8px;
+  font-size: 10px;
+}
+
+.ideals-stem-card--compact .ideals-curve-graph {
+  height: 170px;
+}
+
+.ideals-stem-card--compact .ideals-stem-card--mini .ideals-curve-graph,
+.ideals-stem-card--compact.ideals-stem-card--mini .ideals-curve-graph {
+  height: 170px;
+}
+
+.ideals-stem-card--compact .ideals-metrics-row {
+  padding: 0 10px 10px;
+  gap: 6px;
+}
+
 .ideals-stem-card {
   position: relative;
   min-width: 0;
@@ -7302,6 +7446,24 @@ button.reference-action.active {
   filter: drop-shadow(0 0 6px rgba(255, 159, 67, 0.5));
 }
 
+/* Diff overlay = mix - ideal. Drawn in teal with a long dash + glow so it
+ * pops over the layered curves without fighting them visually. Mastering
+ * engineers can use this as a single "where am I off" reference. */
+.ideals-curve-stroke--diff {
+  stroke: #5eead4;
+  stroke-dasharray: 6 3 2 3;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 8px rgba(94, 234, 212, 0.55));
+}
+
+.ideals-curve-readout-dot--diff {
+  fill: #5eead4;
+}
+
+.ideals-curve-readout-row--diff .ideals-curve-readout-dot-glyph {
+  fill: #5eead4;
+}
+
 .ideals-curve-frame {
   fill: none;
   stroke: rgba(255, 255, 255, 0.08);
@@ -7366,9 +7528,9 @@ button.reference-action.active {
 /* --- Metrics row -------------------------------------------------------- */
 
 .ideals-metrics-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 8px;
   padding: 0 14px 12px;
 }
 
@@ -7427,12 +7589,18 @@ button.reference-action.active {
 
 .ideals-audition {
   margin: 0 14px 14px;
-  padding: 12px 12px 14px;
+  padding: 10px 12px 12px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 14px;
   background:
     linear-gradient(180deg, rgba(92, 167, 255, 0.06) 0%, rgba(92, 167, 255, 0.0) 100%),
     rgba(255, 255, 255, 0.018);
+  outline: none;
+}
+
+.ideals-audition:focus-within {
+  border-color: color-mix(in srgb, var(--stem-accent, #5ca7ff) 60%, rgba(148, 163, 184, 0.18));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--stem-accent, #5ca7ff) 35%, transparent);
 }
 
 .ideals-audition-header {
@@ -7440,7 +7608,7 @@ button.reference-action.active {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .ideals-audition-eyebrow {
@@ -7460,6 +7628,28 @@ button.reference-action.active {
   white-space: nowrap;
 }
 
+.ideals-audition-shortcut-hint {
+  color: #7f95ad;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.ideals-audition-shortcut-hint kbd {
+  display: inline-block;
+  min-width: 14px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+  color: #cfdcec;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin: 0 1px;
+}
+
 .ideals-audition-segments {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -7468,12 +7658,12 @@ button.reference-action.active {
 }
 
 .ideals-audition-segment {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
   min-width: 0;
-  padding: 8px 8px;
+  padding: 7px 9px 7px 7px;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
@@ -7482,8 +7672,36 @@ button.reference-action.active {
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.03em;
+  text-align: left;
   transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease,
     transform 0.16s ease;
+}
+
+.ideals-audition-segment-shortcut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+  color: #cfdcec;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.ideals-audition-segment-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ideals-audition-segment.active .ideals-audition-segment-shortcut {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #ffffff;
 }
 
 .ideals-audition-segment:hover:not(:disabled) {
@@ -7542,6 +7760,83 @@ button.reference-action.active {
   width: 100%;
   height: 36px;
   border-radius: 8px;
+}
+
+/* Custom transport — replaces the ugly native <audio controls>. */
+.ideals-audition-audio-hidden {
+  display: none !important;
+}
+
+.ideals-audition-transport {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.ideals-audition-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--stem-accent, #5ca7ff) 60%, transparent);
+  background: color-mix(in srgb, var(--stem-accent, #5ca7ff) 22%, transparent);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: filter 0.16s ease, transform 0.16s ease, background 0.16s ease;
+}
+
+.ideals-audition-play:hover,
+.ideals-audition-play:focus-visible {
+  filter: brightness(1.1);
+  transform: scale(1.04);
+}
+
+.ideals-audition-scrub {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  overflow: visible;
+}
+
+.ideals-audition-scrub-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--stem-accent, #5ca7ff) 80%, white);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--stem-accent, #5ca7ff) 50%, transparent);
+}
+
+.ideals-audition-scrub-thumb {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6),
+    0 0 0 2px color-mix(in srgb, var(--stem-accent, #5ca7ff) 65%, transparent);
+}
+
+.ideals-audition-time {
+  color: #cfdcec;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  min-width: 64px;
+  text-align: right;
 }
 
 .ideals-audition-empty {
@@ -7705,8 +8000,13 @@ button.reference-action.active {
 }
 
 @media (max-width: 880px) {
-  .ideals-actionbar {
-    grid-template-columns: 1fr;
+  .ideals-actionbar-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ideals-analyze-all {
+    width: 100%;
+    justify-content: center;
   }
 }
 

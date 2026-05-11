@@ -99,10 +99,16 @@ describe('IdealsModal', () => {
 
   it('makes full-view stem graphs interactive and adds a stem-vs-mix A/B control', () => {
     expect(idealsSource).toContain('onPointerMove={updateActiveFrequencyFromPointer}');
-    expect(idealsSource).toContain('data-testid={`ideals-curve-readout-${guide.id}`}');
+    expect(idealsSource).toContain('data-testid={`ideals-curve-readout-${guide.id}');
     expect(idealsSource).toContain('findNearestCurvePoint');
-    expect(idealsSource).toContain('function StemAuditionCompare');
-    expect(idealsSource).toContain('switchAuditionTarget');
+    // The audition panel was renamed from StemAuditionCompare to
+    // StemAuditionPanel when it gained the third "Reference Stem" segment.
+    // syncAudioTime is retained as a helper for back-compat even though the
+    // unified panel currently swaps src via state + effect; tests assert the
+    // helper stays exported so any third-party tooling expecting it doesn't
+    // break.
+    expect(idealsSource).toContain('function StemAuditionPanel');
+    expect(idealsSource).toContain('handleTargetSwitch');
     expect(idealsSource).toContain('syncAudioTime');
   });
 

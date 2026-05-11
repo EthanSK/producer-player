@@ -246,6 +246,12 @@ test.describe('Enter blurs text and number inputs (textareas excluded)', () => {
       const chipRow = page.getByTestId('listening-device-chip-row');
       await expect(chipRow).toBeVisible();
       await expect(chipRow).toContainText('AirPods Pro');
+      await expect(chipRow).toContainText('🔊 AirPods Pro');
+      await expect(chipRow).not.toContainText('🏷️');
+
+      const nowListeningPill = page.getByTestId('checklist-now-listening-pill');
+      await expect(nowListeningPill).toContainText('🔊 AirPods Pro');
+      await expect(nowListeningPill).not.toContainText('🏷️');
 
       // The input should have been cleared by the handler (its own
       // behavior), not the global one. Importantly it should STILL be

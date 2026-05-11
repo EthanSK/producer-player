@@ -1894,7 +1894,7 @@ const LISTENING_DEVICE_PALETTE: ReadonlyArray<{ fg: string; bg: string; border: 
   { fg: '#c5d9b6', bg: 'rgba(160, 195, 120, 0.18)', border: 'rgba(160, 195, 120, 0.55)' },// olive
 ];
 
-const LISTENING_DEVICE_MARKER = '🏷️';
+const LISTENING_DEVICE_MARKER = '🔊';
 
 function hashListeningDeviceId(id: string): number {
   let hash = 5381;
@@ -17032,7 +17032,7 @@ export function App(): JSX.Element {
           <div ref={checklistModalCardRef} className="checklist-modal-card">
             <div className="checklist-modal-header">
               <div>
-                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Tag new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to tag subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
+                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Mark new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to use that device for subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
                 <p className="muted">
                   {checklistCompletedCount}/{checklistModalItems.length} completed · {checklistModalItems.length - checklistCompletedCount} left
                 </p>
@@ -17196,7 +17196,7 @@ export function App(): JSX.Element {
                     title={
                       isListeningDeviceRenameMode
                         ? 'Rename the currently selected listening device. Press Enter or click submit to save the new name.'
-                        : 'Type a device name and press Enter to save it. New items you add will be tagged with the selected device.'
+                        : 'Type a device name and press Enter to save it. New items you add will use the selected device.'
                     }
                   />
                   <button
@@ -17268,7 +17268,7 @@ export function App(): JSX.Element {
                           type="button"
                           className="listening-device-chip-label"
                           onClick={() => handleSelectListeningDevice(device.id)}
-                          title={isActive ? `Clear "${device.name}" selection` : `Tag new items with "${device.name}"`}
+                          title={isActive ? `Clear "${device.name}" selection` : `Use "${device.name}" for new items`}
                         >
                           {isActive ? `${LISTENING_DEVICE_MARKER} ${device.name}` : device.name}
                         </button>

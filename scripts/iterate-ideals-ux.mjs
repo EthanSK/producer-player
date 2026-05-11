@@ -124,6 +124,10 @@ async function main() {
         url: `${baseUrl}/ideals-harness.html?state=ready&mix=true&ref=true&layers=ideal,mix,reference,diff`,
       },
       {
+        name: 'ready-diff-only',
+        url: `${baseUrl}/ideals-harness.html?state=ready&mix=true&ref=true&layers=diff`,
+      },
+      {
         name: 'ready-compact-density',
         url: `${baseUrl}/ideals-harness.html?state=ready&mix=true&ref=true&density=compact`,
       },

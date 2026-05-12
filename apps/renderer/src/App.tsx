@@ -20895,10 +20895,14 @@ export function App(): JSX.Element {
         />
       ) : null}
 
-      {/* v3.20: Inspector drawer toggle. Sits adjacent to the Agent Chat
-          Trigger (floating bottom-right). Only visible at narrow viewports —
-          above the breakpoint the inspector is already shown inline and the
-          toggle is hidden via CSS. */}
+      {/* v3.192 (Ethan voice 2751): Inspector drawer toggle, promoted to the
+          rightmost floating slot (right:16px) as the most-prominent /
+          most-used drawer in narrow-viewport mode. The Agent Chat trigger
+          (right:68px) and Quick Song Switcher (right:120px) shift inward.
+          Distinct accent-filled color so it visually pops above the two
+          muted neighbours. Only visible at narrow viewports — above the
+          breakpoint the inspector is shown inline and the toggle is hidden
+          via CSS. */}
       <button
         type="button"
         className={`inspector-toggle-button${inspectorDrawerOpen ? ' inspector-toggle-button--active' : ''}`}

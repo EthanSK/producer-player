@@ -6,7 +6,10 @@
 .agent-toggle-button {
   position: fixed;
   bottom: 16px;
-  right: 16px;
+  /* v3.192: shifted from right:16px to right:68px (middle slot) so the
+     inspector toggle can occupy the rightmost prominent position. See
+     `.inspector-toggle-button` in styles.css for full ordering rationale. */
+  right: 68px;
   z-index: 900;
   width: 44px;
   height: 44px;
@@ -50,7 +53,10 @@
 .agent-chat-panel {
   position: fixed;
   bottom: 0;
-  right: 16px;
+  /* v3.192: default anchored to the agent toggle button's new right:68px
+     slot. Persisted bounds (`.agent-chat-panel--positioned`) override this
+     so users who explicitly positioned the panel keep their layout. */
+  right: 68px;
   width: 380px;
   max-width: calc(100vw - 32px);
   height: 520px;

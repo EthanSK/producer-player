@@ -1968,7 +1968,10 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 .quick-switcher-toggle {
   position: fixed;
   bottom: 16px;
-  right: 68px;
+  /* v3.192: shifted from right:68px to right:120px (innermost slot) so the
+     inspector toggle can take the rightmost prominent position. See the
+     comment on `.inspector-toggle-button` for the full ordering rationale. */
+  right: 120px;
   z-index: 900;
   width: 44px;
   height: 44px;
@@ -2005,7 +2008,8 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 .quick-switcher-panel {
   position: fixed;
   bottom: 68px;
-  right: 68px;
+  /* v3.192: anchored to the quick-switcher toggle's new right:120px slot. */
+  right: 120px;
   width: 300px;
   max-height: 420px;
   z-index: 950;
@@ -4552,40 +4556,52 @@ button.checklist-play-toggle[data-playing='true'] {
 
 .inspector-toggle-button {
   position: fixed;
-  /* Placed next to the Agent Chat Trigger. The chat trigger lives at
-     right:16px, the quick-song-switcher toggle sits at right:68px (the slot
-     immediately to its left). This inspector toggle slots at right:120px so
-     all three controls line up as a single floating toolbar along the
-     bottom-right edge. Ethan asked for "to the right of the Agent Chat
-     Trigger", but the trigger is already hugging the viewport edge; being
-     visually adjacent is the closest practical interpretation. */
+  /* v3.192 (Ethan voice 2751): inspector toggle promoted to the rightmost
+     slot — right:16px — because in narrow-viewport mode it's the most-used
+     drawer (quick access to inspector cards while mastering). The other two
+     floating controls shift inward to make room:
+       - Inspector toggle:    right:16px  (this one — most prominent)
+       - Agent Chat trigger:  right:68px  (middle)
+       - Quick Song Switcher: right:120px (innermost)
+     Previously the inspector toggle was sandwiched between the other two at
+     right:120px, where Ethan kept missing it while reaching for the chat
+     trigger. */
   bottom: 16px;
-  right: 120px;
+  right: 16px;
   /* z-index must sit above the drawer (920) and backdrop (910) so the user
      can still click the toggle to dismiss an open drawer. */
   z-index: 930;
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--bg-1);
-  color: var(--accent);
+  /* Solid accent fill so it visually pops above the two muted neighbours —
+     this is the most-used button in narrow-viewport mode and deserves the
+     dominant treatment. Matches the active-state styling already used by
+     `.quick-switcher-toggle.active`. */
+  border: 1px solid var(--accent-strong);
+  background: var(--accent);
+  color: var(--bg-0);
   cursor: pointer;
   display: none; /* hidden by default; shown at narrow widths */
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 10px rgba(92, 167, 255, 0.4);
   transition: background 0.15s ease, transform 0.15s ease;
 }
 
 .inspector-toggle-button:hover {
-  background: var(--bg-2);
+  background: var(--accent-strong);
   transform: scale(1.05);
 }
 
 .inspector-toggle-button--active {
+  /* When the drawer is open, invert: muted fill with accent border so the
+     "active" state is still distinguishable from the default solid-accent
+     look (otherwise the button would look identical open vs closed). */
   background: var(--bg-2);
   border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .inspector-drawer-backdrop {

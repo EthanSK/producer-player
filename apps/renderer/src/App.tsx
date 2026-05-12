@@ -1208,7 +1208,29 @@ export function isAnalysisAbortError(error: unknown): boolean {
     return false;
   }
   const name = (error as { name?: unknown }).name;
-  return name === 'AbortError' || name === 'AnalysisTaskPreemptedError';
+  if (name === 'AbortError' || name === 'AnalysisTaskPreemptedError') {
+    return true;
+  }
+  // v3.199 — Electron's IPC boundary serializes thrown main-process Errors as
+  // a renderer-side Error with `name === 'Error'` and the original `name: msg`
+  // pair embedded in the message. So an AnalysisAbortError thrown by main
+  // arrives here as `Error("Error invoking remote method 'X': AbortError: ...")`.
+  // Match the embedded shape so v3.195's preempt-cancel pathway is silenced.
+  const message = (error as { message?: unknown }).message;
+  if (typeof message === 'string') {
+    // Be strict — only match the exact prefix produced by Electron's IPC
+    // bridge for our `AnalysisAbortError` (whose `name = 'AbortError'`).
+    if (message.includes("'producer-player:analyze-audio-file': AbortError:")) {
+      return true;
+    }
+    // Renderer-side analyzeTrackFromUrl decode path may also report
+    // "The user aborted a request." style DOMException. Cover the common
+    // AbortSignal/DOMException string form too.
+    if (message.startsWith('AbortError:') || message === 'The user aborted a request.') {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

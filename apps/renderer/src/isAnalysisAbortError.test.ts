@@ -33,6 +33,30 @@ describe('isAnalysisAbortError', () => {
     expect(isAnalysisAbortError(err)).toBe(true);
   });
 
+  it('returns true for the actual Electron-IPC-mangled AbortError shape (v3.199 regression coverage)', () => {
+    // Electron 40.x ipcRenderer.invoke rejection wraps the thrown main-side
+    // Error as a renderer-side `Error` whose `name === "Error"` and whose
+    // `message` embeds the original `name: msg` pair. This is the REAL shape
+    // observed at runtime when v3.195 preempts a warmup ffmpeg child. The
+    // v3.198 helper was checking `name === "AbortError"` only and missed
+    // this — every preempted row still flipped to "Error".
+    const err = new Error(
+      "Error invoking remote method 'producer-player:analyze-audio-file': " +
+        'AbortError: Analysis request m-1234-abc was aborted'
+    );
+    expect(err.name).toBe('Error');
+    expect(isAnalysisAbortError(err)).toBe(true);
+  });
+
+  it('returns false for an Electron-IPC-mangled error that is NOT an AbortError', () => {
+    // Genuine ffmpeg failure should still surface as error in the UI.
+    const err = new Error(
+      "Error invoking remote method 'producer-player:analyze-audio-file': " +
+        'Error: ffmpeg exited with 1. Invalid data found when processing input'
+    );
+    expect(isAnalysisAbortError(err)).toBe(false);
+  });
+
   it('returns true for AnalysisTaskPreemptedError (queue-internal preempt signal)', () => {
     const err = new AnalysisTaskPreemptedError('track::cache-key');
     expect(isAnalysisAbortError(err)).toBe(true);

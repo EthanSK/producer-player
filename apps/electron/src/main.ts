@@ -143,6 +143,13 @@ import {
 } from './plugin-host-service';
 import { PluginPresetLibraryStore } from './plugin-preset-library';
 import {
+  initActionLog,
+  getActionLogWriter,
+  logActionMain,
+  logErrorMain,
+  ACTION_LOG_FILE_NAME,
+} from './actionLog';
+import {
   buildUiZoomState,
   getNextUiZoomPreference,
   sanitizeUiZoomPreference,
@@ -399,6 +406,40 @@ function getLogDirectoryPath(): string {
   const logFilePath = log.transports.file.getFile().path;
   return dirname(logFilePath);
 }
+
+// ---------------------------------------------------------------------------
+// v3.200 — Structured action log bootstrap.
+//
+// Lives alongside the existing electron-log file as `actions.jsonl`. Writes
+// are queued through `ActionLogWriter` so concurrent IPC calls + rotation
+// don't interleave on disk. Failures bubble back into electron-log so they
+// stay visible in the normal log stream — we never want a logger that
+// silently swallows its own errors.
+// ---------------------------------------------------------------------------
+initActionLog({
+  directory: getLogDirectoryPath(),
+  onError(error) {
+    log.warn('[producer-player:action-log] write failed', error);
+  },
+});
+// Record a session-start marker so cold-start vs warm-start sessions are
+// distinguishable when scanning the action log later.
+logActionMain('app.session-start', {
+  appVersion: app.getVersion?.() ?? 'unknown',
+  platform: process.platform,
+  arch: process.arch,
+});
+
+// Wire global error handlers in the main process so unhandled exceptions
+// and rejections show up in the action log. We DELIBERATELY don't suppress
+// the original handlers — electron-log's `errorHandler.startCatching` is
+// still active and continues to write the normal log line.
+process.on('uncaughtException', (error) => {
+  logErrorMain('error.uncaught.main', error);
+});
+process.on('unhandledRejection', (reason) => {
+  logErrorMain('error.unhandled.main', reason);
+});
 
 /**
  * Log the developer-id / hardened-runtime signature of the installed .app.
@@ -2783,6 +2824,28 @@ function delay(milliseconds: number): Promise<void> {
  */
 const ANALYSIS_REQUEST_CHILDREN = new Map<string, Set<ChildProcessWithoutNullStreams>>();
 
+/**
+ * v3.200 — EXPLICIT cancellation tracking. The v3.195 design inferred
+ * cancellation from "child no longer in ANALYSIS_REQUEST_CHILDREN", which
+ * misclassified every NORMAL completion as cancellation because
+ * `unregisterAnalysisChild` ran BEFORE `checkAborted()` in the close handler.
+ *
+ * Now cancellation state is an explicit set keyed by requestId. The set is
+ * additive on `cancelAnalysisRequest()`, queried by `runProcessCapture`'s
+ * close/error handlers AND by `analyzeAudioFile()` between its sequential
+ * children, and cleared once the request has fully unwound (last child
+ * settled OR cancel arrived after all children already finished).
+ *
+ * This fixes:
+ *   - Finding 1 (v3.200 audit): normal ffmpeg completions were being
+ *     misclassified as AbortError, silently dropping real analyses.
+ *   - Finding 3 (v3.200 audit): cancels arriving BETWEEN sequential ffmpeg
+ *     children (ebur128 → volumedetect → ffprobe) were no-ops; the next
+ *     child still spawned. Now `analyzeAudioFile` checks the cancelled set
+ *     before each spawn.
+ */
+const CANCELLED_REQUEST_IDS = new Set<string>();
+
 // v3.195 — type for the child processes we track. Imported lazily to avoid
 // touching the existing import block.
 type ChildProcessWithoutNullStreams = ReturnType<typeof spawn>;
@@ -2826,7 +2889,39 @@ function unregisterAnalysisChild(
   }
 }
 
+/**
+ * v3.200 — Returns true if this requestId has been cancelled via
+ * `cancelAnalysisRequest()`. Used by both `runProcessCapture` (in the close
+ * handler, to translate a SIGKILL'd non-zero exit into an AnalysisAbortError)
+ * AND `analyzeAudioFile` (between sequential children, to short-circuit
+ * spawning if cancel already fired).
+ */
+function isAnalysisRequestCancelled(requestId: string | null): boolean {
+  if (!requestId) {
+    return false;
+  }
+  return CANCELLED_REQUEST_IDS.has(requestId);
+}
+
+/**
+ * v3.200 — Clear cancellation state for a requestId. Called by
+ * `analyzeAudioFile` in a finally block once the whole request has unwound
+ * (whether by completion, rejection, or cancel). Without this the set would
+ * leak entries for every cancelled request.
+ */
+function clearCancelledRequestId(requestId: string | null): void {
+  if (!requestId) {
+    return;
+  }
+  CANCELLED_REQUEST_IDS.delete(requestId);
+}
+
 function cancelAnalysisRequest(requestId: string): void {
+  // v3.200 — record cancellation EXPLICITLY so close/error handlers and the
+  // sequential-child guard in analyzeAudioFile can detect it. Add to the set
+  // FIRST so any close handler that fires concurrently with this kill sees
+  // the cancelled state.
+  CANCELLED_REQUEST_IDS.add(requestId);
   const set = ANALYSIS_REQUEST_CHILDREN.get(requestId);
   if (!set || set.size === 0) {
     return;
@@ -2842,9 +2937,11 @@ function cancelAnalysisRequest(requestId: string): void {
       // and kill.
     }
   }
-  // Mark the slot drained so the caller sees an abort, not a non-zero exit
-  // (we rely on the abort flag on close handler below).
-  ANALYSIS_REQUEST_CHILDREN.delete(requestId);
+  // We intentionally DO NOT delete from ANALYSIS_REQUEST_CHILDREN here. The
+  // child's own close handler will unregister itself; deleting eagerly would
+  // race the close handler's `unregisterAnalysisChild` call into a no-op
+  // (harmless but confusing). Cancellation state lives in
+  // CANCELLED_REQUEST_IDS now, not the children-map presence.
 }
 
 async function runProcessCapture(
@@ -2853,27 +2950,22 @@ async function runProcessCapture(
   options: { requestId?: string | null } = {}
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolvePromise, rejectPromise) => {
+    const requestId = options.requestId ?? null;
+
+    // v3.200 — Guard: if cancel already fired before we even spawned (e.g.
+    // cancel arrived between sequential children of analyzeAudioFile), do
+    // not spawn at all. The analyzeAudioFile caller has its own pre-spawn
+    // check too, but this is the defense in depth.
+    if (isAnalysisRequestCancelled(requestId)) {
+      rejectPromise(new AnalysisAbortError(requestId ?? '<no-id>'));
+      return;
+    }
+
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    const requestId = options.requestId ?? null;
     registerAnalysisChild(requestId, child);
-    let aborted = false;
-
-    // Detect whether the cancel handler killed this child: if requestId is
-    // no longer in the map (cancelAnalysisRequest cleared it), we should
-    // surface an AbortError rather than treat the non-zero exit as a real
-    // failure.
-    const checkAborted = (): boolean => {
-      if (!requestId) {
-        return false;
-      }
-      const set = ANALYSIS_REQUEST_CHILDREN.get(requestId);
-      // If the set is missing entirely, or this child is no longer in it,
-      // we've been cancelled.
-      return !set || !set.has(child);
-    };
 
     let stdout = '';
     let stderr = '';
@@ -2887,8 +2979,12 @@ async function runProcessCapture(
     });
 
     child.on('error', (error) => {
+      // v3.200 — check cancelled state BEFORE unregistering. The old design
+      // unregistered first and then inferred cancellation from map absence,
+      // which silently misclassified every normal completion as abort.
+      const wasCancelled = isAnalysisRequestCancelled(requestId);
       unregisterAnalysisChild(requestId, child);
-      if (aborted || checkAborted()) {
+      if (wasCancelled) {
         rejectPromise(new AnalysisAbortError(requestId ?? '<no-id>'));
         return;
       }
@@ -2896,8 +2992,13 @@ async function runProcessCapture(
     });
 
     child.on('close', (code) => {
+      // v3.200 — check cancelled state BEFORE unregistering (see error
+      // handler above for rationale). This is the path that caused Finding
+      // 1: every successful ffmpeg exit looked like an abort because the
+      // unregister had already removed the child from the set.
+      const wasCancelled = isAnalysisRequestCancelled(requestId);
       unregisterAnalysisChild(requestId, child);
-      if (aborted || checkAborted()) {
+      if (wasCancelled) {
         rejectPromise(new AnalysisAbortError(requestId ?? '<no-id>'));
         return;
       }
@@ -2919,11 +3020,32 @@ async function analyzeAudioFile(
   filePath: string,
   requestId: string | null = null
 ): Promise<AudioFileAnalysis> {
+  try {
+    return await analyzeAudioFileInternal(filePath, requestId);
+  } finally {
+    // v3.200 — Always clear cancellation bookkeeping for this requestId
+    // once the whole call has unwound, regardless of how it ended (success,
+    // natural failure, cancel-induced AbortError). This prevents leaking
+    // entries in CANCELLED_REQUEST_IDS.
+    clearCancelledRequestId(requestId);
+  }
+}
+
+async function analyzeAudioFileInternal(
+  filePath: string,
+  requestId: string | null
+): Promise<AudioFileAnalysis> {
   const resolvedPath = resolve(filePath);
   const stats = await fs.stat(resolvedPath);
 
   if (!stats.isFile()) {
     throw new Error(`Cannot analyse a non-file path: ${resolvedPath}`);
+  }
+
+  // v3.200 — Finding 3 fix: cancel may have arrived between the stat call
+  // and the first child spawn. Short-circuit if so.
+  if (isAnalysisRequestCancelled(requestId)) {
+    throw new AnalysisAbortError(requestId ?? '<no-id>');
   }
 
   if (ANALYSIS_DELAY_MS > 0) {
@@ -2946,6 +3068,15 @@ async function analyzeAudioFile(
     'null',
     '-',
   ], { requestId });
+
+  // v3.200 — Finding 3 fix: cancel may have arrived between ebur128 finishing
+  // and the next pair of children spawning. Short-circuit so we don't waste
+  // CPU on the next two ffmpeg processes the renderer no longer needs.
+  // (runProcessCapture also has a pre-spawn check, but raising here gives the
+  // caller a single AbortError rather than two parallel ones.)
+  if (isAnalysisRequestCancelled(requestId)) {
+    throw new AnalysisAbortError(requestId ?? '<no-id>');
+  }
 
   const [volumedetectResult, probedSampleRateHz] = await Promise.all([
     runProcessCapture(ffmpegCommand, [
@@ -6149,6 +6280,31 @@ function registerIpcHandlers(service: FileLibraryService): void {
       }
     }
   );
+
+  // v3.200 — Structured action log append (fire-and-forget from renderer).
+  // We intentionally swallow errors and route them to electron-log so a
+  // disk hiccup never propagates a rejection back into the React
+  // handler that triggered the log call.
+  ipcMain.handle(IPC_CHANNELS.ACTION_LOG_APPEND, async (_event, rawEntry: unknown) => {
+    const writer = getActionLogWriter();
+    if (!writer) return;
+    try {
+      const { normalizeEntry } = await import('./actionLog');
+      const entry = normalizeEntry(rawEntry, 'renderer');
+      // Force the renderer-provided source through normalization so any
+      // forged value (e.g. 'main') from a misbehaving renderer is reset
+      // to 'renderer' here. We do this AFTER normalizeEntry because
+      // normalizeEntry's fallback only kicks in for invalid values.
+      const safe = entry.source === 'renderer' ? entry : { ...entry, source: 'renderer' as const };
+      await writer.append(safe);
+    } catch (error) {
+      log.warn('[producer-player:action-log] failed to normalize/append renderer entry', error);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ACTION_LOG_GET_PATH, async () => {
+    return join(getLogDirectoryPath(), ACTION_LOG_FILE_NAME);
+  });
 }
 
 function configureMacTestActivationPolicy(): void {

@@ -279,6 +279,13 @@ export const IPC_CHANNELS = {
   GET_LOG_PATH: 'producer-player:get-log-path',
   LOG_READ_SLICE: 'producer-player:log-read-slice',
   RENDERER_LOG: 'producer-player:renderer-log',
+  // v3.200 — Structured action log. JSONL append-only stream of every
+  // user interaction + error, rotating at ~100 MB, keeping last 5 files.
+  // Renderer code calls `logAction(event, context)` / `logError(...)` which
+  // posts a serialized ActionLogEntry over this channel; the main process
+  // writes to `actions.jsonl` alongside the electron-log file.
+  ACTION_LOG_APPEND: 'producer-player:action-log',
+  ACTION_LOG_GET_PATH: 'producer-player:action-log-get-path',
   GET_USER_STATE: 'producer-player:get-user-state',
   SET_USER_STATE: 'producer-player:set-user-state',
   EXPORT_USER_STATE: 'producer-player:export-user-state',
@@ -1347,6 +1354,43 @@ export interface LogReadSliceResult {
   lines: string[];
 }
 
+// ---------------------------------------------------------------------------
+// v3.200 — Structured action log
+//
+// Every user interaction and error is appended (as JSON) to a dedicated
+// rotating log file `actions.jsonl` alongside the existing electron-log
+// output. The renderer never writes to disk directly — it ships entries
+// over the `ACTION_LOG_APPEND` IPC channel and the main process owns
+// serialization + rotation. See `apps/electron/src/actionLog.ts` and
+// `apps/renderer/src/lib/actionLog.ts`.
+// ---------------------------------------------------------------------------
+
+export type ActionLogLevel = 'info' | 'warn' | 'error';
+
+export type ActionLogSource = 'renderer' | 'main' | 'sidecar';
+
+export interface ActionLogErrorPayload {
+  /** `Error.name` (e.g. `TypeError`). Falls back to `'Error'` if absent. */
+  name: string;
+  /** Human-readable message. Truncated at 2000 chars on the main side. */
+  message: string;
+  /** Optional stack trace. Truncated at 4000 chars on the main side. */
+  stack?: string;
+}
+
+export interface ActionLogEntry {
+  /** ISO 8601 timestamp, set by the caller; the writer trusts it. */
+  ts: string;
+  level: ActionLogLevel;
+  /** Short event name, e.g. `song.play`, `plugin.add`, `error.unhandled`. */
+  event: string;
+  source: ActionLogSource;
+  /** Free-form structured context — IDs, names, durations, etc. */
+  context?: Record<string, unknown>;
+  /** Populated for `error.*` events. */
+  error?: ActionLogErrorPayload;
+}
+
 export interface ProducerPlayerBridge {
   getLibrarySnapshot(): Promise<LibrarySnapshot>;
   getEnvironment(): Promise<ProducerPlayerEnvironment>;
@@ -1439,6 +1483,15 @@ export interface ProducerPlayerBridge {
   getLogPath(): Promise<string>;
   logReadSlice(args: LogReadSliceArgs): Promise<LogReadSliceResult>;
   rendererLog(level: 'error' | 'warn' | 'info', message: string, meta?: Record<string, unknown>): Promise<void>;
+  /**
+   * v3.200 — Append a structured action log entry. Fire-and-forget from
+   * the renderer's perspective (returns once the IPC message is queued;
+   * write errors are swallowed on the main side and logged via
+   * electron-log so user actions never block on disk I/O).
+   */
+  appendActionLog(entry: ActionLogEntry): Promise<void>;
+  /** Returns the absolute path to the active `actions.jsonl` file. */
+  getActionLogPath(): Promise<string>;
   getUserState(): Promise<ProducerPlayerUserState>;
   setUserState(state: ProducerPlayerUserState): Promise<ProducerPlayerUserState>;
   exportUserState(): Promise<UserStateExportResult>;

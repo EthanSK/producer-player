@@ -230,6 +230,7 @@ import {
 } from './lib/useSystemAudioDevice';
 import { decideAutoSelect } from './listeningDeviceAutoSelect';
 import { ErrorDetailsDialog } from './lib/ErrorDetailsDialog';
+import { logAction, logError, installRendererErrorHandlers } from './lib/actionLog';
 import {
   LUFS_LINKS,
   TRUE_PEAK_LINKS,
@@ -6511,6 +6512,8 @@ export function App(): JSX.Element {
   }, []);
 
   // Forward uncaught renderer errors and rejections to main-process log file.
+  // v3.200 — Also fan these out into the structured action log so the
+  // JSONL stream contains every error alongside every user action.
   useEffect(() => {
     function handleError(event: ErrorEvent): void {
       void window.producerPlayer.rendererLog('error', `Uncaught error: ${event.message}`, {
@@ -6527,9 +6530,12 @@ export function App(): JSX.Element {
 
     window.addEventListener('error', handleError);
     window.addEventListener('unhandledrejection', handleRejection);
+    const detachActionLogHandlers = installRendererErrorHandlers();
+    logAction('app.renderer-mount');
     return () => {
       window.removeEventListener('error', handleError);
       window.removeEventListener('unhandledrejection', handleRejection);
+      detachActionLogHandlers();
     };
   }, []);
 
@@ -8002,6 +8008,12 @@ export function App(): JSX.Element {
         return;
       }
 
+      logAction('mastering.ask-ai', {
+        panelId,
+        surface,
+        songId: selectedPlaybackVersion.songId,
+        versionId: selectedPlaybackVersion.id,
+      });
       setAgentChatPromptRequest({
         id: `${panelId}-${surface}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         prompt: buildMasteringPanelAskAiPrompt(panelId, surface),
@@ -9540,6 +9552,7 @@ export function App(): JSX.Element {
       }
       const songId = selectedPlaybackSongId;
       const versionNumber = currentPlaybackVersionNumber;
+      logAction('mastering.trigger', { songId, versionNumber, source });
       aiRecFetchIdRef.current += 1;
       const clearRequestId = aiRecFetchIdRef.current;
 
@@ -10253,15 +10266,18 @@ export function App(): JSX.Element {
   // Tests use page.evaluate(() => window.producerPlayer.linkFolder(path)) directly.
 
   async function handleOpenFolderDialog(): Promise<void> {
+    logAction('folder.link-dialog');
     await runSnapshotTask(() => window.producerPlayer.linkFolderWithDialog());
   }
 
   async function handleUnlinkFolder(folderId: string, folderName: string): Promise<void> {
+    logAction('folder.unlink-requested', { folderId, folderName });
     const confirmed = window.confirm(
       `Unlink "${folderName}"?\n\nThis removes the folder from Producer Player and resets saved ordering/history for that linked folder in the app state.\n\nAudio files on disk are not deleted.`
     );
 
     if (!confirmed) {
+      logAction('folder.unlink-cancelled', { folderId });
       return;
     }
 
@@ -10378,10 +10394,12 @@ export function App(): JSX.Element {
   }
 
   async function handleRescan(): Promise<void> {
+    logAction('folder.rescan');
     await runSnapshotTask(() => window.producerPlayer.rescanLibrary());
   }
 
   async function handleOrganize(): Promise<void> {
+    logAction('folder.organize-old-versions');
     await runSnapshotTask(() => window.producerPlayer.organizeOldVersions());
   }
 
@@ -10647,6 +10665,7 @@ export function App(): JSX.Element {
   }
 
   function handleSongRowSelect(songId: string): void {
+    logAction('song.select', { songId, previousSongId: selectedSongId });
     if (songId !== selectedSongId && songId === selectedPlaybackSongId) {
       rememberCurrentSongPlayhead();
     }
@@ -10656,6 +10675,7 @@ export function App(): JSX.Element {
 
   async function handleSongRowPlay(songId: string): Promise<void> {
     const song = songs.find((candidate) => candidate.id === songId);
+    logAction('song.play', { songId, found: Boolean(song) });
     if (!song) {
       handleSongRowSelect(songId);
       return;
@@ -10818,6 +10838,12 @@ export function App(): JSX.Element {
 
   async function handleTogglePlayback(): Promise<void> {
     const audio = audioRef.current;
+    logAction('transport.toggle-playback', {
+      hasAudio: Boolean(audio),
+      wasPaused: audio?.paused ?? null,
+      selectedSongId,
+      selectedPlaybackVersionId,
+    });
     if (!audio) {
       return;
     }
@@ -11400,6 +11426,10 @@ export function App(): JSX.Element {
   }
 
   async function handleUseCurrentTrackAsReference(): Promise<void> {
+    logAction('reference.use-current-track', {
+      songId: selectedSongId,
+      versionId: selectedPlaybackVersionId,
+    });
     if (!analysis || !measuredAnalysis || !selectedPlaybackVersion) {
       return;
     }
@@ -11443,13 +11473,19 @@ export function App(): JSX.Element {
   }
 
   async function handleChooseReferenceTrack(): Promise<void> {
+    logAction('reference.pick-external');
     setReferenceError(null);
 
     const pickedReference: ReferenceTrackSelection | null =
       await window.producerPlayer.pickReferenceTrack();
     if (!pickedReference) {
+      logAction('reference.pick-external.cancelled');
       return;
     }
+    logAction('reference.pick-external.loaded', {
+      filePath: pickedReference.filePath,
+      fileName: pickedReference.fileName,
+    });
 
     await loadReferenceTrack(
       'external-file',
@@ -11544,6 +11580,7 @@ export function App(): JSX.Element {
   }
 
   function handleRemoveSavedReferenceTrack(filePath: string): void {
+    logAction('reference.remove-saved', { filePath });
     setSavedReferenceTracks((current) => {
       const next = current.filter((savedReference) => savedReference.filePath !== filePath);
       persistSavedReferenceTracks(next);
@@ -11552,6 +11589,7 @@ export function App(): JSX.Element {
   }
 
   function handleClearReferenceTrack(): void {
+    logAction('reference.clear');
     // v3.22.0: bump the reference-load request id so any in-flight
     // auto-restore load (from a fast-switch across songs with pending
     // ffmpeg analysis) becomes stale and can't stomp on this cleared
@@ -11930,6 +11968,7 @@ export function App(): JSX.Element {
   const handlePluginAdd = useCallback(
     (pluginId: string) => {
       if (!selectedSongId) return;
+      logAction('plugin.add', { songId: selectedSongId, pluginId });
       // Any explicit user action on the chain resets the crash circuit
       // breaker (see onPluginSidecarExited handler).
       pluginCrashTimestampsRef.current = [];
@@ -11940,6 +11979,7 @@ export function App(): JSX.Element {
         .catch((err) => {
           const message = err instanceof Error ? err.message : String(err);
           setError(`Could not add plugin: ${message}`);
+          logError('plugin.add.failed', err, { songId: selectedSongId, pluginId });
           void window.producerPlayer.rendererLog('error', '[plugin-chain] add failed', {
             error: message,
           });
@@ -11951,6 +11991,7 @@ export function App(): JSX.Element {
   const handlePluginRemove = useCallback(
     (instanceId: string) => {
       if (!selectedSongId) return;
+      logAction('plugin.remove', { songId: selectedSongId, instanceId });
       pluginCrashTimestampsRef.current = [];
       setPluginChainUnstable(false);
       void window.producerPlayer
@@ -11959,6 +12000,7 @@ export function App(): JSX.Element {
         .catch((err) => {
           const message = err instanceof Error ? err.message : String(err);
           setError(`Could not remove plugin: ${message}`);
+          logError('plugin.remove.failed', err, { songId: selectedSongId, instanceId });
           void window.producerPlayer.rendererLog('error', '[plugin-chain] remove failed', {
             error: message,
           });
@@ -11974,6 +12016,11 @@ export function App(): JSX.Element {
         (item) => item.instanceId === instanceId,
       );
       if (!current) return;
+      logAction('plugin.toggle', {
+        songId: selectedSongId,
+        instanceId,
+        nextEnabled: !current.enabled,
+      });
       pluginCrashTimestampsRef.current = [];
       setPluginChainUnstable(false);
       const previousChain = pluginChainRef.current;
@@ -12003,6 +12050,10 @@ export function App(): JSX.Element {
   const handlePluginReorder = useCallback(
     (orderedInstanceIds: string[]) => {
       if (!selectedSongId) return;
+      logAction('plugin.reorder', {
+        songId: selectedSongId,
+        count: orderedInstanceIds.length,
+      });
       void window.producerPlayer
         .reorderPluginChain(selectedSongId, orderedInstanceIds)
         .then((chain) => commitPluginChain(chain))
@@ -12075,6 +12126,11 @@ export function App(): JSX.Element {
         setError('Preset name is required.');
         return;
       }
+      logAction('plugin.preset-save', {
+        songId: selectedSongId,
+        instanceId,
+        presetName: name,
+      });
       void window.producerPlayer
         .savePluginPreset(selectedSongId, instanceId, name)
         .then((preset) => {
@@ -12098,6 +12154,12 @@ export function App(): JSX.Element {
       if (!selectedSongId) return;
       const pluginId =
         pluginChainRef.current.items.find((item) => item.instanceId === instanceId)?.pluginId ?? '';
+      logAction('plugin.preset-recall', {
+        songId: selectedSongId,
+        instanceId,
+        presetName: name,
+        pluginId,
+      });
       void window.producerPlayer
         .recallPluginPreset(selectedSongId, instanceId, name)
         .then((chain) => {
@@ -12120,6 +12182,7 @@ export function App(): JSX.Element {
 
   const handlePluginDeletePreset = useCallback(
     (pluginId: string, name: string) => {
+      logAction('plugin.preset-delete', { pluginId, presetName: name });
       void window.producerPlayer
         .deletePluginPreset(pluginId, name)
         .then(() => refreshPluginPresets(pluginId))
@@ -12142,6 +12205,7 @@ export function App(): JSX.Element {
   const handlePluginOpenEditor = useCallback((instanceId: string) => {
     if (!instanceId) return;
     const isOpen = openEditorInstanceIds.has(instanceId);
+    logAction('plugin.editor-open', { instanceId, alreadyOpen: isOpen });
     if (!isOpen) {
       // Optimistic open — flip the button on immediately, then fall back on
       // error. The sidecar answers within ~100ms on a loaded plugin.
@@ -12686,21 +12750,25 @@ export function App(): JSX.Element {
   }
 
   async function handlePickSongProjectFile(songId: string): Promise<void> {
+    logAction('project-file.pick', { songId });
     await runVoidTask(async () => {
       const selection = await window.producerPlayer.pickProjectFile(
         songProjectFilePaths[songId] ?? null
       );
 
       if (!selection) {
+        logAction('project-file.pick.cancelled', { songId });
         return;
       }
 
+      logAction('project-file.set', { songId, filePath: selection.filePath });
       setSongProjectFilePath(songId, selection.filePath);
     });
   }
 
   async function handleOpenSongProjectFile(songId: string): Promise<void> {
     const projectFilePath = songProjectFilePaths[songId] ?? null;
+    logAction('project-file.open', { songId, hasFile: Boolean(projectFilePath) });
     if (!projectFilePath) {
       await handlePickSongProjectFile(songId);
       return;
@@ -12732,6 +12800,10 @@ export function App(): JSX.Element {
 
   async function handleSaveSongProjectCopy(song: SongWithVersions): Promise<void> {
     const projectFilePath = songProjectFilePaths[song.id] ?? null;
+    logAction('project-file.save-copy.requested', {
+      songId: song.id,
+      hasFile: Boolean(projectFilePath),
+    });
     if (!projectFilePath) {
       toast.show({
         id: `song-project-save-copy-${song.id}`,
@@ -12751,12 +12823,21 @@ export function App(): JSX.Element {
         );
 
         if (result.ok) {
+          logAction('project-file.save-copy.succeeded', {
+            songId: song.id,
+            newPath: result.newPath,
+            targetVersion,
+          });
           toast.show({
             id: `song-project-save-copy-${song.id}`,
             kind: 'success',
             text: `Saved copy: ${getPathTail(result.newPath)}`,
           });
         } else {
+          logAction('project-file.save-copy.failed', {
+            songId: song.id,
+            error: result.error,
+          });
           toast.show({
             id: `song-project-save-copy-${song.id}`,
             kind: 'error',
@@ -12764,6 +12845,7 @@ export function App(): JSX.Element {
           });
         }
       } catch (cause) {
+        logError('project-file.save-copy.threw', cause, { songId: song.id });
         const message = cause instanceof Error ? cause.message : String(cause);
         toast.show({
           id: `song-project-save-copy-${song.id}`,
@@ -13214,6 +13296,7 @@ export function App(): JSX.Element {
     if (text.length === 0) {
       return;
     }
+    logAction('checklist.album.add', { key: getAlbumChecklistKey(), length: text.length });
 
     const key = getAlbumChecklistKey();
     setAlbumChecklists((prev) => {
@@ -13238,6 +13321,7 @@ export function App(): JSX.Element {
   }
 
   function handleToggleAlbumChecklistItem(itemId: string, completed: boolean): void {
+    logAction('checklist.album.toggle', { itemId, completed });
     const key = getAlbumChecklistKey();
     setAlbumChecklists((prev) => {
       const existing = prev[key] ?? [];
@@ -13252,6 +13336,7 @@ export function App(): JSX.Element {
 
   // v3.183.0 — flip an album-checklist row between todo and note mode.
   function handleToggleAlbumChecklistItemNoteMode(itemId: string): void {
+    logAction('checklist.album.convert-note', { itemId });
     const key = getAlbumChecklistKey();
     setAlbumChecklists((prev) => {
       const existing = prev[key] ?? [];
@@ -13271,6 +13356,7 @@ export function App(): JSX.Element {
   }
 
   function handleRemoveAlbumChecklistItem(itemId: string): void {
+    logAction('checklist.album.remove', { itemId });
     const key = getAlbumChecklistKey();
     setAlbumChecklists((prev) => {
       const existing = prev[key] ?? [];
@@ -13391,6 +13477,11 @@ export function App(): JSX.Element {
   // so the exact same load-then-autoplay-if-playing semantics apply regardless
   // of whether the user reaches for the inspector or the floating switcher.
   function handleVersionSwitcherSelect(versionId: string): void {
+    logAction('version.switch', {
+      versionId,
+      previousVersionId: selectedPlaybackVersionId,
+      previewMode: playbackPreviewMode,
+    });
     // No-op when the user clicks the already-active row AND we're already
     // hearing the mix. When reference playback mode is on, we still fall
     // through so the user ends up on the mix version they just asked for.
@@ -13756,6 +13847,11 @@ export function App(): JSX.Element {
     if (!songId || itemText.length === 0) {
       return;
     }
+    logAction('checklist.song.add', {
+      songId,
+      length: itemText.length,
+      source: options.source,
+    });
 
     const checklistSong = snapshot.songs.find((song) => song.id === songId) ?? null;
     const capturedVersion =
@@ -13948,6 +14044,10 @@ export function App(): JSX.Element {
         return;
       }
 
+      logAction('listening-device.rename', {
+        deviceId: activeListeningDeviceId,
+        newName: trimmed,
+      });
       setListeningDevices((prev) =>
         prev.map((device) =>
           device.id === activeListeningDeviceId ? { ...device, name: trimmed } : device
@@ -13965,6 +14065,7 @@ export function App(): JSX.Element {
       (device) => device.name.trim().toLowerCase() === normalized
     );
     if (existing) {
+      logAction('listening-device.select', { deviceId: existing.id, viaInput: true });
       setActiveListeningDeviceId(existing.id);
       setListeningDeviceDraftName('');
       // v3.197 — no auto-capture; user must click the explicit Link button.
@@ -13978,6 +14079,7 @@ export function App(): JSX.Element {
       id: createListeningDeviceId(),
       name: trimmed,
     };
+    logAction('listening-device.add', { deviceId: newDevice.id, name: newDevice.name });
     setListeningDevices((prev) => [...prev, newDevice]);
     setActiveListeningDeviceId(newDevice.id);
     setListeningDeviceDraftName('');
@@ -13997,6 +14099,12 @@ export function App(): JSX.Element {
     if (!activeListeningDeviceId) return;
     const target = listeningDevices.find((d) => d.id === activeListeningDeviceId);
     if (!target) return;
+    logAction('listening-device.link', {
+      deviceId: activeListeningDeviceId,
+      deviceName: target.name,
+      systemDeviceId: systemAudioDevice.deviceId,
+      systemDeviceLabel: systemAudioDevice.label,
+    });
     const systemId = systemAudioDevice.deviceId.trim();
     if (systemId.length === 0) {
       toast.show({
@@ -14089,6 +14197,7 @@ export function App(): JSX.Element {
     // Clicking the already-active chip clears the selection so new items are
     // added without a device tag.
     const wasActive = activeListeningDeviceId === deviceId;
+    logAction(wasActive ? 'listening-device.deselect' : 'listening-device.select', { deviceId });
     setActiveListeningDeviceId((current) => (current === deviceId ? null : deviceId));
 
     if (wasActive) {
@@ -14111,6 +14220,7 @@ export function App(): JSX.Element {
   }
 
   function handleDeleteListeningDevice(deviceId: string): void {
+    logAction('listening-device.delete', { deviceId });
     setListeningDevices((prev) => prev.filter((device) => device.id !== deviceId));
     setActiveListeningDeviceId((current) => (current === deviceId ? null : current));
     if (activeListeningDeviceId === deviceId) {
@@ -14129,6 +14239,7 @@ export function App(): JSX.Element {
   }
 
   function handleToggleChecklistItem(songId: string, itemId: string, completed: boolean): void {
+    logAction('checklist.song.toggle', { songId, itemId, completed });
     updateSongChecklistItems(songId, (items) =>
       items.map((item) => (item.id === itemId ? { ...item, completed } : item))
     );
@@ -14139,6 +14250,7 @@ export function App(): JSX.Element {
   // total. We omit `isNote` rather than storing `false` so historical
   // items round-trip cleanly through the sanitizer.
   function handleToggleChecklistItemNoteMode(songId: string, itemId: string): void {
+    logAction('checklist.song.convert-note', { songId, itemId });
     updateSongChecklistItems(songId, (items) =>
       items.map((item) => {
         if (item.id !== itemId) return item;
@@ -14168,6 +14280,7 @@ export function App(): JSX.Element {
   }
 
   function handleRemoveChecklistItem(songId: string, itemId: string): void {
+    logAction('checklist.song.remove', { songId, itemId });
     updateSongChecklistItems(songId, (items) => items.filter((item) => item.id !== itemId));
   }
 
@@ -15801,11 +15914,40 @@ export function App(): JSX.Element {
             data-testid="show-logs-button"
             title="Open the folder containing app log files for troubleshooting."
             onClick={() => {
+              logAction('logs.open-folder');
               void window.producerPlayer.openLogFolder();
             }}
           >
             Show Logs
           </button>
+          {/* v3.200 — Tiny status hint pointing at the structured action log.
+              Clicking opens the same log directory; the filename label is the
+              visual hook so Ethan can scan `actions.jsonl` directly. */}
+          <div
+            style={{
+              fontSize: '0.75em',
+              opacity: 0.7,
+              marginTop: '0.3em',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4em',
+            }}
+            data-testid="action-log-indicator"
+            title="Structured JSONL log of every user action + error."
+          >
+            <span>Logs: actions.jsonl</span>
+            <button
+              type="button"
+              className="ghost"
+              style={{ fontSize: '0.9em', padding: '0 4px' }}
+              onClick={() => {
+                logAction('logs.reveal-action-log');
+                void window.producerPlayer.openLogFolder();
+              }}
+            >
+              Reveal
+            </button>
+          </div>
 
           {loading && <p className="muted">Loading snapshot…</p>}
           {error && (

@@ -168,4 +168,22 @@ await build({
   plugins: [shimElectronLog],
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs');
+// v3.200 — Structured action log. Pure serialization, normalization, and
+// rotation logic — testable without an Electron runtime. We keep node:fs
+// and node:path external so the writer's real filesystem usage stays
+// available to the (hermetic) test that drives it via an in-memory
+// dependency-injected handler set instead of touching real disk.
+await build({
+  entryPoints: [resolve(appDir, 'src/actionLog.ts')],
+  outfile: resolve(appDir, 'dist/actionLog.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+  external: ['node:fs', 'node:path'],
+  plugins: [shimElectronLog],
+});
+
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs + dist/actionLog.test.cjs');

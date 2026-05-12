@@ -29,6 +29,7 @@ import {
   type TransportCommand,
   type TransportCommandListener,
   type UiZoomState,
+  type ActionLogEntry,
 } from '@producer-player/contracts';
 
 const bridge: ProducerPlayerBridge = {
@@ -349,6 +350,15 @@ const bridge: ProducerPlayerBridge = {
 
   async rendererLog(level: 'error' | 'warn' | 'info', message: string, meta?: Record<string, unknown>) {
     await ipcRenderer.invoke(IPC_CHANNELS.RENDERER_LOG, level, message, meta);
+  },
+
+  // v3.200 — Structured action log surface.
+  async appendActionLog(entry: ActionLogEntry) {
+    await ipcRenderer.invoke(IPC_CHANNELS.ACTION_LOG_APPEND, entry);
+  },
+
+  async getActionLogPath() {
+    return ipcRenderer.invoke(IPC_CHANNELS.ACTION_LOG_GET_PATH);
   },
 
   async getUserState() {

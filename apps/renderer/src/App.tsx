@@ -65,6 +65,7 @@ import {
   ANALYSIS_PRIORITY_BACKGROUND,
   ANALYSIS_PRIORITY_NEIGHBOR,
   ANALYSIS_PRIORITY_USER_SELECTED,
+  demotePreviewAnalysis,
   dumpPreviewAnalysisQueue,
   estimateShortTermLufs,
   getPreviewAnalysisQueueStats,
@@ -1210,6 +1211,20 @@ function promoteMeasuredAnalysis(
   priority: AnalysisPriority = ANALYSIS_PRIORITY_USER_SELECTED
 ): void {
   MEASURED_ANALYSIS_QUEUE.promote(cacheKey, priority);
+}
+
+/**
+ * v3.190 — Demote a queued/in-flight measured-analysis job. Used when the
+ * user rapidly switches from track A to track B: A's USER_SELECTED measured
+ * job is now stale and should stop hogging a bypass slot away from B. We
+ * demote A to NEIGHBOR rather than cancel because the result is still cached
+ * and useful if the user switches back.
+ */
+function demoteMeasuredAnalysis(
+  cacheKey: string,
+  priority: AnalysisPriority
+): void {
+  MEASURED_ANALYSIS_QUEUE.demote(cacheKey, priority);
 }
 
 function PlatformIcon({ platformId }: { platformId: NormalizationPlatformId }): JSX.Element {
@@ -3178,6 +3193,12 @@ export function App(): JSX.Element {
   const checklistUndoStackRef = useRef(checklistUndoStack);
   const checklistRedoStackRef = useRef(checklistRedoStack);
   const selectedPlaybackSongIdRef = useRef<string | null>(null);
+  // v3.190 — Rapid-switch demotion. When the user clicks song A then song B,
+  // we demote A's previously-USER_SELECTED measured + preview analyses to
+  // NEIGHBOR so they stop competing with B for a bypass slot. Tracking the
+  // previous cache key here (rather than diffing prev-state) lets us demote
+  // exactly the right key when the effect re-runs.
+  const previousUserSelectedAnalysisCacheKeyRef = useRef<string | null>(null);
   const queueMoveTargetSongIdRef = useRef<string | null>(null);
   const checklistHighlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
@@ -3514,6 +3535,14 @@ export function App(): JSX.Element {
     const analysisFilePath = selectedVersion?.filePath ?? null;
 
     if (!selectedPlaybackVersionId || !selectedVersion || !analysisFilePath) {
+      // v3.190 — clearing the selection also clears any stale USER_SELECTED
+      // bypass slot we may have been holding on the previous version.
+      const previousKey = previousUserSelectedAnalysisCacheKeyRef.current;
+      if (previousKey) {
+        demoteMeasuredAnalysis(previousKey, ANALYSIS_PRIORITY_NEIGHBOR);
+        demotePreviewAnalysis(previousKey, ANALYSIS_PRIORITY_NEIGHBOR);
+        previousUserSelectedAnalysisCacheKeyRef.current = null;
+      }
       setAnalysis(null);
       setMeasuredAnalysis(null);
       setAnalysisStatus('idle');
@@ -3540,6 +3569,22 @@ export function App(): JSX.Element {
     setMeasuredAnalysisStatus(cached.measuredAnalysis ? 'ready' : 'loading');
     setAnalysisError(null);
     setMeasuredAnalysisError(null);
+
+    // v3.190 — Rapid-switch demotion. If the user clicked A, then immediately
+    // clicked B, A's still-pending USER_SELECTED jobs are stale. Demote them
+    // to NEIGHBOR before promoting B so B (the actual current selection)
+    // gets the bypass slot instead of competing with A.
+    //
+    // We only demote if the previous key is DIFFERENT from the new key —
+    // promoting the same key as both new+previous would no-op and that's
+    // fine. Demoting the same key would then drop our own priority, which
+    // would defeat the purpose.
+    const previousKey = previousUserSelectedAnalysisCacheKeyRef.current;
+    if (previousKey && previousKey !== analysisCacheKey) {
+      demoteMeasuredAnalysis(previousKey, ANALYSIS_PRIORITY_NEIGHBOR);
+      demotePreviewAnalysis(previousKey, ANALYSIS_PRIORITY_NEIGHBOR);
+    }
+    previousUserSelectedAnalysisCacheKeyRef.current = analysisCacheKey;
 
     // v3.141 — measured mastering stats and preview/graph decode are now
     // intentionally independent. LUFS, true peak, sample rate, and platform

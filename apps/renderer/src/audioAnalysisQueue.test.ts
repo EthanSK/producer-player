@@ -667,6 +667,246 @@ describe('AnalysisQueue', () => {
     }
   });
 
+  // --- v3.190 — rapid-switch demotion tests ---
+
+  describe('demote()', () => {
+    it('demotes a pending user-priority task so a newer click wins the bypass slot', async () => {
+      // Scenario: user clicks track A (gets bypass), then clicks track B before
+      // A's analysis even starts (still pending). B should preempt A. Without
+      // demote, both A and B sit at USER_SELECTED priority and the cap may
+      // fill with stale A clicks, starving the user's actual intent.
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        maxUserBypassSlots: 1, // forces competition for the bypass slot
+      });
+      const order: string[] = [];
+
+      const bg = deferred<void>();
+      // Bg task holds the regular slot.
+      queue.enqueue(async () => {
+        order.push('bg:start');
+        await bg.promise;
+        order.push('bg:end');
+      }, { priority: ANALYSIS_PRIORITY_BACKGROUND });
+
+      await flushMicrotasks();
+
+      const aGate = deferred<void>();
+      const aPromise = queue.enqueue(async () => {
+        order.push('A:start');
+        await aGate.promise;
+        order.push('A:end');
+      }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'A' });
+
+      await flushMicrotasks();
+      // A bypassed the cap; it's now running.
+      expect(order).toContain('A:start');
+      expect(queue.stats().userBypassActive).toBe(1);
+
+      // User changes mind: clicks B. Demote A first so the bypass slot opens
+      // for B. With maxUserBypassSlots=1, B would otherwise be pending.
+      queue.demote('A', ANALYSIS_PRIORITY_NEIGHBOR);
+      const bPromise = queue.enqueue(async () => {
+        order.push('B');
+      }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'B' });
+
+      await flushMicrotasks();
+      // B should now bypass since A no longer holds the bypass slot.
+      expect(order).toContain('B');
+      // B settled; bypass slot freed back; A is still running (demoted to
+      // regular slot equivalent).
+      expect(queue.stats().userBypassActive).toBe(0);
+
+      aGate.resolve();
+      bg.resolve();
+      await Promise.all([aPromise, bPromise]);
+    });
+
+    it('reorders pending tasks by priority after demote', async () => {
+      // A pending USER task can be demoted to NEIGHBOR, then a fresh USER
+      // enqueue should run before it.
+      const queue = new AnalysisQueue({ concurrency: 1, maxUserBypassSlots: 0 });
+      const order: string[] = [];
+      const blocker = deferred<void>();
+
+      queue.enqueue(async () => {
+        await blocker.promise;
+      }, { priority: ANALYSIS_PRIORITY_BACKGROUND });
+
+      queue.enqueue(async () => {
+        order.push('A');
+      }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'A' });
+      queue.enqueue(async () => {
+        order.push('B');
+      }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'B' });
+
+      // Now demote A. B is still USER, so B should run BEFORE A.
+      queue.demote('A', ANALYSIS_PRIORITY_NEIGHBOR);
+
+      blocker.resolve();
+      while (queue.stats().active > 0 || queue.stats().pending > 0) {
+        // eslint-disable-next-line no-await-in-loop
+        await flushMicrotasks();
+      }
+      expect(order).toEqual(['B', 'A']);
+    });
+
+    it('does NOT promote — passing a LOWER priority value is a no-op', async () => {
+      // demote is strictly "make this less urgent". Passing USER (0) to a
+      // NEIGHBOR (1) task would be a promote, which is the wrong API; the
+      // method should refuse and leave the task at NEIGHBOR.
+      const queue = new AnalysisQueue({ concurrency: 1, maxUserBypassSlots: 0 });
+      const order: string[] = [];
+      const blocker = deferred<void>();
+
+      queue.enqueue(async () => {
+        await blocker.promise;
+      }, { priority: ANALYSIS_PRIORITY_BACKGROUND });
+
+      queue.enqueue(async () => {
+        order.push('A');
+      }, { priority: ANALYSIS_PRIORITY_NEIGHBOR, key: 'A' });
+      queue.enqueue(async () => {
+        order.push('B');
+      }, { priority: ANALYSIS_PRIORITY_BACKGROUND, key: 'B' });
+
+      // Attempt to "demote" A to USER (would be a promote — no-op).
+      const changed = queue.demote('A', ANALYSIS_PRIORITY_USER_SELECTED);
+      expect(changed).toBe(false);
+
+      blocker.resolve();
+      while (queue.stats().active > 0 || queue.stats().pending > 0) {
+        // eslint-disable-next-line no-await-in-loop
+        await flushMicrotasks();
+      }
+      // Order should still reflect A=NEIGHBOR, B=BACKGROUND.
+      expect(order).toEqual(['A', 'B']);
+    });
+
+    it('is a no-op for unknown keys', () => {
+      const queue = new AnalysisQueue({ concurrency: 1 });
+      const result = queue.demote('does-not-exist', ANALYSIS_PRIORITY_NEIGHBOR);
+      expect(result).toBe(false);
+    });
+
+    it('updates bookkeeping when a running user-bypass task is demoted', async () => {
+      // Regression: after demote, the bypass slot accounting must release so
+      // a future click can bypass. Otherwise rapid-switch leaks bypass slots.
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        maxUserBypassSlots: 1,
+      });
+
+      const bg = deferred<void>();
+      const bgPromise = queue.enqueue(async () => {
+        await bg.promise;
+      }, { priority: ANALYSIS_PRIORITY_BACKGROUND });
+
+      await flushMicrotasks();
+
+      const aGate = deferred<void>();
+      const aPromise = queue.enqueue(async () => {
+        await aGate.promise;
+      }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'A' });
+
+      await flushMicrotasks();
+      expect(queue.stats().userBypassActive).toBe(1);
+
+      // Demote: bypass slot must free so a new click bypasses.
+      queue.demote('A', ANALYSIS_PRIORITY_NEIGHBOR);
+      expect(queue.stats().userBypassActive).toBe(0);
+
+      const bGate = deferred<void>();
+      const bPromise = queue.enqueue(async () => {
+        await bGate.promise;
+      }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'B' });
+
+      await flushMicrotasks();
+      expect(queue.stats().userBypassActive).toBe(1);
+
+      // Drain.
+      aGate.resolve();
+      bGate.resolve();
+      bg.resolve();
+      await Promise.all([aPromise, bPromise, bgPromise]);
+      expect(queue.stats().userBypassActive).toBe(0);
+      expect(queue.stats().active).toBe(0);
+    });
+
+    it('preserves the dedup key — a re-enqueue at the new priority resolves with the in-flight result', async () => {
+      // After demote, the running task is still associated with its key.
+      // A fresh enqueue at USER priority for the SAME key should dedupe to
+      // the running task — only one task runs and both callers see the same
+      // result.
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        maxUserBypassSlots: 1,
+      });
+
+      const bg = deferred<void>();
+      queue.enqueue(async () => {
+        await bg.promise;
+      }, { priority: ANALYSIS_PRIORITY_BACKGROUND });
+
+      await flushMicrotasks();
+
+      const aGate = deferred<string>();
+      const runner = vi.fn(async () => aGate.promise);
+      const a1 = queue.enqueue(runner, {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+        key: 'A',
+      });
+      await flushMicrotasks();
+
+      // Demote A.
+      queue.demote('A', ANALYSIS_PRIORITY_NEIGHBOR);
+      // Re-enqueue at USER (e.g. user clicks back to A). Should NOT spawn a
+      // second task; both callers see the same eventual result.
+      const a2 = queue.enqueue(async () => 'should-not-run', {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+        key: 'A',
+      });
+
+      aGate.resolve('done');
+      bg.resolve();
+      await expect(a1).resolves.toBe('done');
+      await expect(a2).resolves.toBe('done');
+      // The runner only ran once — the second enqueue deduped to the
+      // existing inflight task instead of starting a new one.
+      expect(runner).toHaveBeenCalledTimes(1);
+    });
+
+    it('updates dump() activeByPriority counts after demote', async () => {
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        maxUserBypassSlots: 1,
+      });
+
+      const bg = deferred<void>();
+      queue.enqueue(async () => {
+        await bg.promise;
+      }, { priority: ANALYSIS_PRIORITY_BACKGROUND });
+
+      await flushMicrotasks();
+
+      const aGate = deferred<void>();
+      const aPromise = queue.enqueue(async () => {
+        await aGate.promise;
+      }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'A' });
+
+      await flushMicrotasks();
+      expect(queue.dump().activeByPriority).toEqual({ user: 1, neighbor: 0, background: 1 });
+
+      queue.demote('A', ANALYSIS_PRIORITY_NEIGHBOR);
+      expect(queue.dump().activeByPriority).toEqual({ user: 0, neighbor: 1, background: 1 });
+
+      aGate.resolve();
+      bg.resolve();
+      await aPromise;
+      expect(queue.dump().activeByPriority).toEqual({ user: 0, neighbor: 0, background: 0 });
+    });
+  });
+
   it('frees a bypass slot when a user-priority task times out', async () => {
     // Regression: the bypass-slot accounting must also be cleaned up by
     // the timeout path. Otherwise userBypassActive could leak past the

@@ -85,6 +85,32 @@ const idealStemAnalysisQueue = new AnalysisQueue({
   maxUserBypassSlots: 1,
 });
 
+/**
+ * v3.190 — Re-prioritize a queued ideal-stem analysis. Symmetric with the
+ * measured / preview queue helpers in audioAnalysis.ts and App.tsx so any
+ * future warmup / preload path can let a user click bypass an in-flight
+ * background ideal-stem job.
+ */
+export function promoteIdealStemAnalysis(
+  cacheKey: string,
+  priority: AnalysisPriority = ANALYSIS_PRIORITY_USER_SELECTED,
+): void {
+  idealStemAnalysisQueue.promote(cacheKey, priority);
+}
+
+/**
+ * v3.190 — Demote a queued ideal-stem analysis to a lower priority. Used
+ * when a previously-selected track's stem analysis is no longer urgent
+ * because the user clicked something else. Symmetric with
+ * demotePreviewAnalysis / demoteMeasuredAnalysis.
+ */
+export function demoteIdealStemAnalysis(
+  cacheKey: string,
+  priority: AnalysisPriority,
+): void {
+  idealStemAnalysisQueue.demote(cacheKey, priority);
+}
+
 const resultCache = new Map<string, IdealStemAnalysisResult>();
 const inFlight = new Map<string, Promise<IdealStemAnalysisResult>>();
 

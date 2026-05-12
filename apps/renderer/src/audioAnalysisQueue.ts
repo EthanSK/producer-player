@@ -329,6 +329,87 @@ export class AnalysisQueue {
   }
 
   /**
+   * v3.190 — Rapid-switch demotion. Lower priority value = runs sooner; a
+   * higher priority value here means "this is now LESS urgent than before".
+   *
+   * When the user clicks song A then song B in rapid succession, A's
+   * USER_SELECTED queue entry is now stale: B is what they're actually
+   * waiting for. If A's job is still PENDING, we demote it (e.g. to
+   * NEIGHBOR) so it stops competing with B for a bypass slot. If A's job is
+   * already RUNNING (in a bypass slot), we can't pre-empt it mid-DSP, but
+   * we can mark it non-user so it stops counting against the bypass cap
+   * for new clicks — that means click C's bypass slot frees up correctly.
+   *
+   * Semantics:
+   *   - If the keyed task is pending and the new priority is HIGHER (numeric
+   *     value greater), update the task's priority and re-evaluate the start
+   *     loop. No-op if new priority is lower or equal (use `promote` for
+   *     that direction).
+   *   - If the keyed task is running, we update bookkeeping so the slot
+   *     accounting reflects the new priority bucket (decrement
+   *     `nonUserActive` if we just dropped out of user-priority; decrement
+   *     `userBypassActive` if it was a bypass slot). The task itself keeps
+   *     running — no AbortController kill path here, identical to the
+   *     promote contract.
+   *   - No-op if the key is not known.
+   *
+   * Returns true if any in-flight or pending task was affected.
+   */
+  demote(key: string, priority: AnalysisPriority): boolean {
+    let changed = false;
+
+    // Pending tasks: lower the priority if we're moving it DOWN
+    // (numeric value greater).
+    for (const task of this.pending) {
+      if (task.key === key && priority > task.priority) {
+        task.priority = priority;
+        changed = true;
+      }
+    }
+
+    // Running tasks: update bookkeeping so subsequent maybeStart() decisions
+    // see the correct counts. We can't abort the underlying task; it will
+    // continue but no longer holds a "user-priority" claim against the cap.
+    for (const [runningTask, slot] of this.runningTasks.entries()) {
+      if (runningTask.key !== key) continue;
+      if (priority <= runningTask.priority) continue;
+
+      const wasUser = runningTask.priority === ANALYSIS_PRIORITY_USER_SELECTED;
+      const isNowUser = priority === ANALYSIS_PRIORITY_USER_SELECTED;
+      const oldBucket = this.priorityBucket(runningTask.priority);
+      const newBucket = this.priorityBucket(priority);
+
+      runningTask.priority = priority;
+      this.activeByPriority[oldBucket] -= 1;
+      this.activeByPriority[newBucket] += 1;
+
+      // Bypass-slot accounting: a demoted user task that was occupying a
+      // bypass slot is now effectively a regular slot's worth of work, but
+      // since it was started as a bypass, the slot frees the bypass counter
+      // and increments active/regular counters so the next click can bypass
+      // again.
+      if (wasUser && !isNowUser) {
+        if (slot === 'user-bypass') {
+          this.userBypassActive -= 1;
+          this.active += 1;
+          this.nonUserActive += 1;
+          this.runningTasks.set(runningTask, 'regular');
+        } else {
+          // Was running in a regular slot at user priority — flip to non-user.
+          this.nonUserActive += 1;
+        }
+      }
+
+      changed = true;
+    }
+
+    if (changed) {
+      this.maybeStart();
+    }
+    return changed;
+  }
+
+  /**
    * Returns counts useful for tests / debugging.
    */
   stats(): {
@@ -469,6 +550,14 @@ export class AnalysisQueue {
     // silent no-op. Without this guard a task that finishes a hair after
     // the timeout would double-decrement the active counters and confuse
     // the queue.
+    //
+    // v3.190 — settle() now reads slot + priority from the LIVE state
+    // (runningTasks + task.priority) rather than start-time closure
+    // captures. This is required for `demote()` correctness: a task that
+    // started as user-priority but was demoted mid-flight may have been
+    // moved from a bypass slot to a regular slot, and the bookkeeping has
+    // to unwind whatever its CURRENT slot is, not what it was when it
+    // started.
     let settled = false;
     const settle = (action: () => void): void => {
       if (settled) {
@@ -477,15 +566,19 @@ export class AnalysisQueue {
       settled = true;
       action();
 
-      if (isUserBypass) {
+      const currentSlot = this.runningTasks.get(next) ?? (isUserBypass ? 'user-bypass' : 'regular');
+      const currentBucket = this.priorityBucket(next.priority);
+      const currentIsNonUser = next.priority !== ANALYSIS_PRIORITY_USER_SELECTED;
+
+      if (currentSlot === 'user-bypass') {
         this.userBypassActive -= 1;
       } else {
         this.active -= 1;
-        if (isNonUser) {
+        if (currentIsNonUser) {
           this.nonUserActive -= 1;
         }
       }
-      this.activeByPriority[activePriorityBucket] -= 1;
+      this.activeByPriority[currentBucket] -= 1;
       this.runningTasks.delete(next);
       if (next.key !== null) {
         this.runningKeys.delete(next.key);

@@ -109,6 +109,20 @@ export function promotePreviewAnalysis(
 }
 
 /**
+ * v3.190 — Demote a queued preview analysis to a lower priority. Called by
+ * App.tsx when the user rapidly switches from track A to track B: A's still-
+ * pending USER_SELECTED preview decode is now stale and should stop holding
+ * a bypass slot away from B. The decode itself is still useful (the user
+ * might switch back), so we drop it to NEIGHBOR instead of cancelling.
+ */
+export function demotePreviewAnalysis(
+  key: string,
+  priority: AnalysisPriority
+): void {
+  previewAnalysisQueue.demote(key, priority);
+}
+
+/**
  * v3.115 Windows-CI diagnostic: expose preview queue stats so e2e specs can
  * dump them on failure.
  */

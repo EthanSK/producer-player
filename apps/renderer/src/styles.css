@@ -3756,7 +3756,13 @@ body.floating-switcher-panel-dragging * {
 }
 
 .checklist-item-row--drag-ghost {
-  width: min(720px, calc(100vw - 40px));
+  /* Match the settled row width. dnd-kit's DragOverlay wrapper is sized to
+     the active draggable's bounding box, so width: 100% inherits the source
+     row's measured width instead of forcing a wider hard-coded value.
+     (Previous `width: min(720px, calc(100vw - 40px))` made the floating
+     preview noticeably wider than the row at rest — voice 2717.) */
+  width: 100%;
+  box-sizing: border-box;
   opacity: 0.95;
   background: rgba(24, 28, 36, 0.96);
   border-color: rgba(92, 167, 255, 0.72);

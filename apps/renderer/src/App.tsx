@@ -233,6 +233,7 @@ import {
   decideAutoSelect,
 } from './listeningDeviceAutoSelect';
 import { ErrorDetailsDialog } from './lib/ErrorDetailsDialog';
+import { formatBytes } from './lib/formatBytes';
 import { logAction, logError, installRendererErrorHandlers } from './lib/actionLog';
 import {
   LUFS_LINKS,
@@ -12845,11 +12846,21 @@ export function App(): JSX.Element {
             songId: song.id,
             newPath: result.newPath,
             targetVersion,
+            sizeBytes: result.sizeBytes,
           });
+          // v3.204 — include the human-readable file size in the toast
+          // so producers can sanity-check the copy landed at the
+          // expected size. Falls back to the size-less form if stat
+          // failed (sizeBytes === null).
+          const fileName = getPathTail(result.newPath);
+          const toastText =
+            typeof result.sizeBytes === 'number'
+              ? `Saved copy: ${fileName} (${formatBytes(result.sizeBytes)})`
+              : `Saved copy: ${fileName}`;
           toast.show({
             id: `song-project-save-copy-${song.id}`,
             kind: 'success',
-            text: `Saved copy: ${getPathTail(result.newPath)}`,
+            text: toastText,
           });
         } else {
           logAction('project-file.save-copy.failed', {

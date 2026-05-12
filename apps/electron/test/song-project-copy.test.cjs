@@ -107,9 +107,17 @@ test('computeNextSaveCopyVersion picks max(existing) + 1, falling back to 1', ()
 // saveSongProjectCopy() handler (dependency-injected filesystem)
 // ---------------------------------------------------------------------------
 
-function makeFakeFs(existingPaths) {
+function makeFakeFs(existingPaths, options = {}) {
   const existing = new Set(existingPaths);
   const copies = [];
+  // v3.204 — fake `statSize` returns a deterministic byte count per
+  // path so tests can assert the result includes `sizeBytes`. By
+  // default every file is reported as 1234 bytes; callers can pass
+  // `{ sizes: { '/songs/foo v4.als': 4096 } }` or
+  // `{ defaultSize: 999 }` / `{ statFailsFor: ['/songs/foo v4.als'] }`
+  // to override.
+  const { sizes = {}, defaultSize = 1234, statFailsFor = [] } = options;
+  const failureSet = new Set(statFailsFor);
   return {
     copies,
     async exists(filePath) {
@@ -122,22 +130,36 @@ function makeFakeFs(existingPaths) {
       copies.push({ source, destination });
       existing.add(destination);
     },
+    async statSize(filePath) {
+      if (failureSet.has(filePath)) {
+        return null;
+      }
+      if (Object.prototype.hasOwnProperty.call(sizes, filePath)) {
+        return sizes[filePath];
+      }
+      return defaultSize;
+    },
   };
 }
 
 test('save-copy of foo.als with no existing copy lands at foo v<N>.als', async () => {
-  const fakeFs = makeFakeFs(['/songs/foo.als']);
+  const destination = join('/songs', 'foo v4.als');
+  const fakeFs = makeFakeFs(['/songs/foo.als'], {
+    sizes: { [destination]: 16384 },
+  });
   const result = await saveSongProjectCopy(
     { originalPath: '/songs/foo.als', targetVersion: 4 },
     fakeFs
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.newPath, join('/songs', 'foo v4.als'));
+  assert.equal(result.newPath, destination);
   assert.equal(result.newFileName, 'foo v4.als');
   assert.equal(result.targetVersion, 4);
+  // v3.204 — result now carries the size of the new copy on disk.
+  assert.equal(result.sizeBytes, 16384);
   assert.deepEqual(fakeFs.copies, [
-    { source: '/songs/foo.als', destination: join('/songs', 'foo v4.als') },
+    { source: '/songs/foo.als', destination },
   ]);
 });
 
@@ -151,6 +173,7 @@ test('save-copy of foo v3.als strips the existing suffix before re-applying', as
   assert.equal(result.ok, true);
   assert.equal(result.newFileName, 'foo v12.als');
   assert.equal(result.newPath, join('/songs', 'foo v12.als'));
+  assert.equal(result.sizeBytes, 1234);
 });
 
 test('destination collisions auto-bump (2), (3), ... until free', async () => {
@@ -167,6 +190,22 @@ test('destination collisions auto-bump (2), (3), ... until free', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.newFileName, 'foo v4 (3).als');
   assert.equal(result.newPath, join('/songs', 'foo v4 (3).als'));
+  assert.equal(result.sizeBytes, 1234);
+});
+
+test('save-copy returns sizeBytes:null when post-copy stat fails (defensive)', async () => {
+  const destination = join('/songs', 'foo v4.als');
+  const fakeFs = makeFakeFs(['/songs/foo.als'], { statFailsFor: [destination] });
+  const result = await saveSongProjectCopy(
+    { originalPath: '/songs/foo.als', targetVersion: 4 },
+    fakeFs
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.newPath, destination);
+  // The copy itself succeeded; only the stat failed. Renderer falls
+  // back to the old size-less toast text in this case.
+  assert.equal(result.sizeBytes, null);
 });
 
 test('save-copy returns ok:false when the source file is missing', async () => {
@@ -243,6 +282,9 @@ test('save-copy gives up after SAVE_COPY_MAX_COLLISION_ATTEMPTS', async () => {
     async copyFile() {
       throw new Error('should not be reached when all slots are full');
     },
+    async statSize() {
+      throw new Error('should not be reached when all slots are full');
+    },
   };
 
   const result = await saveSongProjectCopy(
@@ -261,6 +303,9 @@ test('save-copy surfaces copyFile errors to the caller', async () => {
     },
     async copyFile() {
       throw new Error('disk full');
+    },
+    async statSize() {
+      throw new Error('should not be reached when copy fails');
     },
   };
 

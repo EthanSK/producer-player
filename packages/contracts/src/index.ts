@@ -86,6 +86,14 @@ export type SongProjectSaveCopyResult =
       newPath: string;
       newFileName: string;
       targetVersion: number;
+      /**
+       * v3.204 — Size of the copied file in bytes (`fs.stat` of the new
+       * path on disk). `null` if the post-copy stat fails — the file
+       * is still on disk, we just couldn't read its size, so the
+       * renderer should fall back to omitting the size from the
+       * success toast.
+       */
+      sizeBytes: number | null;
     }
   | {
       ok: false;

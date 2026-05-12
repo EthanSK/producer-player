@@ -126,7 +126,20 @@ export function computeNextSaveCopyVersion(audioVersionFileNames: readonly strin
 export const SAVE_COPY_MAX_COLLISION_ATTEMPTS = 50;
 
 export type SongProjectSaveCopyResult =
-  | { ok: true; newPath: string; newFileName: string; targetVersion: number }
+  | {
+      ok: true;
+      newPath: string;
+      newFileName: string;
+      targetVersion: number;
+      /**
+       * v3.204 — Size of the copied file in bytes. Read via `fs.stat`
+       * on the destination after the copy succeeds so the renderer can
+       * surface a human-readable size in the success toast. `null` if
+       * the post-copy stat fails (defensive: very rare race between
+       * `fs.cp` completing and `fs.stat` reading the new inode).
+       */
+      sizeBytes: number | null;
+    }
   | { ok: false; error: string };
 
 export interface SaveSongProjectCopyDeps {
@@ -134,6 +147,12 @@ export interface SaveSongProjectCopyDeps {
   exists: (filePath: string) => Promise<boolean>;
   /** Copies `source` to `destination`, preserving timestamps when possible. */
   copyFile: (source: string, destination: string) => Promise<void>;
+  /**
+   * v3.204 — Returns the size in bytes of `filePath`, or `null` if the
+   * stat fails. Kept dependency-injected so unit tests can fake the
+   * filesystem without touching the real disk.
+   */
+  statSize: (filePath: string) => Promise<number | null>;
 }
 
 const defaultDeps: SaveSongProjectCopyDeps = {
@@ -150,6 +169,14 @@ const defaultDeps: SaveSongProjectCopyDeps = {
     // duplicated project file inherits the same modification time as
     // the original (helps Finder sorting / version-history clues).
     await fs.cp(source, destination, { preserveTimestamps: true, force: false, errorOnExist: true });
+  },
+  async statSize(filePath: string) {
+    try {
+      const stats = await fs.stat(filePath);
+      return typeof stats.size === 'number' && Number.isFinite(stats.size) ? stats.size : null;
+    } catch {
+      return null;
+    }
   },
 };
 
@@ -217,11 +244,18 @@ export async function saveSongProjectCopy(
       };
     }
 
+    // v3.204 — Read the new copy's size so the renderer can show it in
+    // the success toast. Failures here are non-fatal: the file IS on
+    // disk, we just couldn't read its size, so fall back to `null` and
+    // let the renderer omit the size from the toast.
+    const sizeBytes = await deps.statSize(candidatePath);
+
     return {
       ok: true,
       newPath: candidatePath,
       newFileName: candidateFileName,
       targetVersion: Math.trunc(targetVersion),
+      sizeBytes,
     };
   }
 

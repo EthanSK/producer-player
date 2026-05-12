@@ -4131,6 +4131,55 @@ body.is-dragging-checklist-timestamp * {
   cursor: pointer;
 }
 
+/* v3.203 — wrapper for the Link button + adjacent × unlink button. Sits in
+ * place of the bare Link button so the `margin-left: auto` right-edge
+ * alignment moves up to the wrapper, keeping the Link button immediately
+ * next to its × sibling regardless of available row width. */
+.listening-device-link-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* Inside the link-group the Link button no longer needs its own auto
+ * margin — the wrapper carries it. Without this override the Link button
+ * would push the × button outside the group's flex flow. */
+.listening-device-link-group .listening-device-secondary-button {
+  margin-left: 0;
+}
+
+/* v3.203 — small circular × button matching the song-project-clear-button
+ * visual language (Ethan asked for parity with the existing close-cross
+ * affordance). Hover turns red-tinted to signal removal. */
+.listening-device-link-clear-button {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(154, 182, 211, 0.5);
+  background: rgba(154, 182, 211, 0.12);
+  color: #d9e8fb;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.listening-device-link-clear-button > span {
+  display: block;
+  line-height: 1;
+  transform: translateY(-0.5px);
+}
+
+.listening-device-link-clear-button:hover {
+  border-color: rgba(255, 124, 124, 0.65);
+  background: rgba(255, 124, 124, 0.16);
+  color: #ffd9d9;
+}
+
 .listening-device-secondary-button.is-active {
   color: #9fd1ff;
   border-color: rgba(92, 167, 255, 0.45);

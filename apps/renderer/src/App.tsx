@@ -228,7 +228,10 @@ import {
   unlockSystemAudioDeviceLabels,
   useSystemAudioDevice,
 } from './lib/useSystemAudioDevice';
-import { decideAutoSelect } from './listeningDeviceAutoSelect';
+import {
+  applyExplicitUnlinkAssociation,
+  decideAutoSelect,
+} from './listeningDeviceAutoSelect';
 import { ErrorDetailsDialog } from './lib/ErrorDetailsDialog';
 import { logAction, logError, installRendererErrorHandlers } from './lib/actionLog';
 import {
@@ -14154,6 +14157,40 @@ export function App(): JSX.Element {
     });
   }
 
+  /**
+   * v3.203 — Unlink (×) button. Clears the active listening device's
+   * `systemDeviceId` + `systemDeviceLabel` so it returns to the "no link"
+   * state. Auto-switch will never fire for this device until the user
+   * re-links it via the Link button. Toast surfaces the previously-linked
+   * label so Ethan can confirm what was just removed.
+   */
+  function handleUnlinkActiveListeningDevice(): void {
+    if (!activeListeningDeviceId) return;
+    const target = listeningDevices.find((d) => d.id === activeListeningDeviceId);
+    if (!target) return;
+    const prevId = (target.systemDeviceId ?? '').trim();
+    const prevLabel = (target.systemDeviceLabel ?? '').trim();
+    if (prevId.length === 0 && prevLabel.length === 0) {
+      // Nothing to unlink — keep this a no-op + silent (the × button is
+      // hidden when there's no link, so this path is purely defensive).
+      return;
+    }
+    logAction('listening-device.unlink', {
+      deviceId: activeListeningDeviceId,
+      deviceName: target.name,
+      previousSystemDeviceId: prevId,
+      previousSystemDeviceLabel: prevLabel,
+    });
+    setListeningDevices((prev) =>
+      applyExplicitUnlinkAssociation(prev, activeListeningDeviceId)
+    );
+    toast.show({
+      id: `listening-device-unlinked-${activeListeningDeviceId}-${Date.now()}`,
+      kind: 'info',
+      text: `Unlinked ${target.name}${prevLabel.length > 0 ? ` from ${prevLabel}` : ''}`,
+    });
+  }
+
   function handleStartListeningDeviceRename(): void {
     if (!listeningDeviceRenameTarget) {
       return;
@@ -18001,16 +18038,37 @@ export function App(): JSX.Element {
                         ? `Save the current system audio output (${currentDisplay}) as this device's link. Auto-switch will activate this listening device whenever ${currentDisplay} becomes the system output again.`
                         : 'No system audio output detected — cannot link.';
                     return (
-                      <button
-                        type="button"
-                        className={`listening-device-secondary-button${hasLink ? ' is-active' : ''}`}
-                        onClick={handleLinkActiveListeningDevice}
-                        disabled={!hasCurrent}
-                        data-testid="listening-device-link-button"
-                        title={tooltip}
-                      >
-                        {buttonLabel}
-                      </button>
+                      <span className="listening-device-link-group">
+                        <button
+                          type="button"
+                          className={`listening-device-secondary-button${hasLink ? ' is-active' : ''}`}
+                          onClick={handleLinkActiveListeningDevice}
+                          disabled={!hasCurrent}
+                          data-testid="listening-device-link-button"
+                          title={tooltip}
+                        >
+                          {buttonLabel}
+                        </button>
+                        {/*
+                          v3.203 — adjacent × button that fully unlinks the
+                          active listening device (clears systemDeviceId +
+                          systemDeviceLabel). Only rendered when a link
+                          exists; otherwise the row collapses back to just
+                          the Link button (Ethan voice 2836).
+                        */}
+                        {hasLink ? (
+                          <button
+                            type="button"
+                            className="listening-device-link-clear-button"
+                            onClick={handleUnlinkActiveListeningDevice}
+                            data-testid="listening-device-unlink-button"
+                            aria-label="Remove link to current audio device"
+                            title="Remove link to current audio device"
+                          >
+                            <span aria-hidden="true">×</span>
+                          </button>
+                        ) : null}
+                      </span>
                     );
                   })() : null}
                   <button

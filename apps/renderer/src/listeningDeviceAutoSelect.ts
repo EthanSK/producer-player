@@ -128,3 +128,44 @@ export function applyExplicitLinkAssociation(
     return next;
   });
 }
+
+/**
+ * v3.203 — explicit Unlink (×) button handler logic. Clears the target
+ * listening device's `systemDeviceId` + `systemDeviceLabel` entirely so it
+ * returns to the "no link" state (auto-switch will never fire for it).
+ *
+ * Behavior contract:
+ *   - Selected id not in the list → returns input unchanged (referentially
+ *     equal).
+ *   - Target has neither `systemDeviceId` nor `systemDeviceLabel` set →
+ *     returns input unchanged (no-op; nothing to clear).
+ *   - Otherwise → returns a new array with the target's `systemDeviceId`
+ *     and `systemDeviceLabel` removed. The state-service "preserve only
+ *     truthy keys" pattern then omits these keys from persistence.
+ *
+ * The companion to `applyExplicitLinkAssociation` — together they form the
+ * full "manage link" surface area: link / re-link / unlink.
+ */
+export function applyExplicitUnlinkAssociation(
+  listeningDevices: readonly ListeningDevice[],
+  selectedDeviceId: string
+): ListeningDevice[] {
+  const target = listeningDevices.find((d) => d.id === selectedDeviceId);
+  if (!target) {
+    return listeningDevices as ListeningDevice[];
+  }
+  const hasId =
+    typeof target.systemDeviceId === 'string' && target.systemDeviceId.length > 0;
+  const hasLabel =
+    typeof target.systemDeviceLabel === 'string' && target.systemDeviceLabel.length > 0;
+  if (!hasId && !hasLabel) {
+    return listeningDevices as ListeningDevice[];
+  }
+  return listeningDevices.map((device) => {
+    if (device.id !== selectedDeviceId) return device;
+    const next: ListeningDevice = { ...device };
+    delete next.systemDeviceId;
+    delete next.systemDeviceLabel;
+    return next;
+  });
+}

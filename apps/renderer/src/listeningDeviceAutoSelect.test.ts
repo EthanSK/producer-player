@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ListeningDevice } from '@producer-player/contracts';
 import {
   applyExplicitLinkAssociation,
+  applyExplicitUnlinkAssociation,
   decideAutoSelect,
 } from './listeningDeviceAutoSelect';
 
@@ -153,5 +154,42 @@ describe('applyExplicitLinkAssociation (v3.197 — Link button)', () => {
     const updated = next.find((d) => d.id === 'device-car');
     expect(updated?.systemDeviceId).toBe('group-x');
     expect(updated?.systemDeviceLabel).toBeUndefined();
+  });
+});
+
+describe('applyExplicitUnlinkAssociation (v3.203 — Unlink × button)', () => {
+  it('clears systemDeviceId + systemDeviceLabel on a device that has a link', () => {
+    const next = applyExplicitUnlinkAssociation([airpods, monitors], 'device-airpods');
+    const updated = next.find((d) => d.id === 'device-airpods');
+    expect(updated?.systemDeviceId).toBeUndefined();
+    expect(updated?.systemDeviceLabel).toBeUndefined();
+    // Other devices are untouched.
+    const other = next.find((d) => d.id === 'device-monitors');
+    expect(other?.systemDeviceId).toBe('group-monitors');
+    expect(other?.systemDeviceLabel).toBe('Kali LP-6 (audio interface)');
+  });
+
+  it('clears even when only the id is set (label was already absent)', () => {
+    const idOnly: ListeningDevice = {
+      id: 'device-id-only',
+      name: 'Id-only',
+      systemDeviceId: 'group-id-only',
+    };
+    const next = applyExplicitUnlinkAssociation([idOnly], 'device-id-only');
+    const updated = next.find((d) => d.id === 'device-id-only');
+    expect(updated?.systemDeviceId).toBeUndefined();
+    expect(updated?.systemDeviceLabel).toBeUndefined();
+  });
+
+  it('returns input referentially unchanged when the selected id is not in the list', () => {
+    const before: ListeningDevice[] = [airpods, monitors];
+    const next = applyExplicitUnlinkAssociation(before, 'device-missing');
+    expect(next).toBe(before);
+  });
+
+  it('returns input referentially unchanged when the target has no existing link', () => {
+    const before: ListeningDevice[] = [carStereo];
+    const next = applyExplicitUnlinkAssociation(before, 'device-car');
+    expect(next).toBe(before);
   });
 });

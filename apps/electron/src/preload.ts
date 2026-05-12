@@ -144,6 +144,14 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.PICK_PROJECT_FILE, initialPath ?? null);
   },
 
+  async saveSongProjectCopy(originalPath: string, targetVersion: number) {
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.SONG_PROJECT_SAVE_COPY,
+      originalPath,
+      targetVersion
+    );
+  },
+
   async getSharedUserState() {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_SHARED_USER_STATE);
   },

@@ -114,6 +114,20 @@ await build({
   external: ['node:child_process'],
 });
 
+// v3.189.0 — Save-copy of song project files. Pure filename + collision
+// logic kept in its own module so it can be tested without Electron.
+await build({
+  entryPoints: [resolve(appDir, 'src/song-project-copy.ts')],
+  outfile: resolve(appDir, 'dist/song-project-copy.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+  external: ['node:fs', 'node:path'],
+});
+
 // v3.90 — agent UI control primitives. Pure logic (no electron runtime
 // needed) once electron-log and `electron` types are stripped at build time.
 await build({

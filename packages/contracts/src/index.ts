@@ -72,6 +72,26 @@ export interface ProjectFileSelection {
   fileName: string;
 }
 
+/**
+ * v3.189.0 — Result of duplicating a song's linked project file with a
+ * trailing version suffix. `ok=true` carries the absolute path of the
+ * new copy plus the version number actually appended (after stripping
+ * any pre-existing `vN` suffix from the source filename and bumping for
+ * collisions, so the renderer can show "Saved copy: foo v48 (2).als" if
+ * it had to fall back).
+ */
+export type SongProjectSaveCopyResult =
+  | {
+      ok: true;
+      newPath: string;
+      newFileName: string;
+      targetVersion: number;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 export interface LogicalSong {
   id: string;
   folderId: string;
@@ -209,6 +229,10 @@ export const IPC_CHANNELS = {
   WRITE_MASTERING_ANALYSIS_CACHE: 'producer-player:write-mastering-analysis-cache',
   PICK_REFERENCE_TRACK: 'producer-player:pick-reference-track',
   PICK_PROJECT_FILE: 'producer-player:pick-project-file',
+  // v3.189.0 — Save a copy of the song's linked project file with the next
+  // version number appended (e.g. `barber smith.als` → `barber smith v48.als`).
+  // Lets producers checkpoint their DAW project alongside each export.
+  SONG_PROJECT_SAVE_COPY: 'producer-player:song-project-save-copy',
   SNAPSHOT_UPDATED: 'producer-player:snapshot-updated',
   TRANSPORT_COMMAND: 'producer-player:transport-command',
   GET_SHARED_USER_STATE: 'producer-player:get-shared-user-state',
@@ -1326,6 +1350,17 @@ export interface ProducerPlayerBridge {
   ): Promise<MasteringAnalysisCacheState>;
   pickReferenceTrack(): Promise<ReferenceTrackSelection | null>;
   pickProjectFile(initialPath?: string | null): Promise<ProjectFileSelection | null>;
+  /**
+   * v3.189.0 — Duplicates the song's linked project file next to the
+   * original with `v<targetVersion>` appended (stripping any existing
+   * version suffix first). The main process performs the copy and
+   * resolves a collision-bumped final path so the renderer can show a
+   * "Saved copy: <file>" toast.
+   */
+  saveSongProjectCopy(
+    originalPath: string,
+    targetVersion: number
+  ): Promise<SongProjectSaveCopyResult>;
   getSharedUserState(): Promise<SharedUserState>;
   setSharedUserState(state: Omit<SharedUserState, 'updatedAt'>): Promise<SharedUserState>;
   syncToICloud(data: ICloudBackupData): Promise<ICloudSyncResult>;

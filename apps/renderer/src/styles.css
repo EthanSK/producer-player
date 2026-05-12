@@ -2945,6 +2945,7 @@ body.floating-switcher-panel-dragging * {
 }
 
 .song-project-button,
+.song-project-save-copy-button,
 .song-checklist-button {
   display: inline-flex;
   align-items: center;
@@ -2954,6 +2955,27 @@ body.floating-switcher-panel-dragging * {
   font-size: 11px;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+/* v3.189.0 — Save-copy button sits to the left of "Open project". Styled
+ * as a secondary action: same shape and size as "Open project" but more
+ * muted than the active-blue has-project-file state.
+ */
+.song-project-save-copy-button {
+  border-color: rgba(154, 182, 211, 0.4);
+  background: rgba(154, 182, 211, 0.08);
+  color: #d9e8fb;
+}
+
+.song-project-save-copy-button:hover:not(:disabled) {
+  border-color: rgba(95, 210, 143, 0.7);
+  background: rgba(95, 210, 143, 0.14);
+  color: #e9faec;
+}
+
+.song-project-save-copy-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .song-project-button {
@@ -5583,6 +5605,7 @@ button.checklist-play-toggle[data-playing='true'] {
   .main-list-row-lufs,
   .main-list-row-metadata,
   .song-project-button,
+  .song-project-save-copy-button,
   .song-checklist-button {
     font-size: 10px;
     padding-inline: 6px;

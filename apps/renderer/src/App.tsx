@@ -12480,6 +12480,65 @@ export function App(): JSX.Element {
     });
   }
 
+  // v3.189.0 — Save-copy the song's linked project file. The
+  // renderer figures out the target version (one above the highest
+  // existing audio version) and the main process performs the actual
+  // file-system copy with collision bumping.
+  function computeSongProjectSaveCopyTargetVersion(song: SongWithVersions): number {
+    let highest = 0;
+    for (const version of song.versions) {
+      const versionNumber = getVersionNumberFromFileName(version.fileName);
+      if (versionNumber !== null && versionNumber > highest) {
+        highest = versionNumber;
+      }
+    }
+    return highest >= 1 ? highest + 1 : 1;
+  }
+
+  async function handleSaveSongProjectCopy(song: SongWithVersions): Promise<void> {
+    const projectFilePath = songProjectFilePaths[song.id] ?? null;
+    if (!projectFilePath) {
+      toast.show({
+        id: `song-project-save-copy-${song.id}`,
+        kind: 'error',
+        text: 'No project file linked to this song.',
+      });
+      return;
+    }
+
+    const targetVersion = computeSongProjectSaveCopyTargetVersion(song);
+
+    await runVoidTask(async () => {
+      try {
+        const result = await window.producerPlayer.saveSongProjectCopy(
+          projectFilePath,
+          targetVersion
+        );
+
+        if (result.ok) {
+          toast.show({
+            id: `song-project-save-copy-${song.id}`,
+            kind: 'success',
+            text: `Saved copy: ${getPathTail(result.newPath)}`,
+          });
+        } else {
+          toast.show({
+            id: `song-project-save-copy-${song.id}`,
+            kind: 'error',
+            text: `Couldn't save copy: ${result.error}`,
+          });
+        }
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        toast.show({
+          id: `song-project-save-copy-${song.id}`,
+          kind: 'error',
+          text: `Couldn't save copy: ${message}`,
+        });
+      }
+    });
+  }
+
   function updateSongChecklists(
     updater: (current: Record<string, SongChecklistItem[]>) => Record<string, SongChecklistItem[]>,
     options?: { recordHistory?: boolean }
@@ -16510,6 +16569,26 @@ export function App(): JSX.Element {
                     <div className="main-list-row-meta-footer">
                       {songProjectFilePath ? (
                         <div className="song-project-controls">
+                          <button
+                            type="button"
+                            className="song-project-save-copy-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleSaveSongProjectCopy(song);
+                            }}
+                            data-testid="song-project-save-copy-button"
+                            title={
+                              'Duplicate this project file next to the original, with the next ' +
+                              'version number appended (e.g. song.als → song v48.als). Useful ' +
+                              'for checkpointing your project at each export version.'
+                            }
+                            aria-label={`${songRowTitle} save copy of project file`}
+                          >
+                            <span className="song-project-icon" aria-hidden="true">
+                              💾
+                            </span>
+                            <span>Save copy</span>
+                          </button>
                           <button
                             type="button"
                             className="song-project-button has-project-file"

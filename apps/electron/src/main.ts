@@ -135,6 +135,7 @@ import {
   migrateStateIfNeeded,
 } from './state-service';
 import { openFileWithDetachedSystemHandler } from './file-open';
+import { saveSongProjectCopy } from './song-project-copy';
 import {
   PluginHostService,
   defaultGlobalPluginScanPaths,
@@ -4714,6 +4715,38 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.PICK_PROJECT_FILE, async (_event, initialPath?: string | null) => {
     return pickProjectFile(initialPath ?? null);
   });
+
+  // v3.189.0 — Save-copy of a song's project file. The renderer passes
+  // the current linked path and the target version number; we resolve a
+  // collision-free destination next to the original and copy.
+  ipcMain.handle(
+    IPC_CHANNELS.SONG_PROJECT_SAVE_COPY,
+    async (_event, originalPath: string, targetVersion: number) => {
+      const safeOriginal = typeof originalPath === 'string' ? originalPath : '';
+      const safeVersion =
+        typeof targetVersion === 'number' && Number.isFinite(targetVersion)
+          ? Math.trunc(targetVersion)
+          : NaN;
+      const result = await saveSongProjectCopy({
+        originalPath: safeOriginal,
+        targetVersion: safeVersion,
+      });
+      if (result.ok) {
+        log.info('[producer-player:song-project] saved copy', {
+          originalPath: safeOriginal,
+          newPath: result.newPath,
+          targetVersion: result.targetVersion,
+        });
+      } else {
+        log.warn('[producer-player:song-project] save-copy failed', {
+          originalPath: safeOriginal,
+          targetVersion: safeVersion,
+          error: result.error,
+        });
+      }
+      return result;
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.GET_SHARED_USER_STATE, async () => {
     return readPersistedSharedUserState();

@@ -1285,5 +1285,341 @@ describe('AnalysisQueue', () => {
       await flushMicrotasks();
       await expect(userPromise).resolves.toBe('u');
     });
+
+    // --- v3.201 — Finding 5 (bypass-enabled preemption) tests ---
+    //
+    // The existing v3.195 preemption tests use `maxUserBypassSlots: 0` to
+    // force preemption. Production uses `maxUserBypassSlots: 3` for the
+    // measured-analysis queue, and the v3.201 audit found that preemption
+    // + bypass-in-same-call defeats the CPU-freeing intent: USER starts in
+    // a bypass slot, and the freed regular slot immediately refills with
+    // another NEIGHBOR. These tests cover the production semantics.
+
+    describe('Finding 5 — preemption with bypass enabled (production config)', () => {
+      it('does NOT refill the freed regular slot with NEIGHBOR after preemption — USER takes the regular slot', async () => {
+        const queue = new AnalysisQueue({
+          concurrency: 2,
+          maxUserBypassSlots: 3, // production config
+        });
+
+        const neighborSignals: AbortSignal[] = [];
+        let neighborAcceptCount = 0;
+        const neighborTask = (id: string) => async (signal: AbortSignal) => {
+          neighborSignals.push(signal);
+          neighborAcceptCount += 1;
+          return new Promise<string>((resolve, reject) => {
+            signal.addEventListener('abort', () => {
+              reject(new Error(`${id} aborted`));
+            });
+          });
+        };
+
+        // 2 NEIGHBOR jobs filling both regular slots. Plus 4 NEIGHBOR
+        // jobs pending — so the bypass loop COULD trivially refill if it
+        // were allowed to run after preemption.
+        for (let i = 1; i <= 6; i += 1) {
+          queue.enqueue(neighborTask(`n${i}`), {
+            priority: ANALYSIS_PRIORITY_NEIGHBOR,
+            key: `n${i}`,
+            cancellable: true,
+          }).catch(() => undefined);
+        }
+
+        await flushMicrotasks();
+        // 2 regular slots are running, 4 NEIGHBOR pending
+        expect(queue.stats().active).toBe(2);
+        expect(queue.stats().pending).toBe(4);
+        expect(neighborSignals.length).toBe(2);
+
+        // USER click — should preempt one NEIGHBOR. Bypass is enabled
+        // (3 slots) but the v3.201 fix must suppress it for THIS call.
+        let userRan = false;
+        const userPromise = queue.enqueue(async () => {
+          userRan = true;
+          return 'user-done';
+        }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'u' });
+
+        await flushMicrotasks();
+
+        // Preemption MUST have fired — at least one neighbor aborted.
+        expect(neighborSignals.filter((s) => s.aborted).length).toBeGreaterThanOrEqual(1);
+
+        // CRITICAL: USER must NOT have started in a bypass slot in this
+        // tick. Bypass count should remain 0; USER takes the freed
+        // regular slot when the preempted neighbor's settle fires.
+        expect(queue.stats().userBypassActive).toBe(0);
+
+        // Drain settles.
+        for (let i = 0; i < 6; i += 1) {
+          await flushMicrotasks();
+        }
+
+        await expect(userPromise).resolves.toBe('user-done');
+        expect(userRan).toBe(true);
+
+        // After USER ran in its slot, bypass should still be 0 (USER
+        // never used a bypass slot).
+        expect(queue.stats().userBypassActive).toBe(0);
+        // After the user finishes, both regular slots may fill with
+        // requeued + pending neighbors. neighborAcceptCount > 2 confirms
+        // the requeue path ran (the preempted neighbor came back).
+        expect(neighborAcceptCount).toBeGreaterThanOrEqual(3);
+      });
+
+      it('still preempts when 3 NEIGHBOR jobs are in flight and bypass is also enabled', async () => {
+        const queue = new AnalysisQueue({
+          concurrency: 3,
+          maxUserBypassSlots: 3,
+        });
+
+        const signals: AbortSignal[] = [];
+        const neighborTask = (id: string) => async (signal: AbortSignal) => {
+          signals.push(signal);
+          return new Promise<string>((_, reject) => {
+            signal.addEventListener('abort', () => reject(new Error(`${id} aborted`)));
+          });
+        };
+
+        for (let i = 1; i <= 3; i += 1) {
+          queue.enqueue(neighborTask(`n${i}`), {
+            priority: ANALYSIS_PRIORITY_NEIGHBOR,
+            key: `n${i}`,
+            cancellable: true,
+          }).catch(() => undefined);
+        }
+
+        await flushMicrotasks();
+        expect(queue.stats().active).toBe(3);
+
+        let userRan = false;
+        const userPromise = queue.enqueue(async () => {
+          userRan = true;
+          return 'u';
+        }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'u' });
+
+        await flushMicrotasks();
+
+        // At least one of the three neighbors got cancelled.
+        expect(signals.filter((s) => s.aborted).length).toBeGreaterThanOrEqual(1);
+        // USER did NOT start in bypass — preempt-in-this-call returned
+        // before bypass loop.
+        expect(queue.stats().userBypassActive).toBe(0);
+
+        for (let i = 0; i < 6; i += 1) {
+          await flushMicrotasks();
+        }
+        await expect(userPromise).resolves.toBe('u');
+        expect(userRan).toBe(true);
+      });
+
+      it('falls through to bypass when NO cancellable task can be preempted (all running tasks non-cancellable)', async () => {
+        // Regression: the Finding 2 fix should NOT break the existing
+        // bypass-as-fallback path. If preempt finds nothing to cancel,
+        // the bypass loop must still kick in for the pending USER click.
+        const queue = new AnalysisQueue({
+          concurrency: 2,
+          maxUserBypassSlots: 1,
+        });
+
+        const neighborGate = deferred<void>();
+        const neighborPromise = queue.enqueue(async () => {
+          await neighborGate.promise;
+          return 'neighbor-natural';
+        }, {
+          priority: ANALYSIS_PRIORITY_NEIGHBOR,
+          key: 'n1',
+          cancellable: false, // NOT cancellable
+        });
+        const neighbor2Gate = deferred<void>();
+        const neighbor2Promise = queue.enqueue(async () => {
+          await neighbor2Gate.promise;
+          return 'n2-natural';
+        }, {
+          priority: ANALYSIS_PRIORITY_NEIGHBOR,
+          key: 'n2',
+          cancellable: false,
+        });
+
+        await flushMicrotasks();
+        expect(queue.stats().active).toBe(2);
+
+        // USER click: preempt finds nothing to cancel; bypass picks up.
+        // Use a gate so the USER task doesn't finish before we snapshot
+        // userBypassActive.
+        const userGate = deferred<string>();
+        const userPromise = queue.enqueue(async () => userGate.promise, {
+          priority: ANALYSIS_PRIORITY_USER_SELECTED,
+          key: 'u',
+        });
+
+        await flushMicrotasks();
+        // Bypass MUST have started (preempt was a no-op against the
+        // non-cancellable neighbors, so the bypass fallback fired).
+        expect(queue.stats().userBypassActive).toBe(1);
+
+        userGate.resolve('u');
+        await expect(userPromise).resolves.toBe('u');
+
+        // Cleanup
+        neighborGate.resolve();
+        neighbor2Gate.resolve();
+        await expect(neighborPromise).resolves.toBe('neighbor-natural');
+        await expect(neighbor2Promise).resolves.toBe('n2-natural');
+      });
+    });
+
+    // --- v3.201 — Finding 4 (inflightByKey dedup across requeue) tests ---
+    //
+    // When a NEIGHBOR task is preempted + requeued, the inflightByKey map
+    // must keep its entry alive so that a rapid second USER click for the
+    // SAME key dedupes to the same caller promise. Otherwise the second
+    // enqueue would create a new task that runs in parallel with the
+    // requeued one.
+
+    describe('Finding 4 — inflightByKey dedup across requeue', () => {
+      it('a duplicate enqueue for a preempted-and-requeued key dedupes (does not spawn a parallel task)', async () => {
+        // Scenario: NEIGHBOR task A is running. USER clicks DIFFERENT key
+        // B, preempting A. A's body rejects → settle()/requeue runs → A
+        // is re-pushed into pending at NEIGHBOR priority. During that
+        // window a duplicate enqueue for key A MUST dedupe to the
+        // already-pending A (the requeued one), not spawn a second
+        // parallel A.
+        const queue = new AnalysisQueue({
+          concurrency: 1,
+          maxUserBypassSlots: 0,
+        });
+
+        let aRuns = 0;
+        const aTask = async (signal: AbortSignal): Promise<string> => {
+          aRuns += 1;
+          const myRun = aRuns;
+          if (myRun === 1) {
+            return new Promise<string>((_, reject) => {
+              signal.addEventListener('abort', () => reject(new Error('a-aborted')));
+            });
+          }
+          return `a-final-run-${myRun}`;
+        };
+
+        const aPromise = queue.enqueue(aTask, {
+          priority: ANALYSIS_PRIORITY_NEIGHBOR,
+          key: 'A',
+          cancellable: true,
+        });
+
+        await flushMicrotasks();
+        expect(aRuns).toBe(1);
+
+        // USER click for DIFFERENT key B preempts A.
+        const userGate = deferred<void>();
+        const userPromise = queue.enqueue(async () => {
+          await userGate.promise;
+        }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'B' });
+
+        // Allow the preempt to fire, A's body to reject, settle() to run,
+        // and requeue to place A back in pending. (User is now in the
+        // freed regular slot, gated on userGate.)
+        for (let i = 0; i < 4; i += 1) {
+          await flushMicrotasks();
+        }
+
+        // A should be requeued in pending (not running — user holds slot).
+        expect(aRuns).toBe(1); // A has not started its second run yet
+        const dumpDuringRequeue = queue.dump();
+        const aPending = dumpDuringRequeue.pendingByPriority.neighbor;
+        expect(aPending).toBeGreaterThanOrEqual(1);
+
+        // Duplicate enqueue for key A during the requeue window. This is
+        // the Finding 4 path — inflightByKey must still contain A so this
+        // dedupes rather than creating a parallel pending task.
+        const pendingBefore = queue.stats().pending;
+        const aDup = queue.enqueue(aTask, {
+          priority: ANALYSIS_PRIORITY_NEIGHBOR,
+          key: 'A',
+          cancellable: true,
+        });
+        const pendingAfter = queue.stats().pending;
+
+        // Pending count must NOT grow — dedupe wins.
+        expect(pendingAfter).toBe(pendingBefore);
+
+        // Now unblock user, then A should run exactly ONE more time
+        // (run #2) and complete.
+        userGate.resolve();
+        await userPromise;
+        for (let i = 0; i < 8; i += 1) {
+          await flushMicrotasks();
+        }
+
+        await expect(aPromise).resolves.toBe('a-final-run-2');
+        await expect(aDup).resolves.toBe('a-final-run-2');
+        // run 1 = preempted, run 2 = final. NOT 3 — dedupe held across
+        // the requeue window.
+        expect(aRuns).toBe(2);
+      });
+
+      it('a USER-priority duplicate enqueue for a preempted-and-requeued NEIGHBOR key promotes + dedupes (only one final run)', async () => {
+        // Same shape as above, but the duplicate enqueue arrives at USER
+        // priority — should promote the requeued NEIGHBOR A to USER and
+        // still dedupe. Net result: ONE task body re-runs (not two).
+        const queue = new AnalysisQueue({
+          concurrency: 1,
+          maxUserBypassSlots: 0,
+        });
+
+        let aRuns = 0;
+        const aTask = async (signal: AbortSignal): Promise<string> => {
+          aRuns += 1;
+          const myRun = aRuns;
+          if (myRun === 1) {
+            return new Promise<string>((_, reject) => {
+              signal.addEventListener('abort', () => reject(new Error('a-aborted')));
+            });
+          }
+          return `a-final-run-${myRun}`;
+        };
+
+        const aPromise = queue.enqueue(aTask, {
+          priority: ANALYSIS_PRIORITY_NEIGHBOR,
+          key: 'A',
+          cancellable: true,
+        });
+
+        await flushMicrotasks();
+        expect(aRuns).toBe(1);
+
+        // USER click for B preempts A.
+        const userGate = deferred<void>();
+        const userPromise = queue.enqueue(async () => {
+          await userGate.promise;
+        }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'B' });
+
+        for (let i = 0; i < 4; i += 1) {
+          await flushMicrotasks();
+        }
+
+        // Duplicate enqueue for A but as USER priority — should promote
+        // the requeued A to USER and dedupe.
+        const aDupAsUser = queue.enqueue(aTask, {
+          priority: ANALYSIS_PRIORITY_USER_SELECTED,
+          key: 'A',
+          cancellable: true,
+        });
+
+        // Should NOT spawn a fresh task; aRuns stays at 1 (A is still in
+        // pending, hasn't restarted yet).
+        expect(aRuns).toBe(1);
+
+        userGate.resolve();
+        await userPromise;
+        for (let i = 0; i < 8; i += 1) {
+          await flushMicrotasks();
+        }
+
+        await expect(aPromise).resolves.toBe('a-final-run-2');
+        await expect(aDupAsUser).resolves.toBe('a-final-run-2');
+        expect(aRuns).toBe(2);
+      });
+    });
   });
 });

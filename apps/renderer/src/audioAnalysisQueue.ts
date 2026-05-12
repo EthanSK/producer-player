@@ -653,7 +653,18 @@ export class AnalysisQueue {
       this.runningTasks.delete(next);
       if (next.key !== null) {
         this.runningKeys.delete(next.key);
-        this.inflightByKey.delete(next.key);
+        // v3.201 — Finding 4 fix: when a task is being preempted + requeued,
+        // we MUST keep its inflightByKey entry alive across the cancel so
+        // that a rapid second enqueue for the same key dedupes to the SAME
+        // (still-pending) caller promise instead of spawning a parallel
+        // duplicate. The dedupePromise's resolve/reject wrappers are still
+        // wired to this queued task's resolve/reject, which the requeued
+        // run will eventually call. The dedupe entry gets cleared on the
+        // next settle (when the requeued task finally completes — at that
+        // point next.preempted has been reset to false by requeue).
+        if (!next.preempted) {
+          this.inflightByKey.delete(next.key);
+        }
       }
       this.maybeStart();
     };
@@ -836,17 +847,42 @@ export class AnalysisQueue {
     // Crucially: we run preemption BEFORE bypass so the USER task can take
     // a real regular slot rather than running in parallel with bg work.
     // Bypass remains as a fallback for the non-cancellable case.
+    let preemptedThisCall = 0;
     if (
       this.peekHighestPendingPriority() === ANALYSIS_PRIORITY_USER_SELECTED &&
       this.active >= this.concurrency &&
       this.nonUserActive > 0
     ) {
-      this.preemptCancellableForUser();
+      preemptedThisCall = this.preemptCancellableForUser();
       // The aborted tasks will free their slots asynchronously via their
       // rejection path → `settle()` → `requeuePreemptedTask` →
-      // `maybeStart()`. We don't loop here — bypass below covers the
-      // immediate case where the user click still wants to run NOW even
-      // while ffmpeg is being killed.
+      // `maybeStart()`. The next maybeStart() (triggered by that settle)
+      // is where the pending USER task actually starts in the freed slot.
+    }
+
+    // v3.201 — Finding 2 fix: when preemption JUST fired in THIS
+    // `maybeStart()` call, we must NOT also run the bypass loop here,
+    // because:
+    //
+    //   - Preemption freed (or is freeing) `preemptedThisCall` regular
+    //     slots. Those slots are intended to serve the pending USER work.
+    //   - If we ALSO run bypass in this same call, the pending USER task
+    //     gets started in a bypass slot. Then when the preempted child's
+    //     async settle fires, the freed regular slot's NEXT maybeStart()
+    //     Phase 1 picks up the next NEIGHBOR (USER has already started),
+    //     refilling the supposedly-freed slot. Net = 0 reduction in CPU
+    //     pressure — preemption is defeated.
+    //
+    // By returning here we let the next `maybeStart()` (triggered by the
+    // preempted task's settle) start the USER work in the actual freed
+    // regular slot. Production has `maxUserBypassSlots: 3` so this race
+    // is the realistic case — the bypass-disabled tests hid it.
+    //
+    // Non-cancellable case: if preempt fires for 0 (e.g. running tasks
+    // are all non-cancellable, or already preempted), `preemptedThisCall`
+    // is 0 and we fall through to bypass as before.
+    if (preemptedThisCall > 0) {
+      return;
     }
 
     // Phase 2 — Item #14 user-priority bypass. If we have a pending

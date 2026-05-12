@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AnalysisQueue,
+  AnalysisTaskPreemptedError,
   AnalysisTaskTimeoutError,
   ANALYSIS_PRIORITY_BACKGROUND,
   ANALYSIS_PRIORITY_NEIGHBOR,
@@ -962,5 +963,327 @@ describe('AnalysisQueue', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // --- v3.195 — USER-priority preemption (cancel + requeue) tests ---
+
+  describe('USER preemption', () => {
+    it('aborts a running cancellable NEIGHBOR task when a USER task is enqueued', async () => {
+      // Scenario: cold-launch warmup. Two NEIGHBOR ffmpeg jobs are running in
+      // both regular slots. User clicks a song. The queue should abort one of
+      // the running NEIGHBOR jobs and start the USER job in the freed slot.
+      const queue = new AnalysisQueue({
+        concurrency: 2,
+        maxUserBypassSlots: 0, // force preemption — no bypass available
+      });
+
+      const neighborSignals: AbortSignal[] = [];
+      const neighborTaskFn = (id: string) => async (signal: AbortSignal) => {
+        neighborSignals.push(signal);
+        return new Promise<string>((_, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new Error(`${id} aborted`));
+          });
+        });
+      };
+
+      const n1 = queue.enqueue(neighborTaskFn('n1'), {
+        priority: ANALYSIS_PRIORITY_NEIGHBOR,
+        key: 'n1',
+        cancellable: true,
+      });
+      n1.catch(() => undefined);
+      const n2 = queue.enqueue(neighborTaskFn('n2'), {
+        priority: ANALYSIS_PRIORITY_NEIGHBOR,
+        key: 'n2',
+        cancellable: true,
+      });
+      n2.catch(() => undefined);
+
+      await flushMicrotasks();
+      expect(queue.stats().active).toBe(2);
+      expect(neighborSignals.length).toBe(2);
+      expect(neighborSignals[0].aborted).toBe(false);
+      expect(neighborSignals[1].aborted).toBe(false);
+
+      // User clicks — should preempt one NEIGHBOR.
+      let userRan = false;
+      const userPromise = queue.enqueue(async () => {
+        userRan = true;
+        return 'user-done';
+      }, { priority: ANALYSIS_PRIORITY_USER_SELECTED, key: 'user' });
+
+      await flushMicrotasks();
+      // Exactly ONE neighbor should be aborted (we only need 1 slot freed).
+      const abortedCount = neighborSignals.filter((s) => s.aborted).length;
+      expect(abortedCount).toBe(1);
+
+      // Drain — let the aborted neighbor reject, then user runs in its slot.
+      await flushMicrotasks();
+      await flushMicrotasks();
+      await expect(userPromise).resolves.toBe('user-done');
+      expect(userRan).toBe(true);
+    });
+
+    it('requeues a preempted task at its original priority so it runs after USER completes', async () => {
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        maxUserBypassSlots: 0,
+      });
+
+      let neighborCallCount = 0;
+      const neighborTask = async (signal: AbortSignal): Promise<string> => {
+        neighborCallCount += 1;
+        const thisRun = neighborCallCount;
+        if (thisRun === 1) {
+          // First run is preempted.
+          return new Promise<string>((_, reject) => {
+            signal.addEventListener('abort', () => {
+              reject(new Error('n1 aborted'));
+            });
+          });
+        }
+        // Second run completes normally.
+        return 'n1-done-second';
+      };
+
+      const nPromise = queue.enqueue(neighborTask, {
+        priority: ANALYSIS_PRIORITY_NEIGHBOR,
+        key: 'n1',
+        cancellable: true,
+      });
+
+      await flushMicrotasks();
+      expect(neighborCallCount).toBe(1);
+
+      // User preempts.
+      const userGate = deferred<void>();
+      const userPromise = queue.enqueue(async () => {
+        await userGate.promise;
+      }, { priority: ANALYSIS_PRIORITY_USER_SELECTED });
+
+      // Drain the abort rejection so the slot frees + user runs.
+      await flushMicrotasks();
+      await flushMicrotasks();
+
+      // User task should now be running.
+      expect(queue.stats().active).toBe(1);
+
+      userGate.resolve();
+      await userPromise;
+      await flushMicrotasks();
+      await flushMicrotasks();
+
+      // After user finishes, the requeued neighbor should run AGAIN.
+      expect(neighborCallCount).toBe(2);
+      await expect(nPromise).resolves.toBe('n1-done-second');
+    });
+
+    it('does NOT abort non-cancellable running tasks; uses bypass instead', async () => {
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        maxUserBypassSlots: 1,
+      });
+
+      let neighborAborted = false;
+      const neighborGate = deferred<void>();
+      const neighborPromise = queue.enqueue(async (signal) => {
+        signal.addEventListener('abort', () => {
+          neighborAborted = true;
+        });
+        await neighborGate.promise;
+        return 'neighbor-natural';
+      }, {
+        priority: ANALYSIS_PRIORITY_NEIGHBOR,
+        key: 'n1',
+        cancellable: false,
+      });
+
+      await flushMicrotasks();
+      expect(queue.stats().active).toBe(1);
+
+      const userPromise = queue.enqueue(async () => 'user', {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+        key: 'u1',
+      });
+
+      await flushMicrotasks();
+      // Neighbor was NOT aborted (cancellable=false).
+      expect(neighborAborted).toBe(false);
+      // User ran via bypass instead.
+      await expect(userPromise).resolves.toBe('user');
+
+      // Let neighbor finish naturally.
+      neighborGate.resolve();
+      await expect(neighborPromise).resolves.toBe('neighbor-natural');
+    });
+
+    it('caller of a cancellable task does NOT see the preemption — only the eventual result', async () => {
+      // The whole point of requeue: the caller's promise stays pending until
+      // the task finally settles for real, even across an abort+restart.
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        maxUserBypassSlots: 0,
+      });
+
+      let attempt = 0;
+      const task = async (signal: AbortSignal): Promise<string> => {
+        attempt += 1;
+        if (attempt === 1) {
+          return new Promise<string>((_, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('aborted')));
+          });
+        }
+        return 'final-value';
+      };
+
+      const promise = queue.enqueue(task, {
+        priority: ANALYSIS_PRIORITY_NEIGHBOR,
+        key: 'n1',
+        cancellable: true,
+      });
+
+      await flushMicrotasks();
+      // Preempt with user.
+      const userPromise = queue.enqueue(async () => 'user', {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+      });
+
+      await flushMicrotasks();
+      await flushMicrotasks();
+      await flushMicrotasks();
+
+      // The neighbor's caller-facing promise should still be PENDING — the
+      // requeue is transparent.
+      await expect(userPromise).resolves.toBe('user');
+      await expect(promise).resolves.toBe('final-value');
+      expect(attempt).toBe(2);
+    });
+
+    it('preempts only as many tasks as USER jobs pending (avoids unnecessary cancellation)', async () => {
+      const queue = new AnalysisQueue({
+        concurrency: 3,
+        maxUserBypassSlots: 0,
+      });
+
+      const signals: AbortSignal[] = [];
+      const makeBgTask = () => async (signal: AbortSignal) => {
+        signals.push(signal);
+        return new Promise<void>((_, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      };
+
+      // 3 background tasks fill all slots.
+      const bgs = [1, 2, 3].map((i) => {
+        const p = queue.enqueue(makeBgTask(), {
+          priority: ANALYSIS_PRIORITY_BACKGROUND,
+          key: `bg${i}`,
+          cancellable: true,
+        });
+        p.catch(() => undefined);
+        return p;
+      });
+
+      await flushMicrotasks();
+      expect(signals.length).toBe(3);
+      expect(signals.filter((s) => s.aborted).length).toBe(0);
+
+      // ONE user click → preempt exactly ONE bg.
+      const userPromise = queue.enqueue(async () => 'user', {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+      });
+      await flushMicrotasks();
+      expect(signals.filter((s) => s.aborted).length).toBe(1);
+
+      // Drain — let preempt → user run → requeued bg finish later.
+      await flushMicrotasks();
+      await flushMicrotasks();
+      await expect(userPromise).resolves.toBe('user');
+
+      // Cleanup: abort remaining bg's so test exits.
+      void bgs;
+    });
+
+    it('exposes AnalysisTaskPreemptedError as a typed export for callers that want to detect it', () => {
+      const err = new AnalysisTaskPreemptedError('some-key');
+      expect(err).toBeInstanceOf(Error);
+      expect(err.name).toBe('AnalysisTaskPreemptedError');
+      expect(err.key).toBe('some-key');
+      expect(err.message).toContain('some-key');
+    });
+
+    it('a cancellable task that ignores the abort signal and resolves anyway has its value passed through', async () => {
+      // Defensive: a task may legitimately finish a hair after we tried to
+      // abort it (e.g. the ffmpeg child already had results buffered when we
+      // SIGKILLed). We don't requeue in that case; we just pass the value
+      // through and free the slot.
+      //
+      // Note: when preempted=true, our `then(resolve)` path resolves the
+      // caller's promise with the value. The USER pending was already going
+      // to be served by the bypass + maybeStart loop, so the slot release
+      // here is bonus.
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        maxUserBypassSlots: 0,
+      });
+
+      const taskFn = async () => 'completed-before-abort-effect';
+
+      const nPromise = queue.enqueue(taskFn, {
+        priority: ANALYSIS_PRIORITY_NEIGHBOR,
+        cancellable: true,
+        key: 'n',
+      });
+      await flushMicrotasks();
+      await expect(nPromise).resolves.toBe('completed-before-abort-effect');
+    });
+
+    it('preempts BACKGROUND before NEIGHBOR (preempts lowest-value work first)', async () => {
+      const queue = new AnalysisQueue({
+        concurrency: 2,
+        maxUserBypassSlots: 0,
+      });
+
+      let bgAborted = false;
+      let neighborAborted = false;
+
+      queue.enqueue(async (signal) => {
+        signal.addEventListener('abort', () => { bgAborted = true; });
+        return new Promise<void>((_, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('abort')));
+        });
+      }, {
+        priority: ANALYSIS_PRIORITY_BACKGROUND,
+        key: 'bg',
+        cancellable: true,
+      }).catch(() => undefined);
+
+      queue.enqueue(async (signal) => {
+        signal.addEventListener('abort', () => { neighborAborted = true; });
+        return new Promise<void>((_, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('abort')));
+        });
+      }, {
+        priority: ANALYSIS_PRIORITY_NEIGHBOR,
+        key: 'nb',
+        cancellable: true,
+      }).catch(() => undefined);
+
+      await flushMicrotasks();
+
+      // One user click. Should preempt BG (lower-value work), not the neighbor.
+      const userPromise = queue.enqueue(async () => 'u', {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+      });
+
+      await flushMicrotasks();
+      expect(bgAborted).toBe(true);
+      expect(neighborAborted).toBe(false);
+
+      await flushMicrotasks();
+      await flushMicrotasks();
+      await expect(userPromise).resolves.toBe('u');
+    });
   });
 });

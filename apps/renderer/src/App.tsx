@@ -1194,17 +1194,49 @@ function getFileNameFromPath(filePath: string): string {
  *   - cap concurrent ffmpeg processes at 2 (modest CPU + IPC budget)
  *   - prioritize the user-selected track over background preloads
  *   - dedupe simultaneous requests for the same version (cache key)
+ *
+ * v3.195 — Tasks are CANCELLABLE: the AnalysisQueue's preemption pathway
+ * may abort a running NEIGHBOR/BG analysis when a USER click arrives. We
+ * generate a unique requestId per run and call
+ * `window.producerPlayer.cancelAnalyzeAudioFile(requestId)` from the abort
+ * signal — main-process SIGKILLs the ffmpeg child. The aborted job is
+ * silently requeued by the AnalysisQueue at its original priority, so
+ * warmup resumes after the USER click resolves.
  */
 function runMeasuredAnalysis(
   filePath: string,
   options: RunMeasuredAnalysisOptions = {}
 ): Promise<AudioFileAnalysis> {
   return MEASURED_ANALYSIS_QUEUE.enqueue(
-    () => window.producerPlayer.analyzeAudioFile(filePath),
+    async (signal) => {
+      const requestId = `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const handleAbort = (): void => {
+        // Fire-and-forget cancel to main; if the request already settled,
+        // main treats it as a no-op.
+        try {
+          void window.producerPlayer.cancelAnalyzeAudioFile?.(requestId);
+        } catch {
+          // The preload API may be older in dev; ignore.
+        }
+      };
+      if (signal.aborted) {
+        handleAbort();
+      } else {
+        signal.addEventListener('abort', handleAbort, { once: true });
+      }
+      try {
+        return await window.producerPlayer.analyzeAudioFile(filePath, requestId);
+      } finally {
+        signal.removeEventListener('abort', handleAbort);
+      }
+    },
     {
       priority: options.priority ?? ANALYSIS_PRIORITY_BACKGROUND,
       key: options.cacheKey,
       label: options.label ?? getFileNameFromPath(filePath),
+      // v3.195 — Mark as cancellable so the queue may abort+requeue this
+      // task when a USER-priority click arrives during cold-launch warmup.
+      cancellable: true,
     }
   );
 }
@@ -16648,7 +16680,24 @@ export function App(): JSX.Element {
                   tabIndex={0}
                   className={`main-list-row ${song.id === selectedSongId ? 'selected' : ''} ${
                     dragSongId === song.id ? 'drag-source' : ''
+                  } ${
+                    // v3.195 — Click-feedback UX. When the user selects a row whose
+                    // measured analysis hasn't resolved yet, mark it `is-analyzing` so
+                    // the row visually acknowledges the click immediately (loading
+                    // shimmer + persistent border accent) BEFORE LUFS/normalization
+                    // actually return. The class disappears once
+                    // `activeSongIntegratedLufsStatus` flips to `ready`.
+                    song.id === selectedSongId &&
+                    activeSongIntegratedLufsStatus === 'loading'
+                      ? 'is-analyzing'
+                      : ''
                   }`}
+                  data-analyzing={
+                    song.id === selectedSongId &&
+                    activeSongIntegratedLufsStatus === 'loading'
+                      ? 'true'
+                      : undefined
+                  }
                   onClick={() => handleSongRowSelect(song.id)}
                   onDoubleClick={() => {
                     void handleSongRowPlay(song.id);

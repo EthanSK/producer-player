@@ -57,9 +57,54 @@ interface QueuedTask<T> {
   priority: AnalysisPriority;
   label: string | null;
   insertionOrder: number;
-  task: () => Promise<T>;
+  /**
+   * v3.195 — task receives an AbortSignal so callers that support cancellation
+   * (notably the ffmpeg measured-analysis path) can react to a USER preemption.
+   * Tasks that ignore the signal (preview decode, Worker) keep working until
+   * natural settle, which is fine because the queue's pause-after-cancel
+   * scheduling guarantees the USER job still runs ASAP via bypass.
+   */
+  task: (signal: AbortSignal) => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason: unknown) => void;
+  /**
+   * v3.195 — when true, a USER preemption may abort this running task (via
+   * the AbortController below) AND requeue it at its current priority so the
+   * work isn't lost. When false, the running task is left alone — USER work
+   * runs via bypass instead. Default: false (additive, opt-in).
+   */
+  cancellable: boolean;
+  /**
+   * v3.195 — controller used to deliver the preemption signal to the task.
+   * Created lazily when the task starts; `null` while pending.
+   */
+  abortController: AbortController | null;
+  /**
+   * v3.195 — once an external preemption has fired, this is the underlying
+   * cause that should be passed to the next instance's reject. We treat the
+   * task as "to-be-requeued" rather than "to-be-failed".
+   */
+  preempted: boolean;
+}
+
+/**
+ * v3.195 — error used internally to indicate the task was preempted by the
+ * queue's USER-preemption pathway. The caller of `enqueue()` does NOT see
+ * this; the queue re-enqueues the task at the same priority + key. The
+ * underlying task implementation (e.g. ffmpeg child kill path) should react
+ * to the AbortSignal and reject with whatever it wants — the queue treats
+ * any rejection of a cancelled task as a successful preemption.
+ */
+export class AnalysisTaskPreemptedError extends Error {
+  public readonly key: string | null;
+
+  constructor(key: string | null) {
+    super(
+      `Analysis task preempted by USER priority (key=${key ?? '<none>'})`
+    );
+    this.name = 'AnalysisTaskPreemptedError';
+    this.key = key;
+  }
 }
 
 export interface AnalysisQueueJobSnapshot {
@@ -179,6 +224,18 @@ export interface EnqueueOptions {
    * in scheduling decisions.
    */
   label?: string;
+  /**
+   * v3.195 — when true, this task can be aborted + requeued by the queue if a
+   * USER-priority task arrives while it is running. The task is responsible
+   * for honoring its AbortSignal (e.g. by killing a child process). The
+   * queue will silently requeue cancelled tasks at their original priority.
+   *
+   * Default: false. Opt-in for the measured-analysis path which can kill
+   * the underlying ffmpeg child; the preview-analysis path (decodeAudioData)
+   * cannot reliably cancel mid-flight so it stays false and relies on the
+   * USER bypass slot instead.
+   */
+  cancellable?: boolean;
 }
 
 export class AnalysisQueue {
@@ -248,10 +305,14 @@ export class AnalysisQueue {
    * task — useful when both a background preloader and a user-selection effect
    * race for the same track on near-simultaneous renders.
    */
-  enqueue<T>(task: () => Promise<T>, options: EnqueueOptions = {}): Promise<T> {
+  enqueue<T>(
+    task: ((signal: AbortSignal) => Promise<T>) | (() => Promise<T>),
+    options: EnqueueOptions = {}
+  ): Promise<T> {
     const priority = options.priority ?? ANALYSIS_PRIORITY_BACKGROUND;
     const key = options.key ?? null;
     const label = sanitizeJobLabel(options.label);
+    const cancellable = options.cancellable === true;
 
     if (key !== null) {
       const existing = this.inflightByKey.get(key);
@@ -280,9 +341,13 @@ export class AnalysisQueue {
         priority,
         label,
         insertionOrder: this.nextInsertionOrder++,
-        task,
+        // Wrap legacy 0-arg tasks so they ignore the signal silently.
+        task: task as (signal: AbortSignal) => Promise<T>,
         resolve,
         reject,
+        cancellable,
+        abortController: null,
+        preempted: false,
       };
 
       this.pending.push(queued as QueuedTask<unknown>);
@@ -545,6 +610,12 @@ export class AnalysisQueue {
       this.runningKeys.add(next.key);
     }
 
+    // v3.195 — Each task gets its own AbortController. Cancellable tasks honor
+    // the signal (e.g. ffmpeg path kills the child process and rejects). Non-
+    // cancellable tasks may ignore it.
+    next.abortController = new AbortController();
+    const abortSignal = next.abortController.signal;
+
     // v3.120 — track-once-and-settle. The timeout path and the natural
     // settle path can race; whichever fires first wins, the other is a
     // silent no-op. Without this guard a task that finishes a hair after
@@ -620,21 +691,129 @@ export class AnalysisQueue {
     }
 
     Promise.resolve()
-      .then(() => next.task())
+      .then(() => next.task(abortSignal))
       .then(
         (value) => {
           if (timeoutHandle !== null) {
             clearTimeout(timeoutHandle);
           }
-          settle(() => next.resolve(value));
+          // v3.195 — if a value comes back AFTER preemption fired (the task
+          // ignored the abort signal and finished naturally) we still treat
+          // the slot release as a settle. The caller's promise was kept
+          // alive; we resolve with the late value.
+          settle(() => {
+            if (next.preempted) {
+              // Treat as if the requeued task will pick this up — but the
+              // value is still useful; pass it through.
+              next.resolve(value);
+            } else {
+              next.resolve(value);
+            }
+          });
         },
         (reason) => {
           if (timeoutHandle !== null) {
             clearTimeout(timeoutHandle);
           }
+          // v3.195 — preemption rejection path. If the task was preempted
+          // (we aborted its signal) and it then rejected, we silently
+          // requeue rather than propagating the rejection. The caller's
+          // original promise stays pending until the requeued instance
+          // settles.
+          if (next.preempted) {
+            settle(() => {
+              this.requeuePreemptedTask(next);
+            });
+            return;
+          }
           settle(() => next.reject(reason));
         }
       );
+  }
+
+  /**
+   * v3.195 — Re-insert a preempted task at the front of its priority bucket so
+   * it runs again after the USER work completes. The original
+   * resolve/reject closures are preserved so the caller's promise still
+   * settles with the eventual result.
+   */
+  private requeuePreemptedTask(task: QueuedTask<unknown>): void {
+    // Reset preemption state so a fresh AbortController is created when
+    // the task starts again.
+    task.preempted = false;
+    task.abortController = null;
+    // Re-insert at the FRONT of insertion order within its priority bucket:
+    // we use a fresh insertionOrder that sorts AFTER currently-pending tasks
+    // at the same priority but BEFORE tasks at strictly LOWER priority. The
+    // simplest correct choice is the head of the bucket — give it a negative
+    // insertion order so it wins same-priority FIFO against newer entries.
+    // Since insertion order is monotonically increasing, decrement below the
+    // current min.
+    task.insertionOrder = this.computeRequeueInsertionOrder();
+    this.pending.push(task);
+    this.maybeStart();
+  }
+
+  private computeRequeueInsertionOrder(): number {
+    let min = 0;
+    for (const t of this.pending) {
+      if (t.insertionOrder < min) {
+        min = t.insertionOrder;
+      }
+    }
+    return min - 1;
+  }
+
+  /**
+   * v3.195 — Preempt all running NEIGHBOR/BG tasks that are cancellable so
+   * one (or more) pending USER-priority tasks can grab a regular slot.
+   * Non-cancellable running tasks are left alone (they keep their slot until
+   * natural settle).
+   *
+   * Returns the number of tasks preempted.
+   */
+  private preemptCancellableForUser(): number {
+    if (this.peekHighestPendingPriority() !== ANALYSIS_PRIORITY_USER_SELECTED) {
+      return 0;
+    }
+    // Count how many USER jobs are pending so we don't preempt more slots
+    // than we need (avoids unnecessary cancellation churn).
+    let userPendingCount = 0;
+    for (const t of this.pending) {
+      if (t.priority === ANALYSIS_PRIORITY_USER_SELECTED) {
+        userPendingCount += 1;
+      }
+    }
+    if (userPendingCount === 0) {
+      return 0;
+    }
+
+    let preempted = 0;
+    // Iterate cancellable non-user tasks in REVERSE priority order
+    // (background first, then neighbor) so user clicks preempt the lowest-
+    // value work first.
+    const candidates: QueuedTask<unknown>[] = [];
+    for (const [runningTask, slot] of this.runningTasks.entries()) {
+      if (slot !== 'regular') continue;
+      if (runningTask.priority === ANALYSIS_PRIORITY_USER_SELECTED) continue;
+      if (!runningTask.cancellable) continue;
+      if (runningTask.preempted) continue;
+      candidates.push(runningTask);
+    }
+    candidates.sort((a, b) => b.priority - a.priority);
+
+    for (const candidate of candidates) {
+      if (preempted >= userPendingCount) break;
+      candidate.preempted = true;
+      try {
+        candidate.abortController?.abort();
+      } catch {
+        // Aborting a controller is meant to be infallible; swallow as a
+        // defensive precaution.
+      }
+      preempted += 1;
+    }
+    return preempted;
   }
 
   private maybeStart(): void {
@@ -645,6 +824,29 @@ export class AnalysisQueue {
         return;
       }
       this.startTask(next, false);
+    }
+
+    // v3.195 — Phase 1.5: PREEMPTION. If a USER-priority task is pending and
+    // all regular slots are held by lower-priority work, try to cancel a
+    // cancellable NEIGHBOR/BG task to free a slot for USER. The aborted
+    // task's natural rejection will trigger `requeuePreemptedTask` which
+    // re-inserts it at its original priority for later. This is what
+    // delivers the "click instantly" UX during cold-launch warmup floods.
+    //
+    // Crucially: we run preemption BEFORE bypass so the USER task can take
+    // a real regular slot rather than running in parallel with bg work.
+    // Bypass remains as a fallback for the non-cancellable case.
+    if (
+      this.peekHighestPendingPriority() === ANALYSIS_PRIORITY_USER_SELECTED &&
+      this.active >= this.concurrency &&
+      this.nonUserActive > 0
+    ) {
+      this.preemptCancellableForUser();
+      // The aborted tasks will free their slots asynchronously via their
+      // rejection path → `settle()` → `requeuePreemptedTask` →
+      // `maybeStart()`. We don't loop here — bypass below covers the
+      // immediate case where the user click still wants to run NOW even
+      // while ffmpeg is being killed.
     }
 
     // Phase 2 — Item #14 user-priority bypass. If we have a pending

@@ -2759,6 +2759,35 @@ body.floating-switcher-panel-dragging * {
   background: rgba(92, 167, 255, 0.15);
 }
 
+/* v3.195 — Click-feedback UX. While the selected row's measured analysis is
+ * still loading (ffmpeg ebur128 hasn't returned), apply a subtle shimmer +
+ * accent-glow so the click is visibly acknowledged BEFORE LUFS resolves.
+ * The class is removed as soon as `activeSongIntegratedLufsStatus === 'ready'`,
+ * giving a clear visual cue: "the app heard your click; analysis pending."
+ */
+.main-list-row.is-analyzing {
+  position: relative;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(92, 167, 255, 0.15) 0%,
+      rgba(92, 167, 255, 0.28) 50%,
+      rgba(92, 167, 255, 0.15) 100%
+    );
+  background-size: 220% 100%;
+  animation: main-list-row-analyzing-shimmer 1.6s ease-in-out infinite;
+  box-shadow: 0 0 0 1px rgba(92, 167, 255, 0.48), 0 0 16px rgba(92, 167, 255, 0.18);
+}
+
+@keyframes main-list-row-analyzing-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 .main-list-row:focus {
   outline: none;
 }

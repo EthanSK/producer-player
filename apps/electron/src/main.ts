@@ -2770,14 +2770,110 @@ function delay(milliseconds: number): Promise<void> {
   });
 }
 
+/**
+ * v3.195 — Map of in-flight analysis request ids to the child processes
+ * they own. The renderer's AnalysisQueue invokes
+ * `cancelAnalyzeAudioFile(requestId)` when a USER-priority click preempts a
+ * running NEIGHBOR/BG analysis; we SIGKILL every child we still have and
+ * let the awaiting `runProcessCapture` reject with an AbortError.
+ *
+ * The set is scoped per-requestId because a single `analyzeAudioFile()` call
+ * spawns multiple children (ebur128, volumedetect, ffprobe) and we must kill
+ * all of them to free the OS-level CPU pressure.
+ */
+const ANALYSIS_REQUEST_CHILDREN = new Map<string, Set<ChildProcessWithoutNullStreams>>();
+
+// v3.195 — type for the child processes we track. Imported lazily to avoid
+// touching the existing import block.
+type ChildProcessWithoutNullStreams = ReturnType<typeof spawn>;
+
+class AnalysisAbortError extends Error {
+  constructor(requestId: string) {
+    super(`Analysis request ${requestId} was aborted`);
+    this.name = 'AbortError';
+  }
+}
+
+function registerAnalysisChild(
+  requestId: string | null,
+  child: ChildProcessWithoutNullStreams
+): void {
+  if (!requestId) {
+    return;
+  }
+  let set = ANALYSIS_REQUEST_CHILDREN.get(requestId);
+  if (!set) {
+    set = new Set();
+    ANALYSIS_REQUEST_CHILDREN.set(requestId, set);
+  }
+  set.add(child);
+}
+
+function unregisterAnalysisChild(
+  requestId: string | null,
+  child: ChildProcessWithoutNullStreams
+): void {
+  if (!requestId) {
+    return;
+  }
+  const set = ANALYSIS_REQUEST_CHILDREN.get(requestId);
+  if (!set) {
+    return;
+  }
+  set.delete(child);
+  if (set.size === 0) {
+    ANALYSIS_REQUEST_CHILDREN.delete(requestId);
+  }
+}
+
+function cancelAnalysisRequest(requestId: string): void {
+  const set = ANALYSIS_REQUEST_CHILDREN.get(requestId);
+  if (!set || set.size === 0) {
+    return;
+  }
+  for (const child of set) {
+    try {
+      // SIGKILL — bypass any pipe drains; we don't want a half-baked stdout
+      // to be parsed by the awaiting analysis logic. The corresponding
+      // `runProcessCapture` rejects with AnalysisAbortError on close.
+      child.kill('SIGKILL');
+    } catch {
+      // Best-effort; the child may have already exited between map-lookup
+      // and kill.
+    }
+  }
+  // Mark the slot drained so the caller sees an abort, not a non-zero exit
+  // (we rely on the abort flag on close handler below).
+  ANALYSIS_REQUEST_CHILDREN.delete(requestId);
+}
+
 async function runProcessCapture(
   command: string,
-  args: string[]
+  args: string[],
+  options: { requestId?: string | null } = {}
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+
+    const requestId = options.requestId ?? null;
+    registerAnalysisChild(requestId, child);
+    let aborted = false;
+
+    // Detect whether the cancel handler killed this child: if requestId is
+    // no longer in the map (cancelAnalysisRequest cleared it), we should
+    // surface an AbortError rather than treat the non-zero exit as a real
+    // failure.
+    const checkAborted = (): boolean => {
+      if (!requestId) {
+        return false;
+      }
+      const set = ANALYSIS_REQUEST_CHILDREN.get(requestId);
+      // If the set is missing entirely, or this child is no longer in it,
+      // we've been cancelled.
+      return !set || !set.has(child);
+    };
 
     let stdout = '';
     let stderr = '';
@@ -2791,10 +2887,20 @@ async function runProcessCapture(
     });
 
     child.on('error', (error) => {
+      unregisterAnalysisChild(requestId, child);
+      if (aborted || checkAborted()) {
+        rejectPromise(new AnalysisAbortError(requestId ?? '<no-id>'));
+        return;
+      }
       rejectPromise(error);
     });
 
     child.on('close', (code) => {
+      unregisterAnalysisChild(requestId, child);
+      if (aborted || checkAborted()) {
+        rejectPromise(new AnalysisAbortError(requestId ?? '<no-id>'));
+        return;
+      }
       if (code === 0) {
         resolvePromise({ stdout, stderr });
         return;
@@ -2809,7 +2915,10 @@ async function runProcessCapture(
   });
 }
 
-async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
+async function analyzeAudioFile(
+  filePath: string,
+  requestId: string | null = null
+): Promise<AudioFileAnalysis> {
   const resolvedPath = resolve(filePath);
   const stats = await fs.stat(resolvedPath);
 
@@ -2836,7 +2945,7 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
     '-f',
     'null',
     '-',
-  ]);
+  ], { requestId });
 
   const [volumedetectResult, probedSampleRateHz] = await Promise.all([
     runProcessCapture(ffmpegCommand, [
@@ -2849,7 +2958,7 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
       '-f',
       'null',
       '-',
-    ]),
+    ], { requestId }),
     (async () => {
       try {
         const probeResult = await runProcessCapture(ffprobeCommand, [
@@ -2862,7 +2971,7 @@ async function analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis> {
           '-of',
           'default=noprint_wrappers=1:nokey=1',
           resolvedPath,
-        ]);
+        ], { requestId });
 
         return parseInteger(probeResult.stdout.trim());
       } catch {
@@ -4693,9 +4802,28 @@ function registerIpcHandlers(service: FileLibraryService): void {
     return resolvePlaybackSource(filePath);
   });
 
-  ipcMain.handle(IPC_CHANNELS.ANALYZE_AUDIO_FILE, async (_event, filePath: string) => {
-    return analyzeAudioFile(filePath);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.ANALYZE_AUDIO_FILE,
+    async (_event, filePath: string, requestId: string | null = null) => {
+      return analyzeAudioFile(filePath, requestId);
+    }
+  );
+
+  // v3.195 — Cancel an in-flight ffmpeg/ffprobe analysis by request id. The
+  // renderer-side AnalysisQueue preemption pathway calls this to free CPU
+  // slots for a USER-priority click. SIGKILLs every child process tracked
+  // for the request id; the awaiting runProcessCapture sees the abort
+  // and rejects with AnalysisAbortError, which propagates back to the
+  // renderer as an AbortError.
+  ipcMain.handle(
+    IPC_CHANNELS.CANCEL_ANALYZE_AUDIO_FILE,
+    async (_event, requestId: string) => {
+      if (typeof requestId !== 'string' || requestId.length === 0) {
+        return;
+      }
+      cancelAnalysisRequest(requestId);
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.GET_MASTERING_ANALYSIS_CACHE, async () => {
     return readMasteringAnalysisCacheState();

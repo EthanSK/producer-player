@@ -225,6 +225,12 @@ export const IPC_CHANNELS = {
   TO_FILE_URL: 'producer-player:to-file-url',
   RESOLVE_PLAYBACK_SOURCE: 'producer-player:resolve-playback-source',
   ANALYZE_AUDIO_FILE: 'producer-player:analyze-audio-file',
+  // v3.195 — Cancel an in-flight ffmpeg analysis by request id. The
+  // renderer-side AnalysisQueue's preemption pathway invokes this when a
+  // USER-priority click arrives while a NEIGHBOR/BG analysis is mid-flight,
+  // so the OS-level child process is SIGKILLed and the slot is freed
+  // immediately. No-op if the request id is unknown (already settled).
+  CANCEL_ANALYZE_AUDIO_FILE: 'producer-player:cancel-analyze-audio-file',
   GET_MASTERING_ANALYSIS_CACHE: 'producer-player:get-mastering-analysis-cache',
   WRITE_MASTERING_ANALYSIS_CACHE: 'producer-player:write-mastering-analysis-cache',
   PICK_REFERENCE_TRACK: 'producer-player:pick-reference-track',
@@ -1365,7 +1371,17 @@ export interface ProducerPlayerBridge {
   copyTextToClipboard(text: string): Promise<void>;
   toFileUrl(filePath: string): Promise<string>;
   resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo>;
-  analyzeAudioFile(filePath: string): Promise<AudioFileAnalysis>;
+  analyzeAudioFile(
+    filePath: string,
+    requestId?: string
+  ): Promise<AudioFileAnalysis>;
+  /**
+   * v3.195 — Cancel an in-flight `analyzeAudioFile` call by its requestId.
+   * The main process SIGKILLs any ffmpeg/ffprobe child processes associated
+   * with the request and the original promise rejects with an AbortError.
+   * Idempotent — repeated calls and unknown ids are no-ops.
+   */
+  cancelAnalyzeAudioFile(requestId: string): Promise<void>;
   getMasteringAnalysisCache(): Promise<MasteringAnalysisCacheState>;
   writeMasteringAnalysisCache(
     payload: MasteringAnalysisCachePayload

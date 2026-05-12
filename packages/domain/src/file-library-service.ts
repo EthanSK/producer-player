@@ -266,18 +266,6 @@ async function moveFile(sourcePath: string, targetPath: string): Promise<void> {
   await fs.unlink(sourcePath);
 }
 
-// DAW sidecar files live next to the audio they describe and are named
-// `<audio-filename>.<sidecar-ext>` — e.g. `barber smith v45.wav.asd`.
-// Keep this whitelist conservative: only files matching exact prefix +
-// recognised extension move with the audio. Anything else (e.g. a project
-// file that happens to share a prefix) is intentionally left alone.
-const DAW_SIDECAR_EXTENSIONS: readonly string[] = [
-  '.asd', // Ableton Live analysis
-  '.reapeaks', // Reaper waveform peaks
-  '.peak', // Logic and various other hosts
-  '.peaks', // Some hosts use the plural form
-];
-
 export class FileLibraryService {
   private readonly linkedFolders = new Map<string, LinkedFolder>();
   private readonly folderFiles = new Map<string, ScannedAudioFile[]>();
@@ -937,16 +925,29 @@ export class FileLibraryService {
 
   /**
    * After moving an audio file from `sourceAudioPath` to `<targetDirectory>/<targetAudioFileName>`,
-   * move any DAW sidecar files that lived next to the source audio (e.g. Ableton's `.asd`,
-   * Reaper's `.reapeaks`) into the same target directory so they keep tracking the audio.
+   * move any companion files that lived next to the source audio into the same target directory
+   * so they keep tracking the audio. This is intentionally DAW-agnostic: any file in the source
+   * directory whose name starts with `<source-audio-filename>.` (the full audio filename plus a
+   * literal trailing dot) is treated as a companion and follows the move.
    *
-   * Sidecars are matched by exact filename prefix + recognised sidecar extension:
-   * for `barber smith v45.wav` we look for `barber smith v45.wav.asd`,
-   * `barber smith v45.wav.reapeaks`, etc. Missing sidecars are skipped silently.
+   * Examples of files that match for `barber smith v45.wav`:
+   *   - `barber smith v45.wav.asd`        (Ableton analysis)
+   *   - `barber smith v45.wav.reapeaks`   (Reaper peaks)
+   *   - `barber smith v45.wav.peak`       (Logic / generic peaks)
+   *   - `barber smith v45.wav.bak`        (manual backup)
+   *   - `barber smith v45.wav.notes`      (manual companion)
+   *   - any future DAW sidecar we haven't heard of, plus arbitrary user companions
+   *
+   * Files that do NOT match:
+   *   - `barber smith v45.wav` itself (no trailing dot after the filename)
+   *   - `barber smith v45.mp3` or other versions / formats (different audio filename)
+   *   - subdirectories whose name happens to share the prefix (only regular files move)
+   *
    * The destination filename mirrors the audio's renamed form so that, for example,
-   * `Leaky v1.wav` archived as `Leaky v1-archived-1.wav` gets its sidecar moved as
-   * `Leaky v1-archived-1.wav.asd`. Name collisions at the destination are de-duplicated
-   * via `resolveArchivePath`.
+   * `Leaky v1.wav` archived as `Leaky v1-archived-1.wav` gets its companions renamed to
+   * `Leaky v1-archived-1.wav.<suffix>`. Name collisions at the destination are de-duplicated
+   * via `resolveArchivePath`. Companion moves are best-effort: a failure on one companion
+   * never blocks the others (or the audio move itself).
    */
   private async moveSidecarsAlongside(
     sourceAudioPath: string,
@@ -955,18 +956,39 @@ export class FileLibraryService {
   ): Promise<void> {
     const sourceDirectory = path.dirname(sourceAudioPath);
     const sourceAudioFileName = path.basename(sourceAudioPath);
+    const matchPrefix = `${sourceAudioFileName}.`;
 
-    for (const sidecarExtension of DAW_SIDECAR_EXTENSIONS) {
-      const sourceSidecarPath = path.join(
-        sourceDirectory,
-        `${sourceAudioFileName}${sidecarExtension}`
-      );
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(sourceDirectory, { withFileTypes: true });
+    } catch {
+      // Source directory unreadable — nothing to do.
+      return;
+    }
 
-      if (!(await pathExists(sourceSidecarPath))) {
+    for (const entry of entries) {
+      // Only regular files follow the move. Skip directories (and other special
+      // entries) even if their name matches the prefix.
+      if (!entry.isFile()) {
         continue;
       }
 
-      const targetSidecarFileName = `${targetAudioFileName}${sidecarExtension}`;
+      if (!entry.name.startsWith(matchPrefix)) {
+        continue;
+      }
+
+      // Defensive: exact-equality check would never be true given the trailing
+      // dot in `matchPrefix`, but guard explicitly in case the prefix changes
+      // shape in the future.
+      if (entry.name === sourceAudioFileName) {
+        continue;
+      }
+
+      // The suffix after the audio filename (including the leading dot) is
+      // preserved verbatim on the destination file.
+      const suffix = entry.name.slice(sourceAudioFileName.length);
+      const targetSidecarFileName = `${targetAudioFileName}${suffix}`;
+      const sourceSidecarPath = path.join(sourceDirectory, entry.name);
       const targetSidecarPath = await this.resolveArchivePath(
         targetDirectory,
         targetSidecarFileName
@@ -975,7 +997,7 @@ export class FileLibraryService {
       try {
         await moveFile(sourceSidecarPath, targetSidecarPath);
       } catch {
-        // Sidecars are best-effort — never fail the audio move because of one.
+        // Companions are best-effort — never fail the audio move because of one.
       }
     }
   }

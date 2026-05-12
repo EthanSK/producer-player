@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * One-shot maintenance script for cleaning up DAW sidecar files
- * (Ableton `.asd`, Reaper `.reapeaks`, Logic `.peak`, generic `.peaks`)
- * that were left stranded at the top level of a Producer Player folder
- * because earlier versions of the app moved audio files into `old/`
- * without bringing their sidecars along.
+ * One-shot maintenance script for cleaning up companion files
+ * (DAW sidecars like Ableton `.asd`, Reaper `.reapeaks`, Logic `.peak`,
+ * plus arbitrary user companions like `.bak` / `.notes` / future DAW
+ * formats) that were left stranded at the top level of a Producer Player
+ * folder because earlier versions of the app moved audio files into
+ * `old/` without bringing their companions along.
  *
  * Usage:
  *   node scripts/cleanup-orphaned-sidecars.mjs /path/to/MusicOutput
  *   node scripts/cleanup-orphaned-sidecars.mjs --dry-run /path/to/MusicOutput
  *
- * For each top-level `*.<sidecar-ext>` file, the script:
- *   - Computes the matching audio file name (strip the sidecar extension)
- *   - If the audio file is NOT at the top level but IS in `old/`, moves
- *     the sidecar into `old/` (alongside its audio).
- *   - Otherwise skips it (audio is still at top level, or audio is
- *     genuinely gone — both cases are intentionally left alone).
+ * Detection is DAW-agnostic: any top-level file whose name starts with
+ * `<audio-filename>.` (the full audio filename plus a literal trailing
+ * dot, where `<audio-filename>` is some file that currently lives in
+ * `old/`) is considered a stranded companion and is moved into `old/`
+ * alongside its audio. Subdirectories are skipped even if they match.
  *
  * Safe to run multiple times. Use --dry-run first to inspect what would
  * change without touching disk.
@@ -24,8 +24,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-
-const DAW_SIDECAR_EXTENSIONS = ['.asd', '.reapeaks', '.peak', '.peaks'];
 
 function parseArgs(argv) {
   const args = { dryRun: false, folder: null };
@@ -47,20 +45,11 @@ function printUsage() {
   console.log(
     'Usage: node scripts/cleanup-orphaned-sidecars.mjs [--dry-run] <folder>\n' +
       '\n' +
-      'Move stranded DAW sidecar files (.asd / .reapeaks / .peak / .peaks)\n' +
-      'from the top level of <folder> into <folder>/old/ when their matching\n' +
-      'audio file is already in <folder>/old/.\n'
+      'Move stranded companion files from the top level of <folder> into\n' +
+      '<folder>/old/ when their matching audio file is already in <folder>/old/.\n' +
+      'A companion is any regular file whose name starts with `<audio>.` where\n' +
+      '<audio> matches an audio file currently in <folder>/old/.\n'
   );
-}
-
-function getSidecarExtension(fileName) {
-  const lower = fileName.toLowerCase();
-  for (const extension of DAW_SIDECAR_EXTENSIONS) {
-    if (lower.endsWith(extension)) {
-      return extension;
-    }
-  }
-  return null;
 }
 
 async function pathExists(absolutePath) {
@@ -134,6 +123,32 @@ async function main() {
 
   const oldFolderExists = await pathExists(oldFolder);
 
+  // Index the set of audio (and other) filenames currently in `old/` so we can
+  // match top-level companions against them with a prefix-anchored lookup.
+  // Each entry maps the audio filename to its absolute path inside `old/`.
+  const oldFileNames = [];
+  if (oldFolderExists) {
+    try {
+      const oldEntries = await fs.readdir(oldFolder, { withFileTypes: true });
+      for (const oldEntry of oldEntries) {
+        if (oldEntry.isFile()) {
+          oldFileNames.push(oldEntry.name);
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to read old/ folder: ${oldFolder}`);
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  }
+
+  // Sort longest-first so that when a candidate matches multiple potential
+  // "audio" prefixes (e.g. `foo.wav` and `foo.wav.bak` both happen to be in
+  // `old/`), we associate the companion with the most specific (longest)
+  // anchor. In practice this is paranoia — companions in `old/` won't usually
+  // themselves act as audio anchors — but it makes the matching deterministic.
+  oldFileNames.sort((a, b) => b.length - a.length);
+
   let moved = 0;
   let skipped = 0;
 
@@ -142,37 +157,29 @@ async function main() {
       continue;
     }
 
-    const sidecarExtension = getSidecarExtension(entry.name);
-    if (!sidecarExtension) {
+    // Find the longest old/ filename `X` such that `entry.name` starts with
+    // `X.` (literal trailing dot). That `X` is the audio anchor for this
+    // companion.
+    let audioFileName = null;
+    for (const candidate of oldFileNames) {
+      const prefix = `${candidate}.`;
+      if (entry.name.length > prefix.length && entry.name.startsWith(prefix)) {
+        audioFileName = candidate;
+        break;
+      }
+    }
+
+    if (!audioFileName) {
+      // Not a recognised companion (no anchor in old/), or the top-level audio
+      // is still present (handled implicitly: if the audio is at top level,
+      // it's not in old/ and won't match). Leave the file alone.
       continue;
     }
 
-    // The audio filename is the sidecar name minus the trailing sidecar
-    // extension. e.g. `barber smith v45.wav.asd` -> `barber smith v45.wav`.
-    const audioFileName = entry.name.slice(0, -sidecarExtension.length);
-    if (audioFileName.length === 0) {
-      skipped += 1;
-      continue;
-    }
-
+    // Don't touch a companion if the audio is ALSO at top level — the
+    // companion belongs alongside the top-level audio, not in old/.
     const topLevelAudioPath = path.join(folder, audioFileName);
-    const oldAudioPath = path.join(oldFolder, audioFileName);
-
-    const audioAtTop = await pathExists(topLevelAudioPath);
-    if (audioAtTop) {
-      // Audio still at the top level — sidecar belongs here too.
-      skipped += 1;
-      continue;
-    }
-
-    if (!oldFolderExists) {
-      skipped += 1;
-      continue;
-    }
-
-    const audioInOld = await pathExists(oldAudioPath);
-    if (!audioInOld) {
-      // No matching audio anywhere we recognise — leave the sidecar alone.
+    if (await pathExists(topLevelAudioPath)) {
       skipped += 1;
       continue;
     }

@@ -619,6 +619,216 @@ test('sidecar is not touched when its audio file is missing or already in old/',
   }
 });
 
+test('archiving drags arbitrary companion files (unknown extensions) along into old/', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-sidecar-arbitrary-'
+  );
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Custom v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        // A completely unknown / made-up extension. The old whitelist would
+        // have left this stranded; the prefix-anchored match takes it.
+        relativePath: 'Custom v1.wav.foobarext',
+        contents: 'mystery-companion',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Custom v1.wav.bak',
+        contents: 'manual-backup',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Custom v1.wav.notes',
+        contents: 'producer-notes',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Custom v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+    });
+
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Custom v2.wav',
+      'old/Custom v1.wav',
+      'old/Custom v1.wav.bak',
+      'old/Custom v1.wav.foobarext',
+      'old/Custom v1.wav.notes',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
+test('archiving drags many heterogeneous companions in a single move', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-sidecar-many-'
+  );
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Heavy v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Heavy v1.wav.asd',
+        contents: 'ableton',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Heavy v1.wav.reapeaks',
+        contents: 'reaper',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Heavy v1.wav.bak',
+        contents: 'backup',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Heavy v1.wav.notes',
+        contents: 'notes',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Heavy v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+    });
+
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Heavy v2.wav',
+      'old/Heavy v1.wav',
+      'old/Heavy v1.wav.asd',
+      'old/Heavy v1.wav.bak',
+      'old/Heavy v1.wav.notes',
+      'old/Heavy v1.wav.reapeaks',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
+test('archiving does NOT pick up same-prefix-but-different-filename audio files', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-sidecar-prefix-collision-'
+  );
+
+  try {
+    // `barber smith v45.wav` is the audio we expect to be archived. A
+    // separate file `barber smith v45a.wav` has the SAME starting characters
+    // but is NOT a companion (no literal-dot separator after the audio
+    // filename), so it must NOT be dragged along.
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'barber smith v45.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'barber smith v45.wav.asd',
+        contents: 'real-companion',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        // Same starting chars but a different audio file — not a companion.
+        relativePath: 'barber smith v45a.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.500Z'),
+      },
+      {
+        relativePath: 'barber smith v46.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+    });
+
+    // What this test pins down: the companion matcher uses `<audio>.` as a
+    // LITERAL prefix (audio filename PLUS a trailing dot), so it must NOT
+    // pick up `barber smith v45a.wav` as a companion of `barber smith v45.wav`
+    // — there's no separator dot between `v45` and `a`. The real companion
+    // (`barber smith v45.wav.asd`) follows its audio into old/.
+    //
+    // `barber smith v45a.wav` stays at top level here because the version
+    // matcher treats it as its own song (the `a` after `v45` breaks the
+    // `vNN` grouping rule). The point of this test is the companion match,
+    // not the song grouping — what matters is that no companion of v45 grabbed
+    // v45a by mistake.
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'barber smith v45a.wav',
+      'barber smith v46.wav',
+      'old/barber smith v45.wav',
+      'old/barber smith v45.wav.asd',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
+test('archiving skips subdirectories whose name matches the companion prefix', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-sidecar-subdir-'
+  );
+
+  try {
+    // A directory named `Subdir v1.wav.metadata/` exists with content inside.
+    // The prefix-anchored matcher must NOT try to move it as a companion.
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Subdir v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        // Same-prefix file companion — should move.
+        relativePath: 'Subdir v1.wav.asd',
+        contents: 'companion',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        // Inside a same-prefix subdirectory — directory should be skipped,
+        // so this nested file stays in place (and the directory survives).
+        relativePath: 'Subdir v1.wav.metadata/inner.txt',
+        contents: 'inside-the-dir',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Subdir v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+    });
+
+    // The `.metadata/` directory and its contents stay at the original
+    // location; only the regular file companion (`.asd`) follows the audio.
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Subdir v1.wav.metadata/inner.txt',
+      'Subdir v2.wav',
+      'old/Subdir v1.wav',
+      'old/Subdir v1.wav.asd',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
 test('mixed v-suffix naming variants stay grouped, while no-suffix files are ignored', async () => {
   const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-vsuffix-');
 

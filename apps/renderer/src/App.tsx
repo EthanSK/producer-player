@@ -12525,10 +12525,14 @@ export function App(): JSX.Element {
     });
   }
 
-  // v3.189.0 — Save-copy the song's linked project file. The
-  // renderer figures out the target version (one above the highest
-  // existing audio version) and the main process performs the actual
-  // file-system copy with collision bumping.
+  // v3.189.0 — Save-copy the song's linked project file.
+  // v3.191 — target = the song's CURRENT/highest existing audio
+  // version, not (current + 1). Original intent (per Ethan voice 2752):
+  // "I clicked save copy on version 49 and it saved version 50. It
+  // should save the current version." So if a song has versions
+  // v1..v49, save-copy tags the project as `… v49.als` (matches the
+  // currently-active export). Main process still bumps to v49 (2), (3)
+  // on filename collisions so re-clicks remain non-destructive.
   function computeSongProjectSaveCopyTargetVersion(song: SongWithVersions): number {
     let highest = 0;
     for (const version of song.versions) {
@@ -12537,7 +12541,7 @@ export function App(): JSX.Element {
         highest = versionNumber;
       }
     }
-    return highest >= 1 ? highest + 1 : 1;
+    return highest >= 1 ? highest : 1;
   }
 
   async function handleSaveSongProjectCopy(song: SongWithVersions): Promise<void> {
@@ -16623,9 +16627,10 @@ export function App(): JSX.Element {
                             }}
                             data-testid="song-project-save-copy-button"
                             title={
-                              'Duplicate this project file next to the original, with the next ' +
-                              'version number appended (e.g. song.als → song v48.als). Useful ' +
-                              'for checkpointing your project at each export version.'
+                              "Duplicate this project file next to the original, with the song's " +
+                              'current version number appended (e.g. if the latest audio is v49, ' +
+                              'the copy is named song v49.als). Useful for checkpointing your ' +
+                              'project at the version you just rendered. Re-clicks add (2), (3) etc.'
                             }
                             aria-label={`${songRowTitle} save copy of project file`}
                           >

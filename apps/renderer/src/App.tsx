@@ -1186,6 +1186,32 @@ function getFileNameFromPath(filePath: string): string {
 }
 
 /**
+ * v3.198 — Did a rejected analysis promise come from a preempt/cancel
+ * (USER click during cold-launch warmup → SIGKILL'd ffmpeg → AbortError)
+ * rather than a real failure?
+ *
+ * The AnalysisQueue's preempt pathway SHOULD silently requeue cancelled
+ * tasks so the caller's promise stays pending — but as defense-in-depth
+ * (and to cover any future direct-cancel path or queue edge case), every
+ * `runMeasuredAnalysis` / `analyzeTrackFromUrl` consumer should branch on
+ * this helper and leave its existing state intact rather than flipping to
+ * a misleading `status: 'error'`.
+ *
+ * Matches:
+ *   - DOMException with name='AbortError' (Web standard AbortError)
+ *   - the main-process `AnalysisAbortError` shape (Error subclass, name
+ *     preserved across the IPC boundary)
+ *   - any nominal `AnalysisTaskPreemptedError` from the queue itself
+ */
+export function isAnalysisAbortError(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') {
+    return false;
+  }
+  const name = (error as { name?: unknown }).name;
+  return name === 'AbortError' || name === 'AnalysisTaskPreemptedError';
+}
+
+/**
  * Throttled wrapper around the ffmpeg-backed `analyzeAudioFile` IPC.
  * Centralizing the call site lets us:
  *   - cap concurrent ffmpeg processes at 2 (modest CPU + IPC budget)
@@ -3719,14 +3745,21 @@ export function App(): JSX.Element {
             return;
           }
 
+          // v3.198 — Defensive: cancellation from a preempt path should
+          // not flip the preview status to 'error'. Leave existing state
+          // intact so the requeued task can complete it; previously a
+          // preempted preview could surface a misleading "Analysis was
+          // interrupted" message in the UI.
+          if (isAnalysisAbortError(analysisIssue)) {
+            return;
+          }
+
           setAnalysis(cached.previewAnalysis);
           setAnalysisStatus(cached.previewAnalysis ? 'ready' : 'error');
           setAnalysisError(
-            analysisIssue instanceof DOMException && analysisIssue.name === 'AbortError'
-              ? 'Analysis was interrupted before it could finish.'
-              : analysisIssue instanceof Error
-                ? analysisIssue.message
-                : 'Could not analyse this track preview.'
+            analysisIssue instanceof Error
+              ? analysisIssue.message
+              : 'Could not analyse this track preview.'
           );
         });
     }
@@ -3773,6 +3806,15 @@ export function App(): JSX.Element {
         })
         .catch((analysisIssue: unknown) => {
           if (cancelled) {
+            return;
+          }
+
+          // v3.198 — Defensive: cancellation from v3.195's USER preempt
+          // pathway should never flip the selected-track status to 'error'.
+          // The queue silently requeues preempted tasks, but if the
+          // AbortError reaches this catch for any reason (direct cancel,
+          // future edge case), leave the existing state intact.
+          if (isAnalysisAbortError(analysisIssue)) {
             return;
           }
 
@@ -6760,6 +6802,14 @@ export function App(): JSX.Element {
             };
           });
         } catch (error: unknown) {
+          // v3.198 — Same defensive AbortError guard as warmMeasuredAnalysis.
+          // A USER-click preempt from v3.195 cancels the running NEIGHBOR
+          // ffmpeg child; leave the row in `loading` so the requeued task
+          // can complete it rather than flipping to a misleading "error"
+          // badge in the version-history inspector.
+          if (isAnalysisAbortError(error)) {
+            return;
+          }
           // v3.121 (Concern 4) — same fix as the success branch. Bailing on
           // `cancelled` left timeout-rejected entries stuck on "loading"
           // forever (the queue's 60s `AnalysisTaskTimeoutError` would reject,
@@ -7167,6 +7217,18 @@ export function App(): JSX.Element {
           })
         );
       } catch (error: unknown) {
+        // v3.198 — A v3.195 USER-click preemption SIGKILLs the running
+        // NEIGHBOR ffmpeg, surfacing as an AbortError to this catch. The
+        // queue's silent-requeue path is supposed to mask this from the
+        // caller, but as a defensive guard (and to cover any edge case
+        // where the AbortError leaks through), treat cancellation as a
+        // no-op: leave the row in `pending` so the requeued warmup can
+        // update it when it eventually completes. Without this, every
+        // preempted warmup row flipped to a misleading "Error" badge in
+        // the top-right LUFS slot.
+        if (isAnalysisAbortError(error)) {
+          return;
+        }
         // v3.121 (Concern 4) — let errors flow through even after the
         // effect was cancelled. The previous `if (cancelled) return` left
         // album rows stuck in `pending` status forever after a folder /
@@ -11291,6 +11353,13 @@ export function App(): JSX.Element {
       setReferenceStatus('ready');
     } catch (cause: unknown) {
       if (isStale()) return;
+      // v3.198 — Defensive: cancellation from the v3.195 preempt path
+      // should never flip the reference loader to 'error'. The queue
+      // requeues silently, but if the AbortError leaks through, leave
+      // existing reference state intact.
+      if (isAnalysisAbortError(cause)) {
+        return;
+      }
       // Auto-restore paths (startup / song switch) must never show a red
       // error banner for a failing reference the user didn't just ask for.
       // Reset to the idle empty state instead, and wipe any stale

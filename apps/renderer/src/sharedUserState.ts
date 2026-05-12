@@ -70,6 +70,9 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
     // so historical items keep round-tripping without growing a stray
     // `fromMastering: false` key.
     const fromMastering = candidate.fromMastering === true ? true : undefined;
+    // v3.183.0 — note-vs-todo mode flag. Only carry forward when
+    // explicitly true so historical items round-trip unchanged.
+    const isNote = candidate.isNote === true ? true : undefined;
 
     return [
       {
@@ -80,6 +83,7 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
         versionNumber,
         listeningDeviceId,
         ...(fromMastering ? { fromMastering: true } : {}),
+        ...(isNote ? { isNote: true } : {}),
       },
     ];
   });

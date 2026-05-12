@@ -179,6 +179,69 @@ describe('shared user state sanitizers', () => {
     });
   });
 
+  it('preserves isNote=true and omits the field otherwise (v3.183.0)', () => {
+    expect(
+      sanitizeSongChecklists({
+        songA: [
+          {
+            id: 'item-note',
+            text: 'Permanent reminder about kick character',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: null,
+            isNote: true,
+          },
+          {
+            id: 'item-todo',
+            text: 'Plain todo',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: null,
+          },
+          {
+            id: 'item-note-bogus',
+            text: 'Garbage isNote should not leak through as true',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: null,
+            isNote: 'yes',
+          },
+        ],
+      })
+    ).toEqual({
+      songA: [
+        {
+          id: 'item-note',
+          text: 'Permanent reminder about kick character',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+          isNote: true,
+        },
+        {
+          id: 'item-todo',
+          text: 'Plain todo',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+        },
+        {
+          id: 'item-note-bogus',
+          text: 'Garbage isNote should not leak through as true',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+        },
+      ],
+    });
+  });
+
   it('keeps only valid per-song project file paths', () => {
     expect(
       sanitizeSongProjectFilePaths({

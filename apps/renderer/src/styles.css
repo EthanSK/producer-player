@@ -4263,6 +4263,99 @@ body.is-dragging-checklist-timestamp * {
   align-self: flex-end;
 }
 
+/* v3.183.0 — Permanent-note mode for checklist rows.
+   Notes have no checkbox, a subtle amber tint so they stand out when
+   scrolling, and a small "NOTE" eyebrow badge in the checkbox slot. */
+.checklist-item-row--note {
+  background: rgba(255, 196, 87, 0.07);
+  border-color: rgba(255, 196, 87, 0.28);
+}
+
+.checklist-item-row--note:hover {
+  background: rgba(255, 196, 87, 0.10);
+}
+
+.checklist-item-note-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 196, 87, 0.42);
+  background: rgba(255, 196, 87, 0.12);
+  color: #ffc457;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+/* Convert-mode button. Hidden by default, revealed on row hover or
+   focus-within so it doesn't add visual noise. Always visible on note
+   rows so it's obvious how to flip back to a todo. */
+.checklist-item-mode-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(170, 170, 170, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.checklist-item-row:hover .checklist-item-mode-toggle,
+.checklist-item-row:focus-within .checklist-item-mode-toggle,
+.checklist-item-mode-toggle.is-note {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.checklist-item-mode-toggle:hover,
+.checklist-item-mode-toggle:focus-visible {
+  border-color: rgba(92, 167, 255, 0.55);
+  box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.14);
+  color: var(--text-main);
+}
+
+.checklist-item-mode-toggle.is-note {
+  border-color: rgba(255, 196, 87, 0.55);
+  color: #ffc457;
+  background: rgba(255, 196, 87, 0.08);
+}
+
+.checklist-item-mode-toggle.is-note:hover,
+.checklist-item-mode-toggle.is-note:focus-visible {
+  border-color: rgba(255, 196, 87, 0.78);
+  box-shadow: 0 0 0 2px rgba(255, 196, 87, 0.18);
+}
+
+/* Note count chip inside the checklist header counts line. */
+.checklist-note-count {
+  color: #ffc457;
+  font-weight: 600;
+}
+
 .checklist-empty-state {
   margin: 0;
   min-height: 100%;

@@ -337,6 +337,17 @@ export interface SongChecklistItem {
    * back to false so existing stored checklists load unchanged.
    */
   fromMastering?: boolean;
+  /**
+   * v3.183.0 — true when the item is a permanent note rather than a todo.
+   * Notes render without a checkbox, with a distinct background tint, and
+   * do NOT count toward the checklist's todo/done totals. Items can be
+   * toggled freely between todo (isNote=false/undefined) and note
+   * (isNote=true) via the row's toggle-mode button. Persisted alongside
+   * the rest of the item so the mode survives reloads. Defaults to
+   * undefined/false for historical items; the sanitizer coerces unknown
+   * values back to false so existing stored checklists load unchanged.
+   */
+  isNote?: boolean;
 }
 
 /**
@@ -356,6 +367,13 @@ export interface AlbumChecklistItem {
   id: string;
   text: string;
   completed: boolean;
+  /**
+   * v3.183.0 — true when the item is a permanent note rather than a todo.
+   * Notes render without a checkbox, with a distinct background tint, and
+   * do NOT count toward the checklist's todo/done totals. Defaults to
+   * undefined/false for historical items.
+   */
+  isNote?: boolean;
 }
 
 export interface SavedReferenceTrack {

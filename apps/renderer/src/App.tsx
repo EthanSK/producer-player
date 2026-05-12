@@ -1969,14 +1969,29 @@ function readStoredAlbumChecklists(): Record<string, AlbumChecklistItem[]> {
     const result: Record<string, AlbumChecklistItem[]> = {};
     for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
       if (Array.isArray(value)) {
-        result[key] = value.filter(
-          (item): item is AlbumChecklistItem =>
-            typeof item === 'object' &&
-            item !== null &&
-            typeof (item as AlbumChecklistItem).id === 'string' &&
-            typeof (item as AlbumChecklistItem).text === 'string' &&
-            typeof (item as AlbumChecklistItem).completed === 'boolean'
-        );
+        result[key] = value
+          .filter(
+            (item): item is AlbumChecklistItem =>
+              typeof item === 'object' &&
+              item !== null &&
+              typeof (item as AlbumChecklistItem).id === 'string' &&
+              typeof (item as AlbumChecklistItem).text === 'string' &&
+              typeof (item as AlbumChecklistItem).completed === 'boolean'
+          )
+          // v3.183.0 — preserve isNote when explicitly true so the
+          // note/todo mode survives reloads. Historical items round-trip
+          // unchanged (no stray `isNote: false` key).
+          .map((item) => {
+            const candidate = item as AlbumChecklistItem;
+            const isNote =
+              (candidate as { isNote?: unknown }).isNote === true ? true : undefined;
+            return {
+              id: candidate.id,
+              text: candidate.text,
+              completed: candidate.completed,
+              ...(isNote ? { isNote: true } : {}),
+            };
+          });
       }
     }
     return result;
@@ -12848,6 +12863,26 @@ export function App(): JSX.Element {
     });
   }
 
+  // v3.183.0 — flip an album-checklist row between todo and note mode.
+  function handleToggleAlbumChecklistItemNoteMode(itemId: string): void {
+    const key = getAlbumChecklistKey();
+    setAlbumChecklists((prev) => {
+      const existing = prev[key] ?? [];
+      return {
+        ...prev,
+        [key]: existing.map((item) => {
+          if (item.id !== itemId) return item;
+          const nextIsNote = !(item.isNote === true);
+          if (nextIsNote) {
+            return { ...item, isNote: true, completed: false };
+          }
+          const { isNote: _isNote, ...rest } = item;
+          return rest;
+        }),
+      };
+    });
+  }
+
   function handleRemoveAlbumChecklistItem(itemId: string): void {
     const key = getAlbumChecklistKey();
     setAlbumChecklists((prev) => {
@@ -13640,6 +13675,27 @@ export function App(): JSX.Element {
     );
   }
 
+  // v3.183.0 — flip a song-checklist row between todo and note mode.
+  // Notes render without a checkbox and don't count toward the todo
+  // total. We omit `isNote` rather than storing `false` so historical
+  // items round-trip cleanly through the sanitizer.
+  function handleToggleChecklistItemNoteMode(songId: string, itemId: string): void {
+    updateSongChecklistItems(songId, (items) =>
+      items.map((item) => {
+        if (item.id !== itemId) return item;
+        const nextIsNote = !(item.isNote === true);
+        if (nextIsNote) {
+          // Becoming a note: drop the checkbox state so a stray `completed:
+          // true` never leaks into a todo count if it later flips back.
+          return { ...item, isNote: true, completed: false };
+        }
+        // Becoming a todo again: strip the isNote key entirely.
+        const { isNote: _isNote, ...rest } = item;
+        return rest;
+      })
+    );
+  }
+
   function handleChecklistItemTextChange(
     songId: string,
     itemId: string,
@@ -13842,7 +13898,11 @@ export function App(): JSX.Element {
     return folder?.path ?? '__global__';
   })();
   const albumChecklistItems = albumChecklists[albumChecklistKey] ?? [];
-  const albumChecklistCompletedCount = albumChecklistItems.filter((item) => item.completed).length;
+  // v3.183.0 — Notes are tracked separately from todos in the header
+  // count and excluded from the completed/total todo math.
+  const albumChecklistTodoItems = albumChecklistItems.filter((item) => item.isNote !== true);
+  const albumChecklistNoteCount = albumChecklistItems.length - albumChecklistTodoItems.length;
+  const albumChecklistCompletedCount = albumChecklistTodoItems.filter((item) => item.completed).length;
 
   const checklistModalSong = checklistModalSongId
     ? snapshot.songs.find((song) => song.id === checklistModalSongId) ?? null
@@ -14190,7 +14250,11 @@ export function App(): JSX.Element {
   function handleChecklistDawOffsetEnabledChange(nextEnabled: boolean): void {
     writeChecklistDawOffset(checklistDawOffsetSeconds, nextEnabled);
   }
-  const checklistCompletedCount = checklistModalItems.filter((item) => item.completed).length;
+  // v3.183.0 — Notes don't contribute to the todo count; the header shows
+  // both numbers side-by-side as "X / Y todos · N notes".
+  const checklistModalTodoItems = checklistModalItems.filter((item) => item.isNote !== true);
+  const checklistNoteCount = checklistModalItems.length - checklistModalTodoItems.length;
+  const checklistCompletedCount = checklistModalTodoItems.filter((item) => item.completed).length;
   const checklistModalCanOpenMastering = checklistModalSong
     ? getPreferredPlaybackVersionId(checklistModalSong) !== null
     : false;
@@ -16206,8 +16270,14 @@ export function App(): JSX.Element {
                     : 'No LUFS';
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
             const songChecklistItems = songChecklists[song.id] ?? [];
-            const songChecklistCount = songChecklistItems.length;
-            const songChecklistRemainingTodoCount = songChecklistItems.filter(
+            // v3.183.0 — Notes (isNote === true) are not todos. The
+            // song-row checklist badge tracks only todos so a row full
+            // of permanent notes doesn't look like outstanding work.
+            const songChecklistTodoItems = songChecklistItems.filter(
+              (item) => item.isNote !== true
+            );
+            const songChecklistCount = songChecklistTodoItems.length;
+            const songChecklistRemainingTodoCount = songChecklistTodoItems.filter(
               (item) => !item.completed
             ).length;
             const songChecklistOpacity =
@@ -17033,8 +17103,16 @@ export function App(): JSX.Element {
             <div className="checklist-modal-header">
               <div>
                 <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Mark new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to use that device for subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
-                <p className="muted">
-                  {checklistCompletedCount}/{checklistModalItems.length} completed · {checklistModalItems.length - checklistCompletedCount} left
+                <p className="muted" data-testid="song-checklist-header-counts">
+                  {checklistCompletedCount}/{checklistModalTodoItems.length} todos · {checklistModalTodoItems.length - checklistCompletedCount} left
+                  {checklistNoteCount > 0 ? (
+                    <>
+                      {' · '}
+                      <span className="checklist-note-count" data-testid="song-checklist-note-count">
+                        {checklistNoteCount} note{checklistNoteCount === 1 ? '' : 's'}
+                      </span>
+                    </>
+                  ) : null}
                 </p>
               </div>
               <div
@@ -17408,26 +17486,41 @@ export function App(): JSX.Element {
                         isChecklistFindActiveMatch ? ' is-find-active-match' : ''
                       }${
                         isCurrentVersionTag ? ' checklist-item--current-version' : ''
-                      }`}
+                      }${item.isNote === true ? ' checklist-item-row--note' : ''}`}
                       style={
                         groupHighlightColor
                           ? ({ '--group-highlight-color': groupHighlightColor } as CSSProperties)
                           : undefined
                       }
                     >
-                      <label className="checklist-item-toggle">
-                        <input
-                          type="checkbox"
-                          checked={item.completed}
-                          onChange={(event) => {
-                            handleToggleChecklistItem(
-                              checklistModalSong.id,
-                              item.id,
-                              event.currentTarget.checked
-                            );
-                          }}
-                        />
-                      </label>
+                      {item.isNote === true ? (
+                        // v3.183.0 — Notes have no checkbox. Render a
+                        // small "NOTE" eyebrow badge in the same grid
+                        // slot so the row keeps a consistent layout with
+                        // its todo siblings.
+                        <span
+                          className="checklist-item-note-eyebrow"
+                          data-testid="song-checklist-item-note-eyebrow"
+                          aria-hidden="true"
+                          title="This item is a permanent note. It doesn't count toward todos."
+                        >
+                          NOTE
+                        </span>
+                      ) : (
+                        <label className="checklist-item-toggle">
+                          <input
+                            type="checkbox"
+                            checked={item.completed}
+                            onChange={(event) => {
+                              handleToggleChecklistItem(
+                                checklistModalSong.id,
+                                item.id,
+                                event.currentTarget.checked
+                              );
+                            }}
+                          />
+                        </label>
+                      )}
                       {hasItemMetadata ? (
                         <div className="checklist-item-meta">
                           {item.timestampSeconds !== null ? (() => {
@@ -17588,7 +17681,7 @@ export function App(): JSX.Element {
                         data-testid="song-checklist-item-text"
                       />
                       <div className="checklist-item-actions">
-                        {deviceLabel === null ? (
+                        {deviceLabel === null && item.isNote !== true ? (
                           <button
                             type="button"
                             className={`checklist-listening-device-badge checklist-listening-device-badge--assign${
@@ -17605,6 +17698,31 @@ export function App(): JSX.Element {
                             {isListeningDeviceAssignmentTarget ? 'Select listening device…' : 'Set device'}
                           </button>
                         ) : null}
+                        {/* v3.183.0 — Convert this row between todo and
+                            note mode. Hidden by default, revealed on
+                            hover / focus-within (see styles.css). Stays
+                            permanently visible on note rows so it's
+                            obvious how to flip back to a todo. */}
+                        <button
+                          type="button"
+                          className={`checklist-item-mode-toggle${item.isNote === true ? ' is-note' : ''}`}
+                          onClick={() =>
+                            handleToggleChecklistItemNoteMode(checklistModalSong.id, item.id)
+                          }
+                          data-testid="song-checklist-item-mode-toggle"
+                          aria-label={
+                            item.isNote === true
+                              ? 'Convert to todo'
+                              : 'Convert to note'
+                          }
+                          title={
+                            item.isNote === true
+                              ? 'Convert this note back into a todo (re-adds the checkbox).'
+                              : 'Convert this todo into a permanent note (removes the checkbox; not counted in progress).'
+                          }
+                        >
+                          {item.isNote === true ? 'To todo' : 'To note'}
+                        </button>
                         <button
                           type="button"
                           className="ghost checklist-remove-button"
@@ -17659,11 +17777,15 @@ export function App(): JSX.Element {
                             hasItemMetadata ? ' has-metadata' : ''
                           }${
                             isCurrentVersionTag ? ' checklist-item--current-version' : ''
-                          }`}
+                          }${item.isNote === true ? ' checklist-item-row--note' : ''}`}
                         >
-                          <label className="checklist-item-toggle">
-                            <input type="checkbox" checked={item.completed} readOnly tabIndex={-1} />
-                          </label>
+                          {item.isNote === true ? (
+                            <span className="checklist-item-note-eyebrow" aria-hidden="true">NOTE</span>
+                          ) : (
+                            <label className="checklist-item-toggle">
+                              <input type="checkbox" checked={item.completed} readOnly tabIndex={-1} />
+                            </label>
+                          )}
                           {hasItemMetadata ? (
                             <div className="checklist-item-meta">
                               {item.timestampSeconds !== null ? (
@@ -18202,8 +18324,16 @@ export function App(): JSX.Element {
             <div className="checklist-modal-header">
               <div>
                 <h2>{albumTitle} Checklist <HelpTooltip text={"What this is: An album-wide to-do list for high-level tasks that apply to the whole project — not individual songs.\n\nHow to use it: Type a task in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item.\n\nWhy you'd want to: Track project-level tasks like finalizing album art, checking track gaps, exporting final files, or uploading to a distributor — things that don't belong on any single song's checklist."} /></h2>
-                <p className="muted">
-                  {albumChecklistCompletedCount}/{albumChecklistItems.length} completed · {albumChecklistItems.length - albumChecklistCompletedCount} left
+                <p className="muted" data-testid="album-checklist-header-counts">
+                  {albumChecklistCompletedCount}/{albumChecklistTodoItems.length} todos · {albumChecklistTodoItems.length - albumChecklistCompletedCount} left
+                  {albumChecklistNoteCount > 0 ? (
+                    <>
+                      {' · '}
+                      <span className="checklist-note-count" data-testid="album-checklist-note-count">
+                        {albumChecklistNoteCount} note{albumChecklistNoteCount === 1 ? '' : 's'}
+                      </span>
+                    </>
+                  ) : null}
                 </p>
               </div>
               <button type="button" className="checklist-header-done-button" onClick={handleCloseAlbumChecklist} title="Close album checklist." data-testid="album-checklist-done-header">
@@ -18220,17 +18350,28 @@ export function App(): JSX.Element {
                   {albumChecklistItems.map((item) => (
                     <li
                       key={item.id}
-                      className="checklist-item-row"
+                      className={`checklist-item-row${item.isNote === true ? ' checklist-item-row--note' : ''}`}
                     >
-                      <label className="checklist-item-toggle">
-                        <input
-                          type="checkbox"
-                          checked={item.completed}
-                          onChange={(event) => {
-                            handleToggleAlbumChecklistItem(item.id, event.currentTarget.checked);
-                          }}
-                        />
-                      </label>
+                      {item.isNote === true ? (
+                        <span
+                          className="checklist-item-note-eyebrow"
+                          data-testid="album-checklist-item-note-eyebrow"
+                          aria-hidden="true"
+                          title="This item is a permanent note. It doesn't count toward todos."
+                        >
+                          NOTE
+                        </span>
+                      ) : (
+                        <label className="checklist-item-toggle">
+                          <input
+                            type="checkbox"
+                            checked={item.completed}
+                            onChange={(event) => {
+                              handleToggleAlbumChecklistItem(item.id, event.currentTarget.checked);
+                            }}
+                          />
+                        </label>
+                      )}
                       <textarea
                         className={`checklist-item-text${item.completed ? ' completed' : ''}`}
                         value={item.text}
@@ -18261,15 +18402,31 @@ export function App(): JSX.Element {
                         }}
                         data-testid="album-checklist-item-text"
                       />
-                      <button
-                        type="button"
-                        className="ghost checklist-remove-button"
-                        onClick={() => handleRemoveAlbumChecklistItem(item.id)}
-                        aria-label={`Remove ${item.text}`}
-                        title="Remove checklist item"
-                      >
-                        <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
-                      </button>
+                      <div className="checklist-item-actions">
+                        <button
+                          type="button"
+                          className={`checklist-item-mode-toggle${item.isNote === true ? ' is-note' : ''}`}
+                          onClick={() => handleToggleAlbumChecklistItemNoteMode(item.id)}
+                          data-testid="album-checklist-item-mode-toggle"
+                          aria-label={item.isNote === true ? 'Convert to todo' : 'Convert to note'}
+                          title={
+                            item.isNote === true
+                              ? 'Convert this note back into a todo (re-adds the checkbox).'
+                              : 'Convert this todo into a permanent note (removes the checkbox; not counted in progress).'
+                          }
+                        >
+                          {item.isNote === true ? 'To todo' : 'To note'}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost checklist-remove-button"
+                          onClick={() => handleRemoveAlbumChecklistItem(item.id)}
+                          aria-label={`Remove ${item.text}`}
+                          title="Remove checklist item"
+                        >
+                          <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>

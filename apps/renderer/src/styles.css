@@ -85,6 +85,14 @@ body,
   padding: 8px 12px !important;
   align-items: center !important;
   pointer-events: none !important;
+  /* v3.194 follow-up — Sonner positions each toast li with
+   * `position: absolute` which removes it from the toaster wrapper's
+   * flow. The wrapper uses `width: fit-content` (collapses to 0 with no
+   * in-flow children), so without an explicit anchor the toast extends
+   * rightward from the wrapper's right-edge anchor and overflows the
+   * viewport. Pin the toast li's right edge to 0 so it sits flush
+   * against the wrapper's (right: 20px) anchor instead of overflowing. */
+  right: 0 !important;
 }
 
 [data-sonner-toaster] [data-close-button],

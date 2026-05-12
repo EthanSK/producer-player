@@ -66,11 +66,14 @@ body,
   max-width: var(--toast-max-width) !important;
 }
 
-/* v3.63 — flush the toaster wrapper to the top-right corner with zero gap.
- * Doubled attribute selector boosts specificity over Sonner's inline styles. */
+/* v3.194 — position the toaster in the top-right corner with a small viewport
+ * inset so toasts remain fully visible. Previously zeroed top/right combined
+ * with `width: fit-content` on the wrapper anchored toasts to x=viewport-edge
+ * and they rendered off-screen to the right. Doubled attribute selector boosts
+ * specificity over Sonner's inline styles. */
 [data-sonner-toaster][data-sonner-toaster] {
-  top: 0 !important;
-  right: 0 !important;
+  top: 20px !important;
+  right: 20px !important;
   padding: 0 !important;
   margin: 0 !important;
 }

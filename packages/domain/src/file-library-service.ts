@@ -266,6 +266,18 @@ async function moveFile(sourcePath: string, targetPath: string): Promise<void> {
   await fs.unlink(sourcePath);
 }
 
+// DAW sidecar files live next to the audio they describe and are named
+// `<audio-filename>.<sidecar-ext>` — e.g. `barber smith v45.wav.asd`.
+// Keep this whitelist conservative: only files matching exact prefix +
+// recognised extension move with the audio. Anything else (e.g. a project
+// file that happens to share a prefix) is intentionally left alone.
+const DAW_SIDECAR_EXTENSIONS: readonly string[] = [
+  '.asd', // Ableton Live analysis
+  '.reapeaks', // Reaper waveform peaks
+  '.peak', // Logic and various other hosts
+  '.peaks', // Some hosts use the plural form
+];
+
 export class FileLibraryService {
   private readonly linkedFolders = new Map<string, LinkedFolder>();
   private readonly folderFiles = new Map<string, ScannedAudioFile[]>();
@@ -842,6 +854,11 @@ export class FileLibraryService {
         );
 
         await moveFile(version.filePath, archivePath);
+        await this.moveSidecarsAlongside(
+          version.filePath,
+          path.dirname(archivePath),
+          path.basename(archivePath)
+        );
 
         movedCount += 1;
         affectedFolderIds.add(version.folderId);
@@ -865,10 +882,20 @@ export class FileLibraryService {
           path.basename(promotedPath)
         );
         await moveFile(promotedPath, archivePath);
+        await this.moveSidecarsAlongside(
+          promotedPath,
+          path.dirname(archivePath),
+          path.basename(archivePath)
+        );
         movedCount += 1;
       }
 
       await moveFile(newestVersion.filePath, promotedPath);
+      await this.moveSidecarsAlongside(
+        newestVersion.filePath,
+        path.dirname(promotedPath),
+        path.basename(promotedPath)
+      );
       movedCount += 1;
       affectedFolderIds.add(newestVersion.folderId);
     }
@@ -906,6 +933,51 @@ export class FileLibraryService {
     }
 
     return candidatePath;
+  }
+
+  /**
+   * After moving an audio file from `sourceAudioPath` to `<targetDirectory>/<targetAudioFileName>`,
+   * move any DAW sidecar files that lived next to the source audio (e.g. Ableton's `.asd`,
+   * Reaper's `.reapeaks`) into the same target directory so they keep tracking the audio.
+   *
+   * Sidecars are matched by exact filename prefix + recognised sidecar extension:
+   * for `barber smith v45.wav` we look for `barber smith v45.wav.asd`,
+   * `barber smith v45.wav.reapeaks`, etc. Missing sidecars are skipped silently.
+   * The destination filename mirrors the audio's renamed form so that, for example,
+   * `Leaky v1.wav` archived as `Leaky v1-archived-1.wav` gets its sidecar moved as
+   * `Leaky v1-archived-1.wav.asd`. Name collisions at the destination are de-duplicated
+   * via `resolveArchivePath`.
+   */
+  private async moveSidecarsAlongside(
+    sourceAudioPath: string,
+    targetDirectory: string,
+    targetAudioFileName: string
+  ): Promise<void> {
+    const sourceDirectory = path.dirname(sourceAudioPath);
+    const sourceAudioFileName = path.basename(sourceAudioPath);
+
+    for (const sidecarExtension of DAW_SIDECAR_EXTENSIONS) {
+      const sourceSidecarPath = path.join(
+        sourceDirectory,
+        `${sourceAudioFileName}${sidecarExtension}`
+      );
+
+      if (!(await pathExists(sourceSidecarPath))) {
+        continue;
+      }
+
+      const targetSidecarFileName = `${targetAudioFileName}${sidecarExtension}`;
+      const targetSidecarPath = await this.resolveArchivePath(
+        targetDirectory,
+        targetSidecarFileName
+      );
+
+      try {
+        await moveFile(sourceSidecarPath, targetSidecarPath);
+      } catch {
+        // Sidecars are best-effort — never fail the audio move because of one.
+      }
+    }
   }
 
   private async resolveVersionedExportPath(

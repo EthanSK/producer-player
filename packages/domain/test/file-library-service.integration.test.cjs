@@ -416,6 +416,209 @@ test('rescan leaves newer unversioned exports alone when their contents match th
   }
 });
 
+test('archiving an old version drags its .asd sidecar along into old/', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-sidecar-archive-'
+  );
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Sidecar v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Sidecar v1.wav.asd',
+        contents: 'fake-asd-blob',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Sidecar v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        relativePath: 'Sidecar v2.wav.asd',
+        contents: 'fake-asd-blob-two',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+    });
+
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Sidecar v2.wav',
+      'Sidecar v2.wav.asd',
+      'old/Sidecar v1.wav',
+      'old/Sidecar v1.wav.asd',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
+test('archiving an audio file with no sidecars works without errors', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-sidecar-none-'
+  );
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Plain v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Plain v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+    });
+
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Plain v2.wav',
+      'old/Plain v1.wav',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
+test('promoting an audio file from old/ back to the top drags its sidecar with it', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-sidecar-promote-'
+  );
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Promote v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Promote v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        relativePath: 'old/Promote-v3.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:03.000Z'),
+      },
+      {
+        relativePath: 'old/Promote-v3.wav.asd',
+        contents: 'fake-asd-blob',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:03.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+    });
+
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Promote-v3.wav',
+      'Promote-v3.wav.asd',
+      'old/Promote v1.wav',
+      'old/Promote v2.wav',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
+test('multiple sidecar types for the same audio all follow the move', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-sidecar-multi-'
+  );
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Multi v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Multi v1.wav.asd',
+        contents: 'ableton',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Multi v1.wav.reapeaks',
+        contents: 'reaper',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Multi v1.wav.peak',
+        contents: 'logic',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Multi v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+    });
+
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Multi v2.wav',
+      'old/Multi v1.wav',
+      'old/Multi v1.wav.asd',
+      'old/Multi v1.wav.peak',
+      'old/Multi v1.wav.reapeaks',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
+test('sidecar is not touched when its audio file is missing or already in old/', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-sidecar-orphan-'
+  );
+
+  try {
+    // An orphaned sidecar at the top level with no matching top-level audio.
+    // The matching audio is already in old/. The audio doesn't need to be
+    // moved (it's already where it belongs), so the orphan sidecar must NOT
+    // be moved either by the regular organize pass.
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Orphan v1.wav.asd',
+        contents: 'orphan-asd',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'old/Orphan v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'Orphan v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      await service.linkFolder(fixtureDirectory);
+    });
+
+    // The orphan .asd stays where it was. The current top-level audio (v2)
+    // had no sidecar and stays. v1 audio was already in old/ and stays.
+    assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+      'Orphan v1.wav.asd',
+      'Orphan v2.wav',
+      'old/Orphan v1.wav',
+    ]);
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
 test('mixed v-suffix naming variants stay grouped, while no-suffix files are ignored', async () => {
   const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-vsuffix-');
 

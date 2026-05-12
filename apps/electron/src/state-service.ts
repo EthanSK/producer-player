@@ -145,6 +145,12 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
     // value (missing, null, string, undefined) safely coerces to false
     // at render time because the renderer treats undefined as falsy.
     const fromMastering = c.fromMastering === true ? true : undefined;
+    // v3.183.0 — note-vs-todo mode flag. Only carry forward when explicitly
+    // true so historical items round-trip without a stray `isNote: false`
+    // key. (v3.188 restored — the renderer-side sanitize already preserved
+    // isNote, but this main-process parse path was stripping it on
+    // disk-load, causing notes to revert to todos on app restart.)
+    const isNote = c.isNote === true ? true : undefined;
     return [{
       id: c.id,
       text: c.text,
@@ -153,6 +159,7 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       versionNumber,
       listeningDeviceId,
       ...(fromMastering ? { fromMastering: true } : {}),
+      ...(isNote ? { isNote: true } : {}),
     }];
   });
 }
@@ -201,7 +208,16 @@ function parseAlbumChecklists(value: unknown): Record<string, AlbumChecklistItem
           typeof item.text !== 'string' ||
           typeof item.completed !== 'boolean'
         ) return [];
-        return [{ id: item.id, text: item.text, completed: item.completed }];
+        // v3.183.0 — note-vs-todo mode flag. Only carry forward when
+        // explicitly true so historical items round-trip without a stray
+        // `isNote: false` key. (v3.188 restored.)
+        const isNote = item.isNote === true ? true : undefined;
+        return [{
+          id: item.id,
+          text: item.text,
+          completed: item.completed,
+          ...(isNote ? { isNote: true } : {}),
+        }];
       });
     }
   }

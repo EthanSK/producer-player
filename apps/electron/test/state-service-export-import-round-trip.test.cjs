@@ -201,3 +201,74 @@ test('export from legacy monolithic dir imports cleanly into split-layout target
     fs.rmSync(targetDir, { recursive: true, force: true });
   }
 });
+
+// v3.188 regression fixture — isNote (checklist-item-as-permanent-note flag,
+// introduced in v3.183) was being stripped on disk-load by both
+// parseSongChecklistItems and parseAlbumChecklists. The renderer's
+// sanitize preserved isNote correctly, so notes survived in-memory but
+// reverted to todos on app restart. These two tests pin down the round-trip
+// so the regression cannot recur.
+test('song checklist item isNote=true survives write/read round-trip (v3.188)', async () => {
+  const dir = mktmp();
+  try {
+    migrateStateIfNeeded(dir);
+    const svc = new UserStateService(dir);
+    const base = createDefaultUserState();
+    base.songChecklists = {
+      'song-a': [
+        {
+          id: 'item-todo',
+          text: 'still a todo',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+        },
+        {
+          id: 'item-note',
+          text: 'now a permanent note',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+          isNote: true,
+        },
+      ],
+    };
+    await svc.writeUserState(base);
+
+    const reader = await reloadService(dir);
+    const restored = await reader.readUserState();
+    const items = restored.songChecklists['song-a'];
+    assert.equal(items.length, 2);
+    assert.equal(items[0].isNote, undefined, 'todo item: isNote omitted');
+    assert.equal(items[1].isNote, true, 'note item: isNote preserved across restart');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('album checklist item isNote=true survives write/read round-trip (v3.188)', async () => {
+  const dir = mktmp();
+  try {
+    migrateStateIfNeeded(dir);
+    const svc = new UserStateService(dir);
+    const base = createDefaultUserState();
+    base.albumChecklists = {
+      default: [
+        { id: 'album-todo', text: 'still a todo', completed: false },
+        { id: 'album-note', text: 'now a note', completed: false, isNote: true },
+      ],
+    };
+    await svc.writeUserState(base);
+
+    const reader = await reloadService(dir);
+    const restored = await reader.readUserState();
+    const items = restored.albumChecklists.default;
+    assert.equal(items.length, 2);
+    assert.equal(items[0].isNote, undefined, 'album todo item: isNote omitted');
+    assert.equal(items[1].isNote, true, 'album note item: isNote preserved across restart');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

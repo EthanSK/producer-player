@@ -228,10 +228,7 @@ import {
   unlockSystemAudioDeviceLabels,
   useSystemAudioDevice,
 } from './lib/useSystemAudioDevice';
-import {
-  applyManualSelectionAssociation,
-  decideAutoSelect,
-} from './listeningDeviceAutoSelect';
+import { decideAutoSelect } from './listeningDeviceAutoSelect';
 import { ErrorDetailsDialog } from './lib/ErrorDetailsDialog';
 import {
   LUFS_LINKS,
@@ -13879,50 +13876,68 @@ export function App(): JSX.Element {
     if (existing) {
       setActiveListeningDeviceId(existing.id);
       setListeningDeviceDraftName('');
-      // v3.193 — capture the system-output association on first activation
-      // even when re-selecting an existing device by name.
-      maybeCaptureSystemAudioAssociation(existing.id);
+      // v3.197 — no auto-capture; user must click the explicit Link button.
       return;
     }
-    // v3.193 — new device: capture the system audio association at creation
-    // time so the user gets the auto-switch behavior without an extra step.
+    // v3.197 — new device is created WITHOUT a system-device link. The user
+    // links explicitly later via the Link button. Removes the v3.193 silent
+    // auto-bind that often associated the wrong output (e.g. AirPods active
+    // when the user actually wanted studio monitors linked).
     const newDevice: ListeningDevice = {
       id: createListeningDeviceId(),
       name: trimmed,
     };
-    const systemId = systemAudioDevice.deviceId.trim();
-    if (systemId.length > 0) {
-      newDevice.systemDeviceId = systemId;
-      const systemLabel = systemAudioDevice.label.trim();
-      if (systemLabel.length > 0) {
-        newDevice.systemDeviceLabel = systemLabel;
-      }
-    }
     setListeningDevices((prev) => [...prev, newDevice]);
     setActiveListeningDeviceId(newDevice.id);
     setListeningDeviceDraftName('');
-    // Toast confirming the new device + which system output it's linked to.
-    const linkSuffix =
-      systemAudioDevice.label.trim().length > 0
-        ? ` · Linked to ${systemAudioDevice.label}`
-        : systemAudioDevice.deviceId.trim().length > 0
-          ? ' · Linked to current output'
-          : '';
     toast.show({
       id: `listening-device-added-${newDevice.id}`,
       kind: 'success',
-      text: `Added listening device: ${newDevice.name}${linkSuffix}`,
+      text: `Added listening device: ${newDevice.name}`,
     });
   }
 
-  // v3.193 — capture the current system audio output device on a listening
-  // device the first time it's manually selected (if it doesn't already
-  // have an association). Lifted into a helper so both the submit-existing
-  // and explicit-click paths can use it.
-  function maybeCaptureSystemAudioAssociation(deviceId: string): void {
+  // v3.197 — explicit Link button handler. Writes the CURRENT system audio
+  // output device id + label onto the selected listening device, overwriting
+  // any previous association. Replaces the v3.193 silent auto-bind so the
+  // user controls when a link is created (after they've confirmed the right
+  // audio device is actually active).
+  function handleLinkActiveListeningDevice(): void {
+    if (!activeListeningDeviceId) return;
+    const target = listeningDevices.find((d) => d.id === activeListeningDeviceId);
+    if (!target) return;
+    const systemId = systemAudioDevice.deviceId.trim();
+    if (systemId.length === 0) {
+      toast.show({
+        id: `listening-device-link-missing-${Date.now()}`,
+        kind: 'info',
+        text: 'No system audio device detected — cannot link.',
+      });
+      return;
+    }
+    const systemLabel = systemAudioDevice.label.trim();
     setListeningDevices((prev) =>
-      applyManualSelectionAssociation(prev, deviceId, systemAudioDevice)
+      prev.map((device) => {
+        if (device.id !== activeListeningDeviceId) return device;
+        const next: ListeningDevice = {
+          ...device,
+          systemDeviceId: systemId,
+        };
+        if (systemLabel.length > 0) {
+          next.systemDeviceLabel = systemLabel;
+        } else {
+          // Clear stale label when we couldn't resolve a fresh one — the
+          // matcher only uses systemDeviceId anyway.
+          delete next.systemDeviceLabel;
+        }
+        return next;
+      })
     );
+    toast.show({
+      id: `listening-device-linked-${activeListeningDeviceId}-${Date.now()}`,
+      kind: 'success',
+      text: `Linked ${target.name} → ${systemLabel.length > 0 ? systemLabel : 'current output'}`,
+    });
   }
 
   function handleStartListeningDeviceRename(): void {
@@ -13986,32 +14001,20 @@ export function App(): JSX.Element {
     setActiveListeningDeviceId((current) => (current === deviceId ? null : deviceId));
 
     if (wasActive) {
-      // Deselect — no toast, no association capture.
+      // Deselect — no toast.
       return;
     }
 
-    // v3.193 — capture the system-output association on first manual select,
-    // and surface a toast showing the linked system device so Ethan can
-    // verify the association.
+    // v3.197 — selection no longer captures the system output. Just confirm
+    // the active device by name. Linking is an explicit action via the Link
+    // button (so the user controls which audio output gets linked, not
+    // whichever happens to be live when they click the chip).
     const selectedDevice = listeningDevices.find((d) => d.id === deviceId) ?? null;
     if (selectedDevice) {
-      const existingAssociation =
-        typeof selectedDevice.systemDeviceId === 'string' &&
-        selectedDevice.systemDeviceId.trim().length > 0;
-      if (!existingAssociation) {
-        maybeCaptureSystemAudioAssociation(deviceId);
-      }
-      const associatedLabel = existingAssociation
-        ? (selectedDevice.systemDeviceLabel ?? '').trim() ||
-          systemAudioDevice.label.trim() ||
-          'unknown output'
-        : systemAudioDevice.label.trim() ||
-          (systemAudioDevice.deviceId.trim().length > 0 ? 'current output' : 'no system output');
-      const prefix = existingAssociation ? 'Selected' : 'Selected (linking)';
       toast.show({
         id: `listening-device-selected-${deviceId}-${Date.now()}`,
         kind: 'info',
-        text: `${prefix}: ${selectedDevice.name} · ${associatedLabel}`,
+        text: `Selected: ${selectedDevice.name}`,
       });
     }
   }
@@ -17720,6 +17723,48 @@ export function App(): JSX.Element {
                         : '(unknown)'}
                     </span>
                   </span>
+                  {/*
+                    v3.197 — explicit Link button (replaces v3.193 silent
+                    auto-bind). Writes the current system output device to the
+                    selected listening device's systemDeviceId/Label. Disabled
+                    when no listening device is selected OR when there's no
+                    system output detected. Copy + tooltip change based on
+                    whether the active device already has a link.
+                  */}
+                  {activeListeningDevice ? (() => {
+                    const existingLabel =
+                      (activeListeningDevice.systemDeviceLabel ?? '').trim();
+                    const existingId =
+                      (activeListeningDevice.systemDeviceId ?? '').trim();
+                    const hasLink = existingId.length > 0;
+                    const currentLabel = systemAudioDevice.label.trim();
+                    const currentId = systemAudioDevice.deviceId.trim();
+                    const hasCurrent = currentId.length > 0;
+                    const linkedDisplay =
+                      existingLabel.length > 0 ? existingLabel : hasLink ? 'linked output' : '';
+                    const currentDisplay =
+                      currentLabel.length > 0 ? currentLabel : hasCurrent ? 'current output' : 'no audio device';
+                    const buttonLabel = hasLink
+                      ? `🔗 Linked: ${linkedDisplay}`
+                      : '🔗 Link to current audio device';
+                    const tooltip = hasLink
+                      ? `Currently linked to ${linkedDisplay}. Click to re-link to current audio output (${currentDisplay}).`
+                      : hasCurrent
+                        ? `Save the current system audio output (${currentDisplay}) as this device's link. Auto-switch will activate this listening device whenever ${currentDisplay} becomes the system output again.`
+                        : 'No system audio output detected — cannot link.';
+                    return (
+                      <button
+                        type="button"
+                        className={`listening-device-secondary-button${hasLink ? ' is-active' : ''}`}
+                        onClick={handleLinkActiveListeningDevice}
+                        disabled={!hasCurrent}
+                        data-testid="listening-device-link-button"
+                        title={tooltip}
+                      >
+                        {buttonLabel}
+                      </button>
+                    );
+                  })() : null}
                   <button
                     type="button"
                     className={`listening-device-secondary-button${isListeningDeviceRenameMode ? ' is-active' : ''}`}

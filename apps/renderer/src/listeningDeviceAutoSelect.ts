@@ -76,33 +76,37 @@ export function decideAutoSelect(
 }
 
 /**
- * Apply (and possibly capture) the system-device association when the user
- * manually selects a listening device.
+ * v3.197 — explicit Link button handler logic. Overwrites the target
+ * listening device's `systemDeviceId` + `systemDeviceLabel` with the current
+ * system audio output, regardless of whether an existing association is
+ * present.
  *
- * Returns the next `listeningDevices` array. When the selected device:
- *   - already has a `systemDeviceId` → returns the input unchanged.
- *   - has no `systemDeviceId` AND the current system device is valid →
- *     captures `systemDeviceId` + `systemDeviceLabel` on the selected
- *     device and returns a new array.
- *   - has no `systemDeviceId` and the system device is empty → returns
- *     the input unchanged (nothing to capture).
+ * Behavior contract:
+ *   - Selected id not in the list → returns input unchanged.
+ *   - Current system deviceId is blank → returns input unchanged (no-op;
+ *     caller should surface a "no audio device" toast).
+ *   - Otherwise → returns a new array with the target updated.
+ *     • `systemDeviceLabel` is written when the snapshot label is non-empty.
+ *     • When the snapshot label is empty, any existing label on the device
+ *       is CLEARED — the matcher only uses `systemDeviceId`, so leaving a
+ *       stale "AirPods Pro" label after re-linking to studio monitors would
+ *       just confuse the UI.
  *
  * Returned array is referentially equal to the input when no change is
- * needed, so callers can do `if (next !== prev) setListeningDevices(next)`
- * without an extra deep compare.
+ * needed, so callers can early-out without a deep compare.
+ *
+ * Replaces v3.193's `applyManualSelectionAssociation` (silent auto-bind on
+ * select). The v3.193 helper was removed because the new UX is "user must
+ * explicitly click Link", not "auto-capture on first selection". This
+ * function is the explicit-overwrite equivalent.
  */
-export function applyManualSelectionAssociation(
+export function applyExplicitLinkAssociation(
   listeningDevices: readonly ListeningDevice[],
   selectedDeviceId: string,
   systemDevice: SystemDeviceSnapshot
 ): ListeningDevice[] {
   const target = listeningDevices.find((d) => d.id === selectedDeviceId);
   if (!target) {
-    return listeningDevices as ListeningDevice[];
-  }
-  const hasAssociation =
-    typeof target.systemDeviceId === 'string' && target.systemDeviceId.trim().length > 0;
-  if (hasAssociation) {
     return listeningDevices as ListeningDevice[];
   }
   const systemId = systemDevice.deviceId.trim();
@@ -118,6 +122,8 @@ export function applyManualSelectionAssociation(
     };
     if (systemLabel.length > 0) {
       next.systemDeviceLabel = systemLabel;
+    } else {
+      delete next.systemDeviceLabel;
     }
     return next;
   });

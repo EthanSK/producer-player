@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ListeningDevice } from '@producer-player/contracts';
 import {
-  applyManualSelectionAssociation,
+  applyExplicitLinkAssociation,
   decideAutoSelect,
 } from './listeningDeviceAutoSelect';
 
@@ -88,54 +88,70 @@ describe('decideAutoSelect', () => {
   });
 });
 
-describe('applyManualSelectionAssociation', () => {
-  it('captures system device id + label on a device with no association', () => {
-    const next = applyManualSelectionAssociation(
+describe('applyExplicitLinkAssociation (v3.197 — Link button)', () => {
+  it('captures system device id + label on a device with no existing link', () => {
+    const next = applyExplicitLinkAssociation(
       [carStereo],
       'device-car',
       { deviceId: 'group-car-bt', label: 'Mazda CX-5 Bluetooth' }
     );
-    expect(next).not.toBe(undefined);
     const updated = next.find((d) => d.id === 'device-car');
     expect(updated?.systemDeviceId).toBe('group-car-bt');
     expect(updated?.systemDeviceLabel).toBe('Mazda CX-5 Bluetooth');
   });
 
-  it('does not overwrite an existing association', () => {
+  it('overwrites an existing link (re-link behavior)', () => {
     const before: ListeningDevice[] = [airpods];
-    const next = applyManualSelectionAssociation(before, 'device-airpods', {
-      deviceId: 'group-something-else',
-      label: 'Different device',
+    const next = applyExplicitLinkAssociation(before, 'device-airpods', {
+      deviceId: 'group-monitors',
+      label: 'Kali LP-6 (audio interface)',
     });
-    expect(next).toBe(before);
+    expect(next).not.toBe(before);
+    const updated = next.find((d) => d.id === 'device-airpods');
+    expect(updated?.systemDeviceId).toBe('group-monitors');
+    expect(updated?.systemDeviceLabel).toBe('Kali LP-6 (audio interface)');
   });
 
   it('does nothing when the selected id is not in the list', () => {
     const before: ListeningDevice[] = [airpods, carStereo];
-    const next = applyManualSelectionAssociation(before, 'device-missing', {
+    const next = applyExplicitLinkAssociation(before, 'device-missing', {
       deviceId: 'group-x',
       label: 'X',
     });
     expect(next).toBe(before);
   });
 
-  it('does not capture when the current system device is blank', () => {
+  it('does nothing when the current system device is blank', () => {
     const before: ListeningDevice[] = [carStereo];
-    const next = applyManualSelectionAssociation(before, 'device-car', {
+    const next = applyExplicitLinkAssociation(before, 'device-car', {
       deviceId: '',
       label: '',
     });
     expect(next).toBe(before);
   });
 
-  it('captures id only when label is blank (preserves type contract)', () => {
-    const next = applyManualSelectionAssociation(
+  it('captures id only and clears any stale label when snapshot label is blank', () => {
+    // Pre-condition: airpods has a label. Re-link to a device whose label
+    // didn't resolve — old label should be cleared so the UI doesn't
+    // misrepresent the new association.
+    const next = applyExplicitLinkAssociation(
+      [airpods],
+      'device-airpods',
+      { deviceId: 'group-new', label: '' }
+    );
+    const updated = next.find((d) => d.id === 'device-airpods');
+    expect(updated?.systemDeviceId).toBe('group-new');
+    expect(updated?.systemDeviceLabel).toBeUndefined();
+  });
+
+  it('returns input unchanged when the target has no existing label and link cannot resolve a new one', () => {
+    const next = applyExplicitLinkAssociation(
       [carStereo],
       'device-car',
-      { deviceId: 'group-car-bt', label: '' }
+      { deviceId: 'group-x', label: '' }
     );
     const updated = next.find((d) => d.id === 'device-car');
-    expect(updated?.systemDeviceId).toBe('group-car-bt');
+    expect(updated?.systemDeviceId).toBe('group-x');
     expect(updated?.systemDeviceLabel).toBeUndefined();
   });
 });

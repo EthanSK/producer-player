@@ -173,7 +173,22 @@ function parseListeningDevices(value: unknown): ListeningDevice[] {
     const name = typeof entry.name === 'string' ? entry.name.trim() : '';
     if (id.length === 0 || name.length === 0 || seenIds.has(id)) return [];
     seenIds.add(id);
-    return [{ id, name }];
+    // v3.193 — optional system audio output association. Mirror the
+    // `fromMastering` pattern: only spread the field when it's truthy so
+    // historical entries round-trip without a stray null and the JSON on
+    // disk stays minimal.
+    const systemDeviceIdRaw =
+      typeof entry.systemDeviceId === 'string' ? entry.systemDeviceId.trim() : '';
+    const systemDeviceLabelRaw =
+      typeof entry.systemDeviceLabel === 'string' ? entry.systemDeviceLabel.trim() : '';
+    const device: ListeningDevice = { id, name };
+    if (systemDeviceIdRaw.length > 0) {
+      device.systemDeviceId = systemDeviceIdRaw;
+    }
+    if (systemDeviceLabelRaw.length > 0) {
+      device.systemDeviceLabel = systemDeviceLabelRaw;
+    }
+    return [device];
   });
 }
 

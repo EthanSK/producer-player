@@ -224,6 +224,14 @@ import {
   MasteringChecklistRowHelp,
 } from './lib/MasteringChecklistImportance';
 import { useToast } from './lib/ToastStack';
+import {
+  unlockSystemAudioDeviceLabels,
+  useSystemAudioDevice,
+} from './lib/useSystemAudioDevice';
+import {
+  applyManualSelectionAssociation,
+  decideAutoSelect,
+} from './listeningDeviceAutoSelect';
 import { ErrorDetailsDialog } from './lib/ErrorDetailsDialog';
 import {
   LUFS_LINKS,
@@ -1937,7 +1945,22 @@ function sanitizeListeningDevices(value: unknown): ListeningDevice[] {
     const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
     if (id.length === 0 || name.length === 0 || seen.has(id)) continue;
     seen.add(id);
-    result.push({ id, name });
+    // v3.193 — preserve optional system audio output association. Only carry
+    // the fields forward when they're non-empty strings so historical
+    // devices round-trip without stray nulls. Matches the state-service
+    // parser's shape.
+    const systemDeviceIdRaw =
+      typeof candidate.systemDeviceId === 'string' ? candidate.systemDeviceId.trim() : '';
+    const systemDeviceLabelRaw =
+      typeof candidate.systemDeviceLabel === 'string' ? candidate.systemDeviceLabel.trim() : '';
+    const device: ListeningDevice = { id, name };
+    if (systemDeviceIdRaw.length > 0) {
+      device.systemDeviceId = systemDeviceIdRaw;
+    }
+    if (systemDeviceLabelRaw.length > 0) {
+      device.systemDeviceLabel = systemDeviceLabelRaw;
+    }
+    result.push(device);
   }
   return result;
 }
@@ -2854,6 +2877,49 @@ export function App(): JSX.Element {
     | { type: 'version'; versionNumber: number }
     | null
   >(null);
+
+  // v3.193 — keep the listening devices + active id reachable from inside
+  // the `useSystemAudioDevice` change callback without re-creating the hook
+  // every render. The hook's `onChange` fires on `devicechange` events;
+  // mirroring the latest state in refs lets the callback read fresh values
+  // even though React closes over the original.
+  const listeningDevicesRef = useRef<ListeningDevice[]>([]);
+  const activeListeningDeviceIdRef = useRef<string | null>(null);
+  const systemAudioDevice = useSystemAudioDevice({
+    onChange: (next) => {
+      const decision = decideAutoSelect(
+        next,
+        listeningDevicesRef.current,
+        activeListeningDeviceIdRef.current
+      );
+      if (decision.activateDeviceId && decision.matchedDevice) {
+        setActiveListeningDeviceId(decision.activateDeviceId);
+        const labelSuffix = next.label.trim().length > 0 ? ` (${next.label})` : '';
+        toast.show({
+          id: `listening-device-auto-${decision.activateDeviceId}-${Date.now()}`,
+          kind: 'info',
+          text: `Auto-switched to ${decision.matchedDevice.name}${labelSuffix}`,
+        });
+      }
+    },
+  });
+  // v3.193 — unlock device labels once on mount so the system-audio strip
+  // shows the human-readable name instead of an empty string. Chromium
+  // gates `MediaDeviceInfo.label` behind a media-permission grant; we
+  // request audio (immediately stopping the tracks) so labels populate.
+  // The Electron permission handler in main.ts already auto-approves
+  // audio-only `getUserMedia` requests, so this is silent in production.
+  useEffect(() => {
+    void unlockSystemAudioDeviceLabels();
+  }, []);
+  // v3.193 — keep refs in sync so the `useSystemAudioDevice` change
+  // callback always sees the freshest listening devices + active id.
+  useEffect(() => {
+    listeningDevicesRef.current = listeningDevices;
+  }, [listeningDevices]);
+  useEffect(() => {
+    activeListeningDeviceIdRef.current = activeListeningDeviceId;
+  }, [activeListeningDeviceId]);
   // Vertical drag-to-scrub state for a checklist item's timestamp badge.
   // Active while the user is holding the pointer down on a timestamp to adjust it.
   // Moving up increases seconds; moving down decreases. Released commits the
@@ -13781,15 +13847,50 @@ export function App(): JSX.Element {
     if (existing) {
       setActiveListeningDeviceId(existing.id);
       setListeningDeviceDraftName('');
+      // v3.193 — capture the system-output association on first activation
+      // even when re-selecting an existing device by name.
+      maybeCaptureSystemAudioAssociation(existing.id);
       return;
     }
+    // v3.193 — new device: capture the system audio association at creation
+    // time so the user gets the auto-switch behavior without an extra step.
     const newDevice: ListeningDevice = {
       id: createListeningDeviceId(),
       name: trimmed,
     };
+    const systemId = systemAudioDevice.deviceId.trim();
+    if (systemId.length > 0) {
+      newDevice.systemDeviceId = systemId;
+      const systemLabel = systemAudioDevice.label.trim();
+      if (systemLabel.length > 0) {
+        newDevice.systemDeviceLabel = systemLabel;
+      }
+    }
     setListeningDevices((prev) => [...prev, newDevice]);
     setActiveListeningDeviceId(newDevice.id);
     setListeningDeviceDraftName('');
+    // Toast confirming the new device + which system output it's linked to.
+    const linkSuffix =
+      systemAudioDevice.label.trim().length > 0
+        ? ` · Linked to ${systemAudioDevice.label}`
+        : systemAudioDevice.deviceId.trim().length > 0
+          ? ' · Linked to current output'
+          : '';
+    toast.show({
+      id: `listening-device-added-${newDevice.id}`,
+      kind: 'success',
+      text: `Added listening device: ${newDevice.name}${linkSuffix}`,
+    });
+  }
+
+  // v3.193 — capture the current system audio output device on a listening
+  // device the first time it's manually selected (if it doesn't already
+  // have an association). Lifted into a helper so both the submit-existing
+  // and explicit-click paths can use it.
+  function maybeCaptureSystemAudioAssociation(deviceId: string): void {
+    setListeningDevices((prev) =>
+      applyManualSelectionAssociation(prev, deviceId, systemAudioDevice)
+    );
   }
 
   function handleStartListeningDeviceRename(): void {
@@ -13849,7 +13950,38 @@ export function App(): JSX.Element {
 
     // Clicking the already-active chip clears the selection so new items are
     // added without a device tag.
+    const wasActive = activeListeningDeviceId === deviceId;
     setActiveListeningDeviceId((current) => (current === deviceId ? null : deviceId));
+
+    if (wasActive) {
+      // Deselect — no toast, no association capture.
+      return;
+    }
+
+    // v3.193 — capture the system-output association on first manual select,
+    // and surface a toast showing the linked system device so Ethan can
+    // verify the association.
+    const selectedDevice = listeningDevices.find((d) => d.id === deviceId) ?? null;
+    if (selectedDevice) {
+      const existingAssociation =
+        typeof selectedDevice.systemDeviceId === 'string' &&
+        selectedDevice.systemDeviceId.trim().length > 0;
+      if (!existingAssociation) {
+        maybeCaptureSystemAudioAssociation(deviceId);
+      }
+      const associatedLabel = existingAssociation
+        ? (selectedDevice.systemDeviceLabel ?? '').trim() ||
+          systemAudioDevice.label.trim() ||
+          'unknown output'
+        : systemAudioDevice.label.trim() ||
+          (systemAudioDevice.deviceId.trim().length > 0 ? 'current output' : 'no system output');
+      const prefix = existingAssociation ? 'Selected' : 'Selected (linking)';
+      toast.show({
+        id: `listening-device-selected-${deviceId}-${Date.now()}`,
+        kind: 'info',
+        text: `${prefix}: ${selectedDevice.name} · ${associatedLabel}`,
+      });
+    }
   }
 
   function handleDeleteListeningDevice(deviceId: string): void {
@@ -17513,6 +17645,32 @@ export function App(): JSX.Element {
                   </button>
                 </div>
                 <div className="listening-device-editor-actions">
+                  {/*
+                    v3.193 — surface the live system audio output device on
+                    the LEFT of the same row as the Rename selected button.
+                    Sourced from `useSystemAudioDevice` which subscribes to
+                    `navigator.mediaDevices.devicechange`. Empty label is
+                    rendered as "(unknown)" so the row never collapses
+                    silently when permissions / enumeration fails.
+                  */}
+                  <span
+                    className="listening-device-system-output"
+                    data-testid="listening-device-system-output"
+                    title={
+                      systemAudioDevice.deviceId.length > 0
+                        ? `Current operating-system audio output device. Auto-switches the active listening device when this changes to one you've linked.`
+                        : `Operating-system audio output device unavailable (permission not yet granted or no audio outputs detected).`
+                    }
+                  >
+                    <span className="listening-device-system-output-label">
+                      Current audio device:
+                    </span>{' '}
+                    <span className="listening-device-system-output-value">
+                      {systemAudioDevice.label.trim().length > 0
+                        ? systemAudioDevice.label
+                        : '(unknown)'}
+                    </span>
+                  </span>
                   <button
                     type="button"
                     className={`listening-device-secondary-button${isListeningDeviceRenameMode ? ' is-active' : ''}`}

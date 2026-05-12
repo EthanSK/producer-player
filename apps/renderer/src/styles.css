@@ -4028,12 +4028,46 @@ body.is-dragging-checklist-timestamp * {
 
 .listening-device-editor-actions {
   display: flex;
-  flex-direction: column;
-  /* v3.87 — right-align so the slim "Rename selected" button hugs the right
-   * edge of its container, sitting closer to the saved device chips on the
-   * other side of the strip. (Ethan voice 5553) */
-  align-items: flex-end;
-  gap: 4px;
+  /* v3.193 — flipped from column to row-with-wrap so the current-audio-device
+   * label can sit on the LEFT of the same row as the Rename selected button
+   * (Ethan voice 2754). Optional hint spans wrap onto the next line, but the
+   * primary row (system-output label · Rename button) stays a single row.
+   * The Rename button retains `margin-left: auto` from its own rule so it
+   * still hugs the right edge regardless of the system-output label width. */
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  /* Slightly more horizontal gap than the old column gap so the audio-device
+   * label has breathing room from the rename button when both are in view. */
+  gap: 4px 10px;
+}
+
+.listening-device-system-output {
+  /* v3.193 — compact monospace-ish chip showing the current OS audio output.
+   * Sits to the LEFT of the Rename selected button on the same row. Tooltip
+   * explains the auto-switch link semantics so the UI doesn't have to. */
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--text-muted);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listening-device-system-output-label {
+  /* Slightly dimmer than the value so the device name reads as the
+   * primary content. */
+  opacity: 0.7;
+}
+
+.listening-device-system-output-value {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .listening-device-secondary-button {

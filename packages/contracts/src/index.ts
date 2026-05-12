@@ -386,6 +386,28 @@ export interface SongChecklistItem {
 export interface ListeningDevice {
   id: string;
   name: string;
+  /**
+   * v3.193 — optional association to the operating system's audio output
+   * device that the user was using when they created / activated this
+   * listening device. Captured from `navigator.mediaDevices.enumerateDevices`
+   * (kind: `audiooutput`) at the time the listening device was created or
+   * the first time it was manually selected after the association feature
+   * landed. When the system default output later changes to a device whose
+   * deviceId matches this value, the renderer auto-switches the active
+   * listening device to this one. Optional + nullable so existing devices
+   * round-trip cleanly. May refer to a deviceId that no longer exists on
+   * the current machine — that's fine, the auto-switch just won't fire.
+   */
+  systemDeviceId?: string | null;
+  /**
+   * v3.193 — human-readable label of the system audio output device that was
+   * associated when `systemDeviceId` was captured (e.g. "AirPods Pro",
+   * "MacBook Pro Speakers"). Stored alongside the id so the renderer can
+   * surface the original device name in toasts / hover hints even if the
+   * device is no longer connected (and thus not in the live enumerate
+   * result). Optional + nullable so existing devices round-trip cleanly.
+   */
+  systemDeviceLabel?: string | null;
 }
 
 export interface AlbumChecklistItem {

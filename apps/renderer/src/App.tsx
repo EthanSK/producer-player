@@ -12766,16 +12766,31 @@ export function App(): JSX.Element {
     });
   }
 
-  async function handleOpenSongProjectFile(songId: string): Promise<void> {
+  // v3.202 — Fire-and-forget. NEVER `await` the project-file open.
+  // Ethan reported (voice 2833) that clicking "Open project" on a song
+  // linked to an Ableton .als stalls Producer Player with the macOS
+  // rainbow wheel while Ableton boots. The renderer side of that bug
+  // was awaiting an `ipcRenderer.invoke` round-trip via `runVoidTask`,
+  // so PP's React effects + microtasks couldn't progress until the
+  // main-process IPC settled. The preload now exposes `openFile` as a
+  // one-way `ipcRenderer.send` that returns void synchronously; here
+  // we call it directly (no `await`, no `runVoidTask`) and surface
+  // intent via a non-blocking toast. The main process does its `fs.stat`
+  // + detached `/usr/bin/open` handoff in the background, fully decoupled
+  // from the renderer.
+  function handleOpenSongProjectFile(songId: string): void {
     const projectFilePath = songProjectFilePaths[songId] ?? null;
     logAction('project-file.open', { songId, hasFile: Boolean(projectFilePath) });
     if (!projectFilePath) {
-      await handlePickSongProjectFile(songId);
+      void handlePickSongProjectFile(songId);
       return;
     }
 
-    await runVoidTask(async () => {
-      await window.producerPlayer.openFile(projectFilePath);
+    window.producerPlayer.openFile(projectFilePath);
+    toast.show({
+      id: `song-project-open-${songId}`,
+      kind: 'success',
+      text: `Opening ${getPathTail(projectFilePath)}…`,
     });
   }
 

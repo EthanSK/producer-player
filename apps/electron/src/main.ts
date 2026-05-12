@@ -4883,25 +4883,48 @@ function registerIpcHandlers(service: FileLibraryService): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.OPEN_FILE, async (_event, filePath: string) => {
-    const resolvedPath = resolve(filePath);
+  // v3.202 — One-way (`ipcMain.on`, not `ipcMain.handle`). The renderer
+  // never awaits this — see `openFile` in `preload.ts` for context.
+  // Switching from request/response to fire-and-forget guarantees the
+  // renderer's call returns synchronously the moment the IPC message
+  // is queued, even if the main process's `fs.stat` or LaunchServices
+  // handoff stalls while Ableton boots. The stat + spawn happen in a
+  // microtask we never await from any caller's perspective; errors are
+  // logged but never propagated to the renderer (UI-wise there's
+  // nothing useful to do if `open` fails — the user already moved on).
+  ipcMain.on(IPC_CHANNELS.OPEN_FILE, (_event, filePath: string) => {
+    void (async () => {
+      const resolvedPath = resolve(filePath);
 
-    let stats;
-    try {
-      stats = await fs.stat(resolvedPath);
-    } catch {
-      throw new Error(`File not accessible: ${resolvedPath}`);
-    }
+      let stats;
+      try {
+        stats = await fs.stat(resolvedPath);
+      } catch (cause) {
+        log.warn('[producer-player] OPEN_FILE: file not accessible', {
+          resolvedPath,
+          cause,
+        });
+        return;
+      }
 
-    if (!stats.isFile()) {
-      throw new Error(`Path is not a file: ${resolvedPath}`);
-    }
+      if (!stats.isFile()) {
+        log.warn('[producer-player] OPEN_FILE: path is not a file', { resolvedPath });
+        return;
+      }
 
-    openFileWithDetachedSystemHandler(resolvedPath, {
-      onAsyncError: (cause) => {
-        log.warn('[producer-player] Detached file-open handoff failed asynchronously', cause);
-      },
-    });
+      try {
+        openFileWithDetachedSystemHandler(resolvedPath, {
+          onAsyncError: (cause) => {
+            log.warn(
+              '[producer-player] Detached file-open handoff failed asynchronously',
+              cause
+            );
+          },
+        });
+      } catch (cause) {
+        log.warn('[producer-player] OPEN_FILE: detached spawn failed synchronously', cause);
+      }
+    })();
   });
 
   ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL_URL, async (_event, url: string) => {

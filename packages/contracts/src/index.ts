@@ -1408,7 +1408,11 @@ export interface ProducerPlayerBridge {
   ): Promise<{ folderPath: string | null; exportedCount: number }>;
   revealFile(filePath: string): Promise<void>;
   openFolder(folderPath: string): Promise<void>;
-  openFile(filePath: string): Promise<void>;
+  // v3.202 — Fire-and-forget (one-way IPC). Returns void, not a
+  // Promise, so the renderer can NEVER `await` the launch and stall
+  // its event loop while a slow DAW (Ableton) boots. See `openFile` in
+  // `apps/electron/src/preload.ts` for full rationale.
+  openFile(filePath: string): void;
   openExternalUrl(url: string): Promise<void>;
   getMicrophonePermissionStatus(): Promise<MicrophonePermissionStatus>;
   openMicrophonePrivacySettings(): Promise<void>;

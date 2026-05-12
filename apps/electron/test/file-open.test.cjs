@@ -81,6 +81,43 @@ test('surfaces immediate spawn failures to the caller', () => {
   );
 });
 
+// v3.202 — Anti-rainbow-wheel regression test. Ethan reported (voice
+// 2833) that opening an Ableton-linked project froze Producer Player
+// with the macOS beachball while Ableton booted. The renderer's
+// `Open project` button must NEVER block its caller, even if the
+// underlying spawn (or any post-spawn LaunchServices step) hangs.
+// This test simulates a child whose async work never resolves and
+// asserts that `openFileWithDetachedSystemHandler` STILL returns
+// synchronously within a tight budget — i.e. nothing in this layer
+// can ever be awaited by mistake.
+test('returns synchronously even when the spawned child never completes', () => {
+  const child = {
+    once() {
+      return this;
+    },
+    unref() {},
+  };
+
+  const start = Date.now();
+  openFileWithDetachedSystemHandler('/tmp/Ableton Session.als', {
+    platform: 'darwin',
+    spawn() {
+      // Simulate a slow handoff. The function must NOT wait on this —
+      // it should construct the spawn request, call spawn, hook the
+      // error listener, unref, and return.
+      return child;
+    },
+  });
+  const elapsedMs = Date.now() - start;
+
+  // 50ms budget: generous for CI but tight enough that any accidental
+  // `await` on a 5s simulated delay would blow it.
+  assert.ok(
+    elapsedMs < 50,
+    `expected synchronous return; took ${elapsedMs}ms (fire-and-forget broken?)`
+  );
+});
+
 test('reports asynchronous child errors without awaiting the child', () => {
   let asyncError = null;
   let errorHandler = null;

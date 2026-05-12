@@ -97,8 +97,20 @@ const bridge: ProducerPlayerBridge = {
     await ipcRenderer.invoke(IPC_CHANNELS.OPEN_FOLDER, folderPath);
   },
 
-  async openFile(filePath: string) {
-    await ipcRenderer.invoke(IPC_CHANNELS.OPEN_FILE, filePath);
+  // v3.202 — Fire-and-forget. The renderer must NEVER await Producer
+  // Player's project-file open: when Ethan clicks "Open project" on a
+  // song linked to an Ableton .als, Ableton can take 5-15s to launch.
+  // Awaiting an `ipcRenderer.invoke` round-trip means the renderer's
+  // Promise stays pending while the OS hammers the system, which
+  // surfaces as the rainbow-wheel beachball on PP's window even though
+  // PP's own JS isn't busy. Switching to `ipcRenderer.send` (one-way)
+  // means the renderer returns immediately, never blocks on the file
+  // handoff, and never registers a pending Promise tied to the slow
+  // DAW launch. Main process side spawns a fully detached `/usr/bin/open`
+  // child (see `file-open.ts`), so neither PP process is coupled to
+  // Ableton's launch.
+  openFile(filePath: string): void {
+    ipcRenderer.send(IPC_CHANNELS.OPEN_FILE, filePath);
   },
 
   async openExternalUrl(url: string) {

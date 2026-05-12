@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyGainInPlace,
   base64ToFloat32Interleaved,
-  clampPluginChainOutputGainLinear,
+  clampPluginSlotGainLinear,
   float32InterleavedToBase64,
   getEnabledPluginProcessChain,
-  getPluginChainOutputGainLinear,
+  getPluginSlotInputGain,
+  getPluginSlotOutputGain,
   interleaveStereoSamples,
   writeInterleavedStereoSamples,
 } from './pluginAudioPipeline';
@@ -51,18 +53,45 @@ describe('pluginAudioPipeline', () => {
     ).toEqual([]);
   });
 
-  it('normalizes plugin chain output gain for the live playback gain node', () => {
-    expect(getPluginChainOutputGainLinear({ songId: 'song-a', items: [] })).toBe(1);
-    expect(
-      getPluginChainOutputGainLinear({
-        songId: 'song-a',
-        outputGainLinear: 1.25,
-        items: [],
-      }),
-    ).toBe(1.25);
-    expect(clampPluginChainOutputGainLinear(-1)).toBe(0);
-    expect(clampPluginChainOutputGainLinear(3)).toBe(2);
-    expect(clampPluginChainOutputGainLinear(Number.NaN)).toBe(1);
+  it('clamps per-plugin input/output gain to [0, 2] with NaN → unity', () => {
+    expect(clampPluginSlotGainLinear(undefined)).toBe(1);
+    expect(clampPluginSlotGainLinear(Number.NaN)).toBe(1);
+    expect(clampPluginSlotGainLinear(-1)).toBe(0);
+    expect(clampPluginSlotGainLinear(0)).toBe(0);
+    expect(clampPluginSlotGainLinear(1)).toBe(1);
+    expect(clampPluginSlotGainLinear(1.5)).toBe(1.5);
+    expect(clampPluginSlotGainLinear(3)).toBe(2);
+  });
+
+  it('reads per-slot input/output gain with sensible unity defaults', () => {
+    const bare = { instanceId: 'a', pluginId: 'vst3:x', enabled: true, order: 0 } as const;
+    expect(getPluginSlotInputGain(bare)).toBe(1);
+    expect(getPluginSlotOutputGain(bare)).toBe(1);
+
+    const withGains = {
+      ...bare,
+      inputGainLinear: 0.5,
+      outputGainLinear: 1.75,
+    };
+    expect(getPluginSlotInputGain(withGains)).toBe(0.5);
+    expect(getPluginSlotOutputGain(withGains)).toBe(1.75);
+
+    const overdriven = { ...bare, inputGainLinear: 5, outputGainLinear: -2 };
+    expect(getPluginSlotInputGain(overdriven)).toBe(2);
+    expect(getPluginSlotOutputGain(overdriven)).toBe(0);
+  });
+
+  it('applyGainInPlace scales a float32 buffer and short-circuits at unity', () => {
+    const buf = new Float32Array([0.5, -0.25, 1, -1]);
+    applyGainInPlace(buf, 1);
+    expect(Array.from(buf)).toEqual([0.5, -0.25, 1, -1]);
+
+    applyGainInPlace(buf, 0.5);
+    expect(Array.from(buf)).toEqual([0.25, -0.125, 0.5, -0.5]);
+
+    applyGainInPlace(buf, 0);
+    // Use Math.abs to collapse +0/-0 from sign-preserving multiplication.
+    expect(Array.from(buf).map((v) => Math.abs(v))).toEqual([0, 0, 0, 0]);
   });
 
   it('round-trips stereo float32 blocks through base64', () => {

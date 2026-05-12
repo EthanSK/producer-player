@@ -1,26 +1,36 @@
 import type {
+  PluginChainItem,
   PluginProcessBlockItem,
   TrackPluginChain,
 } from '@producer-player/contracts';
 
 export const PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE = 4096;
-export const PLUGIN_CHAIN_OUTPUT_GAIN_DEFAULT = 1;
-export const PLUGIN_CHAIN_OUTPUT_GAIN_MIN = 0;
-export const PLUGIN_CHAIN_OUTPUT_GAIN_MAX = 2;
+/**
+ * Per-plugin I/O gain (Ableton-style sandwich) — `inputGainLinear` /
+ * `outputGainLinear`. Linear multipliers; 1 = unity (default), 0 = silent,
+ * 2 = +6 dB. Anything outside [MIN..MAX] gets clamped.
+ */
+export const PLUGIN_SLOT_GAIN_DEFAULT = 1;
+export const PLUGIN_SLOT_GAIN_MIN = 0;
+export const PLUGIN_SLOT_GAIN_MAX = 2;
 const BASE64_CHUNK_SIZE = 0x8000;
 
-export function clampPluginChainOutputGainLinear(value: unknown): number {
+export function clampPluginSlotGainLinear(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return PLUGIN_CHAIN_OUTPUT_GAIN_DEFAULT;
+    return PLUGIN_SLOT_GAIN_DEFAULT;
   }
   return Math.min(
-    PLUGIN_CHAIN_OUTPUT_GAIN_MAX,
-    Math.max(PLUGIN_CHAIN_OUTPUT_GAIN_MIN, value),
+    PLUGIN_SLOT_GAIN_MAX,
+    Math.max(PLUGIN_SLOT_GAIN_MIN, value),
   );
 }
 
-export function getPluginChainOutputGainLinear(chain: TrackPluginChain): number {
-  return clampPluginChainOutputGainLinear(chain.outputGainLinear);
+export function getPluginSlotInputGain(item: PluginChainItem): number {
+  return clampPluginSlotGainLinear(item.inputGainLinear);
+}
+
+export function getPluginSlotOutputGain(item: PluginChainItem): number {
+  return clampPluginSlotGainLinear(item.outputGainLinear);
 }
 
 export function getEnabledPluginProcessChain(
@@ -37,6 +47,22 @@ export function getEnabledPluginProcessChain(
       instanceId: item.instanceId,
       enabled: true,
     }));
+}
+
+/**
+ * Apply per-slot input gain to an interleaved stereo float32 block in-place
+ * before the buffer is shipped to the plugin sidecar. A unity gain (1.0) is
+ * a no-op fast-path. The output gain is applied symmetrically by
+ * {@link applyPluginSlotOutputGainInPlace} after processing.
+ *
+ * Both gains compose multiplicatively when multiple plugins are in the
+ * chain: the App.tsx pipeline calls this per-slot in chain order.
+ */
+export function applyGainInPlace(samples: Float32Array, gain: number): void {
+  if (gain === 1 || !Number.isFinite(gain)) return;
+  for (let i = 0; i < samples.length; i++) {
+    samples[i] = samples[i]! * gain;
+  }
 }
 
 export function interleaveStereoSamples(

@@ -70,7 +70,7 @@ test('addPluginToChain appends in order and persists across a reload', async () 
   }
 });
 
-test('setTrackPluginChain stores plugin-chain output gain and mutations preserve it', async () => {
+test('setPluginSlotGain persists per-plugin input/output gain and survives mutations + reload', async () => {
   const tmp = mktmp();
   try {
     migrateStateIfNeeded(tmp);
@@ -78,7 +78,6 @@ test('setTrackPluginChain stores plugin-chain output gain and mutations preserve
 
     await service.setTrackPluginChain('song-gain', {
       songId: 'song-gain',
-      outputGainLinear: 1.25,
       items: [
         {
           instanceId: 'slot-a',
@@ -86,22 +85,55 @@ test('setTrackPluginChain stores plugin-chain output gain and mutations preserve
           enabled: true,
           order: 0,
         },
+        {
+          instanceId: 'slot-b',
+          pluginId: 'vst3:gain-b',
+          enabled: true,
+          order: 1,
+        },
       ],
     });
 
-    let chain = await service.addPluginToChain('song-gain', 'vst3:gain-b', {
-      instanceId: 'slot-b',
+    // Patch only input gain on slot-a, leave output untouched.
+    let chain = await service.setPluginSlotGain('song-gain', 'slot-a', {
+      inputGainLinear: 0.5,
     });
-    assert.equal(chain.outputGainLinear, 1.25);
+    assert.equal(chain.items[0].inputGainLinear, 0.5);
+    assert.equal(chain.items[0].outputGainLinear, undefined);
 
+    // Patch output gain too; both should land independently.
+    chain = await service.setPluginSlotGain('song-gain', 'slot-a', {
+      outputGainLinear: 1.75,
+    });
+    assert.equal(chain.items[0].inputGainLinear, 0.5);
+    assert.equal(chain.items[0].outputGainLinear, 1.75);
+
+    // Values outside [0..2] are clamped, NaN dropped.
+    chain = await service.setPluginSlotGain('song-gain', 'slot-b', {
+      inputGainLinear: 5,
+      outputGainLinear: Number.NaN,
+    });
+    assert.equal(chain.items[1].inputGainLinear, 2);
+    assert.equal(chain.items[1].outputGainLinear, undefined);
+
+    // Mutations (reorder/toggle) MUST preserve per-slot gains.
     chain = await service.reorderPluginChain('song-gain', ['slot-b', 'slot-a']);
-    assert.equal(chain.outputGainLinear, 1.25);
+    const byId = Object.fromEntries(chain.items.map((i) => [i.instanceId, i]));
+    assert.equal(byId['slot-a'].inputGainLinear, 0.5);
+    assert.equal(byId['slot-a'].outputGainLinear, 1.75);
+    assert.equal(byId['slot-b'].inputGainLinear, 2);
 
-    chain = await service.togglePluginEnabled('song-gain', 'slot-b', false);
-    assert.equal(chain.outputGainLinear, 1.25);
+    chain = await service.togglePluginEnabled('song-gain', 'slot-a', false);
+    const byId2 = Object.fromEntries(chain.items.map((i) => [i.instanceId, i]));
+    assert.equal(byId2['slot-a'].inputGainLinear, 0.5);
+    assert.equal(byId2['slot-a'].outputGainLinear, 1.75);
 
+    // Reload from disk — values persist verbatim.
     chain = await (await reload(tmp)).getTrackPluginChain('song-gain');
-    assert.equal(chain.outputGainLinear, 1.25);
+    const byId3 = Object.fromEntries(chain.items.map((i) => [i.instanceId, i]));
+    assert.equal(byId3['slot-a'].inputGainLinear, 0.5);
+    assert.equal(byId3['slot-a'].outputGainLinear, 1.75);
+    assert.equal(byId3['slot-b'].inputGainLinear, 2);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

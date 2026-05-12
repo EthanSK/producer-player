@@ -53,7 +53,13 @@ import type {
 } from '@producer-player/contracts';
 
 import { PluginBrowserDialog } from './PluginBrowserDialog';
-import { clampPluginChainOutputGainLinear } from '../pluginAudioPipeline';
+import {
+  PLUGIN_SLOT_GAIN_MAX,
+  PLUGIN_SLOT_GAIN_MIN,
+  clampPluginSlotGainLinear,
+  getPluginSlotInputGain,
+  getPluginSlotOutputGain,
+} from '../pluginAudioPipeline';
 
 export interface PluginChainStripProps {
   chain: TrackPluginChain;
@@ -71,7 +77,15 @@ export interface PluginChainStripProps {
   onToggle: (instanceId: string) => void;
   onReorder: (orderedInstanceIds: string[]) => void;
   onOpenEditor: (instanceId: string) => void;
-  onOutputGainChange?: (outputGainLinear: number) => void;
+  /**
+   * v3.186 — per-plugin Ableton-style I/O gain. The strip emits separate
+   * input and output linear-gain values for one slot; either may be
+   * undefined when only one side changed.
+   */
+  onSlotGainChange?: (
+    instanceId: string,
+    gains: { inputGainLinear?: number; outputGainLinear?: number },
+  ) => void;
   onSavePreset?: (instanceId: string, name: string) => void;
   onRecallPreset?: (instanceId: string, name: string) => void;
   onDeletePreset?: (pluginId: string, name: string) => void;
@@ -92,6 +106,12 @@ export interface PluginChainStripProps {
    */
   loadedInstanceIds?: ReadonlySet<string>;
   instanceLatencies?: Record<string, number>;
+  /**
+   * v3.186 — true when the plugin host has crashed twice within the last
+   * 30s, so auto-restart is paused. The strip surfaces a small inline
+   * warning + a `data-unstable` attribute for tests.
+   */
+  unstable?: boolean;
 }
 
 function findPluginInfo(
@@ -125,10 +145,76 @@ interface SortablePluginPillProps {
   onOpenEditor: (instanceId: string) => void;
   onRemove: (instanceId: string) => void;
   onToggle: (instanceId: string) => void;
+  onSlotGainChange?: (
+    instanceId: string,
+    gains: { inputGainLinear?: number; outputGainLinear?: number },
+  ) => void;
   onSavePreset?: (instanceId: string, name: string) => void;
   onRecallPreset?: (instanceId: string, name: string) => void;
   onDeletePreset?: (pluginId: string, name: string) => void;
   onPresetMenuChange: (instanceId: string | null) => void;
+}
+
+/**
+ * v3.186 — small horizontal range slider for per-plugin I/O gain.
+ * Range 0..200 (percent of linear; 100 = unity, 200 = +6 dB).
+ */
+function GainSlider({
+  ariaLabel,
+  testIdSuffix,
+  instanceId,
+  label,
+  side,
+  valueLinear,
+  disabled,
+  onChange,
+}: {
+  ariaLabel: string;
+  testIdSuffix: 'input' | 'output';
+  instanceId: string;
+  label: string;
+  side: 'in' | 'out';
+  valueLinear: number;
+  disabled: boolean;
+  onChange?: (instanceId: string, value: number) => void;
+}): JSX.Element {
+  const percent = Math.round(valueLinear * 100);
+  return (
+    <span
+      className={`plugin-pill__gain plugin-pill__gain--${side}`}
+      data-testid={`plugin-pill-gain-${testIdSuffix}`}
+      title={`${label}: ${percent}% (1.0 = unity, 0 = silent, 2.0 = +6 dB)`}
+    >
+      <span className="plugin-pill__gain-label" aria-hidden="true">
+        {side}
+      </span>
+      <input
+        type="range"
+        className="plugin-pill__gain-slider"
+        data-testid={`plugin-pill-gain-${testIdSuffix}-slider`}
+        min={Math.round(PLUGIN_SLOT_GAIN_MIN * 100)}
+        max={Math.round(PLUGIN_SLOT_GAIN_MAX * 100)}
+        step={1}
+        value={percent}
+        disabled={disabled || !onChange}
+        onChange={(event) => {
+          if (!onChange) return;
+          onChange(
+            instanceId,
+            clampPluginSlotGainLinear(Number(event.currentTarget.value) / 100),
+          );
+        }}
+        aria-label={ariaLabel}
+      />
+      <span
+        className="plugin-pill__gain-value"
+        data-testid={`plugin-pill-gain-${testIdSuffix}-value`}
+        aria-live="polite"
+      >
+        {percent}
+      </span>
+    </span>
+  );
 }
 
 function PluginPillDragGhost({
@@ -182,6 +268,7 @@ function SortablePluginPill({
   onOpenEditor,
   onRemove,
   onToggle,
+  onSlotGainChange,
   onSavePreset,
   onRecallPreset,
   onDeletePreset,
@@ -203,6 +290,8 @@ function SortablePluginPill({
       : null;
   const latencyTitle = 'Plugin-reported latency in samples. 0 means this plugin reported no added delay.';
   const loadingText = editDisabled && item.enabled ? 'loading' : null;
+  const inputGainLinear = getPluginSlotInputGain(item);
+  const outputGainLinear = getPluginSlotOutputGain(item);
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -231,6 +320,21 @@ function SortablePluginPill({
       >
         <span aria-hidden="true">⋮⋮</span>
       </button>
+
+      <GainSlider
+        ariaLabel={`Input gain for ${displayName}`}
+        testIdSuffix="input"
+        instanceId={item.instanceId}
+        label="Input gain"
+        side="in"
+        valueLinear={inputGainLinear}
+        disabled={false}
+        onChange={
+          onSlotGainChange
+            ? (id, value) => onSlotGainChange(id, { inputGainLinear: value })
+            : undefined
+        }
+      />
 
       <button
         type="button"
@@ -404,6 +508,21 @@ function SortablePluginPill({
         <span className="plugin-pill__toggle-knob" aria-hidden="true" />
       </button>
 
+      <GainSlider
+        ariaLabel={`Output gain for ${displayName}`}
+        testIdSuffix="output"
+        instanceId={item.instanceId}
+        label="Output gain"
+        side="out"
+        valueLinear={outputGainLinear}
+        disabled={false}
+        onChange={
+          onSlotGainChange
+            ? (id, value) => onSlotGainChange(id, { outputGainLinear: value })
+            : undefined
+        }
+      />
+
       <button
         type="button"
         className="plugin-pill__close"
@@ -430,7 +549,7 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     onToggle,
     onReorder,
     onOpenEditor,
-    onOutputGainChange,
+    onSlotGainChange,
     onSavePreset,
     onRecallPreset,
     onDeletePreset,
@@ -442,6 +561,7 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     openEditorInstanceIds,
     loadedInstanceIds,
     instanceLatencies,
+    unstable = false,
   } = props;
 
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -491,8 +611,6 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
   };
 
   const isEmpty = orderedItems.length === 0;
-  const outputGainLinear = clampPluginChainOutputGainLinear(chain.outputGainLinear);
-  const outputGainPercent = Math.round(outputGainLinear * 100);
   const activeDragItem =
     activeDragInstanceId
       ? orderedItems.find((item) => item.instanceId === activeDragInstanceId) ?? null
@@ -503,12 +621,13 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
     <section
       className={`plugin-chain-strip plugin-chain-strip--${layout}${
         hideHeader ? ' plugin-chain-strip--embedded' : ''
-      }`}
+      }${unstable ? ' plugin-chain-strip--unstable' : ''}`}
       data-testid={
         layout === 'fullscreen'
           ? 'plugin-chain-strip-fullscreen'
           : 'plugin-chain-strip-compact'
       }
+      data-unstable={unstable ? 'true' : 'false'}
       aria-label="Plugin insert chain"
     >
       {!hideHeader ? (
@@ -520,42 +639,16 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
         </header>
       ) : null}
 
-      <div
-        className="plugin-chain-strip__gain"
-        data-testid="plugin-chain-output-gain"
-      >
-        <label
-          className="plugin-chain-strip__gain-label"
-          htmlFor={`plugin-chain-output-gain-${layout}`}
+      {unstable ? (
+        <p
+          className="plugin-chain-strip__unstable-warning"
+          data-testid="plugin-chain-strip-unstable"
+          role="alert"
         >
-          Plugin Vol
-        </label>
-        <input
-          id={`plugin-chain-output-gain-${layout}`}
-          className="plugin-chain-strip__gain-slider"
-          data-testid="plugin-chain-output-gain-slider"
-          type="range"
-          min={0}
-          max={200}
-          step={1}
-          value={outputGainPercent}
-          disabled={isEmpty || !onOutputGainChange}
-          onChange={(event) => {
-            onOutputGainChange?.(
-              clampPluginChainOutputGainLinear(Number(event.currentTarget.value) / 100),
-            );
-          }}
-          aria-label="Plugin chain output volume"
-          title="Output volume after this track's plugin chain. 100% is unity."
-        />
-        <span
-          className="plugin-chain-strip__gain-value"
-          data-testid="plugin-chain-output-gain-value"
-          aria-live="polite"
-        >
-          {outputGainPercent}%
-        </span>
-      </div>
+          Plugin host crashed repeatedly. Auto-reload paused — change the
+          chain to retry.
+        </p>
+      ) : null}
 
       <DndContext
         sensors={sensors}
@@ -599,6 +692,7 @@ export function PluginChainStrip(props: PluginChainStripProps): JSX.Element {
                   onOpenEditor={onOpenEditor}
                   onRemove={onRemove}
                   onToggle={onToggle}
+                  onSlotGainChange={onSlotGainChange}
                   onSavePreset={onSavePreset}
                   onRecallPreset={onRecallPreset}
                   onDeletePreset={onDeletePreset}

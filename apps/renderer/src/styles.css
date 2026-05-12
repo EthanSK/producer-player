@@ -8345,35 +8345,57 @@ button.reference-action.active {
   color: var(--text-muted);
 }
 
-.plugin-chain-strip__gain {
-  display: grid;
-  grid-template-columns: auto minmax(92px, 160px) 44px;
+/*
+ * v3.186 — per-plugin Ableton-style I/O gain on each plugin pill. Compact
+ * horizontal slider, label ("in" / "out"), and live percent readout. Sits
+ * flush against the pill edges so the sandwich layout reads as
+ * `[in slider] [bypass+name+edit] [out slider]` at a glance.
+ */
+.plugin-pill__gain {
+  display: inline-grid;
+  grid-template-columns: auto minmax(48px, 80px) auto;
   align-items: center;
-  justify-content: start;
-  gap: 8px;
-  width: min(340px, 100%);
+  gap: 4px;
+  padding: 0 4px;
   min-width: 0;
 }
 
-.plugin-chain-strip__gain-label,
-.plugin-chain-strip__gain-value {
-  font-size: 11px;
+.plugin-pill__gain--in {
+  border-right: 1px solid var(--border-faint, rgba(255, 255, 255, 0.08));
+  padding-right: 6px;
+  margin-right: 2px;
+}
+
+.plugin-pill__gain--out {
+  border-left: 1px solid var(--border-faint, rgba(255, 255, 255, 0.08));
+  padding-left: 6px;
+  margin-left: 2px;
+}
+
+.plugin-pill__gain-label,
+.plugin-pill__gain-value {
+  font-size: 10px;
   color: var(--text-muted);
   white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.plugin-chain-strip__gain-value {
-  text-align: right;
+.plugin-pill__gain-value {
   font-variant-numeric: tabular-nums;
+  min-width: 22px;
+  text-align: right;
 }
 
-.plugin-chain-strip__gain-slider {
+.plugin-pill__gain-slider {
   width: 100%;
   min-width: 0;
+  height: 14px;
   accent-color: var(--accent);
+  cursor: pointer;
 }
 
-.plugin-chain-strip__gain-slider:disabled {
+.plugin-pill__gain-slider:disabled {
   opacity: 0.38;
   cursor: not-allowed;
 }
@@ -8386,14 +8408,23 @@ button.reference-action.active {
   min-height: 36px;
 }
 
+.plugin-chain-strip__unstable-warning {
+  margin: 0 0 6px 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--warning-bg, rgba(220, 100, 60, 0.16));
+  color: var(--warning-fg, #f4a07d);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
 .plugin-chain-strip--compact .plugin-chain-strip__rail {
   flex-direction: column;
   align-items: stretch;
 }
 
-.plugin-chain-strip--compact .plugin-chain-strip__gain {
-  grid-template-columns: auto minmax(96px, 1fr) 44px;
-  width: 100%;
+.plugin-chain-strip--compact .plugin-pill__gain {
+  grid-template-columns: auto minmax(60px, 1fr) auto;
 }
 
 .plugin-chain-strip__empty {

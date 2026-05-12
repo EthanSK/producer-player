@@ -1176,11 +1176,27 @@ juce::var handleProcessBlock (const juce::var& params)
     if (sampleRate <= 0.0) sampleRate = 48000.0;
     if (blockSize <= 0) blockSize = frames;
 
-    // Collect enabled instances, in declared order. Unknown/disabled slots
-    // are skipped silently (the Electron side is the source of truth for
-    // chain membership; if a load_plugin race hasn't finished we'd rather
-    // pass audio through than drop it).
-    juce::Array<LoadedInstance*> enabledChain;
+    // Collect enabled instances, in declared order, along with per-slot
+    // Ableton-style I/O gains. Unknown/disabled slots are skipped silently
+    // (the Electron side is the source of truth for chain membership; if a
+    // load_plugin race hasn't finished we'd rather pass audio through than
+    // drop it). Per-slot gains default to 1.0 (unity) when missing.
+    struct ChainEntry
+    {
+        LoadedInstance* instance;
+        float inputGain;
+        float outputGain;
+    };
+    auto clampSlotGain = [] (const juce::var& raw) -> float
+    {
+        if (! raw.isDouble() && ! raw.isInt() && ! raw.isInt64()) return 1.0f;
+        double v = (double) raw;
+        if (! std::isfinite (v)) return 1.0f;
+        if (v < 0.0) v = 0.0;
+        if (v > 2.0) v = 2.0;
+        return (float) v;
+    };
+    juce::Array<ChainEntry> enabledChain;
     if (auto chainVar = obj->getProperty ("chain"); chainVar.isArray())
     {
         if (auto* arr = chainVar.getArray())
@@ -1193,7 +1209,11 @@ juce::var handleProcessBlock (const juce::var& params)
                 auto slotId = entry["instanceId"].toString().toStdString();
                 auto it = g_instances.find (slotId);
                 if (it == g_instances.end() || ! it->second.plugin) continue;
-                enabledChain.add (&it->second);
+                ChainEntry ce;
+                ce.instance = &it->second;
+                ce.inputGain = clampSlotGain (entry["inputGainLinear"]);
+                ce.outputGain = clampSlotGain (entry["outputGainLinear"]);
+                enabledChain.add (ce);
             }
         }
     }
@@ -1217,8 +1237,9 @@ juce::var handleProcessBlock (const juce::var& params)
         return makeError ("process_block: bufferBase64 size does not match frames/channels");
 
     juce::MidiBuffer emptyMidi;
-    for (auto* loaded : enabledChain)
+    for (auto& slot : enabledChain)
     {
+        auto* loaded = slot.instance;
         if (! loaded || ! loaded->plugin) continue;
         if (std::abs (loaded->preparedSampleRate - sampleRate) > 0.01
             || loaded->preparedBlockSize != blockSize)
@@ -1228,7 +1249,12 @@ juce::var handleProcessBlock (const juce::var& params)
             loaded->preparedSampleRate = sampleRate;
             loaded->preparedBlockSize = blockSize;
         }
+        // v3.186 — per-plugin Ableton-style I/O gains: input gain pre-DSP,
+        // output gain post-DSP. Identity (1.0) is a no-op fast-path in
+        // JUCE's applyGain implementation.
+        if (slot.inputGain != 1.0f) buffer.applyGain (slot.inputGain);
         loaded->plugin->processBlock (buffer, emptyMidi);
+        if (slot.outputGain != 1.0f) buffer.applyGain (slot.outputGain);
     }
 
     juce::DynamicObject::Ptr reply (new juce::DynamicObject());

@@ -438,6 +438,9 @@ const bridge: ProducerPlayerBridge = {
   async setPluginState(songId, instanceId, stateBase64) {
     return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SET_STATE, songId, instanceId, stateBase64);
   },
+  async setPluginSlotGain(songId, instanceId, gains) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SET_SLOT_GAIN, songId, instanceId, gains);
+  },
   async processPluginAudioBlock(request) {
     return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PROCESS_BLOCK, request);
   },

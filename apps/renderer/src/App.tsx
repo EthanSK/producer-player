@@ -148,11 +148,13 @@ import { Spectrogram } from './Spectrogram';
 import { FREQUENCY_BANDS, createBandSoloFilter, createPeakingEqFilter, computeEqGainCurve } from './audioEngine';
 import {
   PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE,
+  applyGainInPlace,
   base64ToFloat32Interleaved,
-  clampPluginChainOutputGainLinear,
+  clampPluginSlotGainLinear,
   float32InterleavedToBase64,
   getEnabledPluginProcessChain,
-  getPluginChainOutputGainLinear,
+  getPluginSlotInputGain,
+  getPluginSlotOutputGain,
   interleaveStereoSamples,
   writeInterleavedStereoSamples,
 } from './pluginAudioPipeline';
@@ -3043,6 +3045,13 @@ export function App(): JSX.Element {
     pluginChainRef.current = chain;
     setPluginChain(chain);
   }, []);
+  /**
+   * v3.186 — sliding 30s window of unexpected pp-audio-host exits. When
+   * we see >= 2 within the window we mark the chain `unstable` and pause
+   * auto-reload so a hard-crashing plugin can't churn the sidecar forever.
+   */
+  const pluginCrashTimestampsRef = useRef<number[]>([]);
+  const [pluginChainUnstable, setPluginChainUnstable] = useState(false);
   const [savedReferenceTracks, setSavedReferenceTracks] = useState<SavedReferenceTrackEntry[]>(() =>
     readSavedReferenceTracks()
   );
@@ -3096,7 +3105,6 @@ export function App(): JSX.Element {
   });
   const midSideProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const pluginAudioProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const pluginOutputGainNodeRef = useRef<GainNode | null>(null);
 
   const [migrationModalOpen, setMigrationModalOpen] = useState(false);
   const [migrationJsonInput, setMigrationJsonInput] = useState('');
@@ -6234,10 +6242,6 @@ export function App(): JSX.Element {
         pluginAudioProcessorRef.current.onaudioprocess = null;
         pluginAudioProcessorRef.current = null;
       }
-      if (pluginOutputGainNodeRef.current) {
-        try { pluginOutputGainNodeRef.current.disconnect(); } catch { /* ignore */ }
-        pluginOutputGainNodeRef.current = null;
-      }
       if (midSideProcessorRef.current) {
         try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
         midSideProcessorRef.current.onaudioprocess = null;
@@ -8028,10 +8032,6 @@ export function App(): JSX.Element {
       pluginAudioProcessorRef.current.onaudioprocess = null;
       pluginAudioProcessorRef.current = null;
     }
-    if (pluginOutputGainNodeRef.current) {
-      try { pluginOutputGainNodeRef.current.disconnect(); } catch { /* ignore */ }
-      pluginOutputGainNodeRef.current = null;
-    }
     if (midSideProcessorRef.current) {
       try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
       midSideProcessorRef.current.onaudioprocess = null;
@@ -8053,14 +8053,25 @@ export function App(): JSX.Element {
     const pluginProcessChain = getEnabledPluginProcessChain(pluginChain, loadedInstanceIds, {
       referencePlayback: playbackPreviewMode === 'reference',
     });
+    // v3.186 — decorate the wire chain with per-slot Ableton-style I/O
+    // gains. The sidecar applies them around each plugin's processBlock;
+    // missing values default to 1.0 in C++. Unity slots skip the
+    // multiplication entirely.
+    const slotById = new Map(pluginChain.items.map((item) => [item.instanceId, item] as const));
+    const pluginProcessChainWithGains = pluginProcessChain.map((slot) => {
+      const item = slotById.get(slot.instanceId);
+      return {
+        ...slot,
+        inputGainLinear: item ? getPluginSlotInputGain(item) : 1,
+        outputGainLinear: item ? getPluginSlotOutputGain(item) : 1,
+      };
+    });
 
     if (pluginProcessChain.length > 0) {
       const processedQueue: Float32Array[] = [];
       let pendingBlocks = 0;
       let processingTail = Promise.resolve();
       let lastProcessErrorLogAt = 0;
-      const pluginOutputGainNode = audioContext.createGain();
-      pluginOutputGainNode.gain.value = getPluginChainOutputGainLinear(pluginChain);
       const processor = audioContext.createScriptProcessor(
         PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE,
         2,
@@ -8091,7 +8102,7 @@ export function App(): JSX.Element {
         processingTail = processingTail
           .then(() =>
             window.producerPlayer.processPluginAudioBlock({
-              chain: pluginProcessChain,
+              chain: pluginProcessChainWithGains,
               bufferBase64,
               frames,
               channels: 2,
@@ -8124,10 +8135,8 @@ export function App(): JSX.Element {
       };
 
       outputNode.connect(processor);
-      processor.connect(pluginOutputGainNode);
       pluginAudioProcessorRef.current = processor;
-      pluginOutputGainNodeRef.current = pluginOutputGainNode;
-      outputNode = pluginOutputGainNode;
+      outputNode = processor;
     }
 
     if (midSideMode !== 'stereo') {
@@ -8193,10 +8202,6 @@ export function App(): JSX.Element {
         try { pluginAudioProcessorRef.current.disconnect(); } catch { /* ignore */ }
         pluginAudioProcessorRef.current.onaudioprocess = null;
         pluginAudioProcessorRef.current = null;
-      }
-      if (pluginOutputGainNodeRef.current) {
-        try { pluginOutputGainNodeRef.current.disconnect(); } catch { /* ignore */ }
-        pluginOutputGainNodeRef.current = null;
       }
       if (midSideProcessorRef.current) {
         try { midSideProcessorRef.current.disconnect(); } catch { /* ignore */ }
@@ -11694,6 +11699,10 @@ export function App(): JSX.Element {
   const handlePluginAdd = useCallback(
     (pluginId: string) => {
       if (!selectedSongId) return;
+      // Any explicit user action on the chain resets the crash circuit
+      // breaker (see onPluginSidecarExited handler).
+      pluginCrashTimestampsRef.current = [];
+      setPluginChainUnstable(false);
       void window.producerPlayer
         .addPluginToChain(selectedSongId, pluginId)
         .then((chain) => commitPluginChain(chain))
@@ -11711,6 +11720,8 @@ export function App(): JSX.Element {
   const handlePluginRemove = useCallback(
     (instanceId: string) => {
       if (!selectedSongId) return;
+      pluginCrashTimestampsRef.current = [];
+      setPluginChainUnstable(false);
       void window.producerPlayer
         .removePluginFromChain(selectedSongId, instanceId)
         .then((chain) => commitPluginChain(chain))
@@ -11732,6 +11743,8 @@ export function App(): JSX.Element {
         (item) => item.instanceId === instanceId,
       );
       if (!current) return;
+      pluginCrashTimestampsRef.current = [];
+      setPluginChainUnstable(false);
       const previousChain = pluginChainRef.current;
       const nextEnabled = !current.enabled;
       const optimisticChain: TrackPluginChain = {
@@ -11773,24 +11786,49 @@ export function App(): JSX.Element {
     [commitPluginChain, selectedSongId],
   );
 
-  const handlePluginOutputGainChange = useCallback(
-    (outputGainLinear: number) => {
+  /**
+   * v3.186 — per-plugin Ableton-style I/O gain. Each slot has its own
+   * input + output linear gain (0..2, default 1). Optimistic UI update +
+   * dedicated IPC so dragging a slider doesn't round-trip the full chain.
+   */
+  const handlePluginSlotGainChange = useCallback(
+    (
+      instanceId: string,
+      gains: { inputGainLinear?: number; outputGainLinear?: number },
+    ) => {
       if (!selectedSongId) return;
       const previousChain = pluginChainRef.current;
-      const nextOutputGainLinear = clampPluginChainOutputGainLinear(outputGainLinear);
+      const cleanedInput =
+        gains.inputGainLinear === undefined
+          ? undefined
+          : clampPluginSlotGainLinear(gains.inputGainLinear);
+      const cleanedOutput =
+        gains.outputGainLinear === undefined
+          ? undefined
+          : clampPluginSlotGainLinear(gains.outputGainLinear);
+      if (cleanedInput === undefined && cleanedOutput === undefined) return;
       const optimisticChain: TrackPluginChain = {
         ...previousChain,
-        outputGainLinear: nextOutputGainLinear,
+        items: previousChain.items.map((item) => {
+          if (item.instanceId !== instanceId) return item;
+          const next = { ...item };
+          if (cleanedInput !== undefined) next.inputGainLinear = cleanedInput;
+          if (cleanedOutput !== undefined) next.outputGainLinear = cleanedOutput;
+          return next;
+        }),
       };
       commitPluginChain(optimisticChain);
       void window.producerPlayer
-        .setTrackPluginChain(selectedSongId, optimisticChain)
+        .setPluginSlotGain(selectedSongId, instanceId, {
+          ...(cleanedInput !== undefined ? { inputGainLinear: cleanedInput } : {}),
+          ...(cleanedOutput !== undefined ? { outputGainLinear: cleanedOutput } : {}),
+        })
         .then((chain) => commitPluginChain(chain))
         .catch((err) => {
           commitPluginChain(previousChain);
           const message = err instanceof Error ? err.message : String(err);
-          setError(`Could not set plugin volume: ${message}`);
-          void window.producerPlayer.rendererLog('error', '[plugin-chain] output gain failed', {
+          setError(`Could not set plugin gain: ${message}`);
+          void window.producerPlayer.rendererLog('error', '[plugin-chain] slot gain failed', {
             error: message,
           });
         });
@@ -11936,10 +11974,65 @@ export function App(): JSX.Element {
     });
     const unsubscribeExited = window.producerPlayer.onPluginSidecarExited((info) => {
       if (info.expected) return;
-      setError('Plugin host crashed — the plugin chain will reload on the next action.');
       setLoadedInstanceIds(new Set<string>());
       setInstanceLatencies({});
       setOpenEditorInstanceIds(new Set<string>());
+
+      // v3.186 — auto-restart hardening. Track crashes in a sliding 30s
+      // window; if we see >= 2 unexpected exits we mark the chain as
+      // "unstable" and stop auto-reloading until the user explicitly
+      // touches the chain again (add/remove/toggle). This prevents an
+      // infinite crash-loop when a single plugin segfaults its host on
+      // every load (e.g. iZotope re-validation failures).
+      const now = Date.now();
+      const within30s = pluginCrashTimestampsRef.current.filter(
+        (t) => now - t < 30_000,
+      );
+      within30s.push(now);
+      pluginCrashTimestampsRef.current = within30s;
+
+      const songId = selectedSongIdForPluginChainRef.current;
+      const slotCount = pluginChainRef.current?.items.length ?? 0;
+
+      void window.producerPlayer.rendererLog(
+        'info',
+        '[plugin-host] auto-restart triggered after unexpected exit; reloading N plugin slots',
+        {
+          code: info.code,
+          signal: info.signal,
+          songId: songId ?? null,
+          slotCount,
+          crashesInLast30s: within30s.length,
+        },
+      );
+
+      if (within30s.length >= 2) {
+        setPluginChainUnstable(true);
+        setError(
+          'Plugin host crashed repeatedly. Auto-reload paused — change the chain (add/remove/toggle a plugin) to retry.',
+        );
+        return;
+      }
+
+      setError(
+        'Plugin host crashed — restarting the plugin chain automatically.',
+      );
+
+      // Trigger a fresh chain fetch which the main process turns into a
+      // sidecar reconcile. The lazy `getOrCreatePluginHost` spawns a new
+      // pp-audio-host child if the previous one died.
+      if (songId) {
+        void window.producerPlayer
+          .getTrackPluginChain(songId)
+          .then((chain) => commitPluginChain(chain))
+          .catch((err) => {
+            void window.producerPlayer.rendererLog(
+              'warn',
+              '[plugin-host] auto-restart reconcile failed',
+              { error: String(err) },
+            );
+          });
+      }
     });
     return () => {
       unsubscribeLoaded();
@@ -15969,7 +16062,8 @@ export function App(): JSX.Element {
                       onToggle={handlePluginToggle}
                       onReorder={handlePluginReorder}
                       onOpenEditor={handlePluginOpenEditor}
-                      onOutputGainChange={handlePluginOutputGainChange}
+                      onSlotGainChange={handlePluginSlotGainChange}
+                      unstable={pluginChainUnstable}
                       onSavePreset={handlePluginSavePreset}
                       onRecallPreset={handlePluginRecallPreset}
                       onDeletePreset={handlePluginDeletePreset}
@@ -19421,7 +19515,8 @@ export function App(): JSX.Element {
                       onToggle={handlePluginToggle}
                       onReorder={handlePluginReorder}
                       onOpenEditor={handlePluginOpenEditor}
-                      onOutputGainChange={handlePluginOutputGainChange}
+                      onSlotGainChange={handlePluginSlotGainChange}
+                      unstable={pluginChainUnstable}
                       onSavePreset={handlePluginSavePreset}
                       onRecallPreset={handlePluginRecallPreset}
                       onDeletePreset={handlePluginDeletePreset}

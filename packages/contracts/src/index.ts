@@ -272,6 +272,7 @@ export const IPC_CHANNELS = {
   PLUGIN_REORDER_CHAIN: 'producer-player:plugin-reorder-chain',
   PLUGIN_TOGGLE_ENABLED: 'producer-player:plugin-toggle-enabled',
   PLUGIN_SET_STATE: 'producer-player:plugin-set-state',
+  PLUGIN_SET_SLOT_GAIN: 'producer-player:plugin-set-slot-gain',
   PLUGIN_PROCESS_BLOCK: 'producer-player:plugin-process-block',
   // v3.43 Phase 4 — Plugin preset save/recall.
   PLUGIN_PRESET_SAVE: 'producer-player:plugin-preset-save',
@@ -433,6 +434,10 @@ export interface PluginInfo {
  *
  * `state` is an opaque base64 blob of plugin-serialized state. When absent
  * (fresh insert, plugin not yet opened) consumers should use plugin defaults.
+ *
+ * v3.186 — per-plugin Ableton-style I/O gains. Each slot owns its own input
+ * (pre-plugin) and output (post-plugin) linear gain. Missing/legacy entries
+ * default to 1 (unity), keeping older saved chains a pure passthrough.
  */
 export interface PluginChainItem {
   instanceId: string;
@@ -442,6 +447,18 @@ export interface PluginChainItem {
   order: number;
   state?: string;
   presetName?: string;
+  /**
+   * Pre-plugin (input) linear gain multiplier. 1 = unity, 0 = silent,
+   * 2 = +6 dB. Applied in the renderer before the audio is handed to the
+   * plugin sidecar. Missing means 1.
+   */
+  inputGainLinear?: number;
+  /**
+   * Post-plugin (output) linear gain multiplier. 1 = unity, 0 = silent,
+   * 2 = +6 dB. Applied in the renderer after the plugin sidecar processes
+   * the block. Missing means 1.
+   */
+  outputGainLinear?: number;
 }
 
 /**
@@ -452,16 +469,18 @@ export interface PluginChainItem {
 export interface TrackPluginChain {
   songId: string;
   items: PluginChainItem[];
-  /**
-   * Output gain applied after the whole plugin insert chain.
-   * Linear multiplier, where 1 = unity. Missing means 1.
-   */
-  outputGainLinear?: number;
 }
 
 export interface PluginProcessBlockItem {
   instanceId: string;
   enabled: boolean;
+  /**
+   * v3.186 — per-slot Ableton-style I/O gains. The sidecar applies
+   * `inputGainLinear` to the buffer BEFORE the plugin's `processBlock` and
+   * `outputGainLinear` AFTER. Missing/non-finite → 1 (unity / no-op).
+   */
+  inputGainLinear?: number;
+  outputGainLinear?: number;
 }
 
 export interface PluginProcessBlockRequest {
@@ -1385,6 +1404,16 @@ export interface ProducerPlayerBridge {
   reorderPluginChain(songId: string, orderedInstanceIds: string[]): Promise<TrackPluginChain>;
   togglePluginEnabled(songId: string, instanceId: string, enabled: boolean): Promise<TrackPluginChain>;
   setPluginState(songId: string, instanceId: string, state: string): Promise<TrackPluginChain>;
+  /**
+   * v3.186 — write the per-slot Ableton-style I/O gain (linear multiplier
+   * in [0..2]). Each field is optional so the renderer can patch one side
+   * without round-tripping the other.
+   */
+  setPluginSlotGain(
+    songId: string,
+    instanceId: string,
+    gains: { inputGainLinear?: number; outputGainLinear?: number },
+  ): Promise<TrackPluginChain>;
   processPluginAudioBlock(request: PluginProcessBlockRequest): Promise<PluginProcessBlockResult>;
   savePluginPreset(songId: string, instanceId: string, name: string): Promise<PluginPresetEntry>;
   recallPluginPreset(songId: string, instanceId: string, name: string): Promise<TrackPluginChain>;

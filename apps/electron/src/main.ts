@@ -5422,6 +5422,21 @@ function registerIpcHandlers(service: FileLibraryService): void {
     },
   );
 
+  // v3.186 — per-plugin Ableton-style I/O gains. Pure renderer-side audio
+  // multiplier; no sidecar reconcile required (the JUCE host is gain-blind).
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_SET_SLOT_GAIN,
+    async (
+      _event,
+      songId: string,
+      instanceId: string,
+      gains: { inputGainLinear?: number; outputGainLinear?: number },
+    ) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      return userStateService.setPluginSlotGain(songId, instanceId, gains ?? {});
+    },
+  );
+
   let lastPluginProcessBlockWarningAt = 0;
   ipcMain.handle(
     IPC_CHANNELS.PLUGIN_PROCESS_BLOCK,

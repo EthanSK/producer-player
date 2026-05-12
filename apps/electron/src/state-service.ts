@@ -532,6 +532,16 @@ function parseScannedPluginLibrary(value: unknown): ScannedPluginLibrary | undef
   return { plugins, scannedAt, scanVersion };
 }
 
+/**
+ * Clamp a stored per-slot linear gain (input or output) to the [0..2]
+ * acceptance window. Anything malformed → undefined so the merged item
+ * omits the field and falls back to the renderer-side unity default.
+ */
+function parsePluginSlotGainLinear(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return Math.min(2, Math.max(0, value));
+}
+
 function parsePluginChainItem(value: unknown): PluginChainItem | null {
   if (!isRecord(value)) return null;
   const instanceId =
@@ -547,6 +557,8 @@ function parsePluginChainItem(value: unknown): PluginChainItem | null {
     typeof value.state === 'string' && value.state.length > 0 ? value.state : undefined;
   const presetName =
     typeof value.presetName === 'string' && value.presetName.length > 0 ? value.presetName : undefined;
+  const inputGainLinear = parsePluginSlotGainLinear(value.inputGainLinear);
+  const outputGainLinear = parsePluginSlotGainLinear(value.outputGainLinear);
   if (!instanceId || !pluginId || order === null) return null;
   return {
     instanceId,
@@ -555,17 +567,9 @@ function parsePluginChainItem(value: unknown): PluginChainItem | null {
     order,
     ...(state !== undefined ? { state } : {}),
     ...(presetName !== undefined ? { presetName } : {}),
+    ...(inputGainLinear !== undefined ? { inputGainLinear } : {}),
+    ...(outputGainLinear !== undefined ? { outputGainLinear } : {}),
   };
-}
-
-function parsePluginChainOutputGainLinear(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  return Math.min(2, Math.max(0, value));
-}
-
-function preservePluginChainOutputGain(chain: TrackPluginChain | undefined): Pick<TrackPluginChain, 'outputGainLinear'> {
-  const outputGainLinear = parsePluginChainOutputGainLinear(chain?.outputGainLinear);
-  return outputGainLinear === undefined ? {} : { outputGainLinear };
 }
 
 function parseTrackPluginChain(songId: string, value: unknown): TrackPluginChain | null {
@@ -573,7 +577,6 @@ function parseTrackPluginChain(songId: string, value: unknown): TrackPluginChain
   // Accept either the full {songId, items} shape or a bare {items} shape —
   // the outer record already carries the songId in its key.
   const storedSongId = typeof value.songId === 'string' ? value.songId : songId;
-  const outputGainLinear = parsePluginChainOutputGainLinear(value.outputGainLinear);
   const itemsRaw = Array.isArray(value.items) ? value.items : [];
   const items = itemsRaw
     .map(parsePluginChainItem)
@@ -585,7 +588,6 @@ function parseTrackPluginChain(songId: string, value: unknown): TrackPluginChain
   return {
     songId: storedSongId,
     items,
-    ...(outputGainLinear !== undefined ? { outputGainLinear } : {}),
   };
 }
 
@@ -1684,7 +1686,6 @@ export class UserStateService {
       const normalised: TrackPluginChain = {
         songId,
         items: chain.items.map((item, index) => ({ ...item, order: index })),
-        ...preservePluginChainOutputGain(chain),
       };
       const next = { ...(state.perTrackPluginChains ?? {}), [songId]: normalised };
       await this.patchUserStateUnlocked({ perTrackPluginChains: next });
@@ -1718,11 +1719,16 @@ export class UserStateService {
         order: existing.length,
         ...(overrides?.state !== undefined ? { state: overrides.state } : {}),
         ...(overrides?.presetName !== undefined ? { presetName: overrides.presetName } : {}),
+        ...(overrides?.inputGainLinear !== undefined
+          ? { inputGainLinear: overrides.inputGainLinear }
+          : {}),
+        ...(overrides?.outputGainLinear !== undefined
+          ? { outputGainLinear: overrides.outputGainLinear }
+          : {}),
       };
       const nextChain: TrackPluginChain = {
         songId,
         items: [...existing, newItem],
-        ...preservePluginChainOutputGain(existingChain),
       };
       await this.patchUserStateUnlocked({
         perTrackPluginChains: { ...chains, [songId]: nextChain },
@@ -1746,7 +1752,6 @@ export class UserStateService {
       const nextChain: TrackPluginChain = {
         songId,
         items: filtered.map((item, index) => ({ ...item, order: index })),
-        ...preservePluginChainOutputGain(existing),
       };
       await this.patchUserStateUnlocked({
         perTrackPluginChains: { ...chains, [songId]: nextChain },
@@ -1782,7 +1787,6 @@ export class UserStateService {
       const nextChain: TrackPluginChain = {
         songId,
         items: reordered,
-        ...preservePluginChainOutputGain(existing),
       };
       await this.patchUserStateUnlocked({
         perTrackPluginChains: { ...chains, [songId]: nextChain },
@@ -1814,8 +1818,49 @@ export class UserStateService {
       const nextChain: TrackPluginChain = {
         songId,
         items: nextItems,
-        ...preservePluginChainOutputGain(existing),
       };
+      await this.patchUserStateUnlocked({
+        perTrackPluginChains: { ...chains, [songId]: nextChain },
+      });
+      return nextChain;
+    });
+  }
+
+  /**
+   * v3.186 — write the Ableton-style I/O gains for one slot. Either field
+   * may be omitted to leave it unchanged. Values outside [0..2] are
+   * clamped; non-finite values are dropped. No-op if the chain or slot
+   * doesn't exist.
+   */
+  async setPluginSlotGain(
+    songId: string,
+    instanceId: string,
+    gains: { inputGainLinear?: number; outputGainLinear?: number },
+  ): Promise<TrackPluginChain> {
+    if (!songId || songId.length === 0) return { songId, items: [] };
+    const cleanedInput = parsePluginSlotGainLinear(gains.inputGainLinear);
+    const cleanedOutput = parsePluginSlotGainLinear(gains.outputGainLinear);
+    return this.enqueueStateMutation(async () => {
+      const state = await this.readUserState();
+      const chains = state.perTrackPluginChains ?? {};
+      const existing = chains[songId];
+      if (!existing) return { songId, items: [] };
+      let touched = false;
+      const nextItems = existing.items.map((i) => {
+        if (i.instanceId !== instanceId) return i;
+        const nextItem: PluginChainItem = { ...i };
+        if (cleanedInput !== undefined && nextItem.inputGainLinear !== cleanedInput) {
+          nextItem.inputGainLinear = cleanedInput;
+          touched = true;
+        }
+        if (cleanedOutput !== undefined && nextItem.outputGainLinear !== cleanedOutput) {
+          nextItem.outputGainLinear = cleanedOutput;
+          touched = true;
+        }
+        return nextItem;
+      });
+      if (!touched) return existing;
+      const nextChain: TrackPluginChain = { songId, items: nextItems };
       await this.patchUserStateUnlocked({
         perTrackPluginChains: { ...chains, [songId]: nextChain },
       });
@@ -1841,7 +1886,6 @@ export class UserStateService {
       const nextChain: TrackPluginChain = {
         songId,
         items: nextItems,
-        ...preservePluginChainOutputGain(existing),
       };
       await this.patchUserStateUnlocked({
         perTrackPluginChains: { ...chains, [songId]: nextChain },

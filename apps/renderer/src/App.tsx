@@ -2997,6 +2997,52 @@ export function App(): JSX.Element {
   useEffect(() => {
     activeListeningDeviceIdRef.current = activeListeningDeviceId;
   }, [activeListeningDeviceId]);
+  // v3.210 — initial-sync auto-select. The `useSystemAudioDevice` hook
+  // intentionally suppresses its initial-mount onChange (so consumers don't
+  // see "device was empty, now it's the current default" as a user-observable
+  // change). That was correct in isolation, but it left a hole on app
+  // startup: the persisted `activeListeningDeviceId` is restored from disk
+  // BEFORE the macOS audio device is resolved, and the matching listening
+  // device's link is never consulted. Net effect: if the OS output changed
+  // while PP was closed (e.g. user unplugged AirPods and now Scarlett 18i8
+  // is the default, which is linked to "HSA"), the active chip stays on
+  // whatever was last persisted (e.g. "MacBook Pro Speakers") and never
+  // auto-switches to HSA. Voice 2984.
+  //
+  // Fix: once both inputs are populated for the first time — listening
+  // devices loaded from user-state AND system audio device resolved — run
+  // decideAutoSelect ONCE. After that, all subsequent device changes flow
+  // through the existing `onChange` path. The `hasRunInitialSyncRef` guard
+  // ensures we never re-fire even if `listeningDevices` or `systemAudioDevice`
+  // change again later (those changes are handled by other effects).
+  const hasRunInitialSyncRef = useRef(false);
+  useEffect(() => {
+    if (hasRunInitialSyncRef.current) {
+      return;
+    }
+    if (listeningDevices.length === 0) {
+      return;
+    }
+    if (systemAudioDevice.deviceId.trim().length === 0) {
+      return;
+    }
+    hasRunInitialSyncRef.current = true;
+    const decision = decideAutoSelect(
+      systemAudioDevice,
+      listeningDevices,
+      activeListeningDeviceIdRef.current
+    );
+    if (decision.activateDeviceId && decision.matchedDevice) {
+      setActiveListeningDeviceId(decision.activateDeviceId);
+      const labelSuffix =
+        systemAudioDevice.label.trim().length > 0 ? ` (${systemAudioDevice.label})` : '';
+      toast.show({
+        id: `listening-device-initial-${decision.activateDeviceId}-${Date.now()}`,
+        kind: 'info',
+        text: `Auto-switched to ${decision.matchedDevice.name}${labelSuffix}`,
+      });
+    }
+  }, [listeningDevices, systemAudioDevice]);
   // Vertical drag-to-scrub state for a checklist item's timestamp badge.
   // Active while the user is holding the pointer down on a timestamp to adjust it.
   // Moving up increases seconds; moving down decreases. Released commits the

@@ -87,6 +87,31 @@ describe('decideAutoSelect', () => {
     );
     expect(decision.activateDeviceId).toBe('device-airpods');
   });
+
+  // v3.210 — regression for voice 2984. Scenario: PP was last closed with
+  // `activeListeningDeviceId = device-mbp-speakers`. While PP was closed the
+  // OS default output changed to a different device (`group-monitors`) which
+  // is linked to a SEPARATE listening device (`device-monitors`). On
+  // startup, the initial-sync effect in App.tsx calls decideAutoSelect with
+  // the current system device + persisted active id; it MUST return the
+  // linked device so the chip flips off the stale persisted value. Without
+  // this behavior the user sees "MacBook Pro Speakers" active despite the
+  // OS being on Scarlett 18i8 linked to HSA.
+  it('initial-sync: switches off a stale persisted active id when the current system device is linked to a different listening device', () => {
+    const mbpSpeakers: ListeningDevice = {
+      id: 'device-mbp-speakers',
+      name: 'MacBook Pro Speakers',
+      systemDeviceId: 'group-mbp-speakers',
+      systemDeviceLabel: 'MacBook Pro Speakers',
+    };
+    const decision = decideAutoSelect(
+      { deviceId: 'group-monitors', label: 'Kali LP-6 (audio interface)' },
+      [mbpSpeakers, monitors, airpods],
+      'device-mbp-speakers' // persisted-but-stale active id
+    );
+    expect(decision.activateDeviceId).toBe('device-monitors');
+    expect(decision.matchedDevice).toBe(monitors);
+  });
 });
 
 describe('applyExplicitLinkAssociation (v3.197 — Link button)', () => {

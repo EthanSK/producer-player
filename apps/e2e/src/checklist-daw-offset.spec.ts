@@ -540,7 +540,11 @@ test.describe('Checklist DAW time offset', () => {
         await openChecklistForRowIndex(page, 1);
         await page.getByTestId('checklist-daw-offset-minutes').fill('01');
         await page.getByTestId('checklist-daw-offset-seconds').fill('30');
-        // toggle already seeded ON from last-used default
+        // v3.206 (voice 2938): no more last-used-default seeding. A brand-new
+        // song's toggle starts OFF and must be explicitly checked or the
+        // post-relaunch `toBeChecked()` assertion below will fail. Codex
+        // review caught the stale flow here on 2026-05-14.
+        await page.getByTestId('checklist-daw-offset-toggle').check();
         await closeChecklist(page);
 
         await page.waitForTimeout(1200); // let debounced sync flush

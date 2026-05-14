@@ -801,7 +801,19 @@ export class AnalysisQueue {
           // timeouts, and preemptions do NOT mark the queue warm — they're
           // ambiguous wrt runtime health (could be the binary, could be
           // genuine "stuck forever" mode, could be cancellation).
-          this.firstSuccessSettled = true;
+          //
+          // v3.208 — Codex review fix: only flip warm if the caller actually
+          // saw this success. If `settled` is already true (timeout fired
+          // first and the caller was rejected with AnalysisTaskTimeoutError),
+          // OR the task was preempted, the late natural resolve is NOT
+          // observable runtime health proof to the caller. Setting
+          // firstSuccessSettled unconditionally meant a cold-start task that
+          // timed out, then resolved 30s later in the background, would
+          // incorrectly mark the queue warm even though the user saw a
+          // timeout. Guard on `!settled && !next.preempted`.
+          if (!settled && !next.preempted) {
+            this.firstSuccessSettled = true;
+          }
           // v3.195 — if a value comes back AFTER preemption fired (the task
           // ignored the abort signal and finished naturally) we still treat
           // the slot release as a settle. The caller's promise was kept

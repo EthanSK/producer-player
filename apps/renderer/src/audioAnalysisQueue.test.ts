@@ -791,6 +791,47 @@ describe('AnalysisQueue', () => {
       }
     });
 
+    it('late natural resolve after cold-start timeout does NOT mark the queue warm', async () => {
+      // v3.208 — Codex review regression pin. Earlier `firstSuccessSettled =
+      // true` was set unconditionally in the success handler, so a task that
+      // (a) ran during cold-start grace, (b) timed out at coldStartTimeoutMs,
+      // (c) THEN naturally resolved a moment later in the background would
+      // incorrectly flip the queue to warm. The caller saw an
+      // AnalysisTaskTimeoutError; the runtime health proof was NOT observable
+      // to them, so the queue must stay cold-started for the next task.
+      vi.useFakeTimers();
+      try {
+        const queue = new AnalysisQueue({
+          concurrency: 1,
+          taskTimeoutMs: 1000,
+          coldStartTimeoutMs: 5000,
+        });
+
+        // Task runs for 6000ms — exceeds the 5000ms cold-start grace window.
+        const latePromise = queue.enqueue(
+          () => new Promise<string>((resolve) => setTimeout(() => resolve('late-ok'), 6000))
+        );
+        latePromise.catch(() => undefined);
+
+        // Advance past the 5000ms grace timeout — caller is rejected.
+        await vi.advanceTimersByTimeAsync(5000);
+        await expect(latePromise).rejects.toBeInstanceOf(AnalysisTaskTimeoutError);
+
+        // Drain the remaining 1000ms — the underlying task resolves naturally.
+        await vi.advanceTimersByTimeAsync(1000);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        // Queue MUST still report cold-started even though the late resolve
+        // landed. The caller saw a timeout; the next task deserves the full
+        // grace window.
+        expect(queue.isWarm()).toBe(false);
+        expect(queue.getEffectiveTimeoutMs()).toBe(5000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('defaults coldStartTimeoutMs to 3× taskTimeoutMs when omitted', async () => {
       const queue = new AnalysisQueue({ concurrency: 1, taskTimeoutMs: 1000 });
       // Pre-warm: 3000ms grace window.

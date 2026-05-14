@@ -14739,16 +14739,17 @@ export function App(): JSX.Element {
     });
   }, [checklistModalItemsChronological.length]);
   // DAW offset — per-song. Reads the currently-open checklist song's entry
-  // from `songDawOffsets`; if absent, falls back to `dawOffsetDefault` (the
-  // last-used value) so the user doesn't start at 0:00/disabled for a fresh
-  // song from the same DAW project. Writes always go back to the specific
-  // song AND update `dawOffsetDefault` so the NEXT un-seeded song inherits
-  // the most recent choice.
+  // from `songDawOffsets`; if absent, falls back to a literal 0/disabled
+  // shape (v3.206, voice 2938). Earlier versions seeded from an app-global
+  // last-used default, but Ethan called that out: a brand-new song must
+  // start at 0:00/disabled until the user explicitly types a value or
+  // toggles. The per-song write below is the only way an entry ever
+  // appears, so the displayed shape is always "user-set or zero".
   const currentChecklistDawOffset = (() => {
     if (checklistModalSongId && songDawOffsets[checklistModalSongId]) {
       return songDawOffsets[checklistModalSongId];
     }
-    return dawOffsetDefault;
+    return { seconds: 0, enabled: false };
   })();
   const checklistDawOffsetSeconds = currentChecklistDawOffset.seconds;
   const checklistDawOffsetEnabled = currentChecklistDawOffset.enabled;
@@ -14761,10 +14762,6 @@ export function App(): JSX.Element {
 
   function writeChecklistDawOffset(nextSeconds: number, nextEnabled: boolean): void {
     const songId = checklistModalSongId;
-    // Always update the last-used default so the next un-seeded song picks
-    // up the same values. This is the "0:42 sticks across tracks from the
-    // same DAW project" QoL behavior.
-    setDawOffsetDefault({ seconds: nextSeconds, enabled: nextEnabled });
     if (!songId) return;
     setSongDawOffsets((prev) => ({
       ...prev,

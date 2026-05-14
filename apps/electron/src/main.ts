@@ -134,6 +134,10 @@ import {
   UNIFIED_STATE_FILE_NAME,
   migrateStateIfNeeded,
 } from './state-service';
+import {
+  startActiveUserHeartbeat,
+  stopActiveUserHeartbeat,
+} from './active-user-heartbeat';
 import { openFileWithDetachedSystemHandler } from './file-open';
 import { saveSongProjectCopy } from './song-project-copy';
 import {
@@ -6443,6 +6447,15 @@ app.whenReady().then(async () => {
 
   log.info('App startup complete');
 
+  // Fire-and-forget active-user heartbeat. Pings Ethan's Firebase backend on
+  // launch + every 5 min so he can see how many PP users are currently
+  // active. No PII, never blocks startup, disabled in test mode so e2e
+  // runs don't pollute the live counter.
+  startActiveUserHeartbeat({
+    version: APP_VERSION_INFO.semanticVersion,
+    disabled: IS_TEST_MODE,
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       void createMainWindow();
@@ -6457,6 +6470,7 @@ app.on('before-quit', () => {
   }
   globalShortcut.unregisterAll();
   clearAutomaticUpdateChecks();
+  stopActiveUserHeartbeat();
   releaseAllFolderSecurityScopes();
   agentService.destroySession();
 

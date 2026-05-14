@@ -17078,18 +17078,29 @@ export function App(): JSX.Element {
                               void handleSaveSongProjectCopy(song);
                             }}
                             data-testid="song-project-save-copy-button"
-                            title={
-                              "Duplicate this project file next to the original, with the song's " +
-                              'current version number appended (e.g. if the latest audio is v49, ' +
-                              'the copy is named song v49.als). Useful for checkpointing your ' +
-                              'project at the version you just rendered. Re-clicks add (2), (3) etc.'
-                            }
                             aria-label={`${songRowTitle} save copy of project file`}
+                            aria-describedby={`song-project-save-copy-popover-${song.id}`}
                           >
                             <span className="song-project-icon" aria-hidden="true">
                               💾
                             </span>
                             <span>Save copy</span>
+                            <span
+                              id={`song-project-save-copy-popover-${song.id}`}
+                              className="main-list-row-metadata-popover song-project-save-copy-popover"
+                              role="tooltip"
+                            >
+                              <span className="main-list-row-metadata-popover-label">
+                                Save copy
+                              </span>
+                              <span className="song-project-save-copy-popover-body">
+                                Duplicates this project file next to the original and tags it with
+                                the song&apos;s current version number (e.g. <code>song v
+                                {computeSongProjectSaveCopyTargetVersion(song)}.als</code>).
+                                Re-clicks append <code>(2)</code>, <code>(3)</code>, etc. — never
+                                overwrites.
+                              </span>
+                            </span>
                           </button>
                           <button
                             type="button"

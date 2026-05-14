@@ -3004,11 +3004,49 @@ body.floating-switcher-panel-dragging * {
 /* v3.189.0 — Save-copy button sits to the left of "Open project". Styled
  * as a secondary action: same shape and size as "Open project" but more
  * muted than the active-blue has-project-file state.
+ *
+ * v3.209 — anchor the instant-popover tooltip (mirrors the V·WAV pill
+ * pattern) so users see what "Save copy" actually does without the
+ * native-title delay. position:relative makes the inner popover position
+ * absolutely against the button.
  */
 .song-project-save-copy-button {
+  position: relative;
   border-color: rgba(154, 182, 211, 0.4);
   background: rgba(154, 182, 211, 0.08);
   color: #d9e8fb;
+}
+
+/* v3.209 — Save-copy popover. Inherits .main-list-row-metadata-popover
+ * (instant-fade absolute panel) but anchors LEFT and widens slightly to
+ * fit the longer body copy. */
+.song-project-save-copy-popover {
+  right: auto;
+  left: 0;
+  max-width: min(360px, calc(100vw - 24px));
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.song-project-save-copy-popover code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  color: #ecf6ff;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+.song-project-save-copy-popover-body {
+  color: var(--text-main);
+  font-weight: 500;
+  white-space: normal;
+}
+
+.song-project-save-copy-button:hover .song-project-save-copy-popover,
+.song-project-save-copy-button:focus-visible .song-project-save-copy-popover {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .song-project-save-copy-button:hover:not(:disabled) {

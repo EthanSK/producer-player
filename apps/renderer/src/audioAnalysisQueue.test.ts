@@ -549,6 +549,10 @@ describe('AnalysisQueue', () => {
         concurrency: 1,
         label: 'test-timeout',
         taskTimeoutMs: 1000,
+        // v3.207 — explicitly opt out of cold-start grace so this regression
+        // test continues to assert the steady-state 1000ms timeout. Cold-
+        // start grace has its own dedicated coverage below.
+        coldStartTimeoutMs: 0,
       });
 
       let stuckSettled = false;
@@ -593,6 +597,7 @@ describe('AnalysisQueue', () => {
       const queue = new AnalysisQueue({
         concurrency: 1,
         taskTimeoutMs: 1000,
+        coldStartTimeoutMs: 0,
       });
 
       let settledValue: string | null = null;
@@ -621,6 +626,7 @@ describe('AnalysisQueue', () => {
       const queue = new AnalysisQueue({
         concurrency: 1,
         taskTimeoutMs: 1000,
+        coldStartTimeoutMs: 0,
       });
 
       const promise = queue.enqueue(async () => {
@@ -666,6 +672,148 @@ describe('AnalysisQueue', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // --- v3.207 — cold-start grace timeout (post-reboot / post-auto-update race) ---
+
+  describe('coldStartTimeoutMs', () => {
+    it('uses cold-start grace until the FIRST task resolves successfully, then reverts to normal timeout', async () => {
+      // The bug Ethan hit (voice 2957, 2026-05-14): after restarting his Mac,
+      // Producer Player launched the freshly-installed v3.206 binary. The
+      // first 6 USER_SELECTED analyses (1 preview + 2 measured-concurrency
+      // waves of 3) all timed out at exactly +60s while macOS was still
+      // verifying the bundled ffmpeg signature + warming dyld caches. A
+      // manual double-click a few seconds later worked instantly because
+      // everything was warm by then. This test pins the fix: cold-start
+      // tasks get an extended grace window, but once any task succeeds the
+      // queue switches to the normal (tighter) timeout.
+      vi.useFakeTimers();
+      try {
+        const queue = new AnalysisQueue({
+          concurrency: 1,
+          label: 'test-cold-start',
+          taskTimeoutMs: 1000,
+          coldStartTimeoutMs: 5000,
+        });
+
+        expect(queue.isWarm()).toBe(false);
+        expect(queue.getEffectiveTimeoutMs()).toBe(5000);
+
+        // First task takes 2500ms — would time out under the normal 1000ms
+        // budget, but cold-start grace gives it 5000ms.
+        const firstPromise = queue.enqueue(
+          () => new Promise<string>((resolve) => setTimeout(() => resolve('cold-ok'), 2500))
+        );
+        await vi.advanceTimersByTimeAsync(2500);
+        await expect(firstPromise).resolves.toBe('cold-ok');
+
+        // First success flips the queue to warm.
+        expect(queue.isWarm()).toBe(true);
+        expect(queue.getEffectiveTimeoutMs()).toBe(1000);
+
+        // Subsequent stuck task gets rejected at the normal 1000ms timeout,
+        // not the 5000ms grace window.
+        const stuckPromise = queue.enqueue(() => new Promise<string>(() => {}));
+        stuckPromise.catch(() => undefined);
+        await vi.advanceTimersByTimeAsync(999);
+        // Not yet rejected.
+        let stuckRejected = false;
+        stuckPromise.catch(() => {
+          stuckRejected = true;
+        });
+        expect(stuckRejected).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(stuckPromise).rejects.toBeInstanceOf(AnalysisTaskTimeoutError);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('still times out a cold-start task that exceeds the grace window', async () => {
+      // Cold-start grace MUST NOT be infinite — a genuinely stuck task
+      // (decodeAudioData hang, ffmpeg deadlock) needs to be caught even on
+      // cold start, just with a wider budget. After coldStartTimeoutMs the
+      // task is rejected with AnalysisTaskTimeoutError and the queue stays
+      // un-warmed (failure does NOT mark first-success).
+      vi.useFakeTimers();
+      try {
+        const queue = new AnalysisQueue({
+          concurrency: 1,
+          taskTimeoutMs: 1000,
+          coldStartTimeoutMs: 5000,
+        });
+
+        const stuckPromise = queue.enqueue(() => new Promise<string>(() => {}));
+        stuckPromise.catch(() => undefined);
+
+        await vi.advanceTimersByTimeAsync(4999);
+        expect(queue.isWarm()).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(stuckPromise).rejects.toBeInstanceOf(AnalysisTaskTimeoutError);
+
+        // Failure does NOT warm the queue.
+        expect(queue.isWarm()).toBe(false);
+        expect(queue.getEffectiveTimeoutMs()).toBe(5000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejections and preemptions do NOT mark the queue warm', async () => {
+      // Only a real resolve proves the runtime is healthy. A task that
+      // rejects (e.g. ffmpeg exits non-zero on a corrupt file) tells us
+      // nothing about whether the binary is responsive; if the NEXT task
+      // is a slow first-decode of a valid file, it still deserves the
+      // cold-start grace window.
+      vi.useFakeTimers();
+      try {
+        const queue = new AnalysisQueue({
+          concurrency: 1,
+          taskTimeoutMs: 1000,
+          coldStartTimeoutMs: 5000,
+        });
+
+        const failed = queue.enqueue(async () => {
+          throw new Error('bad file');
+        });
+        failed.catch(() => undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        await Promise.resolve();
+        await Promise.resolve();
+        await expect(failed).rejects.toThrow('bad file');
+
+        // Queue is still in cold-start mode after a failure.
+        expect(queue.isWarm()).toBe(false);
+        expect(queue.getEffectiveTimeoutMs()).toBe(5000);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('defaults coldStartTimeoutMs to 3× taskTimeoutMs when omitted', async () => {
+      const queue = new AnalysisQueue({ concurrency: 1, taskTimeoutMs: 1000 });
+      // Pre-warm: 3000ms grace window.
+      expect(queue.getEffectiveTimeoutMs()).toBe(3000);
+    });
+
+    it('disables cold-start grace when taskTimeoutMs is 0', async () => {
+      // A queue with no timeout at all has nothing to extend; cold-start
+      // grace must NOT introduce a timeout where none was configured.
+      const queue = new AnalysisQueue({ concurrency: 1, taskTimeoutMs: 0 });
+      expect(queue.getEffectiveTimeoutMs()).toBe(0);
+    });
+
+    it('disables cold-start grace when coldStartTimeoutMs is 0', async () => {
+      // Explicit opt-out: caller wants the normal timeout to apply even on
+      // cold start (e.g. test code that wants deterministic timings).
+      const queue = new AnalysisQueue({
+        concurrency: 1,
+        taskTimeoutMs: 1000,
+        coldStartTimeoutMs: 0,
+      });
+      expect(queue.getEffectiveTimeoutMs()).toBe(1000);
+    });
   });
 
   // --- v3.190 — rapid-switch demotion tests ---
@@ -918,6 +1066,9 @@ describe('AnalysisQueue', () => {
         concurrency: 1,
         maxUserBypassSlots: 1,
         taskTimeoutMs: 500,
+        // v3.207 — opt out of cold-start grace so the 500ms steady-state
+        // timeout fires on the first task as the test expects.
+        coldStartTimeoutMs: 0,
       });
 
       // BG task holds the regular slot — perpetual. Attach a .catch so

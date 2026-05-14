@@ -823,22 +823,19 @@ export interface ProducerPlayerUserState {
   // NOTE: the seek target stays the raw stored timestamp — this is a pure
   // display transform, not a remap of the underlying audio position.
   //
-  // Storage model (refactored from app-global to per-song in v3.9+):
+  // Storage model (refactored from app-global to per-song in v3.9+,
+  // simplified again in v3.206):
   // - `songDawOffsets` holds the authoritative per-song offset/toggle values,
   //   keyed by songId. Different DAW projects have different arrangement
   //   starts, so each song remembers its own offset.
-  // - `checklistDawOffsetDefaultSeconds` / `checklistDawOffsetDefaultEnabled`
-  //   track the last-used values across the app. When a song has no saved
-  //   offset yet, the UI seeds from these defaults instead of starting at
-  //   0:00/disabled — saves retyping 0:42 for every track from the same DAW
-  //   project.
-  // - Migration: on load, if only the legacy `checklistDawOffsetSeconds` /
-  //   `checklistDawOffsetEnabled` fields exist (from v3.8.0 or earlier),
-  //   their values are copied into the new "default" fields so prior user
-  //   settings aren't dropped.
+  // - v3.206 removed the `checklistDawOffsetDefault*` "last-used" seed pair
+  //   (voice 2938). A brand-new song starts at 0:00/disabled until the user
+  //   explicitly types a value or toggles. The legacy v3.8.0 app-global
+  //   fields (`checklistDawOffsetSeconds`/`checklistDawOffsetEnabled`) and
+  //   the v3.9–v3.205 default fields are silently ignored on read; we do
+  //   NOT actively scrub them from disk, but the next state-write naturally
+  //   drops them since they're no longer part of the parsed shape.
   songDawOffsets: Record<string, { seconds: number; enabled: boolean }>;
-  checklistDawOffsetDefaultSeconds: number;
-  checklistDawOffsetDefaultEnabled: boolean;
 
   // File dialog
   lastFileDialogDirectory: string; // Remembers last-used directory across all file pickers

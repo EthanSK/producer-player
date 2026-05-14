@@ -2921,19 +2921,14 @@ export function App(): JSX.Element {
   // starts past 0:00 in the DAW). Does NOT remap the underlying audio seek
   // target; clicking a badge still seeks to the raw stored timestamp.
   //
-  // Per-song storage (refactored v3.9+): `songDawOffsets` is the authoritative
-  // source, keyed by songId. Different DAW projects have different arrangement
-  // starts, so each song remembers its own offset. `dawOffsetDefault` is the
-  // last-used value, used to seed a song that has never had an offset saved
-  // so the user doesn't have to retype 0:42 for every track from the same DAW
-  // project. Both persist to the unified user-state file.
+  // Per-song storage (refactored v3.9+, simplified again in v3.206):
+  // `songDawOffsets` is the authoritative source, keyed by songId. A song
+  // with no entry displays 0:00/disabled — the old `dawOffsetDefault` seed
+  // pair was removed in v3.206 (voice 2938) so new songs always start
+  // clean until the user explicitly types a value or toggles.
   const [songDawOffsets, setSongDawOffsets] = useState<
     Record<string, { seconds: number; enabled: boolean }>
   >({});
-  const [dawOffsetDefault, setDawOffsetDefault] = useState<{
-    seconds: number;
-    enabled: boolean;
-  }>({ seconds: 0, enabled: false });
   const [activeChecklistTimestampIds, setActiveChecklistTimestampIds] = useState<string[]>([]);
   const [checklistUndoStack, setChecklistUndoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
   const [checklistRedoStack, setChecklistRedoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
@@ -4937,17 +4932,8 @@ export function App(): JSX.Element {
           }
           setSongDawOffsets(sanitized);
         }
-        const defaultSeconds =
-          typeof userState.checklistDawOffsetDefaultSeconds === 'number' &&
-          Number.isFinite(userState.checklistDawOffsetDefaultSeconds) &&
-          userState.checklistDawOffsetDefaultSeconds >= 0
-            ? Math.floor(userState.checklistDawOffsetDefaultSeconds)
-            : 0;
-        const defaultEnabled =
-          typeof userState.checklistDawOffsetDefaultEnabled === 'boolean'
-            ? userState.checklistDawOffsetDefaultEnabled
-            : false;
-        setDawOffsetDefault({ seconds: defaultSeconds, enabled: defaultEnabled });
+        // v3.206 — `checklistDawOffsetDefault*` removed; new songs render
+        // 0:00/disabled directly from the per-song read fallback.
 
         const loadedDevices = sanitizeListeningDevices(userState.listeningDevices);
         if (loadedDevices.length > 0) {
@@ -5275,8 +5261,6 @@ export function App(): JSX.Element {
         // v3.145 — legacy no-op field; force true so old paused/off state is migrated away.
         agentBackgroundPrecomputeEnabled: true,
         songDawOffsets,
-        checklistDawOffsetDefaultSeconds: dawOffsetDefault.seconds,
-        checklistDawOffsetDefaultEnabled: dawOffsetDefault.enabled,
         lastFileDialogDirectory: '', // managed by main process
         windowBounds: null, // managed by main process — ignored on write
         // v3.30 storage-only feature: AI mastering recommendations are
@@ -5353,7 +5337,6 @@ export function App(): JSX.Element {
     agentAutoRecommendEnabled,
     agentDangerouslyBypassPermissions,
     songDawOffsets,
-    dawOffsetDefault,
     listeningDevices,
     activeListeningDeviceId,
     volume,
@@ -5473,17 +5456,9 @@ export function App(): JSX.Element {
         }
         setSongDawOffsets(sanitized);
       }
-      const nextDefaultSeconds =
-        typeof userState.checklistDawOffsetDefaultSeconds === 'number' &&
-        Number.isFinite(userState.checklistDawOffsetDefaultSeconds) &&
-        userState.checklistDawOffsetDefaultSeconds >= 0
-          ? Math.floor(userState.checklistDawOffsetDefaultSeconds)
-          : 0;
-      const nextDefaultEnabled =
-        typeof userState.checklistDawOffsetDefaultEnabled === 'boolean'
-          ? userState.checklistDawOffsetDefaultEnabled
-          : false;
-      setDawOffsetDefault({ seconds: nextDefaultSeconds, enabled: nextDefaultEnabled });
+      // v3.206 — `checklistDawOffsetDefault*` removed from contract; the
+      // imported state's per-song map is the only source for the offset
+      // display. Songs missing an entry render 0:00/disabled.
 
       const incomingDevices = sanitizeListeningDevices(userState.listeningDevices);
       setListeningDevices(incomingDevices);

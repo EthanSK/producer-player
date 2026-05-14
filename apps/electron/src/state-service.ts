@@ -684,8 +684,6 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     // accidentally suppress startup warmup after upgrade.
     agentBackgroundPrecomputeEnabled: true,
     songDawOffsets: {},
-    checklistDawOffsetDefaultSeconds: 0,
-    checklistDawOffsetDefaultEnabled: false,
     lastFileDialogDirectory: '',
     // v3.39 Phase 1a — plugin hosting. pluginLibrary stays undefined until the
     // first scan; pluginScanPaths defaults to [] which means "use standard
@@ -780,36 +778,12 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     // UI, so preserving OFF would silently block useful startup warmup.
     agentBackgroundPrecomputeEnabled: fallback.agentBackgroundPrecomputeEnabled,
     songDawOffsets: parseSongDawOffsets(raw.songDawOffsets),
-    // Migration: if the new "default" fields are missing but the legacy
-    // app-global `checklistDawOffsetSeconds`/`checklistDawOffsetEnabled`
-    // fields exist (v3.8.0 and earlier), copy them into the default so the
-    // user's prior offset isn't dropped on upgrade.
-    checklistDawOffsetDefaultSeconds: (() => {
-      if (
-        typeof raw.checklistDawOffsetDefaultSeconds === 'number' &&
-        Number.isFinite(raw.checklistDawOffsetDefaultSeconds) &&
-        raw.checklistDawOffsetDefaultSeconds >= 0
-      ) {
-        return Math.floor(raw.checklistDawOffsetDefaultSeconds);
-      }
-      if (
-        typeof raw.checklistDawOffsetSeconds === 'number' &&
-        Number.isFinite(raw.checklistDawOffsetSeconds) &&
-        raw.checklistDawOffsetSeconds >= 0
-      ) {
-        return Math.floor(raw.checklistDawOffsetSeconds);
-      }
-      return fallback.checklistDawOffsetDefaultSeconds;
-    })(),
-    checklistDawOffsetDefaultEnabled: (() => {
-      if (typeof raw.checklistDawOffsetDefaultEnabled === 'boolean') {
-        return raw.checklistDawOffsetDefaultEnabled;
-      }
-      if (typeof raw.checklistDawOffsetEnabled === 'boolean') {
-        return raw.checklistDawOffsetEnabled;
-      }
-      return fallback.checklistDawOffsetDefaultEnabled;
-    })(),
+    // v3.206 removed the `checklistDawOffsetDefault*` seed pair (voice 2938).
+    // Legacy fields on disk (`checklistDawOffsetSeconds`/`Enabled` from
+    // v3.8.0, `checklistDawOffsetDefault*` from v3.9–v3.205) are silently
+    // ignored on read; the next debounced write naturally drops them since
+    // they're no longer part of the parsed shape. No destructive one-shot
+    // migration is performed.
     lastFileDialogDirectory:
       typeof raw.lastFileDialogDirectory === 'string' ? raw.lastFileDialogDirectory : '',
     // v3.39 Phase 1a — plugin hosting storage. These fields are tolerant of

@@ -417,12 +417,11 @@ test.describe('Checklist DAW time offset', () => {
     }
   });
 
-  // Per-song DAW offset behavior (refactor from app-global → per-song).
-  // Each song owns its own offset + enabled flag. Changing song A's
-  // settings must not leak into song B. When a song has no saved offset,
-  // it seeds from the last-used default so users don't re-type 0:42 for
-  // every track from the same DAW project.
-  test('DAW offset is per-song and does not leak between songs, with last-used default seeding', async () => {
+  // Per-song DAW offset behavior. Each song owns its own offset + enabled
+  // flag. Changing song A's settings must not leak into song B. v3.206
+  // (voice 2938): the previous "seeds from last-used default" QoL behavior
+  // was removed — every untouched song starts at 0:00/disabled.
+  test('DAW offset is per-song; a new song starts at 0:00/disabled (no cross-song seeding)', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-daw-offset-per-song',
     );
@@ -465,17 +464,19 @@ test.describe('Checklist DAW time offset', () => {
       await saveScreenshot(page, 'per-song-A-0-42.png');
       await closeChecklist(page);
 
-      // --- Song B: opens seeded from last-used default (0:42 enabled).
-      //     Per task spec option, we seed both seconds AND enabled from last-
-      //     used to match the "saves retyping" QoL behavior.
+      // --- Song B: opens at 0:00/disabled (v3.206, voice 2938).
+      //     Previously this seeded from Song A's last-used value; that
+      //     leak-behavior was explicitly killed — a brand-new song must
+      //     start clean until the user explicitly sets a value.
       await openChecklistForRowIndex(page, 1);
       await expect(page.getByTestId('checklist-daw-offset-minutes')).toHaveValue('00');
-      await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('42');
-      await expect(page.getByTestId('checklist-daw-offset-toggle')).toBeChecked();
+      await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('00');
+      await expect(page.getByTestId('checklist-daw-offset-toggle')).not.toBeChecked();
 
-      // Now change song B to 01:30 enabled.
+      // Now set song B to 01:30 enabled.
       await page.getByTestId('checklist-daw-offset-minutes').fill('01');
       await page.getByTestId('checklist-daw-offset-seconds').fill('30');
+      await page.getByTestId('checklist-daw-offset-toggle').check();
       const badgeB = page.getByTestId('song-checklist-item-timestamp');
       await expect(badgeB).toHaveText('2:15'); // 0:45 + 1:30
       await saveScreenshot(page, 'per-song-B-1-30.png');
@@ -572,14 +573,16 @@ test.describe('Checklist DAW time offset', () => {
     }
   });
 
-  test('legacy app-global offset from v3.8.0 state file migrates to last-used default', async () => {
-    // Simulate an existing v3.8.0 user whose unified state JSON only carries
-    // the old app-global `checklistDawOffsetSeconds` / `checklistDawOffsetEnabled`
-    // fields. On first load after upgrade, those values must be preserved as
-    // the new `checklistDawOffsetDefault*` so the user's prior setting isn't
-    // dropped and it seeds the first unseeded song.
+  test('legacy v3.8.0 / v3.9–v3.205 default fields on disk are silently ignored (v3.206)', async () => {
+    // v3.206 (voice 2938): the app-global `checklistDawOffsetDefault*` seed
+    // pair was removed. Existing user-state files from v3.9–v3.205 may
+    // still have these fields; existing v3.8.0 files may still have the
+    // even-older `checklistDawOffsetSeconds`/`Enabled` pair. Both must be
+    // silently ignored — a song that never had a per-song entry written
+    // MUST open at 0:00/disabled regardless of what's on disk. This is a
+    // regression pin against accidentally re-introducing the seed.
     const directories = await createE2ETestDirectories(
-      'producer-player-checklist-daw-offset-migration',
+      'producer-player-checklist-daw-offset-legacy-ignored',
     );
 
     await writeFixtureFiles(directories.fixtureDirectory, [
@@ -599,10 +602,9 @@ test.describe('Checklist DAW time offset', () => {
       }
     }
 
-    // Now rewrite the unified state file to look like a v3.8.0 blob: strip
-    // the new fields, inject legacy `checklistDawOffsetSeconds` /
-    // `checklistDawOffsetEnabled`. Preserve everything else (linkedFolders,
-    // songChecklists, etc.) so the next launch finds the library intact.
+    // Rewrite the unified state file to look like a v3.205 blob with BOTH
+    // the legacy and the (now-removed) default fields populated. Preserve
+    // everything else so the next launch finds the library intact.
     const statePath = path.join(
       directories.userDataDirectory,
       'producer-player-user-state.json',
@@ -610,8 +612,10 @@ test.describe('Checklist DAW time offset', () => {
     const raw = await fs.readFile(statePath, 'utf8');
     const existing = JSON.parse(raw) as Record<string, unknown>;
     delete existing.songDawOffsets;
-    delete existing.checklistDawOffsetDefaultSeconds;
-    delete existing.checklistDawOffsetDefaultEnabled;
+    // Pre-v3.206 default pair (would have seeded new songs at 0:27 enabled).
+    existing.checklistDawOffsetDefaultSeconds = 27;
+    existing.checklistDawOffsetDefaultEnabled = true;
+    // v3.8.0 legacy pair (would have migrated to default and then seeded).
     existing.checklistDawOffsetSeconds = 27;
     existing.checklistDawOffsetEnabled = true;
     await fs.writeFile(statePath, JSON.stringify(existing, null, 2), 'utf8');
@@ -621,16 +625,17 @@ test.describe('Checklist DAW time offset', () => {
     try {
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 
-      // Open the song's checklist. It has no per-song offset yet, so it must
-      // seed from the migrated default: 27 seconds enabled.
+      // Open the song's checklist. The song has no per-song offset entry
+      // and v3.206 ignores the legacy default fields, so the offset MUST
+      // render 0:00/disabled.
       await openChecklistForRowIndex(page, 0);
       await expect(page.getByTestId('checklist-daw-offset-minutes')).toHaveValue('00');
-      await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('27');
-      await expect(page.getByTestId('checklist-daw-offset-toggle')).toBeChecked();
+      await expect(page.getByTestId('checklist-daw-offset-seconds')).toHaveValue('00');
+      await expect(page.getByTestId('checklist-daw-offset-toggle')).not.toBeChecked();
 
-      // Item at 0:45 + 0:27 offset → 1:12 displayed.
-      await expect(page.getByTestId('song-checklist-item-timestamp')).toHaveText('1:12');
-      await saveScreenshot(page, 'migration-legacy-default.png');
+      // Item at 0:45, no offset applied → 0:45 displayed.
+      await expect(page.getByTestId('song-checklist-item-timestamp')).toHaveText('0:45');
+      await saveScreenshot(page, 'legacy-default-ignored.png');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

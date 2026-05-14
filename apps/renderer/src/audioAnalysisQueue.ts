@@ -167,6 +167,32 @@ export interface AnalysisQueueOptions {
    * deterministic without artificial delays).
    */
   taskTimeoutMs?: number;
+  /**
+   * v3.207 — cold-start grace timeout. The wall-clock budget used for tasks
+   * that start BEFORE this queue has observed its first successful task
+   * settlement in this process lifetime. Once any task in this queue resolves
+   * successfully (rejection / preemption / timeout do NOT count), the queue
+   * "warms up" and subsequent tasks use the normal `taskTimeoutMs` budget.
+   *
+   * Why this exists: on a fresh OS boot / first launch after auto-update,
+   * macOS runs code-sign verification + Gatekeeper + dyld cache rebuild +
+   * disk pre-warm in parallel with the renderer's startup warmup analyses.
+   * Empirically the first ~6 USER_SELECTED measured/preview analyses can
+   * all exceed 60s under that load — they all time out exactly at +60s,
+   * leaving the user staring at "Analysis task timed out" toasts even though
+   * the underlying ffmpeg/decodeAudioData call is making progress in the
+   * background. By the time the user clicks a second track manually, the
+   * binary cache + AudioContext are warm and analyses return in <5s. This
+   * grace window covers the cold-start race without weakening the steady-
+   * state timeout (the timeout still catches genuinely-stuck tasks once the
+   * process is warm).
+   *
+   * Default: 3× `taskTimeoutMs` (180s when `taskTimeoutMs` is the default
+   * 60s). Set to `0` to disable cold-start grace and always use the normal
+   * timeout (tests use `0`). Setting this lower than `taskTimeoutMs` is
+   * permitted but unusual.
+   */
+  coldStartTimeoutMs?: number;
 }
 
 /**
@@ -243,6 +269,15 @@ export class AnalysisQueue {
   private readonly label: string;
   private readonly maxUserBypassSlots: number;
   private readonly taskTimeoutMs: number;
+  // v3.207 — cold-start grace. See AnalysisQueueOptions.coldStartTimeoutMs.
+  private readonly coldStartTimeoutMs: number;
+  // v3.207 — flips to true after the FIRST successfully-resolved task in this
+  // queue's process lifetime. Failures, timeouts, and preemptions do NOT mark
+  // the queue as warm — only a real resolve does, because that's the proof
+  // the underlying analysis runtime (ffmpeg / AudioContext / IPC bridge) is
+  // actually responsive on this machine in this process. Subsequent tasks
+  // use `taskTimeoutMs` rather than `coldStartTimeoutMs`.
+  private firstSuccessSettled = false;
   private readonly pending: QueuedTask<unknown>[] = [];
   private readonly runningKeys = new Set<string>();
   // In-flight + pending dedupe map: key -> the resolved promise the caller can
@@ -296,6 +331,45 @@ export class AnalysisQueue {
     const rawTimeout = options.taskTimeoutMs ?? 60_000;
     this.taskTimeoutMs =
       Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.floor(rawTimeout) : 0;
+    // v3.207 — cold-start grace timeout. If the option is omitted, default to
+    // 3× the normal timeout (covers the cold-start race on a fresh restart /
+    // post-auto-update launch). 0 disables the grace window entirely so tests
+    // can stay deterministic with the normal timeout. If the caller explicitly
+    // set `taskTimeoutMs: 0`, cold-start grace is also disabled — a queue with
+    // no timeout at all has nothing to extend.
+    if (this.taskTimeoutMs === 0) {
+      this.coldStartTimeoutMs = 0;
+    } else {
+      const rawColdStart = options.coldStartTimeoutMs ?? this.taskTimeoutMs * 3;
+      this.coldStartTimeoutMs =
+        Number.isFinite(rawColdStart) && rawColdStart > 0
+          ? Math.floor(rawColdStart)
+          : 0;
+    }
+  }
+
+  /**
+   * v3.207 — diagnostic helper. Tests use this to assert cold-start vs warm
+   * timeout selection. Returns the timeout that WILL be applied to the next
+   * task to start.
+   */
+  public getEffectiveTimeoutMs(): number {
+    if (this.taskTimeoutMs === 0) {
+      return 0;
+    }
+    if (this.coldStartTimeoutMs > 0 && !this.firstSuccessSettled) {
+      return this.coldStartTimeoutMs;
+    }
+    return this.taskTimeoutMs;
+  }
+
+  /**
+   * v3.207 — diagnostic helper. True once any task has resolved successfully
+   * in this queue's process lifetime; thereafter the cold-start grace window
+   * no longer applies.
+   */
+  public isWarm(): boolean {
+    return this.firstSuccessSettled;
   }
 
   /**
@@ -669,8 +743,19 @@ export class AnalysisQueue {
       this.maybeStart();
     };
 
+    // v3.207 — choose effective timeout: cold-start grace window applies
+    // until the queue has observed its first successful task settlement, then
+    // we revert to the normal `taskTimeoutMs`. See coldStartTimeoutMs docs.
+    const effectiveTimeoutMs =
+      this.coldStartTimeoutMs > 0 && !this.firstSuccessSettled
+        ? this.coldStartTimeoutMs
+        : this.taskTimeoutMs;
+    const usingColdStartGrace =
+      this.coldStartTimeoutMs > 0 &&
+      !this.firstSuccessSettled &&
+      this.coldStartTimeoutMs !== this.taskTimeoutMs;
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-    if (this.taskTimeoutMs > 0) {
+    if (effectiveTimeoutMs > 0) {
       timeoutHandle = setTimeout(() => {
         if (settled) {
           return;
@@ -679,7 +764,7 @@ export class AnalysisQueue {
           key: next.key,
           priority: next.priority,
           label: this.label,
-          timeoutMs: this.taskTimeoutMs,
+          timeoutMs: effectiveTimeoutMs,
         });
         // Surface the timeout so the queue's runtime is observable in
         // production. Use console.warn (not error) so it doesn't poison
@@ -692,13 +777,14 @@ export class AnalysisQueue {
             label: this.label,
             priority: next.priority,
             key: next.key,
-            timeoutMs: this.taskTimeoutMs,
+            timeoutMs: effectiveTimeoutMs,
+            coldStartGrace: usingColdStartGrace,
           });
         } catch {
           /* ignore — console.warn shouldn't ever throw, but be safe */
         }
         settle(() => next.reject(error));
-      }, this.taskTimeoutMs);
+      }, effectiveTimeoutMs);
     }
 
     Promise.resolve()
@@ -708,6 +794,14 @@ export class AnalysisQueue {
           if (timeoutHandle !== null) {
             clearTimeout(timeoutHandle);
           }
+          // v3.207 — the FIRST successful resolve in this process lifetime
+          // proves the underlying analysis runtime is responsive on this
+          // machine, so subsequent tasks can use the normal (shorter)
+          // `taskTimeoutMs` rather than the cold-start grace window. Failures,
+          // timeouts, and preemptions do NOT mark the queue warm — they're
+          // ambiguous wrt runtime health (could be the binary, could be
+          // genuine "stuck forever" mode, could be cancellation).
+          this.firstSuccessSettled = true;
           // v3.195 — if a value comes back AFTER preemption fired (the task
           // ignored the abort signal and finished naturally) we still treat
           // the slot release as a settle. The caller's promise was kept

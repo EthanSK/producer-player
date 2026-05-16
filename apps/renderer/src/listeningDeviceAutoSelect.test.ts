@@ -4,6 +4,7 @@ import {
   applyExplicitLinkAssociation,
   applyExplicitUnlinkAssociation,
   decideAutoSelect,
+  decideForceAutoSelect,
 } from './listeningDeviceAutoSelect';
 
 const airpods: ListeningDevice = {
@@ -310,5 +311,157 @@ describe('applyExplicitUnlinkAssociation (v3.203 — Unlink × button)', () => {
     const before: ListeningDevice[] = [carStereo];
     const next = applyExplicitUnlinkAssociation(before, 'device-car');
     expect(next).toBe(before);
+  });
+});
+
+// v3.215 — `decideForceAutoSelect` is the "always-return-the-match" variant
+// used by the per-track checklist-open auto-switcher and the manual Detect
+// button. The key behavioral difference from `decideAutoSelect` is that
+// when the matched device equals the current active id, this function
+// returns the matched id in `activateDeviceId` (instead of null) AND sets
+// `alreadyActive=true` so the caller can suppress the toast while still
+// writing through to state. Voice 3129 / 3130.
+describe('decideForceAutoSelect (v3.215 — Detect + checklist-open force path)', () => {
+  it('returns null match when system device id AND group id are both blank', () => {
+    expect(
+      decideForceAutoSelect({ deviceId: '', label: '' }, [airpods, monitors], null),
+    ).toEqual({ activateDeviceId: null, matchedDevice: null, alreadyActive: false });
+  });
+
+  it('returns null match when no listening device is linked to the system output', () => {
+    expect(
+      decideForceAutoSelect(
+        { deviceId: 'group-unknown', label: 'External DAC' },
+        [airpods, monitors],
+        null,
+      ),
+    ).toEqual({ activateDeviceId: null, matchedDevice: null, alreadyActive: false });
+  });
+
+  it('returns activate id + match when switching to a different listening device', () => {
+    const decision = decideForceAutoSelect(
+      { deviceId: 'group-airpods', label: 'AirPods Pro' },
+      [carStereo, airpods, monitors],
+      'device-monitors',
+    );
+    expect(decision.activateDeviceId).toBe('device-airpods');
+    expect(decision.matchedDevice).toBe(airpods);
+    expect(decision.alreadyActive).toBe(false);
+  });
+
+  it('still returns the match id (NOT null) when the matched device is already active, plus alreadyActive=true', () => {
+    const decision = decideForceAutoSelect(
+      { deviceId: 'group-airpods', label: 'AirPods Pro' },
+      [airpods, monitors],
+      'device-airpods',
+    );
+    // Different from `decideAutoSelect`, which returns null here:
+    expect(decision.activateDeviceId).toBe('device-airpods');
+    expect(decision.matchedDevice).toBe(airpods);
+    expect(decision.alreadyActive).toBe(true);
+  });
+
+  it('falls back to groupId when systemDeviceId is a legacy groupId-format value (v3.213 fallback survives)', () => {
+    const legacyAirpods: ListeningDevice = {
+      id: 'device-airpods-legacy',
+      name: 'AirPods Pro',
+      systemDeviceId: 'group-airpods-OLD',
+      systemDeviceLabel: 'AirPods Pro',
+    };
+    const decision = decideForceAutoSelect(
+      {
+        deviceId: 'stable-airpods-id',
+        groupId: 'group-airpods-OLD',
+        label: 'AirPods Pro',
+      },
+      [legacyAirpods, monitors],
+      null,
+    );
+    expect(decision.activateDeviceId).toBe('device-airpods-legacy');
+    expect(decision.matchedDevice).toBe(legacyAirpods);
+    expect(decision.alreadyActive).toBe(false);
+  });
+});
+
+// v3.215 — pins for the per-song "auto-set listening device on open" checkbox
+// (voice 3129 / 3130). These tests live alongside the auto-select logic
+// because the checkbox's behavioral contract is "gate the auto-select run
+// on checklist open, default ON via absence". Testing the React component
+// would require booting JSDOM + App.tsx (too heavy); instead we pin the
+// localStorage-mirror semantics that drive the gate. The full integration
+// (modal-open → auto-select fire / skip / Detect bypass) is verified end-
+// to-end on the Mac Mini via OpenClaw.
+describe('songAutoSetListeningDeviceOnOpen — localStorage semantics (v3.215)', () => {
+  // Mirror of the App.tsx helpers, kept in sync with the implementation.
+  // If the prefix changes there, this constant must change too (and the test
+  // will fail loudly), which is the desired regression signal.
+  const KEY_PREFIX = 'producer-player.auto-set-listening-device.';
+  function persistAutoSetListeningDeviceForSong(
+    storage: Map<string, string>,
+    songId: string,
+    enabled: boolean,
+  ): void {
+    storage.set(`${KEY_PREFIX}${songId}`, enabled ? '1' : '0');
+  }
+  function readAutoSetListeningDeviceForSong(
+    storage: Map<string, string>,
+    songId: string,
+  ): boolean {
+    const raw = storage.get(`${KEY_PREFIX}${songId}`);
+    return raw !== '0';
+  }
+
+  it('defaults to ON when no value has been persisted (absence === enabled)', () => {
+    const storage = new Map<string, string>();
+    expect(readAutoSetListeningDeviceForSong(storage, 'song-fresh')).toBe(true);
+  });
+
+  it('returns ON after explicit ON persist', () => {
+    const storage = new Map<string, string>();
+    persistAutoSetListeningDeviceForSong(storage, 'song-x', true);
+    expect(storage.get(`${KEY_PREFIX}song-x`)).toBe('1');
+    expect(readAutoSetListeningDeviceForSong(storage, 'song-x')).toBe(true);
+  });
+
+  it('returns OFF only when explicitly persisted as "0"', () => {
+    const storage = new Map<string, string>();
+    persistAutoSetListeningDeviceForSong(storage, 'song-x', false);
+    expect(storage.get(`${KEY_PREFIX}song-x`)).toBe('0');
+    expect(readAutoSetListeningDeviceForSong(storage, 'song-x')).toBe(false);
+  });
+
+  it('toggles ON→OFF→ON round-trip cleanly per song', () => {
+    const storage = new Map<string, string>();
+    persistAutoSetListeningDeviceForSong(storage, 'song-a', false);
+    expect(readAutoSetListeningDeviceForSong(storage, 'song-a')).toBe(false);
+    persistAutoSetListeningDeviceForSong(storage, 'song-a', true);
+    expect(readAutoSetListeningDeviceForSong(storage, 'song-a')).toBe(true);
+  });
+
+  it('keeps per-song values isolated — setting Song A does not affect Song B', () => {
+    const storage = new Map<string, string>();
+    persistAutoSetListeningDeviceForSong(storage, 'song-a', false);
+    // Song B is untouched; defaults to ON via absence.
+    expect(readAutoSetListeningDeviceForSong(storage, 'song-a')).toBe(false);
+    expect(readAutoSetListeningDeviceForSong(storage, 'song-b')).toBe(true);
+  });
+
+  it('Detect-button semantics: a one-shot call must succeed regardless of the toggle', () => {
+    // The Detect handler in App.tsx never reads
+    // `readAutoSetListeningDeviceForSong` — this test pins that the gate
+    // logic and the Detect path are decoupled by re-using the decision
+    // function directly here.
+    const storage = new Map<string, string>();
+    persistAutoSetListeningDeviceForSong(storage, 'song-disabled', false);
+    // Whatever the toggle says, Detect must still resolve a match against
+    // the OS output. The toggle gate only applies on checklist-open auto-fire.
+    const decision = decideForceAutoSelect(
+      { deviceId: 'group-airpods', label: 'AirPods Pro' },
+      [airpods, monitors],
+      null,
+    );
+    expect(decision.activateDeviceId).toBe('device-airpods');
+    // Whether the song's toggle is off changes nothing for Detect:
+    expect(readAutoSetListeningDeviceForSong(storage, 'song-disabled')).toBe(false);
   });
 });

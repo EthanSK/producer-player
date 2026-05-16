@@ -119,6 +119,8 @@ test('PER_TRACK_KEYS surface is stable and matches expected songId-keyed fields'
     'eqLiveStates',
     'aiEqRecommendations',
     'songDawOffsets',
+    // v3.215: per-song auto-set-listening-device-on-open toggle (voice 3129 / 3130).
+    'songAutoSetListeningDeviceOnOpen',
     // v3.30: AI mastering recommendations ride the split pipeline.
     'perTrackAiRecommendations',
     // v3.39 Phase 1a: per-song plugin-host insert chain.

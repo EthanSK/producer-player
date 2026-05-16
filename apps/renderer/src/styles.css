@@ -4230,6 +4230,62 @@ body.is-dragging-checklist-timestamp * {
   cursor: default;
 }
 
+/*
+ * v3.215 — Detect button. Inherits the slim pill shape of the other
+ * `.listening-device-secondary-button` siblings but gets a faint accent
+ * tint so it reads as the "active action" rather than mode-state toggles
+ * (Link / Rename / Cancel rename) around it. No `margin-left: auto` —
+ * stays adjacent to the Link group instead of right-aligning, since
+ * Detect logically belongs with the link controls. Voice 3129 / 3130.
+ */
+.listening-device-detect-button {
+  margin-left: 0;
+  color: #cbe7ff;
+  border-color: rgba(92, 167, 255, 0.28);
+  background: rgba(92, 167, 255, 0.08);
+}
+
+.listening-device-detect-button:hover {
+  border-color: rgba(92, 167, 255, 0.55);
+  background: rgba(92, 167, 255, 0.16);
+  color: #e7f3ff;
+}
+
+/*
+ * v3.215 — thin "Auto-set listening device on open" checkbox row. Sits
+ * between the editor-actions row and the chip strip. Kept compact so it
+ * reads as a modifier on the auto-switch behavior rather than a primary
+ * control — small checkbox + 11px label, single row, no border. Voice 3130.
+ */
+.listening-device-auto-set-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.listening-device-auto-set-toggle-input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #5ca7ff;
+}
+
+.listening-device-auto-set-toggle-text {
+  display: inline-block;
+}
+
+.listening-device-auto-set-toggle:hover {
+  color: var(--text);
+}
+
 .listening-device-mode-hint {
   font-size: 11px;
   line-height: 1.25;

@@ -858,6 +858,19 @@ export interface ProducerPlayerUserState {
   pluginScanPaths?: string[];
   perTrackPluginChains?: Record<string, TrackPluginChain>;
 
+  // v3.215 — per-song "auto-set listening device on checklist open" toggle
+  // (voice 3129 / 3130). Default ON. When ON, opening the checklist modal for
+  // this song re-reads the current OS audio-output device and force-switches
+  // the active listening device to whichever saved device is linked to that
+  // OS output (overriding whatever chip was last selected, even if the song
+  // chip was already set). Toggle is per-song so users can silence the
+  // auto-switch on tracks where it's annoying. Default ON is recorded by
+  // ABSENCE — songs missing from this map are treated as enabled; only
+  // explicit `false` entries opt out. This keeps the map sparse and means
+  // existing on-disk state (no entries) automatically opts every song into
+  // the new behavior post-upgrade.
+  songAutoSetListeningDeviceOnOpen: Record<string, boolean>;
+
   // Main window bounds — persisted across relaunches so the app reopens where
   // it was last positioned. `null` on first launch or when no valid bounds are
   // known yet; the main-process loader validates against currently-connected

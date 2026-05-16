@@ -225,12 +225,14 @@ import {
 } from './lib/MasteringChecklistImportance';
 import { useToast } from './lib/ToastStack';
 import {
+  readSystemAudioDevice,
   unlockSystemAudioDeviceLabels,
   useSystemAudioDevice,
 } from './lib/useSystemAudioDevice';
 import {
   applyExplicitUnlinkAssociation,
   decideAutoSelect,
+  decideForceAutoSelect,
 } from './listeningDeviceAutoSelect';
 import { ErrorDetailsDialog } from './lib/ErrorDetailsDialog';
 import { formatBytes } from './lib/formatBytes';
@@ -852,6 +854,14 @@ const REFERENCE_TRACK_PER_SONG_KEY_PREFIX = 'producer-player.reference-track.';
 // user was currently A/B'ing against). The save behavior for references is
 // unchanged (still always-on); only the restore-on-switch behavior is gated.
 const RESTORE_REFERENCE_PER_SONG_KEY_PREFIX = 'producer-player.restore-reference.';
+// v3.215 — per-song opt-out toggle for "auto-set listening device on
+// checklist open" (voice 3129 / 3130). Stored as '1' (ON) or '0' (OFF).
+// Default ON via ABSENCE: a key that's missing is treated as enabled. Only
+// explicit '0' values opt the song out, matching the contracts-side
+// sparse-map semantics. Mirrors `RESTORE_REFERENCE_PER_SONG_KEY_PREFIX` in
+// shape so the existing hydrate/persist plumbing works the same way.
+const AUTO_SET_LISTENING_DEVICE_PER_SONG_KEY_PREFIX =
+  'producer-player.auto-set-listening-device.';
 // v3.22.0: the "last globally-picked reference" — the most recent reference
 // the user picked via a MANUAL action (handleChooseReferenceTrack,
 // handleUseCurrentTrackAsReference, or clicking a saved reference card).
@@ -2356,6 +2366,45 @@ function readRestoreReferenceForSong(songId: string): boolean {
 }
 
 /**
+ * v3.215 — persist the per-song "auto-set listening device on checklist
+ * open" toggle. Stored as '1' (ON) or '0' (OFF). Default ON via absence
+ * (matching the contracts-layer sparse-map model). We still write '1' when
+ * the user explicitly toggles ON after a previous OFF so the persisted
+ * state shows their explicit choice; readers tolerate either form.
+ */
+function persistAutoSetListeningDeviceForSong(
+  songId: string,
+  enabled: boolean,
+): void {
+  if (typeof window === 'undefined') return;
+  if (songId.length === 0) return;
+  try {
+    window.localStorage.setItem(
+      `${AUTO_SET_LISTENING_DEVICE_PER_SONG_KEY_PREFIX}${songId}`,
+      enabled ? '1' : '0',
+    );
+  } catch {
+    /* localStorage may be unavailable */
+  }
+}
+
+/**
+ * v3.215 — read the per-song "auto-set listening device on checklist open"
+ * toggle. Default ON: absence (key missing) and any unknown value resolve to
+ * `true`. Only explicit '0' returns `false`. This matches the contracts-side
+ * default-by-absence semantics so pre-v3.215 state files automatically opt
+ * every song into the new behavior post-upgrade.
+ */
+function readAutoSetListeningDeviceForSong(songId: string): boolean {
+  if (typeof window === 'undefined') return true;
+  if (songId.length === 0) return true;
+  const raw = window.localStorage.getItem(
+    `${AUTO_SET_LISTENING_DEVICE_PER_SONG_KEY_PREFIX}${songId}`,
+  );
+  return raw !== '0';
+}
+
+/**
  * v3.22.0: persist the "last globally-picked reference" file path. Called
  * only from MANUAL pick handlers so the auto-restore path (a song with
  * restore=ON being switched to) never overwrites it. Pass an empty
@@ -2900,6 +2949,17 @@ export function App(): JSX.Element {
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
+  // v3.215 — UI-state mirror of the per-song "auto-set listening device on
+  // checklist open" toggle (voice 3129 / 3130). Default ON. We keep this in
+  // a piece of React state (not just localStorage) so the checkbox is fully
+  // controlled and re-renders crisply when the user toggles it OR when an
+  // import flips the value externally. Synced FROM localStorage whenever the
+  // modal opens for a new song; synced TO localStorage on each toggle change
+  // via the handler below.
+  const [
+    checklistModalAutoSetListeningDeviceEnabled,
+    setChecklistModalAutoSetListeningDeviceEnabled,
+  ] = useState<boolean>(true);
   // v3.110 — K-weighting / LUFS frequency-weighting curve modal. Triggered
   // from the button immediately to the LEFT of the ✨ AI Stars button in
   // the fullscreen mastering header. Shows the ITU-R BS.1770-4 K-weighting
@@ -3058,53 +3118,98 @@ export function App(): JSX.Element {
       });
     }
   }, [listeningDevices, systemAudioDevice]);
-  // v3.211 — re-sync the active listening device every time the checklist
-  // modal OPENS for any song. Belt-and-suspenders for two cases that the
-  // v3.210 initial-sync didn't cover:
-  //
-  //   1. Cold-start race: if `useSystemAudioDevice`'s first enumerate ran
-  //      BEFORE Electron auto-approved the media-permission unlock, its
-  //      `deviceId` resolved to '' and stayed that way (no `devicechange`
-  //      event fires for a permission grant). The post-unlock refresh
-  //      handler now patches this, but if anything still leaves the device
-  //      empty at modal-open time, this effect re-runs `refresh()` so the
-  //      user gets the correct chip the moment they open the checklist.
-  //
-  //   2. Any silent OS-device transition that Chromium missed emitting
-  //      `devicechange` for (rare but observed on macOS sleep/wake +
-  //      hot-unplug edge cases). When the checklist opens, we re-read the
-  //      ground truth.
-  //
-  // Implementation: fires on every null→<song-id> transition of
-  // `checklistModalSongId`. The `refresh()` call routes through the hook's
-  // change detection; if the device hasn't actually changed since the last
-  // read, it's a no-op. When it has changed, the hook's `onChange` path
-  // fires `decideAutoSelect` automatically. Voice 3076.
+  // v3.215 — hydrate the per-song auto-set-listening-device toggle into
+  // local state whenever the checklist modal opens for a new song. The
+  // toggle is rendered as a controlled checkbox so we read the persisted
+  // value once on null→<songId> transition and let the user's clicks drive
+  // both the UI state and the localStorage value via
+  // `handleToggleChecklistAutoSetListeningDevice`. Default ON via absence.
   useEffect(() => {
     if (checklistModalSongId === null) return;
-    systemAudioDevice.refresh();
-    // Also run decideAutoSelect on the CURRENT system device snapshot in
-    // case the device id is already correct but the persisted active id
-    // doesn't match its link (e.g. initial-sync skipped because devices
-    // weren't loaded yet at app-startup race). This is an explicit
-    // re-check, decoupled from the once-per-app-launch initial-sync guard.
-    if (systemAudioDevice.deviceId.trim().length === 0) return;
-    if (listeningDevices.length === 0) return;
-    const decision = decideAutoSelect(
-      systemAudioDevice,
-      listeningDevices,
-      activeListeningDeviceIdRef.current
+    setChecklistModalAutoSetListeningDeviceEnabled(
+      readAutoSetListeningDeviceForSong(checklistModalSongId),
     );
-    if (decision.activateDeviceId && decision.matchedDevice) {
+  }, [checklistModalSongId]);
+  // v3.215 — re-sync the active listening device every time the checklist
+  // modal OPENS for any song, gated by the per-song "auto-set listening
+  // device on open" toggle (default ON; voice 3129 / 3130). Replaces the
+  // v3.211 implementation, which had two design issues that left Ethan on
+  // v3.219 still seeing stale chips:
+  //
+  //   1. v3.211 read `systemAudioDevice` from the effect closure (deps
+  //      intentionally excluded), so calling `refresh()` updated the hook's
+  //      internal state but the in-effect `decideAutoSelect` call still saw
+  //      whatever value the closure was captured with. If the modal opened
+  //      while the hook was still resolving (or after a missed devicechange
+  //      event), the decision was made against stale data.
+  //
+  //   2. v3.211 short-circuited via `decideAutoSelect` when the matched
+  //      device equaled the current active id (returning
+  //      `activateDeviceId=null`). Ethan's spec for v3.215 is "force it
+  //      through to setActiveListeningDeviceId" — write through to defend
+  //      against any drift between the chip state and the persisted active
+  //      id, even when the matched device is already active. The toast is
+  //      still suppressed on no-change via the new `alreadyActive` flag on
+  //      `ForceAutoSelectDecision`.
+  //
+  // New implementation:
+  //   - Reads the per-song toggle via `readAutoSetListeningDeviceForSong`
+  //     (default ON via absence). When OFF, skip the entire path. Manual
+  //     Detect button bypasses this gate.
+  //   - Re-reads the OS audio output via `readSystemAudioDevice()` directly
+  //     instead of relying on the hook's closure-captured state. This
+  //     guarantees the decision sees the same ground truth the OS would
+  //     report at this exact moment.
+  //   - Uses `decideForceAutoSelect` so an already-active match still
+  //     triggers a write (idempotent under React's referential-equality
+  //     setState) and gives us an explicit `alreadyActive` to gate the
+  //     toast on.
+  //   - Toast fires only when the chip actually moved.
+  //   - Also bumps `systemAudioDevice.refresh()` so the hook's state stays
+  //     in sync with what we just read — keeps downstream consumers
+  //     (system-device label display, link-button enabled state) coherent.
+  useEffect(() => {
+    if (checklistModalSongId === null) return;
+    if (listeningDevicesRef.current.length === 0) return;
+    const enabled = readAutoSetListeningDeviceForSong(checklistModalSongId);
+    if (!enabled) return;
+    let cancelled = false;
+    (async () => {
+      systemAudioDevice.refresh();
+      const snapshot = await readSystemAudioDevice();
+      if (cancelled) return;
+      const devices = listeningDevicesRef.current;
+      if (devices.length === 0) return;
+      if (
+        snapshot.deviceId.trim().length === 0 &&
+        snapshot.groupId.trim().length === 0
+      ) {
+        return;
+      }
+      const decision = decideForceAutoSelect(
+        snapshot,
+        devices,
+        activeListeningDeviceIdRef.current,
+      );
+      if (!decision.matchedDevice || !decision.activateDeviceId) return;
+      // Write through unconditionally so the persisted active id realigns
+      // with the OS output, even when the chip already shows the right
+      // device. React's setState is referentially-equal-aware so this is
+      // free when nothing changed.
       setActiveListeningDeviceId(decision.activateDeviceId);
-      const labelSuffix =
-        systemAudioDevice.label.trim().length > 0 ? ` (${systemAudioDevice.label})` : '';
-      toast.show({
-        id: `listening-device-checklist-open-${decision.activateDeviceId}-${Date.now()}`,
-        kind: 'info',
-        text: `Auto-switched to ${decision.matchedDevice.name}${labelSuffix}`,
-      });
-    }
+      if (!decision.alreadyActive) {
+        const labelSuffix =
+          snapshot.label.trim().length > 0 ? ` (${snapshot.label})` : '';
+        toast.show({
+          id: `listening-device-checklist-open-${decision.activateDeviceId}-${Date.now()}`,
+          kind: 'info',
+          text: `Auto-switched to ${decision.matchedDevice.name}${labelSuffix}`,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // Intentionally exclude `listeningDevices` + `systemAudioDevice` from
     // deps — we only want this to fire on modal-open transitions, not on
     // every device change (those go through the `onChange` path already).
@@ -5217,6 +5322,22 @@ export function App(): JSX.Element {
           persistGlobalReference(null);
         }
 
+        // v3.215 — hydrate per-song auto-set-listening-device toggles into
+        // localStorage cache so `readAutoSetListeningDeviceForSong` returns
+        // the persisted value when the first checklist modal opens.
+        // Absent entries stay absent (which resolves to the ON default).
+        // Voice 3129 / 3130.
+        if (
+          userState.songAutoSetListeningDeviceOnOpen &&
+          Object.keys(userState.songAutoSetListeningDeviceOnOpen).length > 0
+        ) {
+          for (const [songId, enabled] of Object.entries(
+            userState.songAutoSetListeningDeviceOnOpen,
+          )) {
+            persistAutoSetListeningDeviceForSong(songId, enabled);
+          }
+        }
+
         setUnifiedStateReady(true);
       })
       .catch(() => {
@@ -5374,6 +5495,29 @@ export function App(): JSX.Element {
         // v3.145 — legacy no-op field; force true so old paused/off state is migrated away.
         agentBackgroundPrecomputeEnabled: true,
         songDawOffsets,
+        // v3.215 — per-song "auto-set listening device on checklist open"
+        // toggles, mirrored from localStorage. Default ON via absence; only
+        // explicit '0' entries are persisted as `false` so the map stays
+        // sparse. Voice 3129 / 3130.
+        songAutoSetListeningDeviceOnOpen: (() => {
+          const result: Record<string, boolean> = {};
+          for (let i = 0; i < window.localStorage.length; i++) {
+            const key = window.localStorage.key(i);
+            if (
+              key &&
+              key.startsWith(AUTO_SET_LISTENING_DEVICE_PER_SONG_KEY_PREFIX)
+            ) {
+              const songId = key.slice(
+                AUTO_SET_LISTENING_DEVICE_PER_SONG_KEY_PREFIX.length,
+              );
+              const val = window.localStorage.getItem(key);
+              if (songId.length > 0 && (val === '1' || val === '0')) {
+                result[songId] = val === '1';
+              }
+            }
+          }
+          return result;
+        })(),
         lastFileDialogDirectory: '', // managed by main process
         windowBounds: null, // managed by main process — ignored on write
         // v3.30 storage-only feature: AI mastering recommendations are
@@ -5619,6 +5763,29 @@ export function App(): JSX.Element {
         )) {
           persistRestoreReferenceForSong(songId, enabled);
         }
+      }
+
+      // v3.215 — sync per-song auto-set-listening-device toggles into
+      // localStorage on user-state changes (e.g. Import State).
+      // Absent entries mean default ON (matching the contracts default-by-
+      // absence model); only explicit `false` entries are written through
+      // so the in-memory cache reflects the imported state.
+      if (userState.songAutoSetListeningDeviceOnOpen) {
+        for (const [songId, enabled] of Object.entries(
+          userState.songAutoSetListeningDeviceOnOpen,
+        )) {
+          persistAutoSetListeningDeviceForSong(songId, enabled);
+        }
+      }
+      // If the import changed the currently-modal song's value, refresh the
+      // controlled checkbox state so the UI flips immediately. Read via the
+      // ref because this listener's deps array is `[]` — the captured
+      // `checklistModalSongId` from first render would be stale otherwise.
+      const modalSongId = checklistModalSongIdRef.current;
+      if (modalSongId) {
+        setChecklistModalAutoSetListeningDeviceEnabled(
+          readAutoSetListeningDeviceForSong(modalSongId),
+        );
       }
 
       // v3.22.0: import may carry a new "last globally-picked reference".
@@ -14290,6 +14457,100 @@ export function App(): JSX.Element {
     });
   }
 
+  /**
+   * v3.215 — toggle the per-song "auto-set listening device on checklist
+   * open" flag (voice 3129 / 3130). Updates both the controlled React state
+   * (so the checkbox UI flips immediately) and the localStorage cache that
+   * `readAutoSetListeningDeviceForSong` consults on the next modal-open
+   * cycle. The unified-state sync picks the value up from localStorage on
+   * the next debounced flush so it round-trips to disk.
+   */
+  function handleToggleChecklistAutoSetListeningDevice(enabled: boolean): void {
+    setChecklistModalAutoSetListeningDeviceEnabled(enabled);
+    if (checklistModalSongId) {
+      persistAutoSetListeningDeviceForSong(checklistModalSongId, enabled);
+      logAction('listening-device.auto-set-on-open.toggle', {
+        songId: checklistModalSongId,
+        enabled,
+      });
+    }
+  }
+
+  /**
+   * v3.215 — manual Detect button handler (voice 3129 / 3130). Bypasses the
+   * per-song checkbox (Ethan's spec: "Detect button bypasses the checkbox
+   * — manual override always works") and forces an auto-select cycle using
+   * the current OS audio output. Reads the device snapshot directly via
+   * `readSystemAudioDevice()` so the decision uses ground truth even if
+   * the system-audio hook hasn't picked up a recent change yet.
+   *
+   * Toast behavior:
+   *   - No listening device matches the OS output → toast explains why
+   *     ("link a listening device first").
+   *   - No system audio output detected → toast explains why ("no audio
+   *     device").
+   *   - Match found AND already active → toast confirms ("Already on X").
+   *   - Match found AND switching → toast announces the switch.
+   */
+  async function handleDetectListeningDevice(): Promise<void> {
+    logAction('listening-device.detect.click', {
+      songId: checklistModalSongId,
+    });
+    systemAudioDevice.refresh();
+    const snapshot = await readSystemAudioDevice();
+    const devices = listeningDevicesRef.current;
+    if (
+      snapshot.deviceId.trim().length === 0 &&
+      snapshot.groupId.trim().length === 0
+    ) {
+      toast.show({
+        id: `listening-device-detect-no-output-${Date.now()}`,
+        kind: 'info',
+        text: 'No system audio output detected — cannot detect a linked device.',
+      });
+      return;
+    }
+    if (devices.length === 0) {
+      toast.show({
+        id: `listening-device-detect-no-devices-${Date.now()}`,
+        kind: 'info',
+        text: 'No listening devices saved — add one and link it to the current output first.',
+      });
+      return;
+    }
+    const decision = decideForceAutoSelect(
+      snapshot,
+      devices,
+      activeListeningDeviceIdRef.current,
+    );
+    if (!decision.matchedDevice || !decision.activateDeviceId) {
+      const labelSuffix =
+        snapshot.label.trim().length > 0 ? ` (${snapshot.label})` : '';
+      toast.show({
+        id: `listening-device-detect-no-match-${Date.now()}`,
+        kind: 'info',
+        text: `No listening device is linked to the current output${labelSuffix}. Use the Link button to associate one.`,
+      });
+      return;
+    }
+    setActiveListeningDeviceId(decision.activateDeviceId);
+    const labelSuffix =
+      snapshot.label.trim().length > 0 ? ` (${snapshot.label})` : '';
+    if (decision.alreadyActive) {
+      toast.show({
+        id: `listening-device-detect-already-${decision.activateDeviceId}-${Date.now()}`,
+        kind: 'info',
+        text: `Already on ${decision.matchedDevice.name}${labelSuffix}`,
+      });
+    } else {
+      toast.show({
+        id: `listening-device-detect-switched-${decision.activateDeviceId}-${Date.now()}`,
+        kind: 'success',
+        text: `Switched to ${decision.matchedDevice.name}${labelSuffix}`,
+      });
+    }
+  }
+
   function handleStartListeningDeviceRename(): void {
     if (!listeningDeviceRenameTarget) {
       return;
@@ -18178,6 +18439,30 @@ export function App(): JSX.Element {
                       </span>
                     );
                   })() : null}
+                  {/*
+                    v3.215 — manual Detect button (voice 3129 / 3130).
+                    Bypasses the per-song "auto-set on open" checkbox so
+                    Ethan can always force a one-shot re-detect even with
+                    auto-set disabled. Reads the OS audio output directly
+                    and force-switches the active chip to whichever saved
+                    listening device is linked to it. Skinny pill style
+                    matching the other secondary buttons; sits beside the
+                    Link / Linked group so the related controls cluster
+                    visually. Surfaces toasts on success, already-on, and
+                    every "can't detect" branch.
+                  */}
+                  <button
+                    type="button"
+                    className="listening-device-secondary-button listening-device-detect-button"
+                    onClick={() => {
+                      void handleDetectListeningDevice();
+                    }}
+                    data-testid="listening-device-detect-button"
+                    title="Force re-detect the listening device linked to the current OS audio output. Bypasses the per-song auto-set toggle."
+                    aria-label="Detect listening device for current audio output"
+                  >
+                    Detect
+                  </button>
                   <button
                     type="button"
                     className={`listening-device-secondary-button${isListeningDeviceRenameMode ? ' is-active' : ''}`}
@@ -18210,6 +18495,40 @@ export function App(): JSX.Element {
                   ) : null}
                 </div>
               </div>
+              {/*
+                v3.215 — thin per-song "auto-set listening device on open"
+                checkbox (voice 3130). Default ON. Sits between the
+                editor-actions row and the chip strip so it reads as a
+                modifier on the auto-switch behavior without dominating
+                the modal. The Detect button above always works regardless
+                of this checkbox state — this only gates the AUTOMATIC
+                run that fires whenever the checklist modal opens.
+              */}
+              <label
+                className="listening-device-auto-set-toggle"
+                data-testid="listening-device-auto-set-toggle"
+                title={
+                  checklistModalAutoSetListeningDeviceEnabled
+                    ? 'Auto-set the listening device when this checklist opens. Click to disable for this track.'
+                    : 'Auto-set is OFF for this track. Click to re-enable. The Detect button still works manually.'
+                }
+              >
+                <input
+                  type="checkbox"
+                  className="listening-device-auto-set-toggle-input"
+                  checked={checklistModalAutoSetListeningDeviceEnabled}
+                  onChange={(event) =>
+                    handleToggleChecklistAutoSetListeningDevice(
+                      event.currentTarget.checked,
+                    )
+                  }
+                  aria-label="Auto-set listening device when this checklist opens"
+                  data-testid="listening-device-auto-set-toggle-input"
+                />
+                <span className="listening-device-auto-set-toggle-text">
+                  Auto-set listening device on open
+                </span>
+              </label>
               <div
                 className="listening-device-chip-row"
                 data-testid="listening-device-chip-row"

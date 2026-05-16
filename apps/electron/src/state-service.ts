@@ -80,6 +80,12 @@ export const PER_TRACK_KEYS = [
   'eqLiveStates',
   'aiEqRecommendations',
   'songDawOffsets',
+  // v3.215 — per-song "auto-set listening device on checklist open" toggle
+  // (voice 3129 / 3130). Default-ON-by-absence semantics: songs missing from
+  // the map are treated as enabled, only explicit `false` entries opt out.
+  // PER_TRACK so the split-to-disk pipeline hoists each entry into its own
+  // per-track bucket (matches songDawOffsets which uses the same model).
+  'songAutoSetListeningDeviceOnOpen',
   // v3.30: AI mastering recommendations keyed by (songId → versionNumber → set).
   // The outer record is songId-keyed so the split-to-disk machinery in
   // `splitStateForDisk` hoists it into per-track files automatically; the
@@ -265,6 +271,32 @@ function parsePerSongReferenceTracks(value: unknown): Record<string, string> {
 }
 
 function parsePerSongRestoreReferenceEnabled(
+  value: unknown,
+): Record<string, boolean> {
+  if (!isRecord(value)) return {};
+  const entries = Object.entries(value).flatMap(([songId, enabled]) => {
+    if (songId.length === 0 || typeof enabled !== 'boolean') return [];
+    return [[songId, enabled] as const];
+  });
+  return Object.fromEntries(entries);
+}
+
+/**
+ * v3.215 — parse `songAutoSetListeningDeviceOnOpen` (voice 3129 / 3130).
+ *
+ * Stored shape on disk: `Record<string, boolean>` where the key is a songId
+ * and the value is the explicit per-song opt-out flag. Absent songs default
+ * to ON; only explicit `false` entries are meaningful. We still preserve
+ * `true` entries on round-trip even though they're semantically redundant
+ * with absence, so users who explicitly re-enabled via the checkbox see a
+ * stable persisted value.
+ *
+ * Tolerant of malformed inputs (non-object, missing keys, non-boolean
+ * values) — falls back to `{}` so an upgrade to a stale file never crashes
+ * the renderer. Pre-v3.215 state files have no entry → everything defaults
+ * to ON, which matches the auto-on default for new behavior.
+ */
+function parseSongAutoSetListeningDeviceOnOpen(
   value: unknown,
 ): Record<string, boolean> {
   if (!isRecord(value)) return {};
@@ -684,6 +716,8 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     // accidentally suppress startup warmup after upgrade.
     agentBackgroundPrecomputeEnabled: true,
     songDawOffsets: {},
+    // v3.215 — default empty map (everything defaults to ON via absence).
+    songAutoSetListeningDeviceOnOpen: {},
     lastFileDialogDirectory: '',
     // v3.39 Phase 1a — plugin hosting. pluginLibrary stays undefined until the
     // first scan; pluginScanPaths defaults to [] which means "use standard
@@ -778,6 +812,11 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     // UI, so preserving OFF would silently block useful startup warmup.
     agentBackgroundPrecomputeEnabled: fallback.agentBackgroundPrecomputeEnabled,
     songDawOffsets: parseSongDawOffsets(raw.songDawOffsets),
+    // v3.215 — per-song auto-set-listening-device-on-open toggle. Default
+    // ON via absence; only `false` entries opt the song out.
+    songAutoSetListeningDeviceOnOpen: parseSongAutoSetListeningDeviceOnOpen(
+      raw.songAutoSetListeningDeviceOnOpen,
+    ),
     // v3.206 removed the `checklistDawOffsetDefault*` seed pair (voice 2938).
     // Legacy fields on disk (`checklistDawOffsetSeconds`/`Enabled` from
     // v3.8.0, `checklistDawOffsetDefault*` from v3.9–v3.205) are silently

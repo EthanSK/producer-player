@@ -314,14 +314,14 @@ describe('applyExplicitUnlinkAssociation (v3.203 — Unlink × button)', () => {
   });
 });
 
-// v3.215 — `decideForceAutoSelect` is the "always-return-the-match" variant
+// v3.220 — `decideForceAutoSelect` is the "always-return-the-match" variant
 // used by the per-track checklist-open auto-switcher and the manual Detect
 // button. The key behavioral difference from `decideAutoSelect` is that
 // when the matched device equals the current active id, this function
 // returns the matched id in `activateDeviceId` (instead of null) AND sets
 // `alreadyActive=true` so the caller can suppress the toast while still
 // writing through to state. Voice 3129 / 3130.
-describe('decideForceAutoSelect (v3.215 — Detect + checklist-open force path)', () => {
+describe('decideForceAutoSelect (v3.220 — Detect + checklist-open force path)', () => {
   it('returns null match when system device id AND group id are both blank', () => {
     expect(
       decideForceAutoSelect({ deviceId: '', label: '' }, [airpods, monitors], null),
@@ -383,7 +383,7 @@ describe('decideForceAutoSelect (v3.215 — Detect + checklist-open force path)'
   });
 });
 
-// v3.215 — pins for the per-song "auto-set listening device on open" checkbox
+// v3.220 — pins for the per-song "auto-set listening device on open" checkbox
 // (voice 3129 / 3130). These tests live alongside the auto-select logic
 // because the checkbox's behavioral contract is "gate the auto-select run
 // on checklist open, default ON via absence". Testing the React component
@@ -391,7 +391,7 @@ describe('decideForceAutoSelect (v3.215 — Detect + checklist-open force path)'
 // localStorage-mirror semantics that drive the gate. The full integration
 // (modal-open → auto-select fire / skip / Detect bypass) is verified end-
 // to-end on the Mac Mini via OpenClaw.
-describe('songAutoSetListeningDeviceOnOpen — localStorage semantics (v3.215)', () => {
+describe('songAutoSetListeningDeviceOnOpen — localStorage semantics (v3.220)', () => {
   // Mirror of the App.tsx helpers, kept in sync with the implementation.
   // If the prefix changes there, this constant must change too (and the test
   // will fail loudly), which is the desired regression signal.

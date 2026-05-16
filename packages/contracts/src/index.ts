@@ -858,7 +858,7 @@ export interface ProducerPlayerUserState {
   pluginScanPaths?: string[];
   perTrackPluginChains?: Record<string, TrackPluginChain>;
 
-  // v3.215 — per-song "auto-set listening device on checklist open" toggle
+  // v3.220 — per-song "auto-set listening device on checklist open" toggle
   // (voice 3129 / 3130). Default ON. When ON, opening the checklist modal for
   // this song re-reads the current OS audio-output device and force-switches
   // the active listening device to whichever saved device is linked to that

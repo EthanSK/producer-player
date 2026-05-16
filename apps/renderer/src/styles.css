@@ -4231,7 +4231,7 @@ body.is-dragging-checklist-timestamp * {
 }
 
 /*
- * v3.215 — Detect button. Inherits the slim pill shape of the other
+ * v3.220 — Detect button. Inherits the slim pill shape of the other
  * `.listening-device-secondary-button` siblings but gets a faint accent
  * tint so it reads as the "active action" rather than mode-state toggles
  * (Link / Rename / Cancel rename) around it. No `margin-left: auto` —
@@ -4252,7 +4252,7 @@ body.is-dragging-checklist-timestamp * {
 }
 
 /*
- * v3.215 — thin "Auto-set listening device on open" checkbox row. Sits
+ * v3.220 — thin "Auto-set listening device on open" checkbox row. Sits
  * between the editor-actions row and the chip strip. Kept compact so it
  * reads as a modifier on the auto-switch behavior rather than a primary
  * control — small checkbox + 11px label, single row, no border. Voice 3130.

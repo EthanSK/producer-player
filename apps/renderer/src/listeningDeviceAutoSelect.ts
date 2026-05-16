@@ -38,7 +38,7 @@ export interface AutoSelectDecision {
 }
 
 /**
- * v3.215 — decision shape for the "force" auto-select path used by the
+ * v3.220 — decision shape for the "force" auto-select path used by the
  * checklist-open auto-switcher and the manual Detect button.
  *
  * Unlike {@link decideAutoSelect} (which short-circuits with `activateDeviceId
@@ -127,7 +127,7 @@ export function decideAutoSelect(
 }
 
 /**
- * v3.215 — "force" variant used by the per-track checklist-open auto-switch
+ * v3.220 — "force" variant used by the per-track checklist-open auto-switch
  * and the manual Detect button (voice 3129 / 3130).
  *
  * Differs from {@link decideAutoSelect} in two ways:

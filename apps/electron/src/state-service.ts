@@ -80,7 +80,7 @@ export const PER_TRACK_KEYS = [
   'eqLiveStates',
   'aiEqRecommendations',
   'songDawOffsets',
-  // v3.215 — per-song "auto-set listening device on checklist open" toggle
+  // v3.220 — per-song "auto-set listening device on checklist open" toggle
   // (voice 3129 / 3130). Default-ON-by-absence semantics: songs missing from
   // the map are treated as enabled, only explicit `false` entries opt out.
   // PER_TRACK so the split-to-disk pipeline hoists each entry into its own
@@ -282,7 +282,7 @@ function parsePerSongRestoreReferenceEnabled(
 }
 
 /**
- * v3.215 — parse `songAutoSetListeningDeviceOnOpen` (voice 3129 / 3130).
+ * v3.220 — parse `songAutoSetListeningDeviceOnOpen` (voice 3129 / 3130).
  *
  * Stored shape on disk: `Record<string, boolean>` where the key is a songId
  * and the value is the explicit per-song opt-out flag. Absent songs default
@@ -293,7 +293,7 @@ function parsePerSongRestoreReferenceEnabled(
  *
  * Tolerant of malformed inputs (non-object, missing keys, non-boolean
  * values) — falls back to `{}` so an upgrade to a stale file never crashes
- * the renderer. Pre-v3.215 state files have no entry → everything defaults
+ * the renderer. Pre-v3.220 state files have no entry → everything defaults
  * to ON, which matches the auto-on default for new behavior.
  */
 function parseSongAutoSetListeningDeviceOnOpen(
@@ -716,7 +716,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     // accidentally suppress startup warmup after upgrade.
     agentBackgroundPrecomputeEnabled: true,
     songDawOffsets: {},
-    // v3.215 — default empty map (everything defaults to ON via absence).
+    // v3.220 — default empty map (everything defaults to ON via absence).
     songAutoSetListeningDeviceOnOpen: {},
     lastFileDialogDirectory: '',
     // v3.39 Phase 1a — plugin hosting. pluginLibrary stays undefined until the
@@ -812,7 +812,7 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     // UI, so preserving OFF would silently block useful startup warmup.
     agentBackgroundPrecomputeEnabled: fallback.agentBackgroundPrecomputeEnabled,
     songDawOffsets: parseSongDawOffsets(raw.songDawOffsets),
-    // v3.215 — per-song auto-set-listening-device-on-open toggle. Default
+    // v3.220 — per-song auto-set-listening-device-on-open toggle. Default
     // ON via absence; only `false` entries opt the song out.
     songAutoSetListeningDeviceOnOpen: parseSongAutoSetListeningDeviceOnOpen(
       raw.songAutoSetListeningDeviceOnOpen,

@@ -854,7 +854,7 @@ const REFERENCE_TRACK_PER_SONG_KEY_PREFIX = 'producer-player.reference-track.';
 // user was currently A/B'ing against). The save behavior for references is
 // unchanged (still always-on); only the restore-on-switch behavior is gated.
 const RESTORE_REFERENCE_PER_SONG_KEY_PREFIX = 'producer-player.restore-reference.';
-// v3.215 — per-song opt-out toggle for "auto-set listening device on
+// v3.220 — per-song opt-out toggle for "auto-set listening device on
 // checklist open" (voice 3129 / 3130). Stored as '1' (ON) or '0' (OFF).
 // Default ON via ABSENCE: a key that's missing is treated as enabled. Only
 // explicit '0' values opt the song out, matching the contracts-side
@@ -2366,7 +2366,7 @@ function readRestoreReferenceForSong(songId: string): boolean {
 }
 
 /**
- * v3.215 — persist the per-song "auto-set listening device on checklist
+ * v3.220 — persist the per-song "auto-set listening device on checklist
  * open" toggle. Stored as '1' (ON) or '0' (OFF). Default ON via absence
  * (matching the contracts-layer sparse-map model). We still write '1' when
  * the user explicitly toggles ON after a previous OFF so the persisted
@@ -2389,10 +2389,10 @@ function persistAutoSetListeningDeviceForSong(
 }
 
 /**
- * v3.215 — read the per-song "auto-set listening device on checklist open"
+ * v3.220 — read the per-song "auto-set listening device on checklist open"
  * toggle. Default ON: absence (key missing) and any unknown value resolve to
  * `true`. Only explicit '0' returns `false`. This matches the contracts-side
- * default-by-absence semantics so pre-v3.215 state files automatically opt
+ * default-by-absence semantics so pre-v3.220 state files automatically opt
  * every song into the new behavior post-upgrade.
  */
 function readAutoSetListeningDeviceForSong(songId: string): boolean {
@@ -2949,7 +2949,7 @@ export function App(): JSX.Element {
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const [checklistModalSongId, setChecklistModalSongId] = useState<string | null>(null);
-  // v3.215 — UI-state mirror of the per-song "auto-set listening device on
+  // v3.220 — UI-state mirror of the per-song "auto-set listening device on
   // checklist open" toggle (voice 3129 / 3130). Default ON. We keep this in
   // a piece of React state (not just localStorage) so the checkbox is fully
   // controlled and re-renders crisply when the user toggles it OR when an
@@ -3118,7 +3118,7 @@ export function App(): JSX.Element {
       });
     }
   }, [listeningDevices, systemAudioDevice]);
-  // v3.215 — hydrate the per-song auto-set-listening-device toggle into
+  // v3.220 — hydrate the per-song auto-set-listening-device toggle into
   // local state whenever the checklist modal opens for a new song. The
   // toggle is rendered as a controlled checkbox so we read the persisted
   // value once on null→<songId> transition and let the user's clicks drive
@@ -3130,7 +3130,7 @@ export function App(): JSX.Element {
       readAutoSetListeningDeviceForSong(checklistModalSongId),
     );
   }, [checklistModalSongId]);
-  // v3.215 — re-sync the active listening device every time the checklist
+  // v3.220 — re-sync the active listening device every time the checklist
   // modal OPENS for any song, gated by the per-song "auto-set listening
   // device on open" toggle (default ON; voice 3129 / 3130). Replaces the
   // v3.211 implementation, which had two design issues that left Ethan on
@@ -3145,7 +3145,7 @@ export function App(): JSX.Element {
   //
   //   2. v3.211 short-circuited via `decideAutoSelect` when the matched
   //      device equaled the current active id (returning
-  //      `activateDeviceId=null`). Ethan's spec for v3.215 is "force it
+  //      `activateDeviceId=null`). Ethan's spec for v3.220 is "force it
   //      through to setActiveListeningDeviceId" — write through to defend
   //      against any drift between the chip state and the persisted active
   //      id, even when the matched device is already active. The toast is
@@ -5322,7 +5322,7 @@ export function App(): JSX.Element {
           persistGlobalReference(null);
         }
 
-        // v3.215 — hydrate per-song auto-set-listening-device toggles into
+        // v3.220 — hydrate per-song auto-set-listening-device toggles into
         // localStorage cache so `readAutoSetListeningDeviceForSong` returns
         // the persisted value when the first checklist modal opens.
         // Absent entries stay absent (which resolves to the ON default).
@@ -5495,7 +5495,7 @@ export function App(): JSX.Element {
         // v3.145 — legacy no-op field; force true so old paused/off state is migrated away.
         agentBackgroundPrecomputeEnabled: true,
         songDawOffsets,
-        // v3.215 — per-song "auto-set listening device on checklist open"
+        // v3.220 — per-song "auto-set listening device on checklist open"
         // toggles, mirrored from localStorage. Default ON via absence; only
         // explicit '0' entries are persisted as `false` so the map stays
         // sparse. Voice 3129 / 3130.
@@ -5765,7 +5765,7 @@ export function App(): JSX.Element {
         }
       }
 
-      // v3.215 — sync per-song auto-set-listening-device toggles into
+      // v3.220 — sync per-song auto-set-listening-device toggles into
       // localStorage on user-state changes (e.g. Import State).
       // Absent entries mean default ON (matching the contracts default-by-
       // absence model); only explicit `false` entries are written through
@@ -14458,7 +14458,7 @@ export function App(): JSX.Element {
   }
 
   /**
-   * v3.215 — toggle the per-song "auto-set listening device on checklist
+   * v3.220 — toggle the per-song "auto-set listening device on checklist
    * open" flag (voice 3129 / 3130). Updates both the controlled React state
    * (so the checkbox UI flips immediately) and the localStorage cache that
    * `readAutoSetListeningDeviceForSong` consults on the next modal-open
@@ -14477,7 +14477,7 @@ export function App(): JSX.Element {
   }
 
   /**
-   * v3.215 — manual Detect button handler (voice 3129 / 3130). Bypasses the
+   * v3.220 — manual Detect button handler (voice 3129 / 3130). Bypasses the
    * per-song checkbox (Ethan's spec: "Detect button bypasses the checkbox
    * — manual override always works") and forces an auto-select cycle using
    * the current OS audio output. Reads the device snapshot directly via
@@ -18440,7 +18440,7 @@ export function App(): JSX.Element {
                     );
                   })() : null}
                   {/*
-                    v3.215 — manual Detect button (voice 3129 / 3130).
+                    v3.220 — manual Detect button (voice 3129 / 3130).
                     Bypasses the per-song "auto-set on open" checkbox so
                     Ethan can always force a one-shot re-detect even with
                     auto-set disabled. Reads the OS audio output directly
@@ -18496,7 +18496,7 @@ export function App(): JSX.Element {
                 </div>
               </div>
               {/*
-                v3.215 — thin per-song "auto-set listening device on open"
+                v3.220 — thin per-song "auto-set listening device on open"
                 checkbox (voice 3130). Default ON. Sits between the
                 editor-actions row and the chip strip so it reads as a
                 modifier on the auto-switch behavior without dominating

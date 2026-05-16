@@ -19284,11 +19284,15 @@ export function App(): JSX.Element {
                             event.currentTarget.blur();
                           }
                         }}
-                        ref={(el) => {
-                          if (el) {
-                            autosizeChecklistTextarea(el);
-                          }
-                        }}
+                        // v3.214 — share the memoized textarea ref with the
+                        // per-track checklist (parity with ea1d1d2). An inline
+                        // ref callback is a new function on every render, so
+                        // React detaches+reattaches the ref each commit and
+                        // fires the autosize again, which jostles the parent
+                        // scroll region's scrollTop. With many items, the
+                        // jostle is visible as a scroll-to-bottom glitch
+                        // exactly when the user reaches the bottom edge.
+                        ref={handleChecklistItemTextareaRef}
                         data-testid="album-checklist-item-text"
                       />
                       <div className="checklist-item-actions">

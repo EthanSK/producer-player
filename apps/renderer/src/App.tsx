@@ -18653,15 +18653,19 @@ export function App(): JSX.Element {
                 the modal. The Detect button above always works regardless
                 of this checkbox state — this only gates the AUTOMATIC
                 run that fires whenever the checklist modal opens.
+
+                v3.223 — compact label "Auto set" + CSS hover tooltip
+                (voice 3151). Was eating the full row width with the
+                long "Auto-set listening device on open" label; now
+                renders inline-sized so the chip strip / other elements
+                aren't pushed around. Detailed explanation moved into
+                the instant-fade popover (same pattern as Save Copy
+                button / V·WAV pill).
               */}
               <label
                 className="listening-device-auto-set-toggle"
                 data-testid="listening-device-auto-set-toggle"
-                title={
-                  checklistModalAutoSetListeningDeviceEnabled
-                    ? 'Auto-set the listening device when this checklist opens. Click to disable for this track.'
-                    : 'Auto-set is OFF for this track. Click to re-enable. The Detect button still works manually.'
-                }
+                aria-describedby="listening-device-auto-set-toggle-popover"
               >
                 <input
                   type="checkbox"
@@ -18676,7 +18680,21 @@ export function App(): JSX.Element {
                   data-testid="listening-device-auto-set-toggle-input"
                 />
                 <span className="listening-device-auto-set-toggle-text">
-                  Auto-set listening device on open
+                  Auto set
+                </span>
+                <span
+                  id="listening-device-auto-set-toggle-popover"
+                  className="main-list-row-metadata-popover listening-device-auto-set-toggle-popover"
+                  role="tooltip"
+                >
+                  <span className="main-list-row-metadata-popover-label">
+                    Auto set listening device
+                  </span>
+                  <span className="listening-device-auto-set-toggle-popover-body">
+                    {checklistModalAutoSetListeningDeviceEnabled
+                      ? 'When this checklist opens, the listening device is auto-set based on the current system audio output. Uncheck to disable for this track — the Detect button above still works manually.'
+                      : 'Auto-set is OFF for this track when its checklist opens. Re-check to enable. The Detect button above still works manually regardless of this setting.'}
+                  </span>
                 </span>
               </label>
               <div

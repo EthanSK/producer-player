@@ -4256,9 +4256,19 @@ body.is-dragging-checklist-timestamp * {
  * between the editor-actions row and the chip strip. Kept compact so it
  * reads as a modifier on the auto-switch behavior rather than a primary
  * control — small checkbox + 11px label, single row, no border. Voice 3130.
+ *
+ * v3.223 — shrink to inline-sized "Auto set" pill with hover popover
+ * (voice 3151). The label was previously taking the full row width
+ * because the parent flex row stretched the inline-flex to fill —
+ * `align-self: flex-start` + `width: max-content` pins it to its own
+ * content size so the chip strip / other elements next to it don't get
+ * shoved around. `position: relative` anchors the absolute popover.
  */
 .listening-device-auto-set-toggle {
+  position: relative;
   display: inline-flex;
+  align-self: flex-start;
+  width: max-content;
   align-items: center;
   gap: 6px;
   margin: 4px 0 0;
@@ -4284,6 +4294,30 @@ body.is-dragging-checklist-timestamp * {
 
 .listening-device-auto-set-toggle:hover {
   color: var(--text);
+}
+
+/* v3.223 — popover for the compact "Auto set" label. Inherits the
+ * shared instant-fade tooltip from `.main-list-row-metadata-popover`,
+ * anchored LEFT-aligned under the label (it sits on the LEFT side of
+ * the modal so anchoring right would clip on narrow widths). */
+.listening-device-auto-set-toggle-popover {
+  right: auto;
+  left: 0;
+  max-width: min(360px, calc(100vw - 24px));
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.listening-device-auto-set-toggle-popover-body {
+  color: var(--text-main);
+  font-weight: 500;
+  white-space: normal;
+}
+
+.listening-device-auto-set-toggle:hover .listening-device-auto-set-toggle-popover,
+.listening-device-auto-set-toggle:focus-within .listening-device-auto-set-toggle-popover {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .listening-device-mode-hint {

@@ -39,9 +39,9 @@ const HIGH_BAND_CUTOFF_HZ = 4_000;
 const previewAnalysisQueue = new AnalysisQueue({
   concurrency: 1,
   label: 'preview-analysis',
-  // Item #14 (v3.118) — allow the user-selected track to bypass the bg
-  // decoder when bg precompute is mid-decode. Cap at 2 to keep peak memory
-  // bounded (full-track decode can be hundreds of MB).
+  // Item #14/v3.215 — user-selected preview decode first interrupts
+  // cancellable lower-priority preview work; bounded bypass remains as a
+  // fallback if the browser does not stop an in-flight decode promptly.
   maxUserBypassSlots: 2,
 });
 
@@ -60,6 +60,42 @@ function ensureNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw createAbortError();
   }
+}
+
+function createCompositeAbortSignal(
+  signals: Array<AbortSignal | undefined>
+): { signal: AbortSignal; cleanup: () => void } {
+  const activeSignals = signals.filter((candidate): candidate is AbortSignal =>
+    Boolean(candidate)
+  );
+  if (activeSignals.length === 0) {
+    const controller = new AbortController();
+    return { signal: controller.signal, cleanup: () => undefined };
+  }
+
+  const controller = new AbortController();
+  const abort = (): void => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
+  };
+
+  for (const activeSignal of activeSignals) {
+    if (activeSignal.aborted) {
+      abort();
+      break;
+    }
+    activeSignal.addEventListener('abort', abort, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      for (const activeSignal of activeSignals) {
+        activeSignal.removeEventListener('abort', abort);
+      }
+    },
+  };
 }
 
 function clampUnit(value: number): number {
@@ -88,10 +124,13 @@ function amplitudeToDbfs(value: number): number {
 
 // Internal: enqueue a preview-analysis task with the shared priority queue.
 function runPreviewAnalysis<T>(
-  task: () => Promise<T>,
+  task: (signal: AbortSignal) => Promise<T>,
   options: { priority?: AnalysisPriority; key?: string; label?: string } = {}
 ): Promise<T> {
-  return previewAnalysisQueue.enqueue(task, options);
+  return previewAnalysisQueue.enqueue(task, {
+    ...options,
+    cancellable: true,
+  });
 }
 
 /**
@@ -109,11 +148,10 @@ export function promotePreviewAnalysis(
 }
 
 /**
- * v3.190 — Demote a queued preview analysis to a lower priority. Called by
- * App.tsx when the user rapidly switches from track A to track B: A's still-
- * pending USER_SELECTED preview decode is now stale and should stop holding
- * a bypass slot away from B. The decode itself is still useful (the user
- * might switch back), so we drop it to NEIGHBOR instead of cancelling.
+ * v3.190/v3.215 — Demote preview analysis to a lower priority. Called by
+ * App.tsx when the user rapidly switches from track A to track B: A's stale
+ * USER_SELECTED preview should stop competing with B and, if already running,
+ * become eligible for B's interrupt path.
  */
 export function demotePreviewAnalysis(
   key: string,
@@ -321,24 +359,33 @@ export async function analyzeTrackFromUrl(
   signal?: AbortSignal,
   options: { priority?: AnalysisPriority; key?: string; label?: string } = {}
 ): Promise<TrackAnalysisResult> {
-  return runPreviewAnalysis(async () => {
-    ensureNotAborted(signal);
-
-    const response = await fetch(url, { signal });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch analysis source (${response.status}).`);
-    }
-
-    const bytes = await response.arrayBuffer();
-    ensureNotAborted(signal);
-
-    const context = new AudioContext();
+  return runPreviewAnalysis(async (queueSignal) => {
+    const composite = createCompositeAbortSignal([signal, queueSignal]);
+    let context: AudioContext | null = null;
+    const closeContextOnAbort = (): void => {
+      if (context) {
+        void context.close().catch(() => undefined);
+      }
+    };
+    composite.signal.addEventListener('abort', closeContextOnAbort, { once: true });
 
     try {
+      ensureNotAborted(composite.signal);
+
+      const response = await fetch(url, { signal: composite.signal });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch analysis source (${response.status}).`);
+      }
+
+      const bytes = await response.arrayBuffer();
+      ensureNotAborted(composite.signal);
+
+      context = new AudioContext();
+
       // Pass the fetched buffer directly so we do not allocate a second
       // full-size copy of long audio files right before decode.
       const buffer = await context.decodeAudioData(bytes);
-      ensureNotAborted(signal);
+      ensureNotAborted(composite.signal);
 
       const mono = createMonoData(buffer);
       const { peakDbfs, integratedLufsEstimate } = calculatePeakAndIntegrated(mono);
@@ -366,8 +413,17 @@ export async function analyzeTrackFromUrl(
         clipCount,
         waveformPeaks,
       };
+    } catch (error) {
+      if (composite.signal.aborted) {
+        throw createAbortError();
+      }
+      throw error;
     } finally {
-      void context.close().catch(() => undefined);
+      composite.signal.removeEventListener('abort', closeContextOnAbort);
+      composite.cleanup();
+      if (context) {
+        void context.close().catch(() => undefined);
+      }
     }
   }, options);
 }

@@ -1171,10 +1171,9 @@ function cacheMasteringAnalysisValue<T>(
 const MEASURED_ANALYSIS_QUEUE = new AnalysisQueue({
   concurrency: 2,
   label: 'measured-analysis',
-  // Item #14 (v3.118) — let user-selected ffmpeg jobs bypass the cap when
-  // both regular slots are taken by bg precompute. ffmpeg is cheap enough
-  // that 3 extra concurrent runs is fine on modern hardware; the bg work
-  // continues in parallel so the precompute backlog doesn't stall.
+  // Item #14/v3.215 — USER_SELECTED ffmpeg jobs interrupt lower-priority
+  // warmup first; the bounded bypass cap remains only as a fallback if a
+  // running task cannot be cancelled promptly.
   maxUserBypassSlots: 3,
 });
 
@@ -1306,9 +1305,9 @@ function promoteMeasuredAnalysis(
 /**
  * v3.190 — Demote a queued/in-flight measured-analysis job. Used when the
  * user rapidly switches from track A to track B: A's USER_SELECTED measured
- * job is now stale and should stop hogging a bypass slot away from B. We
- * demote A to NEIGHBOR rather than cancel because the result is still cached
- * and useful if the user switches back.
+ * job is now stale and should stop competing with B. We demote A to NEIGHBOR;
+ * if B arrives while A is still running, the queue can interrupt A and requeue
+ * it so B starts immediately.
  */
 function demoteMeasuredAnalysis(
   cacheKey: string,

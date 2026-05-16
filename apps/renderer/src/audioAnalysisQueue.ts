@@ -7,16 +7,14 @@
 // large albums with rapid switching mid-preload.
 //
 // Item #14 (v3.118) — bug fix: foreground analysis was still being blocked by
-// background precompute. The `promote()` mechanism only re-orders PENDING
+// background precompute. The `promote()` mechanism only re-ordered PENDING
 // tasks; if a background task was already running (concurrency=1 preview, or
 // both concurrency=2 measured slots full), a user-priority job had to wait for
-// the running background job(s) to finish. Symptom: integrated LUFS, sample
-// rate, version-history all stuck on "loading" right after a track switch
-// while the precompute backlog churned. Fix below: user-priority enqueues
-// BYPASS the concurrency cap (up to `maxUserBypassSlots`) so a click never
-// stalls behind bg work in flight. Bg tasks keep running in parallel; the
-// renderer-state cancellation guard in App.tsx stops their stale results from
-// clobbering the user-selected view.
+// the running background job(s) to finish. Later versions added cancellable
+// preemption, but the slot was only freed after the aborted task's promise
+// rejected. v3.215 makes USER_SELECTED a real interrupt: lower-priority
+// cancellable work is synchronously removed from active slots, aborted, and
+// requeued so the user task starts in the freed slot immediately.
 //
 // This pool is the throttle + priority layer used by:
 //   - the renderer-side `analyzeTrackFromUrl` decoder (concurrency=1, memory-
@@ -28,9 +26,9 @@
 //   - lower priority value runs first (0 = user-selected, 1 = neighbor, 2 = bg)
 //   - within the same priority level, tasks are FIFO
 //   - concurrent task cap is enforced for non-user-priority tasks
-//   - user-priority (0) tasks BYPASS the cap when all slots are taken by lower-
-//     priority work, up to `maxUserBypassSlots` extra parallel jobs (default 3
-//     — enough for typical click-bursts without OOMing the WAV decoder pool)
+//   - user-priority (0) tasks interrupt lower-priority cancellable work
+//     immediately; non-cancellable work falls back to the older bounded bypass
+//     path so a click still does not wait behind it
 //   - tasks de-dupe by `key` when provided: identical pending key returns the
 //     in-flight promise instead of enqueueing a duplicate analysis job
 //   - calling `promote(key, priority)` re-orders an already-queued task (no-op
@@ -59,10 +57,9 @@ interface QueuedTask<T> {
   insertionOrder: number;
   /**
    * v3.195 — task receives an AbortSignal so callers that support cancellation
-   * (notably the ffmpeg measured-analysis path) can react to a USER preemption.
-   * Tasks that ignore the signal (preview decode, Worker) keep working until
-   * natural settle, which is fine because the queue's pause-after-cancel
-   * scheduling guarantees the USER job still runs ASAP via bypass.
+   * (notably ffmpeg measured analysis and preview fetch/decode) can react to
+   * a USER preemption. Tasks that ignore the signal may keep working until
+   * natural settle, but their queue slot is already released for USER work.
    */
   task: (signal: AbortSignal) => Promise<T>;
   resolve: (value: T) => void;
@@ -70,8 +67,8 @@ interface QueuedTask<T> {
   /**
    * v3.195 — when true, a USER preemption may abort this running task (via
    * the AbortController below) AND requeue it at its current priority so the
-   * work isn't lost. When false, the running task is left alone — USER work
-   * runs via bypass instead. Default: false (additive, opt-in).
+   * work isn't lost. When false, the running task is left alone and USER work
+   * may use the bounded bypass fallback instead. Default: false (opt-in).
    */
   cancellable: boolean;
   /**
@@ -85,6 +82,18 @@ interface QueuedTask<T> {
    * task as "to-be-requeued" rather than "to-be-failed".
    */
   preempted: boolean;
+  /**
+   * v3.215 — true once preemption has already freed this run's queue slot.
+   * The underlying promise may still settle later; settlement must not touch
+   * active counters a second time or requeue a duplicate retry.
+   */
+  releasedForPreemption: boolean;
+  /**
+   * v3.215 — closure installed by startTask so preemption can synchronously
+   * clear the task timeout, release queue bookkeeping, and requeue a retry
+   * without waiting for the underlying abort rejection to arrive.
+   */
+  releaseForPreemption: (() => boolean) | null;
 }
 
 /**
@@ -256,10 +265,9 @@ export interface EnqueueOptions {
    * for honoring its AbortSignal (e.g. by killing a child process). The
    * queue will silently requeue cancelled tasks at their original priority.
    *
-   * Default: false. Opt-in for the measured-analysis path which can kill
-   * the underlying ffmpeg child; the preview-analysis path (decodeAudioData)
-   * cannot reliably cancel mid-flight so it stays false and relies on the
-   * USER bypass slot instead.
+   * Default: false. Opt-in for analysis paths that can react to cancellation
+   * (ffmpeg kills its child process; preview analysis aborts fetch and closes
+   * its AudioContext).
    */
   cancellable?: boolean;
 }
@@ -422,6 +430,8 @@ export class AnalysisQueue {
         cancellable,
         abortController: null,
         preempted: false,
+        releasedForPreemption: false,
+        releaseForPreemption: null,
       };
 
       this.pending.push(queued as QueuedTask<unknown>);
@@ -455,14 +465,40 @@ export class AnalysisQueue {
    * cancelled, or never enqueued. Lower priority values run sooner.
    */
   promote(key: string, priority: AnalysisPriority): void {
+    let changed = false;
+
+    for (const [runningTask, slot] of this.runningTasks.entries()) {
+      if (runningTask.key !== key) continue;
+      if (priority >= runningTask.priority) continue;
+
+      const wasNonUser = runningTask.priority !== ANALYSIS_PRIORITY_USER_SELECTED;
+      const isNowUser = priority === ANALYSIS_PRIORITY_USER_SELECTED;
+      const oldBucket = this.priorityBucket(runningTask.priority);
+      const newBucket = this.priorityBucket(priority);
+
+      runningTask.priority = priority;
+      this.activeByPriority[oldBucket] -= 1;
+      this.activeByPriority[newBucket] += 1;
+
+      if (slot === 'regular' && wasNonUser && isNowUser) {
+        this.nonUserActive -= 1;
+      }
+
+      changed = true;
+    }
+
     if (!this.runningKeys.has(key)) {
       for (const task of this.pending) {
         if (task.key === key && priority < task.priority) {
           task.priority = priority;
+          changed = true;
         }
       }
-      // After a promote, a user-priority job may now be eligible to bypass
-      // the concurrency cap. Re-evaluate the start loop.
+    }
+
+    if (changed) {
+      // After a promote, a user-priority job may now be eligible to interrupt
+      // lower-priority running work, or to start in a regular/bypass slot.
       this.maybeStart();
     }
   }
@@ -475,9 +511,8 @@ export class AnalysisQueue {
    * USER_SELECTED queue entry is now stale: B is what they're actually
    * waiting for. If A's job is still PENDING, we demote it (e.g. to
    * NEIGHBOR) so it stops competing with B for a bypass slot. If A's job is
-   * already RUNNING (in a bypass slot), we can't pre-empt it mid-DSP, but
-   * we can mark it non-user so it stops counting against the bypass cap
-   * for new clicks — that means click C's bypass slot frees up correctly.
+   * already RUNNING, we mark it non-user so a newer USER click can interrupt
+   * it if the task is cancellable (or bypass it if not).
    *
    * Semantics:
    *   - If the keyed task is pending and the new priority is HIGHER (numeric
@@ -485,11 +520,8 @@ export class AnalysisQueue {
    *     loop. No-op if new priority is lower or equal (use `promote` for
    *     that direction).
    *   - If the keyed task is running, we update bookkeeping so the slot
-   *     accounting reflects the new priority bucket (decrement
-   *     `nonUserActive` if we just dropped out of user-priority; decrement
-   *     `userBypassActive` if it was a bypass slot). The task itself keeps
-   *     running — no AbortController kill path here, identical to the
-   *     promote contract.
+   *     accounting reflects the new priority bucket. The task itself keeps
+   *     running until a later USER enqueue decides whether to interrupt it.
    *   - No-op if the key is not known.
    *
    * Returns true if any in-flight or pending task was affected.
@@ -507,8 +539,8 @@ export class AnalysisQueue {
     }
 
     // Running tasks: update bookkeeping so subsequent maybeStart() decisions
-    // see the correct counts. We can't abort the underlying task; it will
-    // continue but no longer holds a "user-priority" claim against the cap.
+    // see the correct counts. A later USER enqueue can now preempt this
+    // demoted task if it is cancellable.
     for (const [runningTask, slot] of this.runningTasks.entries()) {
       if (runningTask.key !== key) continue;
       if (priority <= runningTask.priority) continue;
@@ -654,6 +686,36 @@ export class AnalysisQueue {
     return next;
   }
 
+  private popNextWithPriority(
+    priority: AnalysisPriority
+  ): QueuedTask<unknown> | undefined {
+    let bestIndex = -1;
+    for (let i = 0; i < this.pending.length; i += 1) {
+      const task = this.pending[i];
+      if (task.priority !== priority) {
+        continue;
+      }
+      if (
+        bestIndex === -1 ||
+        this.comparePending(task, this.pending[bestIndex]) < 0
+      ) {
+        bestIndex = i;
+      }
+    }
+    if (bestIndex === -1) {
+      return undefined;
+    }
+    const [next] = this.pending.splice(bestIndex, 1);
+    return next;
+  }
+
+  private popNextRegularSlotTask(): QueuedTask<unknown> | undefined {
+    if (this.activeByPriority.user > 0) {
+      return this.popNextWithPriority(ANALYSIS_PRIORITY_USER_SELECTED);
+    }
+    return this.popNext();
+  }
+
   private peekHighestPendingPriority(): AnalysisPriority | null {
     if (this.pending.length === 0) {
       return null;
@@ -667,7 +729,40 @@ export class AnalysisQueue {
     return best;
   }
 
+  private hasUserPriorityWork(): boolean {
+    return (
+      this.activeByPriority.user > 0 ||
+      this.peekHighestPendingPriority() === ANALYSIS_PRIORITY_USER_SELECTED
+    );
+  }
+
+  private releaseRunningTask(next: QueuedTask<unknown>): void {
+    const currentSlot = this.runningTasks.get(next);
+    if (!currentSlot) {
+      return;
+    }
+
+    const currentBucket = this.priorityBucket(next.priority);
+    const currentIsNonUser = next.priority !== ANALYSIS_PRIORITY_USER_SELECTED;
+
+    if (currentSlot === 'user-bypass') {
+      this.userBypassActive -= 1;
+    } else {
+      this.active -= 1;
+      if (currentIsNonUser) {
+        this.nonUserActive -= 1;
+      }
+    }
+    this.activeByPriority[currentBucket] -= 1;
+    this.runningTasks.delete(next);
+    if (next.key !== null) {
+      this.runningKeys.delete(next.key);
+    }
+  }
+
   private startTask(next: QueuedTask<unknown>, isUserBypass: boolean): void {
+    next.releasedForPreemption = false;
+    next.releaseForPreemption = null;
     const isNonUser = next.priority !== ANALYSIS_PRIORITY_USER_SELECTED;
     const activePriorityBucket = this.priorityBucket(next.priority);
     if (isUserBypass) {
@@ -711,22 +806,11 @@ export class AnalysisQueue {
       settled = true;
       action();
 
-      const currentSlot = this.runningTasks.get(next) ?? (isUserBypass ? 'user-bypass' : 'regular');
-      const currentBucket = this.priorityBucket(next.priority);
-      const currentIsNonUser = next.priority !== ANALYSIS_PRIORITY_USER_SELECTED;
-
-      if (currentSlot === 'user-bypass') {
-        this.userBypassActive -= 1;
-      } else {
-        this.active -= 1;
-        if (currentIsNonUser) {
-          this.nonUserActive -= 1;
-        }
+      if (!next.releasedForPreemption) {
+        this.releaseRunningTask(next);
       }
-      this.activeByPriority[currentBucket] -= 1;
-      this.runningTasks.delete(next);
+      next.releaseForPreemption = null;
       if (next.key !== null) {
-        this.runningKeys.delete(next.key);
         // v3.201 — Finding 4 fix: when a task is being preempted + requeued,
         // we MUST keep its inflightByKey entry alive across the cancel so
         // that a rapid second enqueue for the same key dedupes to the SAME
@@ -787,6 +871,20 @@ export class AnalysisQueue {
       }, effectiveTimeoutMs);
     }
 
+    next.releaseForPreemption = (): boolean => {
+      if (settled || next.releasedForPreemption) {
+        return false;
+      }
+      next.preempted = true;
+      next.releasedForPreemption = true;
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle);
+      }
+      this.releaseRunningTask(next);
+      this.requeuePreemptedTask(next);
+      return true;
+    };
+
     Promise.resolve()
       .then(() => next.task(abortSignal))
       .then(
@@ -839,7 +937,9 @@ export class AnalysisQueue {
           // settles.
           if (next.preempted) {
             settle(() => {
-              this.requeuePreemptedTask(next);
+              if (!next.releasedForPreemption) {
+                this.requeuePreemptedTask(next);
+              }
             });
             return;
           }
@@ -855,10 +955,17 @@ export class AnalysisQueue {
    * settles with the eventual result.
    */
   private requeuePreemptedTask(task: QueuedTask<unknown>): void {
-    // Reset preemption state so a fresh AbortController is created when
-    // the task starts again.
-    task.preempted = false;
-    task.abortController = null;
+    // Clone rather than reusing the still-settling task object. v3.215 can
+    // requeue immediately at abort time, before the old promise has rejected;
+    // the old run must remain marked preempted so its eventual settle is a
+    // no-op, while the retry gets fresh abort/bookkeeping state.
+    const retry: QueuedTask<unknown> = {
+      ...task,
+      abortController: null,
+      preempted: false,
+      releasedForPreemption: false,
+      releaseForPreemption: null,
+    };
     // Re-insert at the FRONT of insertion order within its priority bucket:
     // we use a fresh insertionOrder that sorts AFTER currently-pending tasks
     // at the same priority but BEFORE tasks at strictly LOWER priority. The
@@ -866,9 +973,8 @@ export class AnalysisQueue {
     // insertion order so it wins same-priority FIFO against newer entries.
     // Since insertion order is monotonically increasing, decrement below the
     // current min.
-    task.insertionOrder = this.computeRequeueInsertionOrder();
-    this.pending.push(task);
-    this.maybeStart();
+    retry.insertionOrder = this.computeRequeueInsertionOrder();
+    this.pending.push(retry);
   }
 
   private computeRequeueInsertionOrder(): number {
@@ -882,26 +988,15 @@ export class AnalysisQueue {
   }
 
   /**
-   * v3.195 — Preempt all running NEIGHBOR/BG tasks that are cancellable so
-   * one (or more) pending USER-priority tasks can grab a regular slot.
-   * Non-cancellable running tasks are left alone (they keep their slot until
-   * natural settle).
+   * v3.215 — Preempt all running NEIGHBOR/BG tasks that are cancellable as
+   * soon as USER work is pending or active. Slot bookkeeping is released
+   * synchronously; the underlying task receives AbortSignal immediately and
+   * its caller-facing promise stays pending for the retry.
    *
    * Returns the number of tasks preempted.
    */
   private preemptCancellableForUser(): number {
-    if (this.peekHighestPendingPriority() !== ANALYSIS_PRIORITY_USER_SELECTED) {
-      return 0;
-    }
-    // Count how many USER jobs are pending so we don't preempt more slots
-    // than we need (avoids unnecessary cancellation churn).
-    let userPendingCount = 0;
-    for (const t of this.pending) {
-      if (t.priority === ANALYSIS_PRIORITY_USER_SELECTED) {
-        userPendingCount += 1;
-      }
-    }
-    if (userPendingCount === 0) {
+    if (!this.hasUserPriorityWork()) {
       return 0;
     }
 
@@ -920,8 +1015,10 @@ export class AnalysisQueue {
     candidates.sort((a, b) => b.priority - a.priority);
 
     for (const candidate of candidates) {
-      if (preempted >= userPendingCount) break;
-      candidate.preempted = true;
+      const released = candidate.releaseForPreemption?.() ?? false;
+      if (!released) {
+        continue;
+      }
       try {
         candidate.abortController?.abort();
       } catch {
@@ -934,61 +1031,19 @@ export class AnalysisQueue {
   }
 
   private maybeStart(): void {
+    // Phase 0 — true interrupt. If USER work exists, synchronously evict all
+    // cancellable lower-priority regular-slot tasks before admitting anything
+    // else. This frees CPU/memory pressure immediately instead of waiting for
+    // an async AbortError to unwind.
+    this.preemptCancellableForUser();
+
     // Phase 1 — fill regular concurrency slots in priority order.
     while (this.active < this.concurrency && this.pending.length > 0) {
-      const next = this.popNext();
+      const next = this.popNextRegularSlotTask();
       if (!next) {
         return;
       }
       this.startTask(next, false);
-    }
-
-    // v3.195 — Phase 1.5: PREEMPTION. If a USER-priority task is pending and
-    // all regular slots are held by lower-priority work, try to cancel a
-    // cancellable NEIGHBOR/BG task to free a slot for USER. The aborted
-    // task's natural rejection will trigger `requeuePreemptedTask` which
-    // re-inserts it at its original priority for later. This is what
-    // delivers the "click instantly" UX during cold-launch warmup floods.
-    //
-    // Crucially: we run preemption BEFORE bypass so the USER task can take
-    // a real regular slot rather than running in parallel with bg work.
-    // Bypass remains as a fallback for the non-cancellable case.
-    let preemptedThisCall = 0;
-    if (
-      this.peekHighestPendingPriority() === ANALYSIS_PRIORITY_USER_SELECTED &&
-      this.active >= this.concurrency &&
-      this.nonUserActive > 0
-    ) {
-      preemptedThisCall = this.preemptCancellableForUser();
-      // The aborted tasks will free their slots asynchronously via their
-      // rejection path → `settle()` → `requeuePreemptedTask` →
-      // `maybeStart()`. The next maybeStart() (triggered by that settle)
-      // is where the pending USER task actually starts in the freed slot.
-    }
-
-    // v3.201 — Finding 2 fix: when preemption JUST fired in THIS
-    // `maybeStart()` call, we must NOT also run the bypass loop here,
-    // because:
-    //
-    //   - Preemption freed (or is freeing) `preemptedThisCall` regular
-    //     slots. Those slots are intended to serve the pending USER work.
-    //   - If we ALSO run bypass in this same call, the pending USER task
-    //     gets started in a bypass slot. Then when the preempted child's
-    //     async settle fires, the freed regular slot's NEXT maybeStart()
-    //     Phase 1 picks up the next NEIGHBOR (USER has already started),
-    //     refilling the supposedly-freed slot. Net = 0 reduction in CPU
-    //     pressure — preemption is defeated.
-    //
-    // By returning here we let the next `maybeStart()` (triggered by the
-    // preempted task's settle) start the USER work in the actual freed
-    // regular slot. Production has `maxUserBypassSlots: 3` so this race
-    // is the realistic case — the bypass-disabled tests hid it.
-    //
-    // Non-cancellable case: if preempt fires for 0 (e.g. running tasks
-    // are all non-cancellable, or already preempted), `preemptedThisCall`
-    // is 0 and we fall through to bypass as before.
-    if (preemptedThisCall > 0) {
-      return;
     }
 
     // Phase 2 — Item #14 user-priority bypass. If we have a pending

@@ -32,18 +32,40 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export interface SystemAudioDevice {
   /**
-   * Stable identifier for the system's current default audio output. We use
-   * the `groupId` of the entry whose `deviceId === 'default'` because the
-   * literal `deviceId` of that entry is the (origin-scoped, opaque) string
-   * "default", which is the same across machines and not useful for
-   * associating with a saved listening device. `groupId` resolves to the
-   * underlying real device and is stable across sessions on the same
-   * machine.
+   * Stable identifier for the system's current default audio output.
+   *
+   * v3.213 — we now prefer the `deviceId` of the underlying real entry
+   * (the non-"default" `audiooutput` that matches the "default" entry's
+   * `groupId`). Empirical evidence from the Mac Mini (E2E run, 2026-05-15):
+   * on consecutive app launches with the SAME physical device selected,
+   * Chromium's `groupId` for that device CHANGES (e.g.
+   * `0fb8b3ad...` → `666c8ced...`) while the entry's actual `deviceId`
+   * stays stable (`c2133aad...`). Before v3.213 we persisted the volatile
+   * `groupId` as the listening-device link key, so links broke on every
+   * launch.
+   *
+   * Falls back, in order:
+   *   1. matched non-default entry's `deviceId` (preferred, stable)
+   *   2. the resolved `groupId` of the "default" entry (legacy fallback;
+   *      kept so we can fall back when the matched entry can't be found,
+   *      e.g. permission gate before labels are unlocked).
+   *   3. the "default" entry's literal `deviceId` (last resort).
    *
    * Empty string when no audio outputs are visible (e.g. permission not
    * granted, no enumerate result).
    */
   deviceId: string;
+  /**
+   * v3.213 — secondary identifier carrying the resolved `groupId` of the
+   * "default" entry. Exposed so the auto-select matcher can fall back to
+   * legacy-format link data that was persisted as a `groupId` value before
+   * the v3.213 fix. Pre-v3.213 link records have `systemDeviceId` set to
+   * the (volatile) groupId — translate-on-read happens by trying the
+   * matcher against this field when the primary `deviceId` doesn't match.
+   *
+   * Empty string when no audio outputs are visible.
+   */
+  groupId: string;
   /**
    * Human-readable name of the device (e.g. "MacBook Pro Speakers", "AirPods
    * Pro"). Empty string when labels are unavailable (permission not granted)
@@ -88,7 +110,7 @@ export interface UseSystemAudioDeviceOptions {
   onChange?: (device: SystemAudioDevice) => void;
 }
 
-const EMPTY_DEVICE: SystemAudioDevice = { deviceId: '', label: '' };
+const EMPTY_DEVICE: SystemAudioDevice = { deviceId: '', groupId: '', label: '' };
 
 /**
  * Read the current default audio output device from `enumerateDevices`.
@@ -111,9 +133,10 @@ export async function readSystemAudioDevice(): Promise<SystemAudioDevice> {
       return EMPTY_DEVICE;
     }
     // Chromium exposes a `deviceId === 'default'` entry whose `groupId` is
-    // the real underlying device's group. Prefer that — it's how Chromium
-    // signals "this is what audio is currently going to". Fall back to the
-    // first output if `default` isn't present (rare; some Linux distros).
+    // the real underlying device's group. Use that groupId to find the
+    // matching non-default audio output entry — its `deviceId` is the
+    // stable identifier across sessions (v3.213 bug fix; pre-v3.213 we
+    // persisted the volatile `groupId` instead and links broke on restart).
     const defaultEntry = outputs.find((d) => d.deviceId === 'default') ?? outputs[0];
     const resolvedGroupId = defaultEntry.groupId;
     // The `default` entry's own label is usually "Default - <name>". Prefer
@@ -123,8 +146,19 @@ export async function readSystemAudioDevice(): Promise<SystemAudioDevice> {
       (d) => d.deviceId !== 'default' && d.groupId === resolvedGroupId
     );
     const label = (match?.label ?? defaultEntry.label ?? '').trim();
+    // Prefer the matched non-default entry's `deviceId` (stable). Fall
+    // back to the resolved groupId only when no match exists (e.g.
+    // permission-gated empty-label scenario where the default entry is
+    // the only one Chromium will surface). Last resort: defaultEntry's
+    // literal `deviceId` (typically the opaque "default" string).
+    const stableDeviceId =
+      (match?.deviceId && match.deviceId !== 'default' ? match.deviceId : '') ||
+      resolvedGroupId ||
+      defaultEntry.deviceId ||
+      '';
     return {
-      deviceId: resolvedGroupId || defaultEntry.deviceId || '',
+      deviceId: stableDeviceId,
+      groupId: resolvedGroupId || '',
       label,
     };
   } catch {
@@ -191,7 +225,10 @@ export function useSystemAudioDevice(
       const next = await readSystemAudioDevice();
       if (cancelled) return;
       const previous = lastDeviceRef.current;
-      const changed = next.deviceId !== previous.deviceId || next.label !== previous.label;
+      const changed =
+        next.deviceId !== previous.deviceId ||
+        next.groupId !== previous.groupId ||
+        next.label !== previous.label;
       if (!changed) {
         return;
       }
@@ -262,7 +299,12 @@ export function useSystemAudioDevice(
   // updates it on real changes), and `refresh` is a stable useCallback, so
   // this memo's deps are accurate.
   return useMemo<SystemAudioDeviceState>(
-    () => ({ deviceId: device.deviceId, label: device.label, refresh }),
+    () => ({
+      deviceId: device.deviceId,
+      groupId: device.groupId,
+      label: device.label,
+      refresh,
+    }),
     [device, refresh]
   );
 }

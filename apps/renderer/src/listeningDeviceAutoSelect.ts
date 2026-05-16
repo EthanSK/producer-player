@@ -8,6 +8,17 @@ import type { ListeningDevice } from '@producer-player/contracts';
 
 export interface SystemDeviceSnapshot {
   deviceId: string;
+  /**
+   * v3.213 — optional secondary identifier carrying the resolved Chromium
+   * `groupId` for the current default audio output. The matcher falls back
+   * to comparing against this value when a link record's `systemDeviceId`
+   * doesn't match `deviceId` (pre-v3.213 records were keyed by groupId,
+   * which is volatile across launches — see useSystemAudioDevice.ts).
+   *
+   * Optional so existing call sites don't have to thread it through;
+   * absent groupId = no fallback comparison performed.
+   */
+  groupId?: string;
   label: string;
 }
 
@@ -53,16 +64,29 @@ export function decideAutoSelect(
   currentActiveListeningDeviceId: string | null
 ): AutoSelectDecision {
   const target = systemDevice.deviceId.trim();
-  if (target.length === 0) {
+  const groupTarget = (systemDevice.groupId ?? '').trim();
+  if (target.length === 0 && groupTarget.length === 0) {
     return { activateDeviceId: null, matchedDevice: null };
   }
 
-  const match = listeningDevices.find(
-    (device) =>
-      typeof device.systemDeviceId === 'string' &&
-      device.systemDeviceId.trim().length > 0 &&
-      device.systemDeviceId === target
-  );
+  // v3.213 — match on `deviceId` first (the stable identifier post-fix).
+  // Fall back to matching on `groupId` for legacy link records that were
+  // persisted by pre-v3.213 builds using the volatile groupId value.
+  // We never match a stored value against BOTH — first hit wins, with
+  // deviceId taking precedence so a fresh post-v3.213 link is always
+  // preferred over a stale legacy groupId that happens to collide.
+  const findByStored = (stored: string): ListeningDevice | undefined =>
+    stored.length > 0
+      ? listeningDevices.find(
+          (device) =>
+            typeof device.systemDeviceId === 'string' &&
+            device.systemDeviceId.trim() === stored
+        )
+      : undefined;
+
+  const match =
+    (target.length > 0 ? findByStored(target) : undefined) ??
+    (groupTarget.length > 0 ? findByStored(groupTarget) : undefined);
 
   if (!match) {
     return { activateDeviceId: null, matchedDevice: null };

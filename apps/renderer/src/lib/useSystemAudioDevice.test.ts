@@ -44,7 +44,7 @@ describe('readSystemAudioDevice', () => {
   it('returns empty device when navigator.mediaDevices is unavailable', async () => {
     installNavigator({ mediaDevices: undefined });
     const result = await readSystemAudioDevice();
-    expect(result).toEqual({ deviceId: '', label: '' });
+    expect(result).toEqual({ deviceId: '', groupId: '', label: '' });
   });
 
   it('returns empty device when there are no audio outputs', async () => {
@@ -56,10 +56,18 @@ describe('readSystemAudioDevice', () => {
       },
     });
     const result = await readSystemAudioDevice();
-    expect(result).toEqual({ deviceId: '', label: '' });
+    expect(result).toEqual({ deviceId: '', groupId: '', label: '' });
   });
 
-  it('resolves the default output via the "default" entry groupId', async () => {
+  // v3.213 — pin the persistence shape. The resolved deviceId MUST be the
+  // matched non-default entry's stable deviceId (e.g. 'a2'), NOT the
+  // volatile groupId. groupId is exposed as a secondary field so legacy
+  // links can still match via the fallback path. Pre-v3.213 we returned
+  // `groupId` as `deviceId`, which broke links across Mac Mini launches
+  // because Chromium's groupId for a given physical device flipped on
+  // every relaunch (E2E evidence: c2133aad... stayed stable while groupId
+  // went 0fb8b3ad... → 666c8ced...).
+  it('resolves the default output to the matched entry deviceId, with groupId as a secondary id (v3.213)', async () => {
     installNavigator({
       mediaDevices: {
         enumerateDevices: async () => [
@@ -70,7 +78,8 @@ describe('readSystemAudioDevice', () => {
       },
     });
     const result = await readSystemAudioDevice();
-    expect(result.deviceId).toBe('group-airpods');
+    expect(result.deviceId).toBe('a2');
+    expect(result.groupId).toBe('group-airpods');
     expect(result.label).toBe('AirPods Pro');
   });
 
@@ -83,7 +92,10 @@ describe('readSystemAudioDevice', () => {
       },
     });
     const result = await readSystemAudioDevice();
-    expect(result.deviceId).toBe('group-speakers');
+    // No "default" entry exists, so the lone non-default entry IS treated
+    // as the default. Its own deviceId ('a1') is the stable id.
+    expect(result.deviceId).toBe('a1');
+    expect(result.groupId).toBe('group-speakers');
     expect(result.label).toBe('External Speakers');
   });
 
@@ -97,8 +109,30 @@ describe('readSystemAudioDevice', () => {
       },
     });
     const result = await readSystemAudioDevice();
-    expect(result.deviceId).toBe('group-x');
+    // Even with no labels, the matched non-default entry's deviceId is
+    // still preferred over the volatile groupId.
+    expect(result.deviceId).toBe('real');
+    expect(result.groupId).toBe('group-x');
     expect(result.label).toBe('');
+  });
+
+  // v3.213 — when ONLY the "default" entry is surfaced (e.g. some
+  // permission/sandboxing edge cases), there's no non-default entry to
+  // borrow a stable deviceId from. Fall back to the resolved groupId so
+  // the matcher still has something to compare; legacy link records
+  // keyed by groupId will continue to work in this scenario.
+  it('falls back to groupId as deviceId when no matching non-default entry exists', async () => {
+    installNavigator({
+      mediaDevices: {
+        enumerateDevices: async () => [
+          { deviceId: 'default', groupId: 'group-y', kind: 'audiooutput', label: 'Default - Something' },
+        ],
+      },
+    });
+    const result = await readSystemAudioDevice();
+    expect(result.deviceId).toBe('group-y');
+    expect(result.groupId).toBe('group-y');
+    expect(result.label).toBe('Default - Something');
   });
 
   it('returns empty device when enumerateDevices throws', async () => {
@@ -110,6 +144,6 @@ describe('readSystemAudioDevice', () => {
       },
     });
     const result = await readSystemAudioDevice();
-    expect(result).toEqual({ deviceId: '', label: '' });
+    expect(result).toEqual({ deviceId: '', groupId: '', label: '' });
   });
 });

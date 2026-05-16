@@ -74,6 +74,67 @@ describe('decideAutoSelect', () => {
     ).toEqual({ activateDeviceId: null, matchedDevice: null });
   });
 
+  // v3.213 — translate-on-read fallback. Pre-v3.213 link records were
+  // persisted with the volatile `groupId` value because
+  // `readSystemAudioDevice` returned `groupId` as `deviceId`. After the
+  // fix, the snapshot's `deviceId` is the stable per-device id, and
+  // `groupId` is carried as a secondary field. Legacy link records that
+  // still hold the old groupId value in `systemDeviceId` MUST match via
+  // the snapshot's `groupId` so the link survives the upgrade until the
+  // user re-links (which then captures the stable id).
+  it('falls back to groupId when systemDeviceId is a legacy groupId-format value (v3.213 fix)', () => {
+    // Legacy state: airpods.systemDeviceId is the OLD groupId
+    // ('group-airpods-OLD') captured before v3.213.
+    const legacyAirpods: ListeningDevice = {
+      id: 'device-airpods-legacy',
+      name: 'AirPods Pro',
+      systemDeviceId: 'group-airpods-OLD',
+      systemDeviceLabel: 'AirPods Pro',
+    };
+    // Current snapshot from the post-v3.213 hook: deviceId is the new
+    // stable id, groupId carries the (still volatile but currently-OLD)
+    // groupId so the matcher can find the legacy record.
+    const decision = decideAutoSelect(
+      {
+        deviceId: 'stable-airpods-id',
+        groupId: 'group-airpods-OLD',
+        label: 'AirPods Pro',
+      },
+      [legacyAirpods, monitors],
+      null
+    );
+    expect(decision.activateDeviceId).toBe('device-airpods-legacy');
+    expect(decision.matchedDevice).toBe(legacyAirpods);
+  });
+
+  // v3.213 — when BOTH a fresh-format (deviceId-keyed) record AND a
+  // legacy-format (groupId-keyed) record exist, the fresh-format one
+  // wins. This guards against a stale legacy record activating the
+  // wrong listening device when the user has already re-linked.
+  it('prefers deviceId match over groupId fallback when both could resolve', () => {
+    const freshDevice: ListeningDevice = {
+      id: 'device-fresh',
+      name: 'Fresh',
+      systemDeviceId: 'stable-device-id',
+    };
+    const legacyDevice: ListeningDevice = {
+      id: 'device-legacy',
+      name: 'Legacy',
+      systemDeviceId: 'volatile-group-id',
+    };
+    const decision = decideAutoSelect(
+      {
+        deviceId: 'stable-device-id',
+        groupId: 'volatile-group-id',
+        label: 'Anything',
+      },
+      [legacyDevice, freshDevice],
+      null
+    );
+    expect(decision.activateDeviceId).toBe('device-fresh');
+    expect(decision.matchedDevice).toBe(freshDevice);
+  });
+
   it('matches the first listening device when more than one shares a systemDeviceId', () => {
     const duplicate: ListeningDevice = {
       id: 'device-airpods-2',

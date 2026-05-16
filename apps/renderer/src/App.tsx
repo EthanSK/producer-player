@@ -17203,6 +17203,40 @@ export function App(): JSX.Element {
                 status-section dropdown stays as the single source of truth. */}
           </div>
           <div className="actions">
+            {/* v3.222 — "Save Copy on All" moved to leftmost in the album
+                top-actions row (voice 3149). Emoji span uses inline-flex +
+                lineHeight: 1 so the 💾 glyph's natural line-box doesn't
+                stretch the button taller than its text-only siblings. */}
+            <button
+              type="button"
+              className="action-button secondary"
+              onClick={() => {
+                void handleSaveSongProjectCopyOnAll();
+              }}
+              data-testid="album-save-copy-on-all-button"
+              disabled={bulkSaveCopyProgress !== null}
+              title={
+                bulkSaveCopyProgress !== null
+                  ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
+                  : "Save a copy of every track's linked DAW project file (.als / .logicx etc), tagged with each song's current version. Re-clicks append (2), (3), etc. — never overwrites."
+              }
+              style={{ lineHeight: 1 }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  marginRight: '0.35em',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  lineHeight: 1,
+                }}
+              >
+                💾
+              </span>
+              {bulkSaveCopyProgress !== null
+                ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
+                : 'Save Copy on All'}
+            </button>
             <button
               type="button"
               className="action-button secondary"
@@ -17222,30 +17256,6 @@ export function App(): JSX.Element {
               title="Move older non-archived versions into old/ and keep the newest version in place."
             >
               Organize
-            </button>
-            {/* v3.221 — "Save Copy on All" album-top action (voice 3132).
-                Iterates every track with a linked DAW project and triggers
-                the per-track save-copy flow for each in sequence. */}
-            <button
-              type="button"
-              className="action-button secondary"
-              onClick={() => {
-                void handleSaveSongProjectCopyOnAll();
-              }}
-              data-testid="album-save-copy-on-all-button"
-              disabled={bulkSaveCopyProgress !== null}
-              title={
-                bulkSaveCopyProgress !== null
-                  ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
-                  : "Save a copy of every track's linked DAW project file (.als / .logicx etc), tagged with each song's current version. Re-clicks append (2), (3), etc. — never overwrites."
-              }
-            >
-              <span aria-hidden="true" style={{ marginRight: '0.35em' }}>
-                💾
-              </span>
-              {bulkSaveCopyProgress !== null
-                ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
-                : 'Save Copy on All'}
             </button>
             <button
               type="button"

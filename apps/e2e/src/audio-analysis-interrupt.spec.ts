@@ -95,6 +95,11 @@ async function readMeasuredQueueDump(page: Page): Promise<QueueDump> {
 
 test.describe('audio-analysis USER interrupt @smoke', () => {
   test('song play interrupts measured warmup and lets warmup resume @smoke', async () => {
+    test.skip(
+      process.platform === 'win32',
+      'Windows CI does not reliably dispatch the main-list row double-click used by this macOS-focused interrupt regression.'
+    );
+
     const directories = await createE2ETestDirectories('producer-player-analysis-interrupt');
 
     await writeTestWav(path.join(directories.fixtureDirectory, 'ZZZ Interrupt Target v1.wav'), {

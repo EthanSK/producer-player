@@ -2986,9 +2986,25 @@ export function App(): JSX.Element {
   // request audio (immediately stopping the tracks) so labels populate.
   // The Electron permission handler in main.ts already auto-approves
   // audio-only `getUserMedia` requests, so this is silent in production.
+  //
+  // v3.211 — after the permission resolves, kick `systemAudioDevice.refresh()`
+  // so the hook's enumerate-devices state actually picks up the now-available
+  // groupId + label. Chromium does NOT emit a `devicechange` event for a
+  // permission grant, so without this explicit re-read the hook's initial
+  // mount value (taken BEFORE the permission was granted) would persist as
+  // `EMPTY_DEVICE`, and the initial-sync auto-select effect (below) would
+  // never fire. Voice 3076 — the actual root cause that v3.210 missed.
   useEffect(() => {
-    void unlockSystemAudioDeviceLabels();
-  }, []);
+    let cancelled = false;
+    void (async () => {
+      await unlockSystemAudioDeviceLabels();
+      if (cancelled) return;
+      systemAudioDevice.refresh();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [systemAudioDevice.refresh]);
   // v3.193 — keep refs in sync so the `useSystemAudioDevice` change
   // callback always sees the freshest listening devices + active id.
   useEffect(() => {
@@ -3043,6 +3059,58 @@ export function App(): JSX.Element {
       });
     }
   }, [listeningDevices, systemAudioDevice]);
+  // v3.211 — re-sync the active listening device every time the checklist
+  // modal OPENS for any song. Belt-and-suspenders for two cases that the
+  // v3.210 initial-sync didn't cover:
+  //
+  //   1. Cold-start race: if `useSystemAudioDevice`'s first enumerate ran
+  //      BEFORE Electron auto-approved the media-permission unlock, its
+  //      `deviceId` resolved to '' and stayed that way (no `devicechange`
+  //      event fires for a permission grant). The post-unlock refresh
+  //      handler now patches this, but if anything still leaves the device
+  //      empty at modal-open time, this effect re-runs `refresh()` so the
+  //      user gets the correct chip the moment they open the checklist.
+  //
+  //   2. Any silent OS-device transition that Chromium missed emitting
+  //      `devicechange` for (rare but observed on macOS sleep/wake +
+  //      hot-unplug edge cases). When the checklist opens, we re-read the
+  //      ground truth.
+  //
+  // Implementation: fires on every null→<song-id> transition of
+  // `checklistModalSongId`. The `refresh()` call routes through the hook's
+  // change detection; if the device hasn't actually changed since the last
+  // read, it's a no-op. When it has changed, the hook's `onChange` path
+  // fires `decideAutoSelect` automatically. Voice 3076.
+  useEffect(() => {
+    if (checklistModalSongId === null) return;
+    systemAudioDevice.refresh();
+    // Also run decideAutoSelect on the CURRENT system device snapshot in
+    // case the device id is already correct but the persisted active id
+    // doesn't match its link (e.g. initial-sync skipped because devices
+    // weren't loaded yet at app-startup race). This is an explicit
+    // re-check, decoupled from the once-per-app-launch initial-sync guard.
+    if (systemAudioDevice.deviceId.trim().length === 0) return;
+    if (listeningDevices.length === 0) return;
+    const decision = decideAutoSelect(
+      systemAudioDevice,
+      listeningDevices,
+      activeListeningDeviceIdRef.current
+    );
+    if (decision.activateDeviceId && decision.matchedDevice) {
+      setActiveListeningDeviceId(decision.activateDeviceId);
+      const labelSuffix =
+        systemAudioDevice.label.trim().length > 0 ? ` (${systemAudioDevice.label})` : '';
+      toast.show({
+        id: `listening-device-checklist-open-${decision.activateDeviceId}-${Date.now()}`,
+        kind: 'info',
+        text: `Auto-switched to ${decision.matchedDevice.name}${labelSuffix}`,
+      });
+    }
+    // Intentionally exclude `listeningDevices` + `systemAudioDevice` from
+    // deps — we only want this to fire on modal-open transitions, not on
+    // every device change (those go through the `onChange` path already).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checklistModalSongId]);
   // Vertical drag-to-scrub state for a checklist item's timestamp badge.
   // Active while the user is holding the pointer down on a timestamp to adjust it.
   // Moving up increases seconds; moving down decreases. Released commits the

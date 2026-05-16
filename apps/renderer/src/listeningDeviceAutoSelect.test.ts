@@ -112,6 +112,39 @@ describe('decideAutoSelect', () => {
     expect(decision.activateDeviceId).toBe('device-monitors');
     expect(decision.matchedDevice).toBe(monitors);
   });
+
+  // v3.211 — regression for voice 3076. The v3.210 initial-sync fix only
+  // ran ONCE per app launch and was gated on `systemAudioDevice.deviceId`
+  // being non-empty at the time the effect ran. If the post-permission
+  // refresh hadn't yet populated the device, the chip stayed stale until
+  // the user manually triggered a device-change. v3.211 adds a checklist-
+  // open trigger that re-runs decideAutoSelect with the freshly-resolved
+  // system device.
+  //
+  // This test pins the same decision logic the on-open trigger relies on:
+  // even after the initial-sync has fired (returning `null` because the
+  // persisted active id ALREADY matches the linked device), a SUBSEQUENT
+  // open with a NEW system device must still switch the chip. Confirms
+  // decideAutoSelect is correctly state-free.
+  it('on-open re-sync: switches to the newly-linked device after a system-device transition', () => {
+    // Step 1: persisted chip already matches the OS default (group-airpods).
+    const step1 = decideAutoSelect(
+      { deviceId: 'group-airpods', label: 'AirPods Pro' },
+      [airpods, monitors],
+      'device-airpods'
+    );
+    expect(step1.activateDeviceId).toBeNull();
+    // Step 2: OS default flipped to monitors. Subsequent on-open re-check
+    // must return the monitor device id even though the chip is currently
+    // airpods.
+    const step2 = decideAutoSelect(
+      { deviceId: 'group-monitors', label: 'Kali LP-6 (audio interface)' },
+      [airpods, monitors],
+      'device-airpods'
+    );
+    expect(step2.activateDeviceId).toBe('device-monitors');
+    expect(step2.matchedDevice).toBe(monitors);
+  });
 });
 
 describe('applyExplicitLinkAssociation (v3.197 — Link button)', () => {

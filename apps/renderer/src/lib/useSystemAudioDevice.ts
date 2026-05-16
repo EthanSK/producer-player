@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 /**
  * v3.193 — read the operating system's current default audio output device
@@ -50,6 +50,24 @@ export interface SystemAudioDevice {
    * — call `unlockSystemAudioDeviceLabels()` once to unlock these.
    */
   label: string;
+}
+
+/**
+ * v3.211 — hook return shape with a `refresh()` callback. Consumers call
+ * `refresh()` to force a fresh `enumerateDevices` read on demand — needed
+ * because Chromium does NOT emit a `devicechange` event when media
+ * permission is granted, so the initial post-permission read needs to be
+ * triggered explicitly. Also useful for "re-sync on UI surface open" (e.g.
+ * opening the checklist modal — voice 3076).
+ */
+export interface SystemAudioDeviceState extends SystemAudioDevice {
+  /**
+   * Force a fresh `readSystemAudioDevice` call. If the resolved device
+   * differs from the last emitted value, state updates and `onChange`
+   * fires (with `isInitial=false` semantics — i.e. it WILL invoke
+   * `onChange`). Safe to call multiple times; a no-op when nothing changed.
+   */
+  refresh: () => void;
 }
 
 export interface UseSystemAudioDeviceOptions {
@@ -152,7 +170,7 @@ export async function unlockSystemAudioDeviceLabels(): Promise<boolean> {
  */
 export function useSystemAudioDevice(
   options: UseSystemAudioDeviceOptions = {}
-): SystemAudioDevice {
+): SystemAudioDeviceState {
   const { pollIntervalMs = 0, onChange } = options;
   const [device, setDevice] = useState<SystemAudioDevice>(EMPTY_DEVICE);
   // Track the last emitted device so the change-detection compares against
@@ -160,6 +178,11 @@ export function useSystemAudioDevice(
   const lastDeviceRef = useRef<SystemAudioDevice>(EMPTY_DEVICE);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // v3.211 — refresh-handle ref. The internal `refresh` closure is recreated
+  // on every effect-run; consumers reach it via the returned `refresh()`
+  // callback, which trampolines through this ref so it always invokes the
+  // CURRENT bound closure (correct `cancelled` flag, fresh state ref).
+  const refreshRef = useRef<((isInitial: boolean) => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,6 +203,10 @@ export function useSystemAudioDevice(
       if (!isInitial && onChangeRef.current) {
         onChangeRef.current(next);
       }
+    };
+
+    refreshRef.current = (isInitial: boolean): void => {
+      void refresh(isInitial);
     };
 
     void refresh(true);
@@ -203,6 +230,7 @@ export function useSystemAudioDevice(
 
     return () => {
       cancelled = true;
+      refreshRef.current = null;
       if (
         typeof navigator !== 'undefined' &&
         navigator.mediaDevices &&
@@ -216,5 +244,25 @@ export function useSystemAudioDevice(
     };
   }, [pollIntervalMs]);
 
-  return device;
+  /**
+   * v3.211 — public refresh handle. Invokes the current bound refresh
+   * closure with `isInitial=false`, so callers (e.g. post-permission unlock,
+   * checklist-open re-sync) get the `onChange` side-effect path. Stable
+   * across renders (the underlying ref is updated in-place inside the
+   * effect). No-op if the hook isn't mounted (ref is null between unmount
+   * and re-mount).
+   */
+  const refresh = useCallback((): void => {
+    refreshRef.current?.(false);
+  }, []);
+
+  // v3.211 — memoize the returned state so consumers using it as a
+  // useEffect dependency only re-fire when the underlying device actually
+  // changes. The `device` state itself is referentially stable (React only
+  // updates it on real changes), and `refresh` is a stable useCallback, so
+  // this memo's deps are accurate.
+  return useMemo<SystemAudioDeviceState>(
+    () => ({ deviceId: device.deviceId, label: device.label, refresh }),
+    [device, refresh]
+  );
 }

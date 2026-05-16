@@ -136,12 +136,7 @@ test.describe('audio-analysis USER interrupt @smoke', () => {
         .getByTestId('main-list-row')
         .filter({ hasText: 'ZZZ Interrupt Target' })
         .first()
-        .click();
-      await page
-        .getByTestId('inspector-version-row')
-        .filter({ hasText: 'ZZZ Interrupt Target v1.wav' })
-        .getByRole('button', { name: 'Cue' })
-        .click();
+        .dblclick({ force: true });
 
       await expect
         .poll(async () => {

@@ -39,7 +39,7 @@ const HIGH_BAND_CUTOFF_HZ = 4_000;
 const previewAnalysisQueue = new AnalysisQueue({
   concurrency: 1,
   label: 'preview-analysis',
-  // Item #14/v3.216 — user-selected preview decode first interrupts
+  // Item #14/v3.217 — user-selected preview decode first interrupts
   // cancellable lower-priority preview work; bounded bypass remains as a
   // fallback if the browser does not stop an in-flight decode promptly.
   maxUserBypassSlots: 2,
@@ -148,7 +148,7 @@ export function promotePreviewAnalysis(
 }
 
 /**
- * v3.190/v3.216 — Demote preview analysis to a lower priority. Called by
+ * v3.190/v3.217 — Demote preview analysis to a lower priority. Called by
  * App.tsx when the user rapidly switches from track A to track B: A's stale
  * USER_SELECTED preview should stop competing with B and, if already running,
  * become eligible for B's interrupt path.

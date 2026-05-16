@@ -12,7 +12,7 @@
 // both concurrency=2 measured slots full), a user-priority job had to wait for
 // the running background job(s) to finish. Later versions added cancellable
 // preemption, but the slot was only freed after the aborted task's promise
-// rejected. v3.216 makes USER_SELECTED a real interrupt: lower-priority
+// rejected. v3.217 makes USER_SELECTED a real interrupt: lower-priority
 // cancellable work is synchronously removed from active slots, aborted, and
 // requeued so the user task starts in the freed slot immediately.
 //
@@ -83,13 +83,13 @@ interface QueuedTask<T> {
    */
   preempted: boolean;
   /**
-   * v3.216 — true once preemption has already freed this run's queue slot.
+   * v3.217 — true once preemption has already freed this run's queue slot.
    * The underlying promise may still settle later; settlement must not touch
    * active counters a second time or requeue a duplicate retry.
    */
   releasedForPreemption: boolean;
   /**
-   * v3.216 — closure installed by startTask so preemption can synchronously
+   * v3.217 — closure installed by startTask so preemption can synchronously
    * clear the task timeout, release queue bookkeeping, and requeue a retry
    * without waiting for the underlying abort rejection to arrive.
    */
@@ -955,7 +955,7 @@ export class AnalysisQueue {
    * settles with the eventual result.
    */
   private requeuePreemptedTask(task: QueuedTask<unknown>): void {
-    // Clone rather than reusing the still-settling task object. v3.216 can
+    // Clone rather than reusing the still-settling task object. v3.217 can
     // requeue immediately at abort time, before the old promise has rejected;
     // the old run must remain marked preempted so its eventual settle is a
     // no-op, while the retry gets fresh abort/bookkeeping state.
@@ -988,7 +988,7 @@ export class AnalysisQueue {
   }
 
   /**
-   * v3.216 — Preempt all running NEIGHBOR/BG tasks that are cancellable as
+   * v3.217 — Preempt all running NEIGHBOR/BG tasks that are cancellable as
    * soon as USER work is pending or active. Slot bookkeeping is released
    * synchronously; the underlying task receives AbortSignal immediately and
    * its caller-facing promise stays pending for the retry.

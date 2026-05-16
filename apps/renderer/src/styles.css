@@ -2134,13 +2134,14 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
 .version-switcher-trigger {
   position: fixed;
   bottom: 16px;
-  /* Slots to the left of the inspector toggle (120) when it's visible,
-     maintaining the 52px rhythm (16 → 68 → 120 → 172). On wider
-     viewports (>1280px) the inspector toggle is hidden, so the rhythm
-     would otherwise break; see the @media (min-width: 1281px) override
-     below which collapses this slot back to right:120px so the trigger
-     stays 52px from the song switcher — matching the agent↔song gap.
-     (v3.45 UX fix — Ethan flagged the visual inconsistency.) */
+  /* v3.212: pinned to right:172px across BOTH narrow and wide
+     viewports. Post-v3.192 the floating-toolbar order is inspector=16,
+     agent=68, song=120, version=172, platform-preview=224. On wide
+     viewports the inspector toggle is hidden — that gap is at the
+     outermost slot (right:16), not in the middle — so the inner three
+     keep their 52px rhythm at 68/120/172 with no shift. v3.45's
+     wide-mode override (which forced this slot to right:120px) was
+     removed because it collided with the quick-switcher-toggle. */
   right: 172px;
   z-index: 900;
   width: 44px;
@@ -6483,22 +6484,19 @@ button.reference-action.active {
   }
 }
 
-/* v3.45 — Wider viewports hide the inspector-toggle (its 120px slot is
-   empty), which visually broke the 52px floating-trigger rhythm: the
-   agent chat launcher (right:16) and song switcher (right:68) sit 52px
-   apart, but the version switcher sat 104px from song because it was
-   pinned to 172. Collapse the version switcher/panel to the vacated
-   120 slot so it mirrors the agent→song spacing exactly. */
-@media (min-width: 1281px) {
-  .version-switcher-trigger,
-  .version-switcher-panel {
-    right: 120px;
-  }
+/* v3.212 — Wide-viewport slot-collapse override REMOVED. v3.45's logic
+   shifted version-switcher 172→120 and platformPreview 224→172 to fill
+   the inspector's vacated slot in the OLD layout (agent=16, song=68,
+   inspector=120, version=172). v3.192 reshuffled to inspector=16,
+   agent=68, song=120, version=172, platformPreview=224 — now the
+   inspector slot is the OUTERMOST one (right:16). Hiding it leaves a
+   gap at the viewport edge, not in the middle, so the remaining three
+   floating triggers keep their 52px rhythm without any shift.
 
-  .floating-platform-preview-indicator {
-    right: 172px;
-  }
-}
+   The previous override caused version-switcher to collide with the
+   song-switcher at right:120 on wide viewports, completely covering
+   the song-switcher (same z-index, version rendered later in DOM).
+   Removing the override restores both. */
 
 /*
  * v3.31 — Fullscreen Mastering "Show AI recommendations" toggle + per-metric

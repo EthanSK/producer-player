@@ -53,10 +53,16 @@
 .agent-chat-panel {
   position: fixed;
   bottom: 0;
-  /* v3.192: default anchored to the agent toggle button's new right:68px
-     slot. Persisted bounds (`.agent-chat-panel--positioned`) override this
-     so users who explicitly positioned the panel keep their layout. */
-  right: 68px;
+  /* v3.212: anchored to the viewport's right edge (16px inset), NOT the
+     toggle's middle-slot position. The panel is 380px wide; anchoring it
+     at right:68px (where v3.192 put it) left a visible 68px gap between
+     the panel and the viewport right edge. The toggle (44px wide) sits
+     at right:68px (middle slot) per the v3.192 reshuffle; the panel,
+     being much wider, should slide flush to the viewport edge so it
+     doesn't waste space. Persisted bounds (`.agent-chat-panel--positioned`)
+     override this so users who explicitly positioned the panel keep their
+     layout. */
+  right: 16px;
   width: 380px;
   max-width: calc(100vw - 32px);
   height: 520px;

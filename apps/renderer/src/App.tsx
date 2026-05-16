@@ -234,6 +234,12 @@ import {
   decideAutoSelect,
   decideForceAutoSelect,
 } from './listeningDeviceAutoSelect';
+import {
+  bulkSaveSongProjectCopies,
+  buildBulkSaveCopyToastText,
+  SAVE_COPY_TOOLTIP_HEADING,
+  type BulkSaveCopyInputSong,
+} from './bulkSaveSongProjectCopies';
 import { ErrorDetailsDialog } from './lib/ErrorDetailsDialog';
 import { formatBytes } from './lib/formatBytes';
 import { logAction, logError, installRendererErrorHandlers } from './lib/actionLog';
@@ -2862,6 +2868,14 @@ export function App(): JSX.Element {
   const [songProjectFilePaths, setSongProjectFilePaths] = useState<Record<string, string>>(
     () => readStoredSongProjectFilePaths()
   );
+  // v3.221 — "Save Copy on All" button progress + lockout (voice 3132).
+  // `null` = idle. When running, holds `{ current, total }` so the
+  // album-top button can render "Saving copy 3 of 24…" and stay
+  // disabled until the bulk run resolves.
+  const [bulkSaveCopyProgress, setBulkSaveCopyProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const [sharedUserStateReady, setSharedUserStateReady] = useState(false);
   const [iCloudBackupEnabled, setICloudBackupEnabled] = useState<boolean>(() =>
     readICloudBackupEnabled()
@@ -13140,6 +13154,101 @@ export function App(): JSX.Element {
     });
   }
 
+  // v3.221 — "Save Copy on All" album-top button (voice 3132). Iterates
+  // every track with a linked DAW project, calls the per-song save-copy
+  // IPC sequentially, and reports a single summary toast at the end.
+  // The pure orchestrator lives in `./bulkSaveSongProjectCopies` (with
+  // its own unit tests); this handler is just the React-side wiring:
+  // in-flight lock, progress state, action logging, toast dispatch.
+  async function handleSaveSongProjectCopyOnAll(): Promise<void> {
+    if (bulkSaveCopyProgress !== null) {
+      // Already running — defensive guard against double-clicks even
+      // though the button is disabled while running.
+      return;
+    }
+
+    const inputs: BulkSaveCopyInputSong[] = albumSongs.map((song) => ({
+      id: song.id,
+      title: getSongDisplayTitle(song),
+      projectFilePath: songProjectFilePaths[song.id] ?? null,
+      targetVersion: computeSongProjectSaveCopyTargetVersion(song),
+    }));
+
+    const eligibleCount = inputs.reduce(
+      (count, input) => (input.projectFilePath !== null ? count + 1 : count),
+      0
+    );
+
+    logAction('project-file.save-copy-on-all.requested', {
+      totalSongs: inputs.length,
+      eligibleCount,
+    });
+
+    if (eligibleCount === 0) {
+      toast.show({
+        id: 'song-project-save-copy-on-all',
+        kind: 'info',
+        text: 'No tracks have a linked DAW project to save a copy of.',
+      });
+      return;
+    }
+
+    setBulkSaveCopyProgress({ current: 0, total: eligibleCount });
+
+    try {
+      const summary = await bulkSaveSongProjectCopies(inputs, {
+        saveSongProjectCopy: (originalPath, targetVersion) =>
+          window.producerPlayer.saveSongProjectCopy(originalPath, targetVersion),
+        onProgress: ({ currentIndex, totalEligible }) => {
+          setBulkSaveCopyProgress({ current: currentIndex, total: totalEligible });
+        },
+        onOutcome: (outcome) => {
+          if (outcome.kind === 'success' && outcome.result) {
+            logAction('project-file.save-copy-on-all.song-succeeded', {
+              songId: outcome.song.id,
+              newPath: outcome.result.newPath,
+              targetVersion: outcome.result.targetVersion,
+              sizeBytes: outcome.result.sizeBytes,
+            });
+          } else if (outcome.kind === 'failure') {
+            logAction('project-file.save-copy-on-all.song-failed', {
+              songId: outcome.song.id,
+              title: outcome.song.title,
+              error: outcome.error,
+            });
+          }
+        },
+      });
+
+      logAction('project-file.save-copy-on-all.finished', {
+        total: summary.total,
+        eligible: summary.eligible,
+        succeeded: summary.succeeded,
+        failed: summary.failed,
+        skippedNoProject: summary.skippedNoProject,
+      });
+
+      const toastSpec = buildBulkSaveCopyToastText(summary);
+      toast.show({
+        id: 'song-project-save-copy-on-all',
+        kind: toastSpec.kind,
+        text: toastSpec.text,
+      });
+    } catch (cause) {
+      // The orchestrator does not throw, but belt-and-braces in case
+      // its contract changes.
+      logError('project-file.save-copy-on-all.threw', cause);
+      const message = cause instanceof Error ? cause.message : String(cause);
+      toast.show({
+        id: 'song-project-save-copy-on-all',
+        kind: 'error',
+        text: `Couldn't save copies: ${message}`,
+      });
+    } finally {
+      setBulkSaveCopyProgress(null);
+    }
+  }
+
   function updateSongChecklists(
     updater: (current: Record<string, SongChecklistItem[]>) => Record<string, SongChecklistItem[]>,
     options?: { recordHistory?: boolean }
@@ -17114,6 +17223,30 @@ export function App(): JSX.Element {
             >
               Organize
             </button>
+            {/* v3.221 — "Save Copy on All" album-top action (voice 3132).
+                Iterates every track with a linked DAW project and triggers
+                the per-track save-copy flow for each in sequence. */}
+            <button
+              type="button"
+              className="action-button secondary"
+              onClick={() => {
+                void handleSaveSongProjectCopyOnAll();
+              }}
+              data-testid="album-save-copy-on-all-button"
+              disabled={bulkSaveCopyProgress !== null}
+              title={
+                bulkSaveCopyProgress !== null
+                  ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
+                  : "Save a copy of every track's linked DAW project file (.als / .logicx etc), tagged with each song's current version. Re-clicks append (2), (3), etc. — never overwrites."
+              }
+            >
+              <span aria-hidden="true" style={{ marginRight: '0.35em' }}>
+                💾
+              </span>
+              {bulkSaveCopyProgress !== null
+                ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
+                : 'Save Copy on All'}
+            </button>
             <button
               type="button"
               className="action-button secondary"
@@ -17175,7 +17308,7 @@ export function App(): JSX.Element {
               <span aria-hidden="true">🚶</span>
             </button>
             <div className="actions-help-group">
-              <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• ☑ (Album Checklist) — Opens a project-wide checklist for high-level tasks that apply to the whole album, not individual songs.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and song metadata as a standalone JSON file for sharing or transferring between machines. Different from Export State (in Support & Feedback), which backs up all settings, checklists, and ratings.\n\n• ⤒ (Import Order) — Imports a previously exported ordering JSON to restore track order. Different from Import State (in Support & Feedback), which restores a full settings backup.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
+              <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• ☑ (Album Checklist) — Opens a project-wide checklist for high-level tasks that apply to the whole album, not individual songs.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• 💾 (Save Copy on All) — Saves a versioned copy of every track's linked DAW project file (.als / .logicx etc) in one pass. Same as clicking the per-track Save Copy button for each track. Tracks without a linked DAW project are skipped.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and song metadata as a standalone JSON file for sharing or transferring between machines. Different from Export State (in Support & Feedback), which backs up all settings, checklists, and ratings.\n\n• ⤒ (Import Order) — Imports a previously exported ordering JSON to restore track order. Different from Import State (in Support & Feedback), which restores a full settings backup.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
             </div>
           </div>
         </header>
@@ -17464,15 +17597,22 @@ export function App(): JSX.Element {
                               className="main-list-row-metadata-popover song-project-save-copy-popover"
                               role="tooltip"
                             >
+                              {/* v3.221 — tooltip rewritten (voice 3133)
+                                  to explicitly say "DAW project" instead
+                                  of the ambiguous "project file" / "Save
+                                  copy" heading. Ethan: "Is it the track
+                                  or is it the project?" */}
                               <span className="main-list-row-metadata-popover-label">
-                                Save copy
+                                {SAVE_COPY_TOOLTIP_HEADING}
                               </span>
                               <span className="song-project-save-copy-popover-body">
-                                Duplicates this project file next to the original and tags it with
-                                the song&apos;s current version number (e.g. <code>song v
-                                {computeSongProjectSaveCopyTargetVersion(song)}.als</code>).
+                                Duplicates this song&apos;s DAW project file (e.g.{' '}
+                                <code>
+                                  song v{computeSongProjectSaveCopyTargetVersion(song)}.als
+                                </code>
+                                ) next to the original and tags it with the current version number.
                                 Re-clicks append <code>(2)</code>, <code>(3)</code>, etc. — never
-                                overwrites.
+                                overwrites the source project.
                               </span>
                             </span>
                           </button>

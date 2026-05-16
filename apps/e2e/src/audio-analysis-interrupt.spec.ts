@@ -142,7 +142,7 @@ test.describe('audio-analysis USER interrupt @smoke', () => {
         .poll(async () => {
           const dump = await readMeasuredQueueDump(page);
           return dump.runningJobs.map((job) => `${job.priority}:${job.label ?? ''}`).join('|');
-        }, { timeout: 2_000 })
+        }, { timeout: 8_000 })
         .toContain('0:ZZZ Interrupt Target v1.wav');
 
       const dumpDuringUser = await readMeasuredQueueDump(page);

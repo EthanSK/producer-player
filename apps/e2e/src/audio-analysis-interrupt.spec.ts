@@ -100,9 +100,6 @@ test.describe('audio-analysis USER interrupt @smoke', () => {
     await writeTestWav(path.join(directories.fixtureDirectory, 'ZZZ Interrupt Target v1.wav'), {
       frequencyHz: 880,
     });
-    await writeTestWav(path.join(directories.fixtureDirectory, 'ZZZ Interrupt Target v2.wav'), {
-      frequencyHz: 990,
-    });
     for (let index = 1; index <= 8; index += 1) {
       await writeTestWav(
         path.join(directories.fixtureDirectory, `Warmup ${String(index).padStart(2, '0')} v1.wav`),
@@ -142,7 +139,7 @@ test.describe('audio-analysis USER interrupt @smoke', () => {
         .click();
       await page
         .getByTestId('inspector-version-row')
-        .filter({ hasText: 'ZZZ Interrupt Target v2.wav' })
+        .filter({ hasText: 'ZZZ Interrupt Target v1.wav' })
         .getByRole('button', { name: 'Cue' })
         .click();
 
@@ -151,7 +148,7 @@ test.describe('audio-analysis USER interrupt @smoke', () => {
           const dump = await readMeasuredQueueDump(page);
           return dump.runningJobs.map((job) => `${job.priority}:${job.label ?? ''}`).join('|');
         }, { timeout: 2_000 })
-        .toContain('0:ZZZ Interrupt Target v2.wav');
+        .toContain('0:ZZZ Interrupt Target v1.wav');
 
       const dumpDuringUser = await readMeasuredQueueDump(page);
       expect(dumpDuringUser.activeByPriority.user).toBeGreaterThan(0);
@@ -159,7 +156,7 @@ test.describe('audio-analysis USER interrupt @smoke', () => {
       expect(dumpDuringUser.activeByPriority.background).toBe(0);
 
       await expect(page.getByTestId('analysis-track-label')).toContainText(
-        'ZZZ Interrupt Target v2.wav',
+        'ZZZ Interrupt Target v1.wav',
         { timeout: 5_000 }
       );
       await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading', {

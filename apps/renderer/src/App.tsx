@@ -1171,7 +1171,7 @@ function cacheMasteringAnalysisValue<T>(
 const MEASURED_ANALYSIS_QUEUE = new AnalysisQueue({
   concurrency: 2,
   label: 'measured-analysis',
-  // Item #14/v3.215 — USER_SELECTED ffmpeg jobs interrupt lower-priority
+  // Item #14/v3.216 — USER_SELECTED ffmpeg jobs interrupt lower-priority
   // warmup first; the bounded bypass cap remains only as a fallback if a
   // running task cannot be cancelled promptly.
   maxUserBypassSlots: 3,

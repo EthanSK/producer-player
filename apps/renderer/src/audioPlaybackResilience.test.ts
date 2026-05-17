@@ -5,6 +5,7 @@ import {
   shouldAttemptPlaybackOutputRecovery,
   shouldHoldGainBeforePlayback,
   shouldRestoreAudiblePlaybackGain,
+  shouldRunAudiblePlaybackGainRestoration,
 } from './audioPlaybackResilience';
 
 describe('shouldAttemptPlaybackOutputRecovery', () => {
@@ -157,5 +158,92 @@ describe('shouldHoldGainBeforePlayback', () => {
     // Pinning to 0 would be a no-op, and the subsequent ramp would also be a
     // no-op (0 → 0). Avoid scheduling unnecessary GainNode value changes.
     expect(shouldHoldGainBeforePlayback({ targetGainLinear: 0 })).toBe(false);
+  });
+});
+
+describe('shouldRunAudiblePlaybackGainRestoration', () => {
+  // v3.226 — Codex MUST-FIX #1. The pin-at-0 + ramp-on-`playing` contract
+  // requires the GainNode to stay at 0 between source-commit and the first
+  // `playing` event. Output-recovery is scheduled from `canplay` and `play`,
+  // which can fire BEFORE `playing` on codec-slow cold starts (>80ms macOS
+  // first-play). If recovery unpins the gain in that window, the click
+  // returns. This helper encodes the event-ordering invariant so it can be
+  // exercised without mounting the whole renderer.
+  it('is a no-op while waiting for the first `playing` event after a source switch', () => {
+    // Cold-start state: source freshly committed; `canplay` fires; `play`
+    // fires; `audio.paused` flips to false; the gain is still pinned at 0
+    // because `playing` hasn't fired yet. Recovery would normally see
+    // "active playback near silent → ramp" and click.
+    expect(
+      shouldRunAudiblePlaybackGainRestoration({
+        awaitingFirstPlayingEvent: true,
+        audioPaused: false,
+        currentGainLinear: 0,
+        targetGainLinear: 1,
+      })
+    ).toBe(false);
+  });
+
+  it('still defers even when the recovery policy would normally fire', () => {
+    // Belt-and-braces: even if every other condition for recovery is met,
+    // the awaiting-first-playing guard wins. This is the regression Codex
+    // flagged — App.tsx:6470 (`canplay`) and App.tsx:6504 (`play`) both
+    // schedule recovery, and `audio.paused` is already false before
+    // `playing` arrives.
+    expect(
+      shouldRunAudiblePlaybackGainRestoration({
+        awaitingFirstPlayingEvent: true,
+        audioPaused: false,
+        currentGainLinear: 0.01,
+        targetGainLinear: 1,
+      })
+    ).toBe(false);
+  });
+
+  it('runs once the `playing` event has cleared the await flag', () => {
+    // After `onPlaying` ran and cleared `awaitingFirstPlayingEventRef`,
+    // recovery can do its job — e.g. recover from a real
+    // suspended/interrupted audio context mid-playback.
+    expect(
+      shouldRunAudiblePlaybackGainRestoration({
+        awaitingFirstPlayingEvent: false,
+        audioPaused: false,
+        currentGainLinear: 0.05,
+        targetGainLinear: 1,
+      })
+    ).toBe(true);
+  });
+
+  it('still respects the underlying policy when not awaiting', () => {
+    // Paused playback → recovery should still no-op, regardless of the
+    // await flag.
+    expect(
+      shouldRunAudiblePlaybackGainRestoration({
+        awaitingFirstPlayingEvent: false,
+        audioPaused: true,
+        currentGainLinear: 0,
+        targetGainLinear: 1,
+      })
+    ).toBe(false);
+
+    // User has muted → recovery should not un-mute.
+    expect(
+      shouldRunAudiblePlaybackGainRestoration({
+        awaitingFirstPlayingEvent: false,
+        audioPaused: false,
+        currentGainLinear: 0,
+        targetGainLinear: 0,
+      })
+    ).toBe(false);
+
+    // Gain already at target → no spurious ramp.
+    expect(
+      shouldRunAudiblePlaybackGainRestoration({
+        awaitingFirstPlayingEvent: false,
+        audioPaused: false,
+        currentGainLinear: 1,
+        targetGainLinear: 1,
+      })
+    ).toBe(false);
   });
 });

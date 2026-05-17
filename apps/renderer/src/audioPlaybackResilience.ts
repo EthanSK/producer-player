@@ -81,3 +81,36 @@ export interface PlaybackGainHoldInput {
 export function shouldHoldGainBeforePlayback(input: PlaybackGainHoldInput): boolean {
   return input.targetGainLinear > 0;
 }
+
+/**
+ * v3.226 — Codex MUST-FIX #1. Decides whether `restoreAudiblePlaybackGain`
+ * should perform its ramp this call.
+ *
+ * The pin-at-0 + ramp-on-`playing` contract for click-free track switches
+ * relies on the GainNode staying at 0 until the actual `playing` event fires.
+ * Output-recovery is scheduled from `canplay` and `play` (which fire BEFORE
+ * `playing` on codec-slow cold starts) — if recovery un-pins the gain in that
+ * window, the leading-frame click returns.
+ *
+ * Returns `true` only when ALL of:
+ *   - we're NOT awaiting the first `playing` event for a freshly-committed
+ *     source (i.e. the cold-start hold window has already ended), AND
+ *   - the underlying `shouldRestoreAudiblePlaybackGain` policy says recovery
+ *     is needed (active playback left near silent, with an audible target).
+ */
+export interface AudiblePlaybackGainRestorationInput extends GainRestoreInput {
+  awaitingFirstPlayingEvent: boolean;
+}
+
+export function shouldRunAudiblePlaybackGainRestoration(
+  input: AudiblePlaybackGainRestorationInput
+): boolean {
+  if (input.awaitingFirstPlayingEvent) {
+    return false;
+  }
+  return shouldRestoreAudiblePlaybackGain({
+    audioPaused: input.audioPaused,
+    currentGainLinear: input.currentGainLinear,
+    targetGainLinear: input.targetGainLinear,
+  });
+}

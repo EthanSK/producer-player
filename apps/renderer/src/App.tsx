@@ -111,7 +111,7 @@ import {
   shouldAutoplayOnTransportSwitch,
   shouldAttemptPlaybackOutputRecovery,
   shouldHoldGainBeforePlayback,
-  shouldRestoreAudiblePlaybackGain,
+  shouldRunAudiblePlaybackGainRestoration,
   type PlaybackContextState,
 } from './audioPlaybackResilience';
 import {
@@ -6311,16 +6311,30 @@ export function App(): JSX.Element {
     // leading audio frames. Recovery is scheduled from the `canplay` and `play`
     // events; if codec startup takes >80ms (common macOS first-play), `play`
     // fires and `audio.paused` flips to false BEFORE `playing` ever arrives.
-    // Without this guard, recovery here would ramp the held-0 gain up over
-    // 25ms PRE-OUTPUT — the very window the pin-at-0 hold was meant to mask —
+    // Without this guard, recovery here would ramp the held-0 gain up over the
+    // recovery window — the very window the pin-at-0 hold was meant to mask —
     // and the click returns. The `playing` handler owns the audible ramp;
     // recovery is a no-op for the gain ramp until then. transformGainNode is
     // also skipped because it would compound into the held-0 pin via the
     // upstream gain chain.
-    if (awaitingFirstPlayingEventRef.current) {
-      logPlaybackEvent('output-gain-restore-deferred-awaiting-playing', {
-        reason,
-      });
+    //
+    // Encoded in `shouldRunAudiblePlaybackGainRestoration` so the event-order
+    // contract is unit-testable independent of the React component.
+    const currentGainLinear = gainNode.gain.value;
+    const targetGainLinear = targetGainLinearRef.current;
+    if (
+      !shouldRunAudiblePlaybackGainRestoration({
+        awaitingFirstPlayingEvent: awaitingFirstPlayingEventRef.current,
+        audioPaused: audio.paused,
+        currentGainLinear,
+        targetGainLinear,
+      })
+    ) {
+      if (awaitingFirstPlayingEventRef.current) {
+        logPlaybackEvent('output-gain-restore-deferred-awaiting-playing', {
+          reason,
+        });
+      }
       return;
     }
 
@@ -6330,18 +6344,6 @@ export function App(): JSX.Element {
       } catch {
         transformGainNode.gain.value = targetTransformGainLinearRef.current;
       }
-    }
-
-    const currentGainLinear = gainNode.gain.value;
-    const targetGainLinear = targetGainLinearRef.current;
-    if (
-      !shouldRestoreAudiblePlaybackGain({
-        audioPaused: audio.paused,
-        currentGainLinear,
-        targetGainLinear,
-      })
-    ) {
-      return;
     }
 
     try {

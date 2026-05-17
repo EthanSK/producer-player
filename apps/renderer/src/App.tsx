@@ -228,6 +228,7 @@ import {
 import { useToast } from './lib/ToastStack';
 import {
   readSystemAudioDevice,
+  type SystemAudioDevice,
   unlockSystemAudioDeviceLabels,
   useSystemAudioDevice,
 } from './lib/useSystemAudioDevice';
@@ -841,7 +842,12 @@ const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
 const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
 const PLAYBACK_OUTPUT_RECOVERY_DELAY_MS = 80;
 const PLAYBACK_OUTPUT_RECOVERY_MIN_INTERVAL_MS = 750;
-const PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS = 0.025;
+// v3.226 — Codex CONSIDER. Aligned with the cold-start `onPlaying` ramp
+// (`getTrackSwitchFadeDurationSeconds` returns 0.06 for firstPlayOfSession).
+// Recovery from a stalled/suspended context can land mid-frame on a freshly-
+// loaded decoder, so the recovery ramp must be at least as long as the
+// cold-start fade-in to mask the same jitter window.
+const PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS = 0.06;
 const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
@@ -3037,6 +3043,10 @@ export function App(): JSX.Element {
   // even though React closes over the original.
   const listeningDevicesRef = useRef<ListeningDevice[]>([]);
   const activeListeningDeviceIdRef = useRef<string | null>(null);
+  // v3.226 — per-modal-open run id so late async resolves don't stomp the
+  // current open. Bumped on cleanup; in-flight passes bail if their captured
+  // runId doesn't match. Voice 3156.
+  const autoSetOnOpenRunIdRef = useRef<number>(0);
   const systemAudioDevice = useSystemAudioDevice({
     onChange: (next) => {
       const decision = decideAutoSelect(
@@ -3146,74 +3156,111 @@ export function App(): JSX.Element {
       readAutoSetListeningDeviceForSong(checklistModalSongId),
     );
   }, [checklistModalSongId]);
-  // v3.220 — re-sync the active listening device every time the checklist
+  // v3.226 — re-sync the active listening device every time the checklist
   // modal OPENS for any song, gated by the per-song "auto-set listening
-  // device on open" toggle (default ON; voice 3129 / 3130). Replaces the
-  // v3.211 implementation, which had two design issues that left Ethan on
-  // v3.219 still seeing stale chips:
+  // device on open" toggle (default ON; voice 3129 / 3130 + voice 3156).
   //
-  //   1. v3.211 read `systemAudioDevice` from the effect closure (deps
-  //      intentionally excluded), so calling `refresh()` updated the hook's
-  //      internal state but the in-effect `decideAutoSelect` call still saw
-  //      whatever value the closure was captured with. If the modal opened
-  //      while the hook was still resolving (or after a missed devicechange
-  //      event), the decision was made against stale data.
+  // History:
+  //   - v3.211: read systemAudioDevice from a stale closure, short-circuited
+  //     when matched device equaled current active id.
+  //   - v3.220: replaced with decideForceAutoSelect + async readSystemAudioDevice.
+  //     Mini E2E passed for switch+unlink scenario, but voice 3156 showed
+  //     real-world failure: manual chip switch (no unlink) followed by
+  //     close→reopen left the chip on the manual choice rather than
+  //     auto-snapping back to the linked device.
+  //   - v3.226 (this commit): rewrite to a bulletproof "always-resolve-on-open"
+  //     pattern that pins Ethan's exact repro (no unlink). Key changes:
   //
-  //   2. v3.211 short-circuited via `decideAutoSelect` when the matched
-  //      device equaled the current active id (returning
-  //      `activateDeviceId=null`). Ethan's spec for v3.220 is "force it
-  //      through to setActiveListeningDeviceId" — write through to defend
-  //      against any drift between the chip state and the persisted active
-  //      id, even when the matched device is already active. The toast is
-  //      still suppressed on no-change via the new `alreadyActive` flag on
-  //      `ForceAutoSelectDecision`.
+  //     1. Run the decision THREE times: (a) synchronously against the
+  //        hook's currently-known device, (b) async after readSystemAudioDevice
+  //        resolves, (c) one more time on the next animation frame to defend
+  //        against any state-batching race where another effect/listener
+  //        overwrites activeListeningDeviceId between (a) and (b). Each pass
+  //        uses the LATEST active-id ref so a no-op is a no-op (cheap).
   //
-  // New implementation:
-  //   - Reads the per-song toggle via `readAutoSetListeningDeviceForSong`
-  //     (default ON via absence). When OFF, skip the entire path. Manual
-  //     Detect button bypasses this gate.
-  //   - Re-reads the OS audio output via `readSystemAudioDevice()` directly
-  //     instead of relying on the hook's closure-captured state. This
-  //     guarantees the decision sees the same ground truth the OS would
-  //     report at this exact moment.
-  //   - Uses `decideForceAutoSelect` so an already-active match still
-  //     triggers a write (idempotent under React's referential-equality
-  //     setState) and gives us an explicit `alreadyActive` to gate the
-  //     toast on.
-  //   - Toast fires only when the chip actually moved.
-  //   - Also bumps `systemAudioDevice.refresh()` so the hook's state stays
-  //     in sync with what we just read — keeps downstream consumers
-  //     (system-device label display, link-button enabled state) coherent.
+  //     2. Use a per-modal-open run-id token so a late async resolve from a
+  //        previous open doesn't stomp the current one. The cleanup function
+  //        bumps the token; any in-flight callback checks the token before
+  //        writing.
+  //
+  //     3. Add structured logging via logAction so every modal-open path is
+  //        observable from the unified action log — captures the snapshot,
+  //        decision inputs, and whether a write fired. Critical for debugging
+  //        the "it didn't switch" path on real-world hardware.
+  //
+  //     4. Toast fires only on the FIRST pass that actually moved the chip
+  //        (gated by a per-run flag), so the three-pass design doesn't show
+  //        duplicate toasts.
   useEffect(() => {
     if (checklistModalSongId === null) return;
     if (listeningDevicesRef.current.length === 0) return;
     const enabled = readAutoSetListeningDeviceForSong(checklistModalSongId);
-    if (!enabled) return;
-    let cancelled = false;
-    (async () => {
-      systemAudioDevice.refresh();
-      const snapshot = await readSystemAudioDevice();
-      if (cancelled) return;
+    if (!enabled) {
+      logAction('listening-device.auto-set-on-open.skip-disabled', {
+        songId: checklistModalSongId,
+      });
+      return;
+    }
+    const runId = ++autoSetOnOpenRunIdRef.current;
+    let toastFiredForRun = false;
+
+    const attemptAutoSet = (
+      pass: 'sync' | 'async' | 'raf',
+      snapshot: SystemAudioDevice,
+    ): boolean => {
+      if (runId !== autoSetOnOpenRunIdRef.current) return false;
       const devices = listeningDevicesRef.current;
-      if (devices.length === 0) return;
+      if (devices.length === 0) return false;
       if (
         snapshot.deviceId.trim().length === 0 &&
         snapshot.groupId.trim().length === 0
       ) {
-        return;
+        logAction('listening-device.auto-set-on-open.skip-no-output', {
+          songId: checklistModalSongId,
+          pass,
+        });
+        return false;
       }
-      const decision = decideForceAutoSelect(
-        snapshot,
-        devices,
-        activeListeningDeviceIdRef.current,
-      );
-      if (!decision.matchedDevice || !decision.activateDeviceId) return;
+      const currentActive = activeListeningDeviceIdRef.current;
+      const decision = decideForceAutoSelect(snapshot, devices, currentActive);
+      if (!decision.matchedDevice || !decision.activateDeviceId) {
+        logAction('listening-device.auto-set-on-open.no-match', {
+          songId: checklistModalSongId,
+          pass,
+          snapshotDeviceId: snapshot.deviceId,
+          snapshotGroupId: snapshot.groupId,
+          snapshotLabel: snapshot.label,
+          deviceCount: devices.length,
+          linkedDeviceIds: devices
+            .filter((d) => typeof d.systemDeviceId === 'string' && d.systemDeviceId.length > 0)
+            .map((d) => ({ id: d.id, name: d.name, systemDeviceId: d.systemDeviceId })),
+          currentActive,
+        });
+        return false;
+      }
       // Write through unconditionally so the persisted active id realigns
       // with the OS output, even when the chip already shows the right
-      // device. React's setState is referentially-equal-aware so this is
-      // free when nothing changed.
-      setActiveListeningDeviceId(decision.activateDeviceId);
-      if (!decision.alreadyActive) {
+      // device. Functional setter to defend against any state-batching race
+      // where another listener overwrote activeListeningDeviceId after we
+      // captured currentActive but before our write lands.
+      let didWrite = false;
+      setActiveListeningDeviceId((latest) => {
+        if (latest === decision.activateDeviceId) return latest;
+        didWrite = true;
+        return decision.activateDeviceId;
+      });
+      logAction('listening-device.auto-set-on-open.decided', {
+        songId: checklistModalSongId,
+        pass,
+        decidedDeviceId: decision.activateDeviceId,
+        matchedDeviceName: decision.matchedDevice.name,
+        alreadyActive: decision.alreadyActive,
+        previousActive: currentActive,
+        didWrite,
+        snapshotLabel: snapshot.label,
+      });
+      if (didWrite && !toastFiredForRun) {
+        toastFiredForRun = true;
         const labelSuffix =
           snapshot.label.trim().length > 0 ? ` (${snapshot.label})` : '';
         toast.show({
@@ -3222,9 +3269,55 @@ export function App(): JSX.Element {
           text: `Auto-switched to ${decision.matchedDevice.name}${labelSuffix}`,
         });
       }
+      return didWrite;
+    };
+
+    // Pass A: synchronous decision using the hook's currently-known device.
+    // Catches the happy path where the hook already has a good snapshot
+    // (which it almost always does — devicechange events keep it fresh).
+    const hookSnapshot: SystemAudioDevice = {
+      deviceId: systemAudioDevice.deviceId,
+      groupId: systemAudioDevice.groupId,
+      label: systemAudioDevice.label,
+    };
+    // Pass A return value intentionally discarded — passes B and C are
+    // idempotent no-ops if pass A already wrote the right id (the functional
+    // setter inside attemptAutoSet bails when the latest value matches).
+    attemptAutoSet('sync', hookSnapshot);
+
+    // Kick a refresh so downstream consumers stay coherent.
+    systemAudioDevice.refresh();
+
+    let rafHandle: number | null = null;
+    let cancelled = false;
+    (async () => {
+      // Pass B: re-read directly from navigator.mediaDevices for ground
+      // truth. This guards against the hook being stale at modal-open time
+      // (e.g. modal opened before the hook resolved its initial mount, or
+      // after a missed devicechange event).
+      const snapshot = await readSystemAudioDevice();
+      if (cancelled) return;
+      attemptAutoSet('async', snapshot);
+
+      // Pass C: schedule a final retry on the next animation frame. This
+      // defends against the case where (a) succeeded but a competing
+      // listener (e.g. unified-state import) overwrote activeListeningDeviceId
+      // in the same React tick. By rAF time, all batched setStates have
+      // committed and the functional setter sees the post-batch value.
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        rafHandle = window.requestAnimationFrame(() => {
+          if (cancelled) return;
+          attemptAutoSet('raf', snapshot);
+        });
+      }
     })();
+
     return () => {
       cancelled = true;
+      autoSetOnOpenRunIdRef.current++;
+      if (rafHandle !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(rafHandle);
+      }
     };
     // Intentionally exclude `listeningDevices` + `systemAudioDevice` from
     // deps — we only want this to fire on modal-open transitions, not on
@@ -3716,8 +3809,28 @@ export function App(): JSX.Element {
         baseVolume: nextVolume,
         transformGainDb: nextNormalizationGainDb,
       });
+      // Always update the targets — the `onPlaying` handler reads these refs
+      // to know where to ramp TO, even while the GainNode itself is pinned at
+      // 0 awaiting the first `playing` event.
       targetGainLinearRef.current = gainState.playerVolumeLinear;
       targetTransformGainLinearRef.current = gainState.transformGainLinear;
+
+      // v3.226 — Codex CONSIDER. While a new source is held at 0 awaiting its
+      // first `playing` event, do NOT hard-write the GainNode value here —
+      // doing so would overwrite the pin-at-0 hold (volume slider movements
+      // mid-load would un-pin the bus and re-introduce the leading-frame
+      // click). The targets above are still updated so the `onPlaying`
+      // handler ramps to the right final value. Once that handler runs and
+      // clears `awaitingFirstPlayingEventRef`, subsequent `applyPlaybackGain`
+      // calls write through normally.
+      if (awaitingFirstPlayingEventRef.current) {
+        if (audio) {
+          audio.volume = playbackGainNodeRef.current
+            ? 1
+            : Math.max(0, Math.min(gainState.audibleGainLinear, 1));
+        }
+        return;
+      }
 
       const transformGainNode = playbackTransformGainNodeRef.current;
       if (transformGainNode) {
@@ -6192,6 +6305,25 @@ export function App(): JSX.Element {
       return;
     }
 
+    // v3.226 — Codex MUST-FIX #1. While waiting for the first `playing` event
+    // on a freshly-loaded source, the GainNode is intentionally pinned at 0 so
+    // the `playing` handler can ramp from 0 → target in sync with the actual
+    // leading audio frames. Recovery is scheduled from the `canplay` and `play`
+    // events; if codec startup takes >80ms (common macOS first-play), `play`
+    // fires and `audio.paused` flips to false BEFORE `playing` ever arrives.
+    // Without this guard, recovery here would ramp the held-0 gain up over
+    // 25ms PRE-OUTPUT — the very window the pin-at-0 hold was meant to mask —
+    // and the click returns. The `playing` handler owns the audible ramp;
+    // recovery is a no-op for the gain ramp until then. transformGainNode is
+    // also skipped because it would compound into the held-0 pin via the
+    // upstream gain chain.
+    if (awaitingFirstPlayingEventRef.current) {
+      logPlaybackEvent('output-gain-restore-deferred-awaiting-playing', {
+        reason,
+      });
+      return;
+    }
+
     if (transformGainNode) {
       try {
         transformGainNode.gain.value = targetTransformGainLinearRef.current;
@@ -6228,6 +6360,47 @@ export function App(): JSX.Element {
       currentGainLinear,
       targetGainLinear,
     });
+  }
+
+  // v3.226 — Codex MUST-FIX #2. The pin-at-0 + ramp-on-playing contract is
+  // what makes paused → play click-free. This helper pins the GainNode to 0
+  // before `audio.play()` is called, so the `onPlaying` handler's ramp from
+  // current-value → target masks the decoder's leading frames hitting output.
+  // Previously the contract lived only inline inside the main play button
+  // (`handlePlayPauseToggle`); three other direct-play paths skipped it, so a
+  // same-loaded-source play from those entry points still hard-cut to full
+  // amplitude and clicked. All four play paths now route through this wrapper.
+  //
+  // `firstPlayOfNewSource` controls which ramp duration the `onPlaying`
+  // handler picks: when callers know they're playing a freshly-committed
+  // source (cold-start decoder), they should set this to `true` so the longer
+  // 60ms ramp masks the larger jitter. Same-source paused → play uses the
+  // shorter 35ms warm-decoder ramp by default.
+  function pinPlaybackGainBeforeDirectPlay(options: {
+    firstPlayOfNewSource?: boolean;
+  } = {}): void {
+    const ctx = playbackAudioContextRef.current;
+    const gn = playbackGainNodeRef.current;
+    if (!ctx || !gn) {
+      return;
+    }
+    if (
+      !shouldHoldGainBeforePlayback({
+        targetGainLinear: targetGainLinearRef.current,
+      })
+    ) {
+      return;
+    }
+    try {
+      gn.gain.cancelScheduledValues(ctx.currentTime);
+      gn.gain.setValueAtTime(0, ctx.currentTime);
+    } catch {
+      // GainNode scheduling can throw on closed contexts — fall through and
+      // let the `playing` handler set the value imperatively.
+    }
+    if (options.firstPlayOfNewSource) {
+      awaitingFirstPlayingEventRef.current = true;
+    }
   }
 
   async function recoverPlaybackOutput(reason: string): Promise<void> {
@@ -8986,10 +9159,19 @@ export function App(): JSX.Element {
       audio.load();
     };
 
-    // Micro-crossfade: ramp gain to 0 before switching to avoid an audible click
+    // Micro-crossfade: ramp gain to 0 before switching to avoid an audible click.
+    //
+    // v3.226 — Codex CONSIDER. Bumped from 15ms → 30ms and added
+    // `cancelScheduledValues` before the ramp. 15ms was too short to fully
+    // mask the worst-case trailing-edge transient on platform-normalized
+    // tracks; 30ms is still imperceptible as a "fade" but reliably zeroes the
+    // bus before `audio.load()` swaps the source. `cancelScheduledValues`
+    // guards against an outstanding ramp from a prior crossfade or recovery
+    // event still being in flight at switch time.
     if (shouldCrossfade && gainNode && audioContext) {
+      gainNode.gain.cancelScheduledValues(audioContext.currentTime);
       gainNode.gain.setValueAtTime(gainNode.gain.value, audioContext.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.015);
+      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.03);
 
       if (crossfadeTimerRef.current !== null) {
         clearTimeout(crossfadeTimerRef.current);
@@ -8997,7 +9179,7 @@ export function App(): JSX.Element {
       crossfadeTimerRef.current = setTimeout(() => {
         crossfadeTimerRef.current = null;
         commitSourceSwitch();
-      }, 15);
+      }, 30);
     } else {
       commitSourceSwitch();
     }
@@ -11038,6 +11220,10 @@ export function App(): JSX.Element {
       if (audio.paused) {
         try {
           playbackIntentPlayingRef.current = true;
+          // v3.226 — Codex MUST-FIX #2. Route this paused → play path through
+          // the pin-at-0 wrapper so the `onPlaying` ramp masks the leading
+          // frames. Pre-v3.226 this path hard-cut to full amplitude.
+          pinPlaybackGainBeforeDirectPlay();
           await resumePlaybackContextIfNeeded();
           await audio.play();
           logPlaybackEvent('song-row-double-click-played-current-selection');
@@ -11245,27 +11431,19 @@ export function App(): JSX.Element {
         // ramp it back up over the first ~35-60ms, masking any leading-frame
         // click. This is the explicit play-button path (paused → play on an
         // already-loaded source) which previously hard-cut to full amplitude.
-        const ctxNow = playbackAudioContextRef.current;
-        const gainNow = playbackGainNodeRef.current;
-        if (
-          ctxNow &&
-          gainNow &&
-          shouldHoldGainBeforePlayback({ targetGainLinear: targetGainLinearRef.current })
-        ) {
-          try {
-            gainNow.gain.cancelScheduledValues(ctxNow.currentTime);
-            gainNow.gain.setValueAtTime(0, ctxNow.currentTime);
-          } catch {
-            // GainNode scheduling can throw on closed contexts — fall through
-            // and let the `playing` handler set the value imperatively.
-          }
-          // We don't reset awaitingFirstPlayingEventRef here. If this play is
-          // for the SAME source that was already loaded (i.e. source switch
-          // didn't just happen), the flag is already false and we'll get the
-          // shorter resume ramp on `playing`. If this play is for a fresh
-          // source, commitSourceSwitch already set the flag to true and
-          // we'll get the longer cold-start ramp on `playing`.
-        }
+        //
+        // v3.226 — Codex MUST-FIX #2. Routed through the shared
+        // pinPlaybackGainBeforeDirectPlay wrapper so the same contract applies
+        // to all four direct-play entry points (this one, song-row
+        // double-click, quick-switcher, checklist-timestamp same-song).
+        //
+        // We don't reset awaitingFirstPlayingEventRef here. If this play is
+        // for the SAME source that was already loaded (i.e. source switch
+        // didn't just happen), the flag is already false and we'll get the
+        // shorter resume ramp on `playing`. If this play is for a fresh
+        // source, commitSourceSwitch already set the flag to true and
+        // we'll get the longer cold-start ramp on `playing`.
+        pinPlaybackGainBeforeDirectPlay();
         await resumePlaybackContextIfNeeded();
         await audio.play();
         logPlaybackEvent('play-requested-direct');
@@ -13918,6 +14096,10 @@ export function App(): JSX.Element {
       if (audio.paused) {
         try {
           playbackIntentPlayingRef.current = true;
+          // v3.226 — Codex MUST-FIX #2. Route this paused → play path through
+          // the pin-at-0 wrapper so the `onPlaying` ramp masks the leading
+          // frames. Pre-v3.226 this path hard-cut to full amplitude.
+          pinPlaybackGainBeforeDirectPlay();
           await resumePlaybackContextIfNeeded();
           await audio.play();
           logPlaybackEvent('quick-switcher-played-current-selection');
@@ -14099,6 +14281,10 @@ export function App(): JSX.Element {
     handleSeek(seconds);
 
     if (audio.paused) {
+      // v3.226 — Codex MUST-FIX #2. Route this paused → play path through the
+      // pin-at-0 wrapper so the `onPlaying` ramp masks the leading frames.
+      // Pre-v3.226 this path hard-cut to full amplitude.
+      pinPlaybackGainBeforeDirectPlay();
       void resumePlaybackContextIfNeeded()
         .then(() => {
           playbackIntentPlayingRef.current = true;

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { buildKWeightingCurve } from './kWeighting';
 
-import { InstantTooltipPopover } from './InstantTooltip';
 interface KWeightingCurveModalProps {
   /** Whether the modal is open. */
   open: boolean;
@@ -225,13 +224,14 @@ export function KWeightingCurveModal({
           </div>
           <button
             type="button"
-            className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
+            className="ghost"
             onClick={onClose}
             data-testid="k-weighting-modal-close"
+            title="Close"
             aria-label="Close frequency weighting graph"
           >
             Close
-          <InstantTooltipPopover content="Close" /></button>
+          </button>
         </div>
 
         <div className="k-weighting-canvas-wrap">

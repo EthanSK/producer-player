@@ -17,7 +17,6 @@ import {
   type AgentSttProviderId,
 } from './agentVoiceSettings';
 
-import { InstantTooltipPopover } from './InstantTooltip';
 interface AgentComposerProps {
   onSend: (message: string) => void | Promise<void>;
   onInterrupt: () => void;
@@ -878,8 +877,9 @@ export function AgentComposer({
           {attachments.map((attachment) => (
             <div
               key={attachment.path}
-              className="agent-attachment-chip instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="agent-attachment-chip"
               data-testid="agent-attachment-chip"
+              title={`${attachment.name} — ${formatAttachmentSize(attachment.sizeBytes)}`}
             >
               <span className="agent-attachment-chip-icon" aria-hidden="true">
                 <svg
@@ -901,24 +901,26 @@ export function AgentComposer({
               </span>
               <button
                 type="button"
-                className="agent-attachment-chip-remove instant-tooltip-host instant-tooltip-host--inline-flex"
+                className="agent-attachment-chip-remove"
                 onClick={() => onRemoveAttachment?.(attachment.path)}
                 data-testid="agent-attachment-chip-remove"
+                title={`Remove ${attachment.name}`}
                 aria-label={`Remove ${attachment.name}`}
               >
                 ×
-              <InstantTooltipPopover content={`Remove ${attachment.name}`} /></button>
-            <InstantTooltipPopover content={`${attachment.name} — ${formatAttachmentSize(attachment.sizeBytes)}`} /></div>
+              </button>
+            </div>
           ))}
           {attachments.length > 1 && onClearAttachments ? (
             <button
               type="button"
-              className="agent-attachment-clear-all instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="agent-attachment-clear-all"
               onClick={onClearAttachments}
               data-testid="agent-attachment-clear-all"
+              title="Remove all attachments"
             >
               Clear all
-            <InstantTooltipPopover content="Remove all attachments" /></button>
+            </button>
           ) : null}
         </div>
       ) : null}
@@ -994,9 +996,10 @@ export function AgentComposer({
           {showMic ? (
             <button
               type="button"
-              className={`${micButtonClass} instant-tooltip-host instant-tooltip-host--inline-flex`}
+              className={micButtonClass}
               onClick={() => void handleMicToggle()}
               data-testid="agent-mic-button"
+              title={micTitle}
               disabled={!micClickable}
             >
               {isArming || isProcessing ? (
@@ -1018,28 +1021,30 @@ export function AgentComposer({
                   <line x1="8" y1="23" x2="16" y2="23" />
                 </svg>
               )}
-            <InstantTooltipPopover content={micTitle} /></button>
+            </button>
           ) : null}
 
           {isStreaming ? (
             <button
               type="button"
-              className="agent-stop-button instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="agent-stop-button"
               onClick={onInterrupt}
               data-testid="agent-stop-button"
+              title="Stop generation"
             >
               <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
-            <InstantTooltipPopover content="Stop generation" /></button>
+            </button>
           ) : null}
 
           <button
             type="button"
-            className={`${`agent-send-button ${isStreaming ? 'agent-send-button--steer' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+            className={`agent-send-button ${isStreaming ? 'agent-send-button--steer' : ''}`}
             onClick={handleSend}
             disabled={!canSend}
             data-testid="agent-send-button"
+            title={isStreaming ? 'Steer with follow-up message' : 'Send message'}
           >
             <svg
               viewBox="0 0 24 24"
@@ -1054,7 +1059,7 @@ export function AgentComposer({
               <line x1="22" y1="2" x2="11" y2="13" />
               <polygon points="22 2 15 22 11 13 2 9 22 2" />
             </svg>
-          <InstantTooltipPopover content={isStreaming ? 'Steer with follow-up message' : 'Send message'} /></button>
+          </button>
         </div>
       </div>
 

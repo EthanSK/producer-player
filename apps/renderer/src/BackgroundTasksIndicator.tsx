@@ -42,7 +42,6 @@ import {
   type AnalysisQueueJobSnapshot,
 } from './audioAnalysisQueue';
 
-import { InstantTooltipPopover } from './InstantTooltip';
 type QueueDump = ReturnType<typeof dumpPreviewAnalysisQueue>;
 
 export interface WarmupPlanSnapshot {
@@ -354,9 +353,10 @@ export function BackgroundTasksIndicator(
   return (
     <span
       ref={containerRef}
-      className="bg-tasks-indicator instant-tooltip-host instant-tooltip-host--inline-flex"
+      className="bg-tasks-indicator"
       role="status"
       aria-live="polite"
+      title={tooltip}
       data-testid="bg-tasks-indicator"
       data-popover-open={popoverOpen ? 'true' : 'false'}
       onMouseEnter={handleMouseEnter}
@@ -468,6 +468,6 @@ export function BackgroundTasksIndicator(
           </span>
         </span>
       ) : null}
-    <InstantTooltipPopover content={tooltip} /></span>
+    </span>
   );
 }

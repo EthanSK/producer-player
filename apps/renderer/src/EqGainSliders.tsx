@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import type { EqSnapshot } from '@producer-player/contracts';
 import { FREQUENCY_BANDS, frequencyToX } from './audioEngine';
 
-import { InstantTooltipPopover } from './InstantTooltip';
 const MIN_FREQ = 20;
 const MAX_FREQ = 20000;
 
@@ -197,52 +196,57 @@ export function EqGainSliders({
           {onToggleEq && (
             <button
               type="button"
-              className={`${`ghost eq-toggle-button${eqEnabled ? '' : ' eq-toggle-button--off'}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+              className={`ghost eq-toggle-button${eqEnabled ? '' : ' eq-toggle-button--off'}`}
               data-testid="eq-toggle"
               onClick={onToggleEq}
+              title={eqEnabled ? 'Bypass EQ (keep slider positions).' : 'Re-enable EQ.'}
             >
               {eqEnabled ? 'EQ On' : 'EQ Off'}
-            <InstantTooltipPopover content={eqEnabled ? 'Bypass EQ (keep slider positions).' : 'Re-enable EQ.'} /></button>
+            </button>
           )}
           {hasAnyGain && (
             <button
               type="button"
-              className="ghost eq-reset-all-button instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="ghost eq-reset-all-button"
               data-testid="eq-reset-all"
               onClick={onResetAll}
+              title="Reset all EQ bands to 0 dB."
             >
               Reset EQ
-            <InstantTooltipPopover content="Reset all EQ bands to 0 dB." /></button>
+            </button>
           )}
           <button
             type="button"
-            className="ghost eq-save-snapshot-button instant-tooltip-host instant-tooltip-host--inline-flex"
+            className="ghost eq-save-snapshot-button"
             data-testid="eq-save-snapshot"
             onClick={handleSaveSnapshot}
+            title="Save current EQ settings as a snapshot."
           >
             Save
-          <InstantTooltipPopover content="Save current EQ settings as a snapshot." /></button>
+          </button>
           {snapshots.length > 0 && (
             <div className="eq-snapshots-inline" data-testid="eq-snapshots-row">
               {[...snapshots].reverse().map((snap, idx) => (
                 <div key={snap.id} className="eq-snapshot-pill" data-testid={`eq-snapshot-${idx}`}>
                   <button
                     type="button"
-                    className="eq-snapshot-pill-button instant-tooltip-host instant-tooltip-host--inline-flex"
+                    className="eq-snapshot-pill-button"
                     onClick={() => handleRestoreSnapshot(snap)}
+                    title={snap.gains.map(formatGainCompact).join('  ')}
                   >
                     <span className="eq-snapshot-pill-label">
                       {snap.gains.map(formatGainCompact).join(' ')}
                     </span>
-                  <InstantTooltipPopover content={snap.gains.map(formatGainCompact).join('  ')} /></button>
+                  </button>
                   <button
                     type="button"
-                    className="eq-snapshot-delete instant-tooltip-host instant-tooltip-host--inline-flex"
+                    className="eq-snapshot-delete"
                     data-testid={`eq-snapshot-delete-${idx}`}
                     onClick={() => handleDeleteSnapshot(snap.id)}
+                    title="Delete snapshot"
                   >
                     &times;
-                  <InstantTooltipPopover content="Delete snapshot" /></button>
+                  </button>
                 </div>
               ))}
             </div>
@@ -376,12 +380,13 @@ function EqBandSlider({
     >
       <div
         ref={sliderRef}
-        className="eq-slider-track instant-tooltip-host instant-tooltip-host--inline-flex"
+        className="eq-slider-track"
         style={{ width: trackWidth }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onDoubleClick={handleDoubleClick}
+        title={`${label}: ${dbText} dB — drag to adjust, double-click to reset`}
       >
         {/* Zero line */}
         <div
@@ -409,7 +414,7 @@ function EqBandSlider({
             borderColor: isNonZero ? color : 'rgba(156, 175, 196, 0.4)',
           }}
         />
-      <InstantTooltipPopover content={`${label}: ${dbText} dB — drag to adjust, double-click to reset`} /></div>
+      </div>
       {/* Label */}
       <span
         className={`eq-slider-label ${isNonZero ? 'eq-slider-label-active' : ''}`}

@@ -73,27 +73,31 @@ describe('floating trigger slots — regression pin v3.212', () => {
 });
 
 /**
- * Regression pin (v3.234, Ethan voice 3216): the `.instant-tooltip-host`
- * rule MUST be specificity-neutral (`:where(...)`) so it doesn't override
- * the `position: fixed` declarations on migrated floating triggers
- * (`.quick-switcher-toggle`, `.version-switcher-trigger`,
+ * Regression pin (v3.234 → v3.235, Ethan voice 3216 + 3247): if a future
+ * change ever re-introduces the `.instant-tooltip-host` rule into
+ * styles.css, it MUST be specificity-neutral (`:where(...)`) so it
+ * doesn't override the `position: fixed` declarations on the floating
+ * triggers (`.quick-switcher-toggle`, `.version-switcher-trigger`,
  * `.inspector-toggle-button`).
  *
- * History: v3.229 bulk-migrated 282 sites to the InstantTooltip pattern by
- * adding the `instant-tooltip-host instant-tooltip-host--inline-flex`
- * classes. The host rule `.instant-tooltip-host { position: relative }`
- * has the same specificity as the per-element fixed-trigger rules but is
- * declared LATER in the file, so source-order made `position: relative`
- * win on the four floating triggers — collapsing them into normal flow
- * at the bottom of the page. v3.234 wraps the host rule in `:where()` so
- * any author `position` rule wins regardless of declaration order. This
- * pin guards against accidentally un-wrapping it in the future.
+ * History:
+ *  - v3.229 bulk-migrated 282 sites to the InstantTooltip pattern by
+ *    adding the `instant-tooltip-host instant-tooltip-host--inline-flex`
+ *    classes. The host rule `.instant-tooltip-host { position: relative }`
+ *    had the same specificity as the per-element fixed-trigger rules but
+ *    declared LATER in the file, so source-order made `position: relative`
+ *    win on the four floating triggers — collapsing them into normal flow
+ *    at the bottom of the page.
+ *  - v3.234 wrapped the host rule in `:where()` so any author `position`
+ *    rule wins regardless of declaration order.
+ *  - v3.235 reverted the broad InstantTooltip rollout (voice 3247 — "the
+ *    new behavior of the tooltips on every button is kind of annoying").
+ *    The host class no longer exists in CSS. This pin is retained as a
+ *    forward-compat guard: passes trivially while the class is absent,
+ *    fires the moment a bare `.instant-tooltip-host { position: ... }`
+ *    returns.
  */
-describe('instant-tooltip-host position is specificity-neutral — regression pin v3.234', () => {
-  it('declares position: relative via :where(.instant-tooltip-host), not the bare class', () => {
-    expect(styles).toMatch(/:where\(\.instant-tooltip-host\)\s*\{[^}]*position:\s*relative/);
-  });
-
+describe('instant-tooltip-host position is specificity-neutral — regression pin v3.234/v3.235', () => {
   it('does NOT contain a bare `.instant-tooltip-host { position: ... }` rule that would override fixed triggers', () => {
     // Bare class with position: anything — would re-introduce the regression
     // because .instant-tooltip-host is declared after the fixed-trigger rules.

@@ -4263,6 +4263,16 @@ body.is-dragging-checklist-timestamp * {
  * `align-self: flex-start` + `width: max-content` pins it to its own
  * content size so the chip strip / other elements next to it don't get
  * shoved around. `position: relative` anchors the absolute popover.
+ *
+ * v3.235 (Ethan voice 3243) — the label JSX was moved from a direct
+ * child of `.listening-device-strip` (the 2-column grid) into the
+ * `.listening-device-editor` flex-column. As a strip-level sibling the
+ * label landed in col-2 row-1 of the grid and visually occupied a full
+ * 50% of the strip's width — "AUTO SET button hogging right half" with
+ * the chip strip cramped on the other side. Now it sits beneath the
+ * editor-actions row inside col 1, takes only its own content width
+ * (`align-self: flex-start` + `width: max-content`), and frees the full
+ * col 2 for the chip strip.
  */
 .listening-device-auto-set-toggle {
   position: relative;
@@ -9669,171 +9679,4 @@ button.reference-action.active {
 
 .mastering-checklist-row-help-body {
   color: var(--text-muted, #9cafc4);
-}
-
-/* ------------------------------------------------------------------
- * v3.229 — InstantTooltip (shared instant-fade custom tooltip).
- *
- * Standardises every tooltip in the app on the same pattern previously
- * used for the Save Copy button. Voice 3163:
- *   "convert every tooltip in the app to the same tooltip component …
- *    where it just shows instantly our own custom one per track"
- *
- * Mirrors `.main-list-row-metadata-popover` (declared above around
- * line 2941). Pure CSS, no JS positioning, 60ms fade. The host element
- * itself is `position: relative`, the popover (`.instant-tooltip-popover`)
- * is `position: absolute` against it.
- *
- * Bulk usage: add `instant-tooltip-host instant-tooltip-host--inline-flex`
- * to an existing element's className, then drop in
- * `<InstantTooltipPopover content="..." />` as its last child. Zero
- * layout impact — the wrapper component is also available for cases
- * where modifying the trigger element is awkward.
- * ------------------------------------------------------------------ */
-
-/* Host: provide a relative-positioned default so any descendant absolutely-
- * positioned element (e.g. the v3.232 zero-size `.instant-tooltip-tracker`)
- * resolves against the host rather than the viewport. This is a default —
- * NOT an override. Wrapped in `:where()` to zero out specificity so any
- * author-styled `position` on the trigger element (e.g. the floating
- * `.quick-switcher-toggle`, `.version-switcher-trigger`,
- * `.inspector-toggle-button` which all need `position: fixed`) wins
- * regardless of stylesheet source order.
- *
- * v3.234 (Ethan voice 3216): without the `:where()` wrap, this rule's
- * `position: relative` overrode `position: fixed` on the migrated floating
- * triggers because `.instant-tooltip-host` is declared later in this file
- * than the per-element rules. That caused the three regressions Ethan
- * flagged: floating triggers "all over the place", a strange "bar at the
- * bottom" (the triggers piled into normal flow), and the version-track
- * switcher appearing missing. The CSS contract test in
- * `floatingTriggerSlots.test.ts` pins this so it cannot regress again.
- *
- * Note: v3.232 portaled the popover to document.body and drives layout
- * via JS, so the host no longer needs to be a positioning context for
- * popover anchoring. The relative default is retained only for the
- * `.instant-tooltip-tracker` child positioning, which is harmless either
- * way (the tracker is zero-size + aria-hidden).
- *
- * We also avoid forcing a `display` on the host so existing element
- * styles (e.g. `display: grid`, `display: flex`) keep working unchanged.
- * The `--inline-flex` / `--block` / `--contents` variants are kept for
- * the pure `<InstantTooltip>` wrapper component (which renders its own
- * <span> and needs a sensible default display), and use `:where()` to
- * zero out specificity so any explicit `display` on the trigger element
- * wins. */
-:where(.instant-tooltip-host) {
-  position: relative;
-}
-
-:where(.instant-tooltip-host--inline-flex) {
-  display: inline-flex;
-  align-items: center;
-}
-
-:where(.instant-tooltip-host--block) {
-  display: block;
-}
-
-:where(.instant-tooltip-host--contents) {
-  /* Use sparingly — disables the wrapper's containing block, so the
-     popover positions against the next `position: relative` ancestor. */
-  display: contents;
-}
-
-/* v3.232 — popover now renders via React Portal to document.body, so
- * its layout `top`/`left` come from JS (`position: fixed`) rather than
- * being anchored to the host via CSS. The CSS still owns visual styling
- * (background, padding, font, transition) and the slide-in transform
- * direction per placement variant.
- *
- * Note: the inline `style` attribute set by InstantTooltipPopover.tsx
- * provides `position: fixed`, `top`, `left`, and a layout `transform`
- * that translates the popover by `-100%` on the axes where the anchor
- * point describes a far edge (right-edge for `*-end`, bottom-edge for
- * `top-*`). The slide-in transform from the CSS variants is APPENDED to
- * that layout transform via the `--instant-tooltip-slide` custom
- * property — see the `.instant-tooltip-popover--*` rules below.
- *
- * The tracker element (zero-size sibling of the host's other children)
- * is just a DOM marker that lets the popover walk up to its host.
- */
-.instant-tooltip-tracker {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.instant-tooltip-popover {
-  /* `position: fixed`, `top`, `left`, `transform` are set inline by
-     InstantTooltipPopover.tsx — JS-driven layout escapes every ancestor
-     clipping context. */
-  z-index: 80;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: max-content;
-  max-width: min(360px, calc(100vw - 24px));
-  padding: 8px 10px;
-  border: 1px solid var(--border, rgba(156, 175, 196, 0.4));
-  border-radius: 8px;
-  background: rgba(20, 24, 30, 0.97);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
-  color: var(--text-main, #ecf2f9);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.35;
-  letter-spacing: normal;
-  text-align: left;
-  text-transform: none;
-  white-space: normal;
-  /* Opacity controlled by the `--open` modifier class. Portal mount is
-     unconditional once open, so we animate just the opacity. */
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 60ms ease;
-}
-
-/* When the React state flips `open=true`, the JS sets the inline
-   transform, then we fade in. */
-.instant-tooltip-popover--open {
-  opacity: 1;
-}
-
-/* Placement variants — retained as data classes for any external CSS
-   that wants to target them, and (intentionally a no-op for layout) for
-   forward-compat. Layout is JS-driven; these classes no longer set
-   `top`/`bottom`/`left`/`right`/`transform`. */
-.instant-tooltip-popover--top-end,
-.instant-tooltip-popover--top-start,
-.instant-tooltip-popover--bottom-end,
-.instant-tooltip-popover--bottom-start {
-  /* Intentionally empty — placement is encoded in the inline transform.
-     Kept as targetable selectors for future tweaks. */
-}
-
-.instant-tooltip-popover-label {
-  color: var(--text-muted, #9cafc4);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.instant-tooltip-popover-body {
-  display: block;
-  color: var(--text-main, #ecf2f9);
-  white-space: normal;
-}
-
-.instant-tooltip-popover-body code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10.5px;
-  color: #ecf6ff;
-  background: rgba(255, 255, 255, 0.06);
-  padding: 0 3px;
-  border-radius: 3px;
 }

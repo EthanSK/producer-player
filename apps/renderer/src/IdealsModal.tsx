@@ -29,7 +29,6 @@ import {
   type IdealStemSourceKind,
 } from './idealStemAnalysis';
 
-import { InstantTooltipPopover } from './InstantTooltip';
 export type { IdealStemAnalysisSource } from './idealStemAnalysis';
 
 interface IdealsModalProps {
@@ -847,20 +846,21 @@ function StemAuditionPanel({
           <button
             key={entry.id}
             type="button"
-            className={`${`ideals-audition-segment ideals-audition-segment--${entry.id}${
+            className={`ideals-audition-segment ideals-audition-segment--${entry.id}${
               target === entry.id ? ' active' : ''
-            }`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+            }`}
             aria-pressed={target === entry.id}
             disabled={!entry.enabled}
             onClick={() => handleTargetSwitch(entry.id)}
             data-testid={`ideals-audition-${entry.id}-${stemId}`}
+            title={entry.enabled ? `${entry.description} (${entry.shortcut})` : `Run analysis to enable ${entry.label}`}
           >
             <span className="ideals-audition-segment-shortcut" aria-hidden>{entry.shortcut}</span>
             <span className="ideals-audition-segment-text">
               <span className="ideals-audition-segment-label">{entry.label}</span>
               <span className="ideals-audition-segment-sublabel">{entry.sublabel}</span>
             </span>
-          <InstantTooltipPopover content={entry.enabled ? `${entry.description} (${entry.shortcut})` : `Run analysis to enable ${entry.label}`} /></button>
+          </button>
         ))}
       </div>
       {activeEntry?.src ? (
@@ -1093,21 +1093,22 @@ function SourceStrip({
           {formatSourceStatus(kind, source, state)}
         </span>
         {source?.fileName ? (
-          <span className="ideals-source-strip-file instant-tooltip-host instant-tooltip-host--inline-flex">
+          <span className="ideals-source-strip-file" title={source.fileName}>
             {source.fileName}
-          <InstantTooltipPopover content={source.fileName} /></span>
+          </span>
         ) : null}
       </div>
       <div className="ideals-source-strip-actions">
         <button
           type="button"
-          className="ideals-action-primary instant-tooltip-host instant-tooltip-host--inline-flex"
+          className="ideals-action-primary"
           disabled={disabled || running}
           onClick={() => onAnalyze(ready)}
           data-testid={`ideals-separate-${kind}`}
+          title={source ? primaryLabel : formatSourceStatus(kind, source, state)}
         >
           {primaryLabel}
-        <InstantTooltipPopover content={source ? primaryLabel : formatSourceStatus(kind, source, state)} /></button>
+        </button>
         {running ? (
           <button
             type="button"
@@ -1121,12 +1122,13 @@ function SourceStrip({
         {ready || errored ? (
           <button
             type="button"
-            className="ideals-action-secondary ideals-action-secondary--ghost instant-tooltip-host instant-tooltip-host--inline-flex"
+            className="ideals-action-secondary ideals-action-secondary--ghost"
             onClick={onClear}
             data-testid={`ideals-clear-${kind}`}
+            title="Clear analysis and free memory"
           >
             Clear
-          <InstantTooltipPopover content="Clear analysis and free memory" /></button>
+          </button>
         ) : null}
         {/* Hidden retry button kept for test-id contract. */}
         {errored ? (
@@ -1364,31 +1366,34 @@ export function IdealsModal({
           <div className="ideals-header-actions">
             <button
               type="button"
-              className={`${`ideals-density-toggle${density === 'compact' ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+              className={`ideals-density-toggle${density === 'compact' ? ' active' : ''}`}
               onClick={() => setDensity((current) => (current === 'compact' ? 'detailed' : 'compact'))}
               data-testid="ideals-density-toggle"
               aria-pressed={density === 'compact'}
+              title="Toggle between compact (engineer A/B mode) and detailed (educational) layouts."
             >
               {density === 'compact' ? 'Detailed view' : 'Compact view'}
-            <InstantTooltipPopover content="Toggle between compact (engineer A/B mode) and detailed (educational) layouts." /></button>
+            </button>
             <button
               type="button"
-              className={`${`ideals-tips-toggle${showLearningTips ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+              className={`ideals-tips-toggle${showLearningTips ? ' active' : ''}`}
               onClick={() => setShowLearningTips((current) => !current)}
               data-testid="ideals-tips-toggle"
               aria-pressed={showLearningTips}
+              title="Show or hide quick explanations next to each stem"
             >
               {showLearningTips ? 'Hide tips' : 'Learn mode'}
-            <InstantTooltipPopover content="Show or hide quick explanations next to each stem" /></button>
+            </button>
             <button
               type="button"
-              className="ideals-close-button instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="ideals-close-button"
               onClick={onClose}
               data-testid="ideals-modal-close"
+              title="Close"
               aria-label="Close ideal EQ guide"
             >
               <span aria-hidden>×</span>
-            <InstantTooltipPopover content="Close" /></button>
+            </button>
           </div>
         </div>
 
@@ -1398,57 +1403,62 @@ export function IdealsModal({
               <span className="ideals-layer-toggles-label">Layers</span>
               <button
                 type="button"
-                className={`${`ideals-layer-toggle ideals-layer-toggle--ideal${layers.ideal ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+                className={`ideals-layer-toggle ideals-layer-toggle--ideal${layers.ideal ? ' active' : ''}`}
                 aria-pressed={layers.ideal}
                 onClick={() => setLayers((current) => ({ ...current, ideal: !current.ideal }))}
                 data-testid="ideals-toggle-ideal"
+                title="Show or hide the educational ideal curve."
               >
                 <span className="ideals-layer-swatch ideals-layer-swatch--ideal" aria-hidden />
                 Ideal
-              <InstantTooltipPopover content="Show or hide the educational ideal curve." /></button>
+              </button>
               <button
                 type="button"
-                className={`${`ideals-layer-toggle ideals-layer-toggle--mix${layers.mix && mixReady ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+                className={`ideals-layer-toggle ideals-layer-toggle--mix${layers.mix && mixReady ? ' active' : ''}`}
                 aria-pressed={layers.mix && mixReady}
                 disabled={!mixReady}
                 onClick={() => setLayers((current) => ({ ...current, mix: !current.mix }))}
                 data-testid="ideals-toggle-mix"
+                title={mixReady ? 'Show or hide your mix proxy-stem curves.' : 'Analyze your mix first.'}
               >
                 <span className="ideals-layer-swatch ideals-layer-swatch--mix" aria-hidden />
                 Your Mix
-              <InstantTooltipPopover content={mixReady ? 'Show or hide your mix proxy-stem curves.' : 'Analyze your mix first.'} /></button>
+              </button>
               <button
                 type="button"
-                className={`${`ideals-layer-toggle ideals-layer-toggle--reference${layers.reference && referenceReady ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+                className={`ideals-layer-toggle ideals-layer-toggle--reference${layers.reference && referenceReady ? ' active' : ''}`}
                 aria-pressed={layers.reference && referenceReady}
                 disabled={!referenceReady}
                 onClick={() => setLayers((current) => ({ ...current, reference: !current.reference }))}
                 data-testid="ideals-toggle-reference"
+                title={referenceReady ? 'Show or hide reference proxy-stem curves.' : 'Analyze a loaded reference first.'}
               >
                 <span className="ideals-layer-swatch ideals-layer-swatch--reference" aria-hidden />
                 Reference
-              <InstantTooltipPopover content={referenceReady ? 'Show or hide reference proxy-stem curves.' : 'Analyze a loaded reference first.'} /></button>
+              </button>
               <button
                 type="button"
-                className={`${`ideals-layer-toggle ideals-layer-toggle--diff${layers.diff && diffAvailable ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+                className={`ideals-layer-toggle ideals-layer-toggle--diff${layers.diff && diffAvailable ? ' active' : ''}`}
                 aria-pressed={layers.diff && diffAvailable}
                 disabled={!diffAvailable}
                 onClick={() => setLayers((current) => ({ ...current, diff: !current.diff }))}
                 data-testid="ideals-toggle-diff"
+                title={diffAvailable
+                  ? 'Show Mix − Ideal as a single curve to spot deviations at a glance (engineer mode).'
+                  : 'Analyze your mix to enable the diff overlay.'}
               >
                 <span className="ideals-layer-swatch ideals-layer-swatch--diff" aria-hidden />
                 Diff (Mix − Ideal)
-              <InstantTooltipPopover content={diffAvailable
-                  ? 'Show Mix − Ideal as a single curve to spot deviations at a glance (engineer mode).'
-                  : 'Analyze your mix to enable the diff overlay.'} /></button>
+              </button>
             </div>
             <div className="ideals-actionbar-spacer" aria-hidden />
             <button
               type="button"
-              className="ideals-analyze-all instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="ideals-analyze-all"
               disabled={noSources || anyRunning}
               onClick={startAll}
               data-testid="ideals-separate-all"
+              title="Stem Separate Both — generate proxy stems for mix and reference in parallel."
             >
               <span className="ideals-analyze-all-glyph" aria-hidden>
                 {anyRunning ? '⟳' : '▶'}
@@ -1456,7 +1466,7 @@ export function IdealsModal({
               <span className="ideals-analyze-all-text">
                 {anyRunning ? 'Separating stems…' : 'Stem Separate Both'}
               </span>
-            <InstantTooltipPopover content="Stem Separate Both — generate proxy stems for mix and reference in parallel." /></button>
+            </button>
           </div>
           <div className="ideals-source-strips">
             <SourceStrip
@@ -1553,13 +1563,14 @@ export function IdealsModal({
                     </div>
                     <button
                       type="button"
-                      className="ideals-expand-toggle instant-tooltip-host instant-tooltip-host--inline-flex"
+                      className="ideals-expand-toggle"
                       onClick={() => setSelectedFullscreenStemId(stemId)}
                       aria-haspopup="dialog"
                       data-testid={`ideals-expand-${stemId}`}
+                      title={`Open ${guide.label} in a focused dialog with deeper notes`}
                     >
                       Full view ↗
-                    <InstantTooltipPopover content={`Open ${guide.label} in a focused dialog with deeper notes`} /></button>
+                    </button>
                   </div>
 
                   {showLearningTips ? (
@@ -1652,13 +1663,14 @@ export function IdealsModal({
               </div>
               <button
                 type="button"
-                className="ideals-close-button instant-tooltip-host instant-tooltip-host--inline-flex"
+                className="ideals-close-button"
                 onClick={() => setSelectedFullscreenStemId(null)}
                 data-testid="ideals-stem-fullscreen-close"
                 aria-label={`Close ${fullscreenGuide.label} focused view`}
+                title="Close focused view"
               >
                 <span aria-hidden>×</span>
-              <InstantTooltipPopover content="Close focused view" /></button>
+              </button>
             </div>
 
             <div className="ideals-stem-fullscreen-body">

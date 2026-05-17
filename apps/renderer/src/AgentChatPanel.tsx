@@ -40,7 +40,6 @@ import {
   type AgentChatViewport,
 } from './agentChatPanelBounds';
 
-import { InstantTooltipPopover } from './InstantTooltip';
 export interface AgentChatMessage {
   id: string;
   role: 'user' | 'agent' | 'system';
@@ -1904,9 +1903,10 @@ export function AgentChatPanel({
     <>
       <button
         type="button"
-        className="agent-toggle-button instant-tooltip-host instant-tooltip-host--inline-flex"
+        className="agent-toggle-button"
         onClick={handleTogglePanel}
         data-testid="agent-panel-toggle"
+        title={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'}
         aria-label={isOpen ? 'Minimize Producey Boy' : `Open Producey Boy${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
       >
         <svg
@@ -1926,7 +1926,7 @@ export function AgentChatPanel({
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
-      <InstantTooltipPopover content={isOpen ? 'Minimize Producey Boy' : 'Open Producey Boy'} /></button>
+      </button>
 
       <div
         ref={panelRef}
@@ -1999,9 +1999,10 @@ export function AgentChatPanel({
           <div className="agent-panel-header-right">
             <button
               type="button"
-              className="agent-header-button instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="agent-header-button"
               onClick={handleToggleHelp}
               data-testid="agent-help-toggle"
+              title="Assistant setup help"
               aria-label="Assistant setup help"
             >
               <svg
@@ -2018,12 +2019,13 @@ export function AgentChatPanel({
                 <path d="M9.6 9a2.4 2.4 0 1 1 4.8 0c0 1.9-2.4 2.2-2.4 4" />
                 <circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none" />
               </svg>
-            <InstantTooltipPopover content="Assistant setup help" /></button>
+            </button>
             <button
               type="button"
-              className={`${`agent-header-button ${historyOpen ? 'agent-header-button--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+              className={`agent-header-button ${historyOpen ? 'agent-header-button--active' : ''}`}
               onClick={handleToggleHistory}
               data-testid="agent-history-toggle"
+              title="Chat history"
               aria-label="Chat history"
             >
               <svg
@@ -2040,12 +2042,13 @@ export function AgentChatPanel({
                 <path d="M3 4v5h5" />
                 <path d="M12 7v5l3 3" />
               </svg>
-            <InstantTooltipPopover content="Chat history" /></button>
+            </button>
             <button
               type="button"
-              className={`${`agent-header-button ${settingsOpen ? 'agent-header-button--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+              className={`agent-header-button ${settingsOpen ? 'agent-header-button--active' : ''}`}
               onClick={handleToggleSettings}
               data-testid="agent-settings-toggle"
+              title="Assistant settings"
               aria-label="Assistant settings"
             >
               <svg
@@ -2061,10 +2064,10 @@ export function AgentChatPanel({
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V22a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H2a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 9.44 4.1V4a2 2 0 1 1 4 0v.09c0 .67.4 1.28 1.01 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01c.24.61.84 1.01 1.51 1.01H20a2 2 0 1 1 0 4h-.09c-.67 0-1.28.4-1.51 1.01z" />
               </svg>
-            <InstantTooltipPopover content="Assistant settings" /></button>
+            </button>
             <button
               type="button"
-              className="agent-header-button instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="agent-header-button"
               onClick={() => {
                 setIsOpen(false);
                 setSettingsOpen(false);
@@ -2072,6 +2075,7 @@ export function AgentChatPanel({
                 setHelpDialogOpen(false);
               }}
               data-testid="agent-panel-close"
+              title="Minimize"
               aria-label="Minimize"
             >
               <svg
@@ -2085,7 +2089,7 @@ export function AgentChatPanel({
               >
                 <path d="M6 12h12" />
               </svg>
-            <InstantTooltipPopover content="Minimize" /></button>
+            </button>
           </div>
         </div>
 
@@ -2126,18 +2130,20 @@ export function AgentChatPanel({
             <div className="agent-approval-actions">
               <button
                 type="button"
-                className="agent-approval-allow instant-tooltip-host instant-tooltip-host--inline-flex"
+                className="agent-approval-allow"
                 onClick={() => handleApproval('allow')}
+                title="Allow this tool action"
               >
                 Allow
-              <InstantTooltipPopover content="Allow this tool action" /></button>
+              </button>
               <button
                 type="button"
-                className="agent-approval-deny instant-tooltip-host instant-tooltip-host--inline-flex"
+                className="agent-approval-deny"
                 onClick={() => handleApproval('deny')}
+                title="Deny this tool action"
               >
                 Deny
-              <InstantTooltipPopover content="Deny this tool action" /></button>
+              </button>
             </div>
           </div>
         )}
@@ -2162,12 +2168,13 @@ export function AgentChatPanel({
                   <h4>Set up Producey Boy</h4>
                   <button
                     type="button"
-                    className="agent-help-close instant-tooltip-host instant-tooltip-host--inline-flex"
+                    className="agent-help-close"
                     onClick={() => setHelpDialogOpen(false)}
                     data-testid="agent-help-close"
+                    title="Close help"
                   >
                     ✕
-                  <InstantTooltipPopover content="Close help" /></button>
+                  </button>
                 </div>
                 <p>
                   This assistant uses your local CLI login, so you can run sessions through your
@@ -2206,11 +2213,12 @@ export function AgentChatPanel({
                       <li key={source.url}>
                         <button
                           type="button"
-                          className="agent-help-source-link instant-tooltip-host instant-tooltip-host--inline-flex"
+                          className="agent-help-source-link"
                           onClick={() => handleOpenTutorialSource(source.url)}
+                          title={`Open ${source.label}`}
                         >
                           {source.label}
-                        <InstantTooltipPopover content={`Open ${source.label}`} /></button>
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -2223,12 +2231,13 @@ export function AgentChatPanel({
                 <h4 className="agent-history-title">Chat history</h4>
                 <button
                   type="button"
-                  className="agent-history-close instant-tooltip-host instant-tooltip-host--inline-flex"
+                  className="agent-history-close"
                   onClick={() => setHistoryOpen(false)}
                   data-testid="agent-history-close"
+                  title="Back to current chat"
                 >
                   Back to chat
-                <InstantTooltipPopover content="Back to current chat" /></button>
+                </button>
               </div>
 
               {chatHistory.length === 0 ? (
@@ -2248,20 +2257,22 @@ export function AgentChatPanel({
                       <div className="agent-history-item-actions">
                         <button
                           type="button"
-                          className="agent-history-action instant-tooltip-host instant-tooltip-host--inline-flex"
+                          className="agent-history-action"
                           onClick={() => handleRestoreHistory(entry.id)}
                           data-testid="agent-history-open"
+                          title="Open this chat"
                         >
                           Open
-                        <InstantTooltipPopover content="Open this chat" /></button>
+                        </button>
                         <button
                           type="button"
-                          className="agent-history-action agent-history-action--danger instant-tooltip-host instant-tooltip-host--inline-flex"
+                          className="agent-history-action agent-history-action--danger"
                           onClick={() => handleDeleteHistoryEntry(entry.id)}
                           data-testid="agent-history-delete"
+                          title="Delete from history"
                         >
                           Delete
-                        <InstantTooltipPopover content="Delete from history" /></button>
+                        </button>
                       </div>
                     </li>
                   ))}
@@ -2299,27 +2310,29 @@ export function AgentChatPanel({
                   </ol>
                   <button
                     type="button"
-                    className="agent-empty-state-help instant-tooltip-host instant-tooltip-host--inline-flex"
+                    className="agent-empty-state-help"
                     onClick={() => {
                       setHelpDialogOpen(true);
                       setSettingsOpen(false);
                       setHistoryOpen(false);
                     }}
                     data-testid="agent-empty-state-help"
+                    title="Open setup help for configuring the assistant"
                   >
                     Open setup help
-                  <InstantTooltipPopover content="Open setup help for configuring the assistant" /></button>
+                  </button>
                   <div className="agent-starter-prompts">
                     {STARTER_PROMPTS.map((prompt) => (
                       <button
                         key={prompt}
                         type="button"
-                        className="agent-starter-chip instant-tooltip-host instant-tooltip-host--inline-flex"
+                        className="agent-starter-chip"
                         onClick={() => void handleSendMessage(prompt)}
                         data-testid="agent-starter-chip"
+                        title={`Send: ${prompt}`}
                       >
                         {prompt}
-                      <InstantTooltipPopover content={`Send: ${prompt}`} /></button>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -2358,11 +2371,12 @@ export function AgentChatPanel({
                       {msg.role === 'agent' && msg.status === 'complete' && (
                         <button
                           type="button"
-                          className="agent-copy-button instant-tooltip-host instant-tooltip-host--inline-flex"
+                          className="agent-copy-button"
                           onClick={() => handleCopyMessage(msg.content)}
+                          title="Copy message"
                         >
                           Copy
-                        <InstantTooltipPopover content="Copy message" /></button>
+                        </button>
                       )}
                     </div>
                   </div>

@@ -24,7 +24,6 @@ import {
   writeStoredAgentSttProvider,
 } from './agentVoiceSettings';
 
-import { InstantTooltipPopover } from './InstantTooltip';
 interface AgentSettingsProps {
   provider: AgentProviderId;
   model: AgentModelId;
@@ -435,13 +434,14 @@ export function AgentSettings({
             <button
               key={providerId}
               type="button"
-              className={`${`agent-settings-provider-option ${provider === providerId ? 'agent-settings-provider-option--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+              className={`agent-settings-provider-option ${provider === providerId ? 'agent-settings-provider-option--active' : ''}`}
               onClick={() => onProviderChange(providerId)}
               disabled={controlsDisabled}
               data-testid={`agent-provider-${providerId}`}
+              title={`Use ${AGENT_PROVIDER_LABELS[providerId]} as the AI provider`}
             >
               {AGENT_PROVIDER_LABELS[providerId]}
-            <InstantTooltipPopover content={`Use ${AGENT_PROVIDER_LABELS[providerId]} as the AI provider`} /></button>
+            </button>
           ))}
         </div>
       </div>
@@ -504,7 +504,8 @@ export function AgentSettings({
 
       <div className="agent-settings-section">
         <label
-          className="agent-settings-toggle-row instant-tooltip-host instant-tooltip-host--inline-flex"
+          className="agent-settings-toggle-row"
+          title="When ON, opening a new track in fullscreen mastering automatically asks the AI for per-metric recommendations. Turn OFF to avoid automatic LLM spend — the Regenerate button still works manually."
         >
           <input
             type="checkbox"
@@ -516,7 +517,7 @@ export function AgentSettings({
           <span className="agent-settings-toggle-label">
             Auto-generate mastering recommendations when opening tracks
           </span>
-        <InstantTooltipPopover content="When ON, opening a new track in fullscreen mastering automatically asks the AI for per-metric recommendations. Turn OFF to avoid automatic LLM spend — the Regenerate button still works manually." /></label>
+        </label>
         <p
           className="agent-settings-key-help"
           data-testid="agent-settings-auto-recommend-help"
@@ -536,7 +537,8 @@ export function AgentSettings({
           `agentDangerouslyBypassPermissions`. */}
       <div className="agent-settings-section agent-settings-section--danger">
         <label
-          className="agent-settings-toggle-row instant-tooltip-host instant-tooltip-host--inline-flex"
+          className="agent-settings-toggle-row"
+          title="DANGEROUS. When ON, the AI agent runs with no permission checks and gets full read/write access to your file system and shell. Only enable if you trust what you're about to ask the agent to do."
         >
           <input
             type="checkbox"
@@ -551,7 +553,7 @@ export function AgentSettings({
             Bypass CLI permission checks (DANGEROUS — gives the AI full
             file-system access)
           </span>
-        <InstantTooltipPopover content="DANGEROUS. When ON, the AI agent runs with no permission checks and gets full read/write access to your file system and shell. Only enable if you trust what you're about to ask the agent to do." /></label>
+        </label>
         <p
           className="agent-settings-key-help"
           data-testid="agent-settings-bypass-permissions-help"
@@ -569,13 +571,14 @@ export function AgentSettings({
             <button
               key={providerId}
               type="button"
-              className={`${`agent-settings-provider-option ${sttProvider === providerId ? 'agent-settings-provider-option--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
+              className={`agent-settings-provider-option ${sttProvider === providerId ? 'agent-settings-provider-option--active' : ''}`}
               onClick={() => handleSttProviderChange(providerId)}
               disabled={controlsDisabled}
               data-testid={`agent-stt-provider-${providerId}`}
+              title={`Use ${AGENT_STT_PROVIDER_LABELS[providerId]} for speech-to-text`}
             >
               {AGENT_STT_PROVIDER_LABELS[providerId]}
-            <InstantTooltipPopover content={`Use ${AGENT_STT_PROVIDER_LABELS[providerId]} for speech-to-text`} /></button>
+            </button>
           ))}
         </div>
         <p className="agent-settings-key-help" data-testid="agent-stt-provider-help">
@@ -612,12 +615,13 @@ export function AgentSettings({
               </div>
               <button
                 type="button"
-                className="agent-settings-permission-callout-button instant-tooltip-host instant-tooltip-host--inline-flex"
+                className="agent-settings-permission-callout-button"
                 onClick={() => void handleOpenMicrophonePrivacySettings()}
                 data-testid="agent-mic-permission-settings-button"
+                title="Open macOS Microphone privacy settings"
               >
                 Open System Settings → Privacy & Security → Microphone
-              <InstantTooltipPopover content="Open macOS Microphone privacy settings" /></button>
+              </button>
             </div>
           ) : null}
           {microphonePermissionError ? (
@@ -654,13 +658,14 @@ export function AgentSettings({
               </select>
               <button
                 type="button"
-                className="agent-settings-key-clear instant-tooltip-host instant-tooltip-host--inline-flex"
+                className="agent-settings-key-clear"
                 onClick={() => void refreshMicDevices()}
                 disabled={controlsDisabled || micDevicesLoading}
                 data-testid="agent-mic-refresh"
+                title="Refresh microphone list"
               >
                 {micDevicesLoading ? 'Refreshing…' : 'Refresh'}
-              <InstantTooltipPopover content="Refresh microphone list" /></button>
+              </button>
             </div>
             <p className="agent-settings-key-help" data-testid="agent-mic-device-help">
               Pick the exact input Producey Boy should record from. If names are blank,
@@ -727,12 +732,13 @@ export function AgentSettings({
             <span className="agent-settings-key-status">Key set</span>
             <button
               type="button"
-              className="agent-settings-key-clear instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="agent-settings-key-clear"
               onClick={() => void handleClearDeepgramKey()}
               data-testid="agent-settings-key-clear"
+              title="Clear the saved Deepgram API key"
             >
               Clear
-            <InstantTooltipPopover content="Clear the saved Deepgram API key" /></button>
+            </button>
           </div>
         ) : (
           <div className="agent-settings-key-row">
@@ -746,13 +752,14 @@ export function AgentSettings({
             />
             <button
               type="button"
-              className="agent-settings-key-save instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="agent-settings-key-save"
               onClick={() => void handleSaveDeepgramKey()}
               disabled={!deepgramKey.trim()}
               data-testid="agent-settings-key-save"
+              title="Save the Deepgram API key"
             >
               Save
-            <InstantTooltipPopover content="Save the Deepgram API key" /></button>
+            </button>
           </div>
         )}
         {deepgramKeyError ? (
@@ -775,12 +782,13 @@ export function AgentSettings({
             <span className="agent-settings-key-status">Key set</span>
             <button
               type="button"
-              className="agent-settings-key-clear instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="agent-settings-key-clear"
               onClick={() => void handleClearAssemblyAiKey()}
               data-testid="agent-assemblyai-key-clear"
+              title="Clear the saved AssemblyAI API key"
             >
               Clear
-            <InstantTooltipPopover content="Clear the saved AssemblyAI API key" /></button>
+            </button>
           </div>
         ) : (
           <div className="agent-settings-key-row">
@@ -794,13 +802,14 @@ export function AgentSettings({
             />
             <button
               type="button"
-              className="agent-settings-key-save instant-tooltip-host instant-tooltip-host--inline-flex"
+              className="agent-settings-key-save"
               onClick={() => void handleSaveAssemblyAiKey()}
               disabled={!assemblyAiKey.trim()}
               data-testid="agent-assemblyai-key-save"
+              title="Save the AssemblyAI API key"
             >
               Save
-            <InstantTooltipPopover content="Save the AssemblyAI API key" /></button>
+            </button>
           </div>
         )}
         {assemblyAiKeyError ? (
@@ -819,21 +828,23 @@ export function AgentSettings({
       <div className="agent-settings-section agent-settings-section--danger">
         <button
           type="button"
-          className="agent-settings-clear-button instant-tooltip-host instant-tooltip-host--inline-flex"
+          className="agent-settings-clear-button"
           onClick={handleNewChatClick}
           data-testid="agent-clear-chat"
+          title="Clear the current conversation and start fresh"
         >
           Start new chat
-        <InstantTooltipPopover content="Clear the current conversation and start fresh" /></button>
+        </button>
         <button
           type="button"
-          className="agent-settings-clear-button agent-settings-secondary-button instant-tooltip-host instant-tooltip-host--inline-flex"
+          className="agent-settings-clear-button agent-settings-secondary-button"
           onClick={handleOpenHistoryClick}
           data-testid="agent-open-chat-history"
           disabled={!hasHistory}
+          title={hasHistory ? 'Open previous chats' : 'No chat history yet'}
         >
           Chat history
-        <InstantTooltipPopover content={hasHistory ? 'Open previous chats' : 'No chat history yet'} /></button>
+        </button>
       </div>
     </div>
   );

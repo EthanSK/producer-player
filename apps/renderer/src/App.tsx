@@ -235,6 +235,7 @@ import {
 import {
   applyExplicitUnlinkAssociation,
   decideAutoSelect,
+  decideAutoSetOnOpenToast,
   decideForceAutoSelect,
 } from './listeningDeviceAutoSelect';
 import {
@@ -3190,6 +3191,22 @@ export function App(): JSX.Element {
   //     4. Toast fires only on the FIRST pass that actually moved the chip
   //        (gated by a per-run flag), so the three-pass design doesn't show
   //        duplicate toasts.
+  //
+  //   - v3.230 (toast-not-firing fix): the v3.226 code derived "did the chip
+  //     move" from a `didWrite` flag assigned INSIDE the functional
+  //     setActiveListeningDeviceId updater, and then read that flag
+  //     synchronously immediately after. React doesn't run functional
+  //     updaters eagerly, so the assignment landed after the read — leaving
+  //     `didWrite` permanently false. The chip DID move (because the
+  //     functional setter eventually committed), but the toast never fired
+  //     and the action log recorded `didWrite:false`. Fix: compute
+  //     `willChange` synchronously by comparing the captured `currentActive`
+  //     (read from `activeListeningDeviceIdRef.current` above) against
+  //     `decision.activateDeviceId`, BEFORE calling the setter. Use that
+  //     synchronous value to gate the toast + the action-log `didWrite`
+  //     field. The functional setter still no-ops on identity match so the
+  //     state-batching race the v3.226 comment talks about is still handled
+  //     at the write layer.
   useEffect(() => {
     if (checklistModalSongId === null) return;
     if (listeningDevicesRef.current.length === 0) return;
@@ -3237,17 +3254,27 @@ export function App(): JSX.Element {
         });
         return false;
       }
-      // Write through unconditionally so the persisted active id realigns
-      // with the OS output, even when the chip already shows the right
-      // device. Functional setter to defend against any state-batching race
-      // where another listener overwrote activeListeningDeviceId after we
-      // captured currentActive but before our write lands.
-      let didWrite = false;
-      setActiveListeningDeviceId((latest) => {
-        if (latest === decision.activateDeviceId) return latest;
-        didWrite = true;
-        return decision.activateDeviceId;
+      // v3.230 — gate the toast + log on a SYNCHRONOUS pre-check of the
+      // captured currentActive (read above from the ref). The previous
+      // v3.226 code assigned `didWrite` from inside a functional setter
+      // and then read `didWrite` synchronously right after the
+      // setActiveListeningDeviceId call — but React doesn't run the
+      // functional updater eagerly, so the assignment lands AFTER the
+      // read. That made `didWrite` permanently false and suppressed the
+      // toast (and mis-logged the action), even though the chip did
+      // actually move. The functional setter's no-op short-circuit still
+      // matters for the WRITE (it defends against a batched listener
+      // overwriting activeListeningDeviceId between our `currentActive`
+      // read and the React commit), but the OBSERVABLE "did this pass
+      // cause a change" decision belongs in the synchronous comparison.
+      const toastDecision = decideAutoSetOnOpenToast({
+        previousActiveDeviceId: currentActive,
+        decidedActiveDeviceId: decision.activateDeviceId,
+        toastFiredForRun,
       });
+      setActiveListeningDeviceId((latest) =>
+        latest === decision.activateDeviceId ? latest : decision.activateDeviceId,
+      );
       logAction('listening-device.auto-set-on-open.decided', {
         songId: checklistModalSongId,
         pass,
@@ -3255,11 +3282,11 @@ export function App(): JSX.Element {
         matchedDeviceName: decision.matchedDevice.name,
         alreadyActive: decision.alreadyActive,
         previousActive: currentActive,
-        didWrite,
+        didWrite: toastDecision.willChange,
         snapshotLabel: snapshot.label,
       });
-      if (didWrite && !toastFiredForRun) {
-        toastFiredForRun = true;
+      if (toastDecision.shouldFireToast) {
+        toastFiredForRun = toastDecision.nextToastFiredForRun;
         const labelSuffix =
           snapshot.label.trim().length > 0 ? ` (${snapshot.label})` : '';
         toast.show({
@@ -3268,7 +3295,7 @@ export function App(): JSX.Element {
           text: `Auto-switched to ${decision.matchedDevice.name}${labelSuffix}`,
         });
       }
-      return didWrite;
+      return toastDecision.willChange;
     };
 
     // Pass A: synchronous decision using the hook's currently-known device.

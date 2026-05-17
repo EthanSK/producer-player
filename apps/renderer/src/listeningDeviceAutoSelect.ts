@@ -337,3 +337,52 @@ export function applyExplicitUnlinkAssociation(
     return next;
   });
 }
+
+/**
+ * v3.230 — pure helper that mirrors the "should this auto-set-on-open pass
+ * fire the toast" decision in App.tsx so the behavior can be unit-tested
+ * without booting React.
+ *
+ * Background: v3.226 introduced a 3-pass force-write design for auto-set-on-
+ * open (sync → async readSystemAudioDevice → rAF). Each pass was supposed to
+ * fire a single toast on the FIRST pass that actually moved the chip,
+ * gated by a per-run `toastFiredForRun` flag. The original implementation
+ * derived "did the chip move" from a `didWrite` flag assigned INSIDE a
+ * functional `setActiveListeningDeviceId` updater and read it synchronously
+ * immediately after the call. React doesn't run functional updaters eagerly,
+ * so the assignment landed AFTER the read — leaving `didWrite` false and
+ * the toast permanently suppressed (chip moved, toast didn't).
+ *
+ * Fix: decide "willChange" SYNCHRONOUSLY by comparing the previously-active
+ * id (captured from a ref before the setter call) against the decision's
+ * target id, then gate the toast on that synchronous value. The functional
+ * setter still no-ops on identity to defend against state-batching races
+ * for the WRITE; the toast decision is decoupled from the setter's
+ * execution timing.
+ *
+ * @returns `{ willChange, shouldFireToast, nextToastFiredForRun }`:
+ *   - `willChange` — true iff the pass would move the active id (used both
+ *     for the toast gate AND for the action-log `didWrite` field).
+ *   - `shouldFireToast` — true iff `willChange` AND the run hasn't already
+ *     fired a toast (i.e. earlier passes haven't already shown one).
+ *   - `nextToastFiredForRun` — the updated per-run flag the caller should
+ *     write back to its closure variable.
+ */
+export interface AutoSetOnOpenToastDecision {
+  willChange: boolean;
+  shouldFireToast: boolean;
+  nextToastFiredForRun: boolean;
+}
+
+export function decideAutoSetOnOpenToast(args: {
+  previousActiveDeviceId: string | null;
+  decidedActiveDeviceId: string | null;
+  toastFiredForRun: boolean;
+}): AutoSetOnOpenToastDecision {
+  const willChange =
+    args.decidedActiveDeviceId !== null &&
+    args.previousActiveDeviceId !== args.decidedActiveDeviceId;
+  const shouldFireToast = willChange && !args.toastFiredForRun;
+  const nextToastFiredForRun = args.toastFiredForRun || shouldFireToast;
+  return { willChange, shouldFireToast, nextToastFiredForRun };
+}

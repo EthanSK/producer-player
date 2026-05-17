@@ -4,6 +4,7 @@ import {
   applyExplicitLinkAssociation,
   applyExplicitUnlinkAssociation,
   decideAutoSelect,
+  decideAutoSetOnOpenToast,
   decideForceAutoSelect,
 } from './listeningDeviceAutoSelect';
 
@@ -593,5 +594,100 @@ describe('songAutoSetListeningDeviceOnOpen — localStorage semantics (v3.220)',
     expect(decision.activateDeviceId).toBe('device-airpods');
     // Whether the song's toggle is off changes nothing for Detect:
     expect(readAutoSetListeningDeviceForSong(storage, 'song-disabled')).toBe(false);
+  });
+});
+
+// v3.230 — pins the toast-firing decision for the auto-set-on-open effect.
+// The bug v3.230 fixes was a React state-batching trap: v3.226 derived
+// "did the chip move" from a flag assigned INSIDE a functional setState
+// updater, then read it synchronously immediately after — so the flag was
+// always false at read time and the toast never fired even though the chip
+// did move. These tests pin that the new decision helper relies ONLY on the
+// synchronous previousActive→decidedActive comparison, with NO dependency
+// on setState execution timing.
+describe('decideAutoSetOnOpenToast — v3.230 toast-not-firing fix', () => {
+  it('fires the toast exactly once when the sync pass moves the chip from Car stereo to Kali', () => {
+    // OC's repro: linked=Kali, OS=Mac mini Speakers, active=Car stereo.
+    // Sync pass decides Kali → Car. Expected: toast fires.
+    const decision = decideAutoSetOnOpenToast({
+      previousActiveDeviceId: 'device-car-stereo',
+      decidedActiveDeviceId: 'device-kali',
+      toastFiredForRun: false,
+    });
+    expect(decision.willChange).toBe(true);
+    expect(decision.shouldFireToast).toBe(true);
+    expect(decision.nextToastFiredForRun).toBe(true);
+  });
+
+  it('does NOT fire the toast on a redundant pass where the chip is already on the decided device', () => {
+    // The 3-pass design: after the sync pass moved to Kali, passes B (async)
+    // and C (rAF) re-run. They see the chip already on Kali and must NOT
+    // re-toast. Critically, this is decided from previousActive (now Kali),
+    // not from setState side-effects.
+    const decision = decideAutoSetOnOpenToast({
+      previousActiveDeviceId: 'device-kali',
+      decidedActiveDeviceId: 'device-kali',
+      toastFiredForRun: true,
+    });
+    expect(decision.willChange).toBe(false);
+    expect(decision.shouldFireToast).toBe(false);
+    expect(decision.nextToastFiredForRun).toBe(true);
+  });
+
+  it('only one toast across multiple passes that all decide the same target', () => {
+    // Simulates the worst-case race: sync, async, and rAF all see the
+    // PREVIOUS active id (Car) and all decide Kali. Without the per-run
+    // gate this would 3x-toast. The gate enforces exactly-once.
+    let toastFiredForRun = false;
+    let toastCalls = 0;
+    for (const pass of ['sync', 'async', 'raf']) {
+      void pass;
+      const decision = decideAutoSetOnOpenToast({
+        previousActiveDeviceId: 'device-car-stereo',
+        decidedActiveDeviceId: 'device-kali',
+        toastFiredForRun,
+      });
+      if (decision.shouldFireToast) {
+        toastCalls += 1;
+      }
+      toastFiredForRun = decision.nextToastFiredForRun;
+    }
+    expect(toastCalls).toBe(1);
+    expect(toastFiredForRun).toBe(true);
+  });
+
+  it('does NOT fire the toast when the decision is a no-op (decided id is null)', () => {
+    const decision = decideAutoSetOnOpenToast({
+      previousActiveDeviceId: 'device-car-stereo',
+      decidedActiveDeviceId: null,
+      toastFiredForRun: false,
+    });
+    expect(decision.willChange).toBe(false);
+    expect(decision.shouldFireToast).toBe(false);
+    expect(decision.nextToastFiredForRun).toBe(false);
+  });
+
+  it('does NOT fire the toast when previous active equals decided (already in place)', () => {
+    // The "force-write" path still runs unconditionally on the chip, but
+    // the toast must NOT fire because nothing observable changed.
+    const decision = decideAutoSetOnOpenToast({
+      previousActiveDeviceId: 'device-kali',
+      decidedActiveDeviceId: 'device-kali',
+      toastFiredForRun: false,
+    });
+    expect(decision.willChange).toBe(false);
+    expect(decision.shouldFireToast).toBe(false);
+    expect(decision.nextToastFiredForRun).toBe(false);
+  });
+
+  it('willChange handles null→device transition (cold-start: no chip active yet)', () => {
+    const decision = decideAutoSetOnOpenToast({
+      previousActiveDeviceId: null,
+      decidedActiveDeviceId: 'device-kali',
+      toastFiredForRun: false,
+    });
+    expect(decision.willChange).toBe(true);
+    expect(decision.shouldFireToast).toBe(true);
+    expect(decision.nextToastFiredForRun).toBe(true);
   });
 });

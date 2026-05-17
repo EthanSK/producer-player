@@ -207,6 +207,73 @@ describe('decideAutoSelect', () => {
     expect(step2.activateDeviceId).toBe('device-monitors');
     expect(step2.matchedDevice).toBe(monitors);
   });
+
+  // v3.226 — regression for "no listening device is linked to the current
+  // output" snackbar reported on a previously-linked device. Root cause:
+  // Chromium's MediaDeviceInfo.deviceId AND groupId are both privacy-hashed
+  // per origin + per session, so the values rotate every app launch on
+  // macOS Electron. The same Scarlett 18i8 was re-linked three times in one
+  // day with three different deviceIds. v3.226 adds a final fallback that
+  // matches on the normalized `systemDeviceLabel`, which DOES survive the
+  // salt rotation, so the link continues to resolve after a session change.
+  it('falls back to systemDeviceLabel when both deviceId and groupId differ from the stored record (v3.226 fix)', () => {
+    const scarlett: ListeningDevice = {
+      id: 'device-scarlett',
+      name: 'hs8',
+      // Stored value from a previous session — neither the new deviceId
+      // nor the new groupId match this anymore.
+      systemDeviceId: '3ed472e8c2b266f2d66a560b1ac3010cb2dca69dabc414a96edb029b20939f81',
+      systemDeviceLabel: 'Scarlett 18i8 USB (1235:8214)',
+    };
+    const decision = decideAutoSelect(
+      {
+        deviceId: 'completely-different-hash-this-session',
+        groupId: 'also-different-group-hash',
+        label: 'Scarlett 18i8 USB (1235:8214)',
+      },
+      [scarlett, airpods, monitors],
+      null,
+    );
+    expect(decision.activateDeviceId).toBe('device-scarlett');
+    expect(decision.matchedDevice).toBe(scarlett);
+  });
+
+  it('label fallback is case + whitespace insensitive', () => {
+    const scarlett: ListeningDevice = {
+      id: 'device-scarlett',
+      name: 'hs8',
+      systemDeviceId: 'stale-hash',
+      systemDeviceLabel: '  Scarlett 18i8 USB  ',
+    };
+    const decision = decideAutoSelect(
+      {
+        deviceId: 'fresh-hash',
+        groupId: 'fresh-group',
+        label: 'scarlett 18i8 USB',
+      },
+      [scarlett],
+      null,
+    );
+    expect(decision.activateDeviceId).toBe('device-scarlett');
+    expect(decision.matchedDevice).toBe(scarlett);
+  });
+
+  it('label fallback is ignored when label is empty (no false positive on (unknown))', () => {
+    const ghost: ListeningDevice = {
+      id: 'device-ghost',
+      name: 'ghost',
+      systemDeviceId: 'stale-hash',
+      // Empty label
+      systemDeviceLabel: '',
+    };
+    const decision = decideAutoSelect(
+      { deviceId: 'fresh-hash', groupId: 'fresh-group', label: '' },
+      [ghost],
+      null,
+    );
+    expect(decision.activateDeviceId).toBeNull();
+    expect(decision.matchedDevice).toBeNull();
+  });
 });
 
 describe('applyExplicitLinkAssociation (v3.197 — Link button)', () => {
@@ -379,6 +446,69 @@ describe('decideForceAutoSelect (v3.220 — Detect + checklist-open force path)'
     );
     expect(decision.activateDeviceId).toBe('device-airpods-legacy');
     expect(decision.matchedDevice).toBe(legacyAirpods);
+    expect(decision.alreadyActive).toBe(false);
+  });
+
+  // v3.226 — pin Ethan's exact failing scenario from voice 3156. The v3.220
+  // Mini E2E scenario was "switch chip + unlink it" (which v3.220's logic
+  // handled correctly). Ethan's REAL repro is "switch chip without unlink":
+  // linkedDevice=Kali linked to current OS output Mac mini Speakers, user
+  // manually selects Car stereo (which has no link), closes checklist,
+  // reopens. Expected: auto-set fires on reopen, chip flips back to Kali.
+  //
+  // At the decision-function level this is structurally identical to "switch
+  // to a different listening device" (already pinned above), but pinning it
+  // separately with Ethan's exact device names makes the regression signal
+  // unambiguous if anyone touches this logic.
+  it('v3.226 — Ethan voice 3156: linked=Kali, active=Car stereo, OS=Mac mini Speakers → switches back to Kali', () => {
+    const kali: ListeningDevice = {
+      id: 'device-kali',
+      name: 'Kali LP-6',
+      systemDeviceId: 'mac-mini-speakers-stable-id',
+      systemDeviceLabel: 'Mac mini Speakers',
+    };
+    const carStereoNoLink: ListeningDevice = {
+      id: 'device-car-stereo',
+      name: 'Car stereo',
+      // No link — the chip exists but it's not associated with any system output
+    };
+    const decision = decideForceAutoSelect(
+      {
+        deviceId: 'mac-mini-speakers-stable-id',
+        groupId: 'mac-mini-speakers-volatile-group',
+        label: 'Mac mini Speakers',
+      },
+      [kali, carStereoNoLink],
+      'device-car-stereo', // currently active (manually picked by user)
+    );
+    expect(decision.activateDeviceId).toBe('device-kali');
+    expect(decision.matchedDevice).toBe(kali);
+    expect(decision.alreadyActive).toBe(false);
+  });
+
+  // v3.226 — same label-fallback fix as decideAutoSelect. Manual Detect
+  // button (the path that triggered Ethan's "no listening device is linked
+  // to the current output" snackbar on voice 3157) must resolve a stored
+  // link via systemDeviceLabel when both deviceId and groupId have rotated
+  // due to Chromium's per-session salt.
+  it('v3.226 — Detect button falls back to systemDeviceLabel when stored deviceId is from a previous session', () => {
+    const scarlett: ListeningDevice = {
+      id: 'device-scarlett',
+      name: 'hs8',
+      systemDeviceId: '3ed472e8c2b266f2d66a560b1ac3010cb2dca69dabc414a96edb029b20939f81',
+      systemDeviceLabel: 'Scarlett 18i8 USB (1235:8214)',
+    };
+    const decision = decideForceAutoSelect(
+      {
+        deviceId: 'fresh-session-deviceid',
+        groupId: 'fresh-session-groupid',
+        label: 'Scarlett 18i8 USB (1235:8214)',
+      },
+      [scarlett, airpods, monitors],
+      null,
+    );
+    expect(decision.activateDeviceId).toBe('device-scarlett');
+    expect(decision.matchedDevice).toBe(scarlett);
     expect(decision.alreadyActive).toBe(false);
   });
 });

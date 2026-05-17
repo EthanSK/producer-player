@@ -85,6 +85,27 @@ export interface ForceAutoSelectDecision {
  *      redundant toast / state update).
  *   5. Otherwise → activate the matched device.
  */
+/**
+ * v3.226 — normalize a system audio device label for cross-session
+ * comparison. Chromium's `MediaDeviceInfo.deviceId` AND `groupId` are both
+ * privacy-hashed identifiers (origin + real-device-id + per-session salt)
+ * that rotate every session — so the "stable" deviceId we trusted in
+ * v3.213 is empirically NOT stable across app restarts on macOS Electron.
+ * Action log proof: the SAME Scarlett 18i8 has been re-linked three times
+ * with three different systemDeviceIds in a single day.
+ *
+ * The only field that survives a Chromium salt rotation is the device's
+ * human-readable LABEL. So we normalize (trim + lowercase + collapse
+ * whitespace) and use it as the final fallback match key.
+ *
+ * Returns an empty string for empty/non-string inputs so the caller can
+ * cheaply gate the lookup with `if (normalized.length > 0)`.
+ */
+export function normalizeDeviceLabel(label: string | null | undefined): string {
+  if (typeof label !== 'string') return '';
+  return label.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 export function decideAutoSelect(
   systemDevice: SystemDeviceSnapshot,
   listeningDevices: readonly ListeningDevice[],
@@ -92,17 +113,22 @@ export function decideAutoSelect(
 ): AutoSelectDecision {
   const target = systemDevice.deviceId.trim();
   const groupTarget = (systemDevice.groupId ?? '').trim();
-  if (target.length === 0 && groupTarget.length === 0) {
+  const labelTarget = normalizeDeviceLabel(systemDevice.label);
+  if (target.length === 0 && groupTarget.length === 0 && labelTarget.length === 0) {
     return { activateDeviceId: null, matchedDevice: null };
   }
 
-  // v3.213 — match on `deviceId` first (the stable identifier post-fix).
-  // Fall back to matching on `groupId` for legacy link records that were
-  // persisted by pre-v3.213 builds using the volatile groupId value.
+  // v3.213 — match on `deviceId` first (was claimed stable, but proved
+  // volatile in v3.226 — both deviceId and groupId rotate per session).
+  // Fall back to matching on `groupId` for legacy link records.
+  // v3.226 — final fallback: match on normalized `systemDeviceLabel`. The
+  // label is the only field that survives Chromium's per-session salt
+  // rotation, so a re-link is no longer required after every restart.
   // We never match a stored value against BOTH — first hit wins, with
   // deviceId taking precedence so a fresh post-v3.213 link is always
-  // preferred over a stale legacy groupId that happens to collide.
-  const findByStored = (stored: string): ListeningDevice | undefined =>
+  // preferred over a stale legacy groupId that happens to collide, and
+  // label is only consulted when both id paths miss.
+  const findByStoredId = (stored: string): ListeningDevice | undefined =>
     stored.length > 0
       ? listeningDevices.find(
           (device) =>
@@ -111,9 +137,18 @@ export function decideAutoSelect(
         )
       : undefined;
 
+  const findByLabel = (stored: string): ListeningDevice | undefined =>
+    stored.length > 0
+      ? listeningDevices.find(
+          (device) =>
+            normalizeDeviceLabel(device.systemDeviceLabel ?? '') === stored
+        )
+      : undefined;
+
   const match =
-    (target.length > 0 ? findByStored(target) : undefined) ??
-    (groupTarget.length > 0 ? findByStored(groupTarget) : undefined);
+    (target.length > 0 ? findByStoredId(target) : undefined) ??
+    (groupTarget.length > 0 ? findByStoredId(groupTarget) : undefined) ??
+    (labelTarget.length > 0 ? findByLabel(labelTarget) : undefined);
 
   if (!match) {
     return { activateDeviceId: null, matchedDevice: null };
@@ -158,7 +193,8 @@ export function decideForceAutoSelect(
 ): ForceAutoSelectDecision {
   const target = systemDevice.deviceId.trim();
   const groupTarget = (systemDevice.groupId ?? '').trim();
-  if (target.length === 0 && groupTarget.length === 0) {
+  const labelTarget = normalizeDeviceLabel(systemDevice.label);
+  if (target.length === 0 && groupTarget.length === 0 && labelTarget.length === 0) {
     return {
       activateDeviceId: null,
       matchedDevice: null,
@@ -166,7 +202,10 @@ export function decideForceAutoSelect(
     };
   }
 
-  const findByStored = (stored: string): ListeningDevice | undefined =>
+  // v3.226 — match priority: deviceId → groupId → normalized label.
+  // See decideAutoSelect for the rationale (Chromium per-session salt
+  // rotation makes id/groupId volatile; label is the only stable key).
+  const findByStoredId = (stored: string): ListeningDevice | undefined =>
     stored.length > 0
       ? listeningDevices.find(
           (device) =>
@@ -175,9 +214,18 @@ export function decideForceAutoSelect(
         )
       : undefined;
 
+  const findByLabel = (stored: string): ListeningDevice | undefined =>
+    stored.length > 0
+      ? listeningDevices.find(
+          (device) =>
+            normalizeDeviceLabel(device.systemDeviceLabel ?? '') === stored,
+        )
+      : undefined;
+
   const match =
-    (target.length > 0 ? findByStored(target) : undefined) ??
-    (groupTarget.length > 0 ? findByStored(groupTarget) : undefined);
+    (target.length > 0 ? findByStoredId(target) : undefined) ??
+    (groupTarget.length > 0 ? findByStoredId(groupTarget) : undefined) ??
+    (labelTarget.length > 0 ? findByLabel(labelTarget) : undefined);
 
   if (!match) {
     return {

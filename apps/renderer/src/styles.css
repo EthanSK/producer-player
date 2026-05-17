@@ -3696,13 +3696,37 @@ body.floating-switcher-panel-dragging * {
 
 .checklist-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* v3.236: textarea | mic-button | add/device-group */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px;
   align-items: start;
 }
 
 .checklist-input-row.has-timestamp-preview {
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+/* v3.236: shared style for the inline mic button used by the song /
+   album checklist add-item inputs and the in-place edit textarea.
+   Smaller than the agent-chat composer's mic — it has to sit next to
+   a single-row textarea in the checklist UI. Inherits state colours
+   (idle / arming / recording / processing / error) from
+   .agent-mic-button -- and -- variants in agent-chat.css. */
+.checklist-mic-button.agent-mic-button {
+  width: 26px;
+  height: 26px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.checklist-mic-button.agent-mic-button .agent-mic-spinner {
+  width: 12px;
+  height: 12px;
+}
+
+.checklist-mic-button--item.agent-mic-button {
+  width: 22px;
+  height: 22px;
 }
 
 .checklist-add-device-group {

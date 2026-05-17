@@ -162,6 +162,7 @@ import {
   writeInterleavedStereoSamples,
 } from './pluginAudioPipeline';
 import { EqGainSliders, EQ_GAIN_DEFAULT_DB } from './EqGainSliders';
+import { MicTranscribeButton } from './lib/MicTranscribeButton';
 import { HelpTooltip } from './HelpTooltip';
 import { TechnicalInfoPopover } from './TechnicalInfoPopover';
 import { KWeightingCurveModal } from './KWeightingCurveModal';
@@ -19353,6 +19354,23 @@ export function App(): JSX.Element {
                         data-testid="song-checklist-item-text"
                       />
                       <div className="checklist-item-actions">
+                        <MicTranscribeButton
+                          testId="song-checklist-item-mic-button"
+                          className="checklist-mic-button checklist-mic-button--item"
+                          ariaLabel={`Dictate into ${item.text || 'this checklist item'}`}
+                          onTranscript={(transcript) => {
+                            const previous = item.text;
+                            const merged =
+                              previous.trim().length > 0
+                                ? `${previous} ${transcript}`
+                                : transcript;
+                            handleChecklistItemTextChange(
+                              checklistModalSong.id,
+                              item.id,
+                              merged
+                            );
+                          }}
+                        />
                         {deviceLabel === null && item.isNote !== true ? (
                           <button
                             type="button"
@@ -19613,6 +19631,18 @@ export function App(): JSX.Element {
                 }}
                 placeholder="Add a checklist item"
                 data-testid="song-checklist-input"
+              />
+              <MicTranscribeButton
+                testId="song-checklist-mic-button"
+                className="checklist-mic-button"
+                onTranscript={(transcript) => {
+                  setChecklistDraftText((previous) =>
+                    previous.trim().length > 0
+                      ? `${previous} ${transcript}`
+                      : transcript
+                  );
+                  checklistComposerTextareaRef.current?.focus();
+                }}
               />
               <div className="checklist-add-device-group">
                 <button
@@ -20140,6 +20170,18 @@ export function App(): JSX.Element {
                 }}
                 placeholder="Add an album checklist item"
                 data-testid="album-checklist-input"
+              />
+              <MicTranscribeButton
+                testId="album-checklist-mic-button"
+                className="checklist-mic-button"
+                onTranscript={(transcript) => {
+                  setAlbumChecklistDraftText((previous) =>
+                    previous.trim().length > 0
+                      ? `${previous} ${transcript}`
+                      : transcript
+                  );
+                  albumChecklistComposerRef.current?.focus();
+                }}
               />
               <button
                 type="button"

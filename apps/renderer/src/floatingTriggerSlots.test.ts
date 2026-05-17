@@ -73,6 +73,35 @@ describe('floating trigger slots — regression pin v3.212', () => {
 });
 
 /**
+ * Regression pin (v3.234, Ethan voice 3216): the `.instant-tooltip-host`
+ * rule MUST be specificity-neutral (`:where(...)`) so it doesn't override
+ * the `position: fixed` declarations on migrated floating triggers
+ * (`.quick-switcher-toggle`, `.version-switcher-trigger`,
+ * `.inspector-toggle-button`).
+ *
+ * History: v3.229 bulk-migrated 282 sites to the InstantTooltip pattern by
+ * adding the `instant-tooltip-host instant-tooltip-host--inline-flex`
+ * classes. The host rule `.instant-tooltip-host { position: relative }`
+ * has the same specificity as the per-element fixed-trigger rules but is
+ * declared LATER in the file, so source-order made `position: relative`
+ * win on the four floating triggers — collapsing them into normal flow
+ * at the bottom of the page. v3.234 wraps the host rule in `:where()` so
+ * any author `position` rule wins regardless of declaration order. This
+ * pin guards against accidentally un-wrapping it in the future.
+ */
+describe('instant-tooltip-host position is specificity-neutral — regression pin v3.234', () => {
+  it('declares position: relative via :where(.instant-tooltip-host), not the bare class', () => {
+    expect(styles).toMatch(/:where\(\.instant-tooltip-host\)\s*\{[^}]*position:\s*relative/);
+  });
+
+  it('does NOT contain a bare `.instant-tooltip-host { position: ... }` rule that would override fixed triggers', () => {
+    // Bare class with position: anything — would re-introduce the regression
+    // because .instant-tooltip-host is declared after the fixed-trigger rules.
+    expect(styles).not.toMatch(/(?:^|\s|,)\.instant-tooltip-host\s*\{[^}]*position\s*:/);
+  });
+});
+
+/**
  * Regression pin (v3.212): The agent chat panel default anchor must sit
  * 16px from the viewport right edge — NOT 68px (where v3.192 erroneously
  * placed it). At 68px the 380px-wide panel left a visible empty 68px gap

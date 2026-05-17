@@ -9691,15 +9691,38 @@ button.reference-action.active {
  * where modifying the trigger element is awkward.
  * ------------------------------------------------------------------ */
 
-/* Host: position relative so the popover anchors absolutely against it.
- * We avoid forcing a `display` on the host so existing element styles
- * (e.g. `display: grid`, `display: flex`) keep working unchanged. The
- * `--inline-flex` / `--block` / `--contents` variants are kept for the
- * pure `<InstantTooltip>` wrapper component (which renders its own
+/* Host: provide a relative-positioned default so any descendant absolutely-
+ * positioned element (e.g. the v3.232 zero-size `.instant-tooltip-tracker`)
+ * resolves against the host rather than the viewport. This is a default —
+ * NOT an override. Wrapped in `:where()` to zero out specificity so any
+ * author-styled `position` on the trigger element (e.g. the floating
+ * `.quick-switcher-toggle`, `.version-switcher-trigger`,
+ * `.inspector-toggle-button` which all need `position: fixed`) wins
+ * regardless of stylesheet source order.
+ *
+ * v3.234 (Ethan voice 3216): without the `:where()` wrap, this rule's
+ * `position: relative` overrode `position: fixed` on the migrated floating
+ * triggers because `.instant-tooltip-host` is declared later in this file
+ * than the per-element rules. That caused the three regressions Ethan
+ * flagged: floating triggers "all over the place", a strange "bar at the
+ * bottom" (the triggers piled into normal flow), and the version-track
+ * switcher appearing missing. The CSS contract test in
+ * `floatingTriggerSlots.test.ts` pins this so it cannot regress again.
+ *
+ * Note: v3.232 portaled the popover to document.body and drives layout
+ * via JS, so the host no longer needs to be a positioning context for
+ * popover anchoring. The relative default is retained only for the
+ * `.instant-tooltip-tracker` child positioning, which is harmless either
+ * way (the tracker is zero-size + aria-hidden).
+ *
+ * We also avoid forcing a `display` on the host so existing element
+ * styles (e.g. `display: grid`, `display: flex`) keep working unchanged.
+ * The `--inline-flex` / `--block` / `--contents` variants are kept for
+ * the pure `<InstantTooltip>` wrapper component (which renders its own
  * <span> and needs a sensible default display), and use `:where()` to
  * zero out specificity so any explicit `display` on the trigger element
  * wins. */
-.instant-tooltip-host {
+:where(.instant-tooltip-host) {
   position: relative;
 }
 

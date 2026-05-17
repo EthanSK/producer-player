@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getTrackSwitchFadeDurationSeconds,
   shouldAutoplayOnTransportSwitch,
   shouldAttemptPlaybackOutputRecovery,
+  shouldHoldGainBeforePlayback,
   shouldRestoreAudiblePlaybackGain,
 } from './audioPlaybackResilience';
 
@@ -105,5 +107,55 @@ describe('shouldAutoplayOnTransportSwitch', () => {
         reactIsPlaying: false,
       })
     ).toBe(false);
+  });
+});
+
+describe('getTrackSwitchFadeDurationSeconds', () => {
+  // v3.225 — track-switch crackle fix. The ramp must be long enough to mask
+  // decoder cold-start jitter (which can be 30-100ms on first play) but short
+  // enough to feel instantaneous to the user.
+  it('uses a longer fade on first play of a newly-loaded track to mask decoder cold start', () => {
+    expect(
+      getTrackSwitchFadeDurationSeconds({ firstPlayOfSession: true })
+    ).toBe(0.06);
+  });
+
+  it('uses a shorter fade on subsequent plays where the decoder is already warm', () => {
+    expect(
+      getTrackSwitchFadeDurationSeconds({ firstPlayOfSession: false })
+    ).toBe(0.035);
+  });
+
+  it('returns a duration long enough to mask a cold-start click (≥30ms)', () => {
+    // Empirically, decoder cold-start clicks emerge in the 15-60ms range.
+    // Any fade < 30ms risks completing before the actual audio frames hit the
+    // output device, leaving the click audible. Pin this invariant.
+    expect(
+      getTrackSwitchFadeDurationSeconds({ firstPlayOfSession: false })
+    ).toBeGreaterThanOrEqual(0.03);
+    expect(
+      getTrackSwitchFadeDurationSeconds({ firstPlayOfSession: true })
+    ).toBeGreaterThanOrEqual(0.03);
+  });
+
+  it('returns a duration short enough to feel instantaneous (≤100ms)', () => {
+    // Anything > 100ms is perceived as a deliberate fade-in by the user, not
+    // a click-free start. Pin the upper bound so future tweaks don't drift.
+    expect(
+      getTrackSwitchFadeDurationSeconds({ firstPlayOfSession: true })
+    ).toBeLessThanOrEqual(0.1);
+  });
+});
+
+describe('shouldHoldGainBeforePlayback', () => {
+  it('pre-pins the GainNode to 0 when the target gain is audible', () => {
+    expect(shouldHoldGainBeforePlayback({ targetGainLinear: 1 })).toBe(true);
+    expect(shouldHoldGainBeforePlayback({ targetGainLinear: 0.25 })).toBe(true);
+  });
+
+  it('skips the pin when the user has muted (target = 0)', () => {
+    // Pinning to 0 would be a no-op, and the subsequent ramp would also be a
+    // no-op (0 → 0). Avoid scheduling unnecessary GainNode value changes.
+    expect(shouldHoldGainBeforePlayback({ targetGainLinear: 0 })).toBe(false);
   });
 });

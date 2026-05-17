@@ -107,8 +107,10 @@ import {
 } from './platformNormalization';
 import { computePlaybackGainState } from './playbackGainModel';
 import {
+  getTrackSwitchFadeDurationSeconds,
   shouldAutoplayOnTransportSwitch,
   shouldAttemptPlaybackOutputRecovery,
+  shouldHoldGainBeforePlayback,
   shouldRestoreAudiblePlaybackGain,
   type PlaybackContextState,
 } from './audioPlaybackResilience';
@@ -3612,6 +3614,11 @@ export function App(): JSX.Element {
   const playbackTransformGainNodeRef = useRef<GainNode | null>(null);
   const playbackGainNodeRef = useRef<GainNode | null>(null);
   const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // v3.225 — track-switch crackle fix. True from the moment a new source is
+  // committed until the FIRST `playing` event for that source fires. Used to
+  // pick the longer cold-start fade-in and to know when the fade should be
+  // applied. Reset to true on every source switch.
+  const awaitingFirstPlayingEventRef = useRef(false);
   const playbackOutputRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPlaybackOutputRecoveryAtRef = useRef(0);
   const targetGainLinearRef = useRef(DEFAULT_PLAYBACK_VOLUME);
@@ -6471,15 +6478,6 @@ export function App(): JSX.Element {
 
       void resumePlaybackContextIfNeeded()
         .then(() => audio.play())
-        .then(() => {
-          // Micro-crossfade: ramp gain back up after playback starts
-          const gn = playbackGainNodeRef.current;
-          const ctx = playbackAudioContextRef.current;
-          if (gn && ctx) {
-            gn.gain.setValueAtTime(gn.gain.value, ctx.currentTime);
-            gn.gain.linearRampToValueAtTime(targetGainLinearRef.current, ctx.currentTime + 0.015);
-          }
-        })
         .catch((cause: unknown) => {
           const message = cause instanceof Error ? cause.message : String(cause);
           setPlaybackError(
@@ -6491,6 +6489,10 @@ export function App(): JSX.Element {
             message,
           });
         });
+      // v3.225 — Fade-in is no longer triggered here. The `playing` event
+      // fires when audio output actually begins (not when `audio.play()`'s
+      // Promise resolves), which is the only event that reliably masks
+      // decoder cold-start jitter on first play. See onPlaying.
     };
 
     const onPlay = () => {
@@ -6509,6 +6511,38 @@ export function App(): JSX.Element {
       playbackIntentPlayingRef.current = true;
       logPlaybackEvent('playing');
       schedulePlaybackOutputRecovery('playing');
+
+      // v3.225 — Click-free fade-in. `playing` fires when audio output
+      // actually starts emitting (not when `audio.play()`'s Promise resolves,
+      // which is much earlier). Scheduling the ramp here is what makes the
+      // ramp coincide with the actual leading audio frames hitting the
+      // output device — eliminating the track-switch crackle.
+      //
+      // We pick a longer ramp on the FIRST `playing` event after a source
+      // switch (decoder cold start; jitter is largest there) and a shorter
+      // ramp on subsequent `playing` events (resume from buffer underrun /
+      // device-route recovery, where the decoder is already warm).
+      const gn = playbackGainNodeRef.current;
+      const ctx = playbackAudioContextRef.current;
+      const targetGainLinear = targetGainLinearRef.current;
+      if (
+        gn &&
+        ctx &&
+        shouldHoldGainBeforePlayback({ targetGainLinear })
+      ) {
+        const firstPlayOfSession = awaitingFirstPlayingEventRef.current;
+        awaitingFirstPlayingEventRef.current = false;
+        const fadeSeconds = getTrackSwitchFadeDurationSeconds({ firstPlayOfSession });
+        try {
+          gn.gain.cancelScheduledValues(ctx.currentTime);
+          gn.gain.setValueAtTime(gn.gain.value, ctx.currentTime);
+          gn.gain.linearRampToValueAtTime(targetGainLinear, ctx.currentTime + fadeSeconds);
+        } catch {
+          gn.gain.value = targetGainLinear;
+        }
+      } else {
+        awaitingFirstPlayingEventRef.current = false;
+      }
     };
 
     const onPause = () => {
@@ -8928,11 +8962,26 @@ export function App(): JSX.Element {
         pendingRestoreTimeSeconds: pendingRestoreTimeRef.current,
       });
 
-      // Hold gain at 0 during load so the fade-in after canplay is click-free.
-      // Only needed when playback was active (crossfade path).
-      if (shouldCrossfade && gainNode && audioContext) {
+      // v3.225 — Hold gain at 0 during load so the fade-in after `playing`
+      // fires is click-free. Pre-v3.225 this only ran on the crossfade path,
+      // which left the "first play of a new track" case at full gain when the
+      // decoder cold-start emitted its leading frames — audible as a click.
+      // Now pinned unconditionally (subject to the mute-guard helper) so both
+      // playing→switch and paused→switch paths converge on a silent leading
+      // edge.
+      if (
+        gainNode &&
+        audioContext &&
+        shouldHoldGainBeforePlayback({ targetGainLinear: targetGainLinearRef.current })
+      ) {
+        gainNode.gain.cancelScheduledValues(audioContext.currentTime);
         gainNode.gain.setValueAtTime(0, audioContext.currentTime);
       }
+
+      // Mark that we're waiting for the first `playing` event on this newly
+      // committed source. The `playing` handler reads this to pick the longer
+      // cold-start fade-in.
+      awaitingFirstPlayingEventRef.current = true;
 
       audio.load();
     };
@@ -11192,6 +11241,31 @@ export function App(): JSX.Element {
 
       try {
         playbackIntentPlayingRef.current = true;
+        // v3.225 — Pin gain to 0 before play so the `playing` handler can
+        // ramp it back up over the first ~35-60ms, masking any leading-frame
+        // click. This is the explicit play-button path (paused → play on an
+        // already-loaded source) which previously hard-cut to full amplitude.
+        const ctxNow = playbackAudioContextRef.current;
+        const gainNow = playbackGainNodeRef.current;
+        if (
+          ctxNow &&
+          gainNow &&
+          shouldHoldGainBeforePlayback({ targetGainLinear: targetGainLinearRef.current })
+        ) {
+          try {
+            gainNow.gain.cancelScheduledValues(ctxNow.currentTime);
+            gainNow.gain.setValueAtTime(0, ctxNow.currentTime);
+          } catch {
+            // GainNode scheduling can throw on closed contexts — fall through
+            // and let the `playing` handler set the value imperatively.
+          }
+          // We don't reset awaitingFirstPlayingEventRef here. If this play is
+          // for the SAME source that was already loaded (i.e. source switch
+          // didn't just happen), the flag is already false and we'll get the
+          // shorter resume ramp on `playing`. If this play is for a fresh
+          // source, commitSourceSwitch already set the flag to true and
+          // we'll get the longer cold-start ramp on `playing`.
+        }
         await resumePlaybackContextIfNeeded();
         await audio.play();
         logPlaybackEvent('play-requested-direct');

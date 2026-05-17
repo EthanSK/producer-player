@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { MasteringChecklistImportance } from '../masteringChecklistRules';
 
+import { InstantTooltipPopover } from '../InstantTooltip';
 // ---------------------------------------------------------------------------
 // Importance meter
 // ---------------------------------------------------------------------------
@@ -56,12 +57,11 @@ export function MasteringChecklistImportanceMeter({
   const band = bandForImportance(importance);
   return (
     <span
-      className={`mastering-checklist-importance-meter importance-${band}`}
+      className={`${`mastering-checklist-importance-meter importance-${band}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
       data-testid={`mastering-checklist-importance-${ruleLabel
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')}`}
       aria-label={`Importance ${importance} of 5 — ${BAND_LABEL[importance]}`}
-      title={`Importance ${importance} / 5 — ${BAND_LABEL[importance]}`}
       role="img"
     >
       {[1, 2, 3, 4, 5].map((slot) => (
@@ -73,7 +73,7 @@ export function MasteringChecklistImportanceMeter({
           }`}
         />
       ))}
-    </span>
+    <InstantTooltipPopover content={`Importance ${importance} / 5 — ${BAND_LABEL[importance]}`} /></span>
   );
 }
 
@@ -124,17 +124,16 @@ export function MasteringChecklistRowHelp({
     >
       <button
         type="button"
-        className="mastering-checklist-row-help-trigger"
+        className="mastering-checklist-row-help-trigger instant-tooltip-host instant-tooltip-host--inline-flex"
         aria-label={`Why ${ruleLabel} matters`}
         aria-expanded={open}
         data-testid={`mastering-checklist-row-help-${ruleLabel
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')}`}
-        title="Why this matters"
         onClick={toggle}
       >
         ?
-      </button>
+      <InstantTooltipPopover content="Why this matters" /></button>
       {open ? (
         <span
           className="mastering-checklist-row-help-popover"

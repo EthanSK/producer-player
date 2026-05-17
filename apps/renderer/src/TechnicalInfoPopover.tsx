@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
+import { InstantTooltipPopover } from './InstantTooltip';
 interface TechnicalInfoPopoverProps {
   text: string;
 }
@@ -114,8 +115,7 @@ function InfoModal({
           type="button"
           style={closeButtonStyle}
           onClick={onClose}
-          aria-label="Close"
-          title="Close"
+          aria-label="Close" className="instant-tooltip-host instant-tooltip-host--inline-flex"
           onMouseOver={(e) => {
             (e.currentTarget as HTMLElement).style.color = '#ecf2f9';
           }}
@@ -124,7 +124,7 @@ function InfoModal({
           }}
         >
           &times;
-        </button>
+        <InstantTooltipPopover content="Close" /></button>
         <div style={titleStyle}>Technical Details</div>
         <div style={bodyStyle}>{text}</div>
       </div>
@@ -144,9 +144,8 @@ export function TechnicalInfoPopover({ text }: TechnicalInfoPopoverProps): JSX.E
     <>
       <button
         type="button"
-        className="technical-info-trigger"
+        className="technical-info-trigger instant-tooltip-host instant-tooltip-host--inline-flex"
         aria-label="Technical details"
-        title="Technical details"
         onClick={(e) => {
           e.stopPropagation();
           setOpen(true);
@@ -172,7 +171,7 @@ export function TechnicalInfoPopover({ text }: TechnicalInfoPopoverProps): JSX.E
             i
           </text>
         </svg>
-      </button>
+      <InstantTooltipPopover content="Technical details" /></button>
       {open && <InfoModal text={text} onClose={handleClose} />}
     </>
   );

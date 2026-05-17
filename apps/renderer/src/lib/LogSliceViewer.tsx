@@ -4,6 +4,7 @@ import {
   type LogSliceRef,
 } from './logSliceViewerBus';
 
+import { InstantTooltipPopover } from '../InstantTooltip';
 interface LogSliceResult {
   file: string;
   startLine: number;
@@ -86,9 +87,9 @@ export function LogSliceViewer(): JSX.Element | null {
         onClick={(event) => event.stopPropagation()}
       >
         <header className="log-slice-header">
-          <div className="log-slice-title" title={title}>
+          <div className="log-slice-title instant-tooltip-host instant-tooltip-host--inline-flex">
             {title}
-          </div>
+          <InstantTooltipPopover content={title} /></div>
           <button
             type="button"
             className="log-slice-close"

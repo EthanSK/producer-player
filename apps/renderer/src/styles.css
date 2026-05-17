@@ -9670,3 +9670,138 @@ button.reference-action.active {
 .mastering-checklist-row-help-body {
   color: var(--text-muted, #9cafc4);
 }
+
+/* ------------------------------------------------------------------
+ * v3.229 — InstantTooltip (shared instant-fade custom tooltip).
+ *
+ * Standardises every tooltip in the app on the same pattern previously
+ * used for the Save Copy button. Voice 3163:
+ *   "convert every tooltip in the app to the same tooltip component …
+ *    where it just shows instantly our own custom one per track"
+ *
+ * Mirrors `.main-list-row-metadata-popover` (declared above around
+ * line 2941). Pure CSS, no JS positioning, 60ms fade. The host element
+ * itself is `position: relative`, the popover (`.instant-tooltip-popover`)
+ * is `position: absolute` against it.
+ *
+ * Bulk usage: add `instant-tooltip-host instant-tooltip-host--inline-flex`
+ * to an existing element's className, then drop in
+ * `<InstantTooltipPopover content="..." />` as its last child. Zero
+ * layout impact — the wrapper component is also available for cases
+ * where modifying the trigger element is awkward.
+ * ------------------------------------------------------------------ */
+
+/* Host: position relative so the popover anchors absolutely against it.
+ * We avoid forcing a `display` on the host so existing element styles
+ * (e.g. `display: grid`, `display: flex`) keep working unchanged. The
+ * `--inline-flex` / `--block` / `--contents` variants are kept for the
+ * pure `<InstantTooltip>` wrapper component (which renders its own
+ * <span> and needs a sensible default display), and use `:where()` to
+ * zero out specificity so any explicit `display` on the trigger element
+ * wins. */
+.instant-tooltip-host {
+  position: relative;
+}
+
+:where(.instant-tooltip-host--inline-flex) {
+  display: inline-flex;
+  align-items: center;
+}
+
+:where(.instant-tooltip-host--block) {
+  display: block;
+}
+
+:where(.instant-tooltip-host--contents) {
+  /* Use sparingly — disables the wrapper's containing block, so the
+     popover positions against the next `position: relative` ancestor. */
+  display: contents;
+}
+
+.instant-tooltip-popover {
+  position: absolute;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 8px 10px;
+  border: 1px solid var(--border, rgba(156, 175, 196, 0.4));
+  border-radius: 8px;
+  background: rgba(20, 24, 30, 0.97);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  color: var(--text-main, #ecf2f9);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 60ms ease,
+    transform 60ms ease;
+}
+
+/* Placement variants — control which edge the popover anchors to and
+   which direction it slides in from. */
+.instant-tooltip-popover--top-end {
+  bottom: calc(100% + 6px);
+  right: 0;
+  transform: translateY(2px);
+}
+
+.instant-tooltip-popover--top-start {
+  bottom: calc(100% + 6px);
+  left: 0;
+  transform: translateY(2px);
+}
+
+.instant-tooltip-popover--bottom-end {
+  top: calc(100% + 6px);
+  right: 0;
+  transform: translateY(-2px);
+}
+
+.instant-tooltip-popover--bottom-start {
+  top: calc(100% + 6px);
+  left: 0;
+  transform: translateY(-2px);
+}
+
+/* Reveal on hover / focus of the host OR any descendant. `focus-within`
+   covers keyboard focus on the inner button/link/input. */
+.instant-tooltip-host:hover > .instant-tooltip-popover,
+.instant-tooltip-host:focus-within > .instant-tooltip-popover,
+.instant-tooltip-host:focus-visible > .instant-tooltip-popover {
+  opacity: 1;
+  transform: translateY(0);
+  /* Keep pointer-events:none so the popover never blocks clicks. */
+}
+
+.instant-tooltip-popover-label {
+  color: var(--text-muted, #9cafc4);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.instant-tooltip-popover-body {
+  display: block;
+  color: var(--text-main, #ecf2f9);
+  white-space: normal;
+}
+
+.instant-tooltip-popover-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  color: #ecf6ff;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 3px;
+  border-radius: 3px;
+}

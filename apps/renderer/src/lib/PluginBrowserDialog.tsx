@@ -27,6 +27,7 @@ import type {
   ScannedPluginLibrary,
 } from '@producer-player/contracts';
 
+import { InstantTooltipPopover } from '../InstantTooltip';
 export interface PluginBrowserDialogProps {
   library: ScannedPluginLibrary | null;
   scanning: boolean;
@@ -237,14 +238,13 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
           />
           <button
             type="button"
-            className="plugin-browser-dialog__scan ghost"
+            className="plugin-browser-dialog__scan ghost instant-tooltip-host instant-tooltip-host--inline-flex"
             onClick={() => onScan(customPaths)}
             disabled={scanning}
             data-testid="plugin-browser-dialog-scan"
-            title="Scan the listed plugin paths"
           >
             {scanButtonLabel}
-          </button>
+          <InstantTooltipPopover content="Scan the listed plugin paths" /></button>
         </div>
 
         <section className="plugin-browser-dialog__paths" aria-label="Plugin scan paths">
@@ -309,7 +309,7 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
             {customPaths.length > 0 ? (
               customPaths.map((path) => (
                 <span className="plugin-browser-dialog__path-chip" key={path}>
-                  <span title={path}>{formatPathLabel(path)}</span>
+                  <span className="instant-tooltip-host instant-tooltip-host--inline-flex">{formatPathLabel(path)}<InstantTooltipPopover content={path} /></span>
                   <button
                     type="button"
                     aria-label={`Remove ${path} from plugin scan paths`}
@@ -323,7 +323,7 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
             ) : effectivePaths.length > 0 ? (
               effectivePaths.map((path) => (
                 <span className="plugin-browser-dialog__path-chip plugin-browser-dialog__path-chip--default" key={path}>
-                  <span title={path}>{formatPathLabel(path)}</span>
+                  <span className="instant-tooltip-host instant-tooltip-host--inline-flex">{formatPathLabel(path)}<InstantTooltipPopover content={path} /></span>
                 </span>
               ))
             ) : (
@@ -383,19 +383,14 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
                     type="button"
                     role="option"
                     aria-selected={highlighted}
-                    className={`plugin-browser-dialog__row${
+                    className={`${`plugin-browser-dialog__row${
                       highlighted ? ' plugin-browser-dialog__row--highlighted' : ''
-                    }`}
+                    }`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                     onMouseEnter={() => setHighlightedIndex(index)}
                     onClick={() => onPick(plugin.id)}
                     data-testid="plugin-browser-dialog-row"
                     data-plugin-id={plugin.id}
                     disabled={!plugin.isSupported}
-                    title={
-                      plugin.isSupported
-                        ? `${plugin.name} — ${plugin.vendor}`
-                        : plugin.failureReason ?? 'Unsupported plugin'
-                    }
                   >
                     <span className="plugin-browser-dialog__row-name">{plugin.name}</span>
                     <span className="plugin-browser-dialog__row-vendor">{plugin.vendor || '—'}</span>
@@ -408,7 +403,9 @@ export function PluginBrowserDialog(props: PluginBrowserDialogProps): JSX.Elemen
                     <span className="plugin-browser-dialog__row-add" aria-hidden="true">
                       Add
                     </span>
-                  </button>
+                  <InstantTooltipPopover content={plugin.isSupported
+                        ? `${plugin.name} — ${plugin.vendor}`
+                        : plugin.failureReason ?? 'Unsupported plugin'} /></button>
                 );
               })
             )}

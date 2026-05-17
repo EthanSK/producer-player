@@ -61,6 +61,7 @@ import {
   getPluginSlotOutputGain,
 } from '../pluginAudioPipeline';
 
+import { InstantTooltipPopover } from '../InstantTooltip';
 export interface PluginChainStripProps {
   chain: TrackPluginChain;
   library: ScannedPluginLibrary | null;
@@ -181,9 +182,8 @@ function GainSlider({
   const percent = Math.round(valueLinear * 100);
   return (
     <span
-      className={`plugin-pill__gain plugin-pill__gain--${side}`}
+      className={`${`plugin-pill__gain plugin-pill__gain--${side}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
       data-testid={`plugin-pill-gain-${testIdSuffix}`}
-      title={`${label}: ${percent}% (1.0 = unity, 0 = silent, 2.0 = +6 dB)`}
     >
       <span className="plugin-pill__gain-label" aria-hidden="true">
         {side}
@@ -213,7 +213,7 @@ function GainSlider({
       >
         {percent}
       </span>
-    </span>
+    <InstantTooltipPopover content={`${label}: ${percent}% (1.0 = unity, 0 = silent, 2.0 = +6 dB)`} /></span>
   );
 }
 
@@ -244,9 +244,9 @@ function PluginPillDragGhost({
       <span className="plugin-pill__name">
         <span className="plugin-pill__label">{displayName}</span>
         {latencyText ? (
-          <span className="plugin-pill__latency" title={latencyTitle}>
+          <span className="plugin-pill__latency instant-tooltip-host instant-tooltip-host--inline-flex">
             {latencyText}
-          </span>
+          <InstantTooltipPopover content={latencyTitle} /></span>
         ) : null}
       </span>
     </div>
@@ -302,13 +302,12 @@ function SortablePluginPill({
       ref={setNodeRef}
       style={style}
       role="listitem"
-      className={`plugin-pill${item.enabled ? '' : ' plugin-pill--disabled'}${
+      className={`${`plugin-pill${item.enabled ? '' : ' plugin-pill--disabled'}${
         isDragging ? ' plugin-pill--dragging' : ''
-      }`}
+      }`} instant-tooltip-host instant-tooltip-host--inline-flex`}
       data-testid="plugin-pill"
       data-instance-id={item.instanceId}
       data-enabled={item.enabled ? 'true' : 'false'}
-      title={vendor ? `${displayName} — ${vendor}` : displayName}
     >
       <button
         type="button"
@@ -338,34 +337,32 @@ function SortablePluginPill({
 
       <button
         type="button"
-        className="plugin-pill__name"
+        className="plugin-pill__name instant-tooltip-host instant-tooltip-host--inline-flex"
         onClick={() => onOpenEditor(item.instanceId)}
         data-testid="plugin-pill-name"
         disabled={editDisabled}
         aria-label={`Open editor for ${displayName}`}
-        title={editDisabled ? 'Plugin audio is loading before the native editor can open.' : undefined}
       >
         <span className="plugin-pill__label">{displayName}</span>
         {latencyText ? (
-          <span className="plugin-pill__latency" title={latencyTitle}>
+          <span className="plugin-pill__latency instant-tooltip-host instant-tooltip-host--inline-flex">
             {latencyText}
-          </span>
+          <InstantTooltipPopover content={latencyTitle} /></span>
         ) : null}
         {loadingText ? (
-          <span className="plugin-pill__latency" title="Plugin audio is loading.">
+          <span className="plugin-pill__latency instant-tooltip-host instant-tooltip-host--inline-flex">
             {loadingText}
-          </span>
+          <InstantTooltipPopover content="Plugin audio is loading." /></span>
         ) : null}
         {!item.enabled ? (
           <span
-            className="plugin-pill__bypass-badge"
+            className="plugin-pill__bypass-badge instant-tooltip-host instant-tooltip-host--inline-flex"
             aria-hidden="true"
-            title="Bypassed"
           >
             ⏻
-          </span>
+          <InstantTooltipPopover content="Bypassed" /></span>
         ) : null}
-      </button>
+      <InstantTooltipPopover content={editDisabled ? 'Plugin audio is loading before the native editor can open.' : undefined} /></button>
 
       {orderedItemsLength > 1 ? (
         <span className="plugin-pill__reorder" aria-hidden={index === 0 && orderedItemsLength === 1}>
@@ -394,7 +391,7 @@ function SortablePluginPill({
 
       <button
         type="button"
-        className={`plugin-pill__edit${editorOpen ? ' plugin-pill__edit--open' : ''}`}
+        className={`${`plugin-pill__edit${editorOpen ? ' plugin-pill__edit--open' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
         onClick={() => onOpenEditor(item.instanceId)}
         disabled={editDisabled}
         aria-pressed={editorOpen}
@@ -403,28 +400,26 @@ function SortablePluginPill({
             ? `Bring plugin editor to front for ${displayName}`
             : `Open plugin editor for ${displayName}`
         }
-        title={editDisabled ? 'Plugin is loading…' : editorOpen ? 'Bring editor to front' : 'Edit plugin'}
         data-testid="plugin-pill-edit"
         data-open={editorOpen ? 'true' : 'false'}
       >
         <span aria-hidden="true">✎</span>
-      </button>
+      <InstantTooltipPopover content={editDisabled ? 'Plugin is loading…' : editorOpen ? 'Bring editor to front' : 'Edit plugin'} /></button>
 
       <div className="plugin-pill__preset-wrap">
         <button
           type="button"
-          className="plugin-pill__preset"
+          className="plugin-pill__preset instant-tooltip-host instant-tooltip-host--inline-flex"
           onClick={() =>
             onPresetMenuChange(presetMenuOpen ? null : item.instanceId)
           }
           aria-haspopup="menu"
           aria-expanded={presetMenuOpen}
           aria-label={`Preset menu for ${displayName}`}
-          title="Plugin presets"
           data-testid="plugin-pill-preset-menu"
         >
           <span aria-hidden="true">⋯</span>
-        </button>
+        <InstantTooltipPopover content="Plugin presets" /></button>
         {presetMenuOpen ? (
           <div
             className="plugin-preset-menu"
@@ -532,7 +527,7 @@ function SortablePluginPill({
       >
         <span aria-hidden="true">×</span>
       </button>
-    </div>
+    <InstantTooltipPopover content={vendor ? `${displayName} — ${vendor}` : displayName} /></div>
   );
 }
 

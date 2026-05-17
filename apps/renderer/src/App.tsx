@@ -288,6 +288,7 @@ import {
 } from './agentChatPanelBounds';
 import { computeEffectiveReferenceLevelMatchGainDb } from './referenceLevelMatchGain';
 
+import { InstantTooltipPopover } from './InstantTooltip';
 type RepeatMode = 'off' | 'one' | 'all';
 type DragOverPosition = 'before' | 'after';
 type CompactMasteringPanelId =
@@ -763,14 +764,13 @@ function AiRecommendationWhyButton({ reason }: { reason: string }): ReactNode {
       <button
         ref={buttonRef}
         type="button"
-        className="ai-rec-why-button"
+        className="ai-rec-why-button instant-tooltip-host instant-tooltip-host--inline-flex"
         aria-label="Why this recommendation?"
         aria-expanded={open}
-        title={reason}
         onClick={() => setOpen((current) => !current)}
       >
         ⓘ
-      </button>
+      <InstantTooltipPopover content={reason} /></button>
       {open ? (
         <span
           className={`ai-rec-why-popover ai-rec-why-popover--${popoverSide}`}
@@ -818,10 +818,9 @@ function renderAiRecommendationCaption(
 
   return (
     <span
-      className={className}
+      className={`${className} instant-tooltip-host instant-tooltip-host--inline-flex`}
       data-testid={`ai-rec-${opts.metricId}`}
       data-ai-rec-status={rec.status}
-      title={rec.reason}
     >
       <span className="ai-rec-caption-label">AI recommendation:</span>{' '}
       <span className="ai-rec-caption-value">{rec.recommendedValue}</span>
@@ -829,7 +828,7 @@ function renderAiRecommendationCaption(
       {isStale ? (
         <span className="ai-rec-caption-stale-suffix">(stale)</span>
       ) : null}
-    </span>
+    <InstantTooltipPopover content={rec.reason} /></span>
   );
 }
 
@@ -8679,9 +8678,8 @@ export function App(): JSX.Element {
         {ENABLE_AGENT_FEATURES ? (
           <button
             type="button"
-            className="analysis-panel-ask-ai-button"
+            className="analysis-panel-ask-ai-button instant-tooltip-host instant-tooltip-host--inline-flex"
             onClick={() => handleAskAiForMasteringPanel(panelId, surface)}
-            title={askAiTitle}
             aria-label={askAiTitle}
             data-testid={`analysis-ask-ai-${surface}-${panelId}`}
             disabled={!selectedPlaybackVersion}
@@ -8699,11 +8697,11 @@ export function App(): JSX.Element {
             >
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
-          </button>
+          <InstantTooltipPopover content={askAiTitle} /></button>
         ) : null}
         <button
           type="button"
-          className="analysis-panel-drag-handle"
+          className="analysis-panel-drag-handle instant-tooltip-host instant-tooltip-host--inline-flex"
           draggable
           onDragStart={(event) => {
             if (isCompact) {
@@ -8718,12 +8716,11 @@ export function App(): JSX.Element {
               ? handleCompactMasteringPanelDragEnd
               : handleFullscreenMasteringPanelDragEnd
           }
-          title="Drag me to rearrange this panel."
           aria-label="Drag me to rearrange this panel."
           data-testid={dataTestId}
         >
           ⋮⋮
-        </button>
+        <InstantTooltipPopover content="Drag me to rearrange this panel." /></button>
       </div>
     );
   }
@@ -16395,8 +16392,7 @@ export function App(): JSX.Element {
             onClick={() => {
               setUpdateBannerDismissed(true);
               setDismissedUpdateVersion(autoUpdateState.version);
-            }}
-            title="Dismiss"
+            }} className="instant-tooltip-host instant-tooltip-host--inline-flex"
             style={{
               position: 'absolute',
               right: '8px',
@@ -16414,16 +16410,15 @@ export function App(): JSX.Element {
             }}
           >
             &#x2715;
-          </button>
+          <InstantTooltipPopover content="Dismiss" /></button>
         </div>
       ) : null}
       <aside className="panel panel-left">
         <button
           type="button"
-          className="sidebar-branding sidebar-branding-button"
+          className="sidebar-branding sidebar-branding-button instant-tooltip-host instant-tooltip-host--inline-flex"
           data-testid="producer-player-branding"
           onClick={() => handleOpenSupportLink(PUBLIC_PAGES_URL)}
-          title="Open Producer Player website."
         >
           <img
             src={producerPlayerIconUrl}
@@ -16437,55 +16432,51 @@ export function App(): JSX.Element {
               {/* displayVersion is a clean two-part version (e.g., "2.17") with no build suffix.
                   Do NOT replace this with semanticVersion or append build metadata here. */}
               <span
-                className="sidebar-branding-version"
+                className="sidebar-branding-version instant-tooltip-host instant-tooltip-host--inline-flex"
                 data-testid="producer-player-branding-version"
-                title={loading ? 'Loading version…' : `Current app version ${environment.appVersion.displayVersion}`}
               >
                 {loading ? '—' : environment.appVersion.displayVersion}
-              </span>
+              <InstantTooltipPopover content={loading ? 'Loading version…' : `Current app version ${environment.appVersion.displayVersion}`} /></span>
             </div>
             {SHOW_3000AD_BRANDING && (
               <a
-                className="sidebar-by-line"
+                className="sidebar-by-line instant-tooltip-host instant-tooltip-host--inline-flex"
                 href="https://lnkfi.re/3000AD"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
                   void window.producerPlayer.openExternalUrl('https://lnkfi.re/3000AD');
                 }}
-                title="by 3000 AD"
                 data-testid="sidebar-by-3000ad"
               >
                 by 3000 AD
-              </a>
+              <InstantTooltipPopover content="by 3000 AD" /></a>
             )}
           </div>
-        </button>
+        <InstantTooltipPopover content="Open Producer Player website." /></button>
 
         <section className="folder-tools-card" data-testid="folder-tools-card">
           <section className="folder-add-cta">
             <div className="folder-add-row">
               <button
                 type="button"
-                className="add-folder-primary"
+                className="add-folder-primary instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={() => {
                   void handleOpenFolderDialog();
                 }}
                 data-testid="link-folder-dialog-button"
-                title="Choose a folder containing your exported audio files."
               >
                 Add Folder…
-              </button>
+              <InstantTooltipPopover content="Choose a folder containing your exported audio files." /></button>
               <HelpTooltip text={"What this is: Folder linking connects Producer Player to a folder on your disk where your exported audio files live (WAV, MP3, AAC/M4A). The app watches this folder and automatically picks up new or updated files.\n\nHow to use it: Click 'Add Folder…' and select the folder where you export your mixes from your DAW. You can link multiple folders (e.g. one per album). Click a folder name to filter the song list. Use the unlink button (×) to remove a folder.\n\nWhy you'd want to: Keep the app in sync with your DAW exports — every time you bounce a new version, it appears automatically.\n\nBest practice: Name exports with version suffixes (e.g. 'Track Name v2.wav'). If you forget the suffix on a newer export with the same song name and changed contents, Producer Player can add the next v-number during rescan."} />
             </div>
             {environment.isMacAppStoreSandboxed ? (
               <p
-                className="muted"
+                className="muted instant-tooltip-host instant-tooltip-host--inline-flex"
                 data-testid="path-linker-disabled-message"
-                title="Mac App Store builds require Add Folder for persistent access."
               >
                 Mac App Store build — use Add Folder… to keep access between sessions.
-              </p>
+              <InstantTooltipPopover content="Mac App Store builds require Add Folder for persistent access." /></p>
             ) : null}
           </section>
 
@@ -16493,9 +16484,8 @@ export function App(): JSX.Element {
               page.evaluate(() => window.producerPlayer.linkFolder(path)). */}
 
           <section
-            className="naming-guide"
+            className="naming-guide instant-tooltip-host instant-tooltip-host--inline-flex"
             data-testid="naming-guide"
-            title="File names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav."
           >
             <p className="naming-guide-copy">
               <span className="naming-guide-icon" aria-hidden="true">
@@ -16505,7 +16495,7 @@ export function App(): JSX.Element {
                 File names must end with v1, v2, v3 — for example Leaky v2.wav or Leakyv2.wav.
               </span>
             </p>
-          </section>
+          <InstantTooltipPopover content="File names must end with v1, v2, v3. Example: Leaky v2.wav or Leakyv2.wav." /></section>
         </section>
 
         <div className="sidebar-section-divider" aria-hidden="true" />
@@ -16542,21 +16532,19 @@ export function App(): JSX.Element {
             </p>
             <button
               type="button"
-              className="ghost"
+              className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
               style={{ fontSize: '0.85em', padding: '2px 8px' }}
               onClick={() => {
                 void handleRescan();
               }}
               data-testid="rescan-button"
-              title="Rescan watched folders now. Saved ordering data is retained."
             >
               Rescan
-            </button>
+            <InstantTooltipPopover content="Rescan watched folders now. Saved ordering data is retained." /></button>
           </div>
 
           <label
-            className="checkbox-row"
-            title="Automatically move older non-archived versions into old/ while keeping the newest version in place."
+            className="checkbox-row instant-tooltip-host instant-tooltip-host--inline-flex"
           >
             <input
               type="checkbox"
@@ -16568,13 +16556,10 @@ export function App(): JSX.Element {
               title="Toggle automatic organize behavior for old versions."
             />
             Auto-organize old versions
-          </label>
+          <InstantTooltipPopover content="Automatically move older non-archived versions into old/ while keeping the newest version in place." /></label>
 
           <label
-            className="ui-zoom-control"
-            title={uiZoomState.source === 'auto'
-              ? `Automatic UI zoom is using ${Math.round(uiZoomState.factor * 100)}% (${uiZoomState.reason}).`
-              : `UI zoom is fixed at ${Math.round(uiZoomState.factor * 100)}%.`}
+            className="ui-zoom-control instant-tooltip-host instant-tooltip-host--inline-flex"
           >
             <span>UI zoom</span>
             <select
@@ -16590,13 +16575,14 @@ export function App(): JSX.Element {
                 </option>
               ))}
             </select>
-          </label>
+          <InstantTooltipPopover content={uiZoomState.source === 'auto'
+              ? `Automatic UI zoom is using ${Math.round(uiZoomState.factor * 100)}% (${uiZoomState.reason}).`
+              : `UI zoom is fixed at ${Math.round(uiZoomState.factor * 100)}%.`} /></label>
 
           {iCloudAvailability === null || iCloudAvailability.available ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <label
-                className="checkbox-row"
-                title="Back up checklists, ratings, and preferences to iCloud Drive so they sync across your Macs."
+                className="checkbox-row instant-tooltip-host instant-tooltip-host--inline-flex"
                 style={{ flex: 1, minWidth: 0 }}
               >
                 <input
@@ -16620,30 +16606,28 @@ export function App(): JSX.Element {
                     ✓ Saved
                   </span>
                 )}
-              </label>
+              <InstantTooltipPopover content="Back up checklists, ratings, and preferences to iCloud Drive so they sync across your Macs." /></label>
               {iCloudAvailability?.path && (
                 <button
                   type="button"
-                  className="icloud-show-folder-btn"
-                  title={`Show iCloud folder in ${fileManagerLabel(environment.platform)}`}
+                  className="icloud-show-folder-btn instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="icloud-show-folder-btn"
                   onClick={() => {
                     void window.producerPlayer.openFolder(iCloudAvailability.path!);
                   }}
                 >
                   Show
-                </button>
+                <InstantTooltipPopover content={`Show iCloud folder in ${fileManagerLabel(environment.platform)}`} /></button>
               )}
             </div>
           ) : (
             <p
-              className="muted"
+              className="muted instant-tooltip-host instant-tooltip-host--inline-flex"
               style={{ fontSize: '0.85em', marginTop: '0.4em' }}
-              title={iCloudAvailability.reason ?? 'iCloud Drive not available.'}
               data-testid="icloud-unavailable-hint"
             >
               ☁️ iCloud backup: macOS only
-            </p>
+            <InstantTooltipPopover content={iCloudAvailability.reason ?? 'iCloud Drive not available.'} /></p>
           )}
 
           {iCloudSyncError && (
@@ -16655,10 +16639,9 @@ export function App(): JSX.Element {
           <div style={{ display: 'flex', gap: '6px', marginTop: '0.4em' }}>
             <button
               type="button"
-              className="ghost"
+              className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
               style={{ fontSize: '0.85em', padding: '2px 6px' }}
               data-testid="export-user-state-button"
-              title="Export all settings, checklists, ratings, preferences, and localStorage to a folder."
               onClick={() => {
                 void window.producerPlayer.exportUserState().then((result) => {
                   if (!result.success && result.error && result.error !== 'Export cancelled.') {
@@ -16668,13 +16651,12 @@ export function App(): JSX.Element {
               }}
             >
               Export State
-            </button>
+            <InstantTooltipPopover content="Export all settings, checklists, ratings, preferences, and localStorage to a folder." /></button>
             <button
               type="button"
-              className="ghost"
+              className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
               style={{ fontSize: '0.85em', padding: '2px 6px' }}
               data-testid="import-user-state-button"
-              title="Import settings, checklists, ratings, preferences, and localStorage from a previously exported folder."
               onClick={() => {
                 void window.producerPlayer.importUserState().then((result) => {
                   if (!result.success && result.error && result.error !== 'Import cancelled.') {
@@ -16684,22 +16666,21 @@ export function App(): JSX.Element {
               }}
             >
               Import State
-            </button>
+            <InstantTooltipPopover content="Import settings, checklists, ratings, preferences, and localStorage from a previously exported folder." /></button>
           </div>
 
           <button
             type="button"
-            className="ghost"
+            className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
             style={{ fontSize: '0.85em', marginTop: '0.4em', padding: '2px 6px' }}
             data-testid="show-logs-button"
-            title="Open the folder containing app log files for troubleshooting."
             onClick={() => {
               logAction('logs.open-folder');
               void window.producerPlayer.openLogFolder();
             }}
           >
             Show Logs
-          </button>
+          <InstantTooltipPopover content="Open the folder containing app log files for troubleshooting." /></button>
           {/* v3.200 — Tiny status hint pointing at the structured action log.
               Clicking opens the same log directory; the filename label is the
               visual hook so Ethan can scan `actions.jsonl` directly. */}
@@ -16712,8 +16693,7 @@ export function App(): JSX.Element {
               alignItems: 'center',
               gap: '0.4em',
             }}
-            data-testid="action-log-indicator"
-            title="Structured JSONL log of every user action + error."
+            data-testid="action-log-indicator" className="instant-tooltip-host instant-tooltip-host--inline-flex"
           >
             <span>Logs: actions.jsonl</span>
             <button
@@ -16727,22 +16707,21 @@ export function App(): JSX.Element {
             >
               Reveal
             </button>
-          </div>
+          <InstantTooltipPopover content="Structured JSONL log of every user action + error." /></div>
 
           {loading && <p className="muted">Loading snapshot…</p>}
           {error && (
             <p className="error error-line">
               <button
                 type="button"
-                className="update-status-clickable"
+                className="update-status-clickable instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={() =>
                   setErrorDetails({ title: 'Error details', message: error })
                 }
                 data-testid="sidebar-error-details"
-                title="Click to see the full error"
               >
                 {error.length > 140 ? `${error.slice(0, 140)}…` : error}
-              </button>
+              <InstantTooltipPopover content="Click to see the full error" /></button>
             </p>
           )}
         </section>
@@ -16757,36 +16736,34 @@ export function App(): JSX.Element {
             >
               <div className="folder-row-content">
                 <strong>{folder.name}</strong>
-                <p className="muted folder-row-path" title={folder.path}>{folder.path}</p>
+                <p className="muted folder-row-path instant-tooltip-host instant-tooltip-host--inline-flex">{folder.path}<InstantTooltipPopover content={folder.path} /></p>
                 <p className="muted">{folder.fileCount} tracked files</p>
               </div>
               <div className="folder-row-actions">
                 {folder.path ? (
                   <button
                     type="button"
-                    className="ghost"
+                    className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={(event) => {
                       event.stopPropagation();
                       void runVoidTask(() => window.producerPlayer.openFolder(folder.path));
                     }}
                     data-testid="linked-folder-open-button"
-                    title={`Open this watched folder in ${fileManagerLabel(environment.platform)}.`}
                   >
                     {`Open in ${fileManagerLabel(environment.platform)}`}
-                  </button>
+                  <InstantTooltipPopover content={`Open this watched folder in ${fileManagerLabel(environment.platform)}.`} /></button>
                 ) : null}
                 <button
                   type="button"
-                  className="ghost"
+                  className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                   onClick={(event) => {
                     event.stopPropagation();
                     void handleUnlinkFolder(folder.id, folder.name);
                   }}
                   data-testid="linked-folder-unlink-button"
-                  title="Unlink this folder from the app. Files on disk are not deleted."
                 >
                   Unlink
-                </button>
+                <InstantTooltipPopover content="Unlink this folder from the app. Files on disk are not deleted." /></button>
               </div>
             </li>
           ))}
@@ -16807,28 +16784,26 @@ export function App(): JSX.Element {
                 {normalizationPreviewEnabled && (
                   <button
                     type="button"
-                    className="normalization-preview-header-badge"
+                    className="normalization-preview-header-badge instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={() => handleToggleNormalizationPreview(false)}
-                    title={`${selectedNormalizationPlatform.label} normalization preview active — click to disable`}
                     aria-label={`Platform normalization preview active: ${selectedNormalizationPlatform.label}. Click to disable.`}
                   >
                     <span className="normalization-preview-header-icon analysis-platform-icon" style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as React.CSSProperties}>
                       <PlatformIcon platformId={selectedNormalizationPlatformId} />
                     </span>
-                  </button>
+                  <InstantTooltipPopover content={`${selectedNormalizationPlatform.label} normalization preview active — click to disable`} /></button>
                 )}
               </h3>
             </div>
             <button
               type="button"
-              className="ghost analysis-expand-trigger"
+              className="ghost analysis-expand-trigger instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={() => setAnalysisExpanded(true)}
               data-testid="analysis-expand-button"
-              title="Open the full-screen mastering and reference workspace."
               disabled={!selectedPlaybackVersion}
             >
               Full Screen <span aria-hidden="true">⤢</span>
-            </button>
+            <InstantTooltipPopover content="Open the full-screen mastering and reference workspace." /></button>
           </div>
 
           {selectedPlaybackVersion ? (
@@ -16875,31 +16850,29 @@ export function App(): JSX.Element {
 
               <div className="analysis-stat-grid compact">
                 <div
-                  className="analysis-stat-card loudness-metric--primary"
+                  className="analysis-stat-card loudness-metric--primary instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-integrated-stat"
                   data-emphasized="true"
                   aria-label="Integrated LUFS — primary loudness measurement"
-                  title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file."
                 >
                   <span className="loudness-metric-eyebrow" aria-hidden="true">Integrated</span>
                   <span className="analysis-stat-label">Integrated LUFS{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_INTEGRATED_LUFS} /></span>
                   <strong>{measuredIntegratedText}</strong>
-                </div>
+                <InstantTooltipPopover content="Overall loudness of the entire track (EBU R128). A single value measured across the whole file." /></div>
                 <div
-                  className="analysis-stat-card"
+                  className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-short-term-stat"
-                  title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback."
                 >
                   <span className="analysis-stat-label">Current loudness{referenceModeSuffixNode} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_CURRENT_LOUDNESS} /></span>
                   <strong>{shortTermEstimateText}</strong>
-                </div>
+                <InstantTooltipPopover content="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback." /></div>
               </div>
 
               <button
                 type="button"
-                className={`ghost analysis-stats-expander${
+                className={`${`ghost analysis-stats-expander${
                   analysisCompactStatsExpanded ? ' expanded' : ''
-                }`}
+                }`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                 onClick={() => setAnalysisCompactStatsExpanded((current) => {
                   const next = !current;
                   window.localStorage.setItem(MORE_METRICS_EXPANDED_KEY, String(next));
@@ -16908,7 +16881,6 @@ export function App(): JSX.Element {
                 aria-expanded={analysisCompactStatsExpanded}
                 aria-controls="analysis-side-extra-stats"
                 data-testid="analysis-stats-expander"
-                title="Show or hide additional loudness metrics."
               >
                 <span className="analysis-stats-expander-caret" aria-hidden="true">
                   {analysisCompactStatsExpanded ? '▾' : '▸'}
@@ -16916,7 +16888,7 @@ export function App(): JSX.Element {
                 <span>
                   {analysisCompactStatsExpanded ? 'Hide extra metrics' : 'More metrics'}
                 </span>
-              </button>
+              <InstantTooltipPopover content="Show or hide additional loudness metrics." /></button>
 
               <div
                 id="analysis-side-extra-stats"
@@ -16925,37 +16897,33 @@ export function App(): JSX.Element {
                 hidden={!analysisCompactStatsExpanded}
               >
                 <div
-                  className="analysis-stat-card"
+                  className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-lra-stat"
-                  title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units."
                 >
                   <span className="analysis-stat-label">Loudness range{referenceModeSuffixNode} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /><TechnicalInfoPopover text={TECH_INFO_LRA} /></span>
                   <strong>{measuredLraText}</strong>
-                </div>
+                <InstantTooltipPopover content="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units." /></div>
                 <div
-                  className="analysis-stat-card"
+                  className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-true-peak-stat"
-                  title="True Peak — the highest inter-sample peak level in the track, measured via oversampling."
                 >
                   <span className="analysis-stat-label">True Peak{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /><TechnicalInfoPopover text={TECH_INFO_TRUE_PEAK} /></span>
                   <strong>{measuredTruePeakText}</strong>
-                </div>
+                <InstantTooltipPopover content="True Peak — the highest inter-sample peak level in the track, measured via oversampling." /></div>
                 <div
-                  className="analysis-stat-card"
+                  className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-max-short-term-stat"
-                  title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time."
                 >
                   <span className="analysis-stat-label">Peak short-term{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PEAK_SHORT_TERM} /></span>
                   <strong>{measuredMaxShortTermText}</strong>
-                </div>
+                <InstantTooltipPopover content="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time." /></div>
                 <div
-                  className="analysis-stat-card"
+                  className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-max-momentary-stat"
-                  title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time."
                 >
                   <span className="analysis-stat-label">Peak momentary{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PEAK_MOMENTARY} /></span>
                   <strong>{measuredMaxMomentaryText}</strong>
-                </div>
+                <InstantTooltipPopover content="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time." /></div>
               </div>
                 </section>
               </div>
@@ -16985,14 +16953,13 @@ export function App(): JSX.Element {
                     <div className="analysis-normalization-header-actions">
                       <button
                         type="button"
-                        className={normalizationPreviewEnabled ? '' : 'ghost'}
+                        className={`${normalizationPreviewEnabled ? '' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => handleToggleNormalizationPreview()}
                         data-testid="analysis-normalization-toggle"
                         disabled={normalizationSourceStatus !== 'ready' || !normalizationPreview}
-                        title="Apply this platform's loudness adjustment to your playback."
                       >
                         Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
-                      </button>
+                      <InstantTooltipPopover content="Apply this platform's loudness adjustment to your playback." /></button>
                       {renderMasteringPanelDragHandle('compact', 'normalization')}
                     </div>
                   </div>
@@ -17014,16 +16981,15 @@ export function App(): JSX.Element {
                       <button
                         key={platform.id}
                         type="button"
-                        className={`analysis-platform-button${
+                        className={`${`analysis-platform-button${
                           selectedNormalizationPlatformId === platform.id ? ' selected' : ''
                         }${
                           normalizationPreviewEnabled && selectedNormalizationPlatformId === platform.id
                             ? ' preview-active'
                             : ''
-                        }`}
+                        }`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => handleSelectNormalizationPlatform(platform.id)}
                         data-testid={`analysis-platform-${platform.id}`}
-                        title={platform.description}
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
                         style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                       >
@@ -17045,7 +17011,7 @@ export function App(): JSX.Element {
                             {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
                           </span>
                         </span>
-                      </button>
+                      <InstantTooltipPopover content={platform.description} /></button>
                     );
                   })}
                 </div>
@@ -17167,40 +17133,36 @@ export function App(): JSX.Element {
                           onClick={() => {
                             void handleChooseReferenceTrack();
                           }}
-                          data-testid="analysis-choose-reference"
-                          title="Choose an external reference file."
+                          data-testid="analysis-choose-reference" className="instant-tooltip-host instant-tooltip-host--inline-flex"
                           disabled={referenceStatus === 'loading'}
                         >
                           {referenceStatus === 'loading' ? 'Loading…' : 'Choose File…'}
-                        </button>
+                        <InstantTooltipPopover content="Choose an external reference file." /></button>
                         <button
                           type="button"
                           onClick={() => {
                             void handleUseCurrentTrackAsReference();
                           }}
                           data-testid="analysis-use-current-reference"
-                          disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
-                          title="Use the current track as the reference."
+                          disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'} className="instant-tooltip-host instant-tooltip-host--inline-flex"
                         >
                           {referenceStatus === 'loading' ? 'Loading…' : 'Use Current'}
-                        </button>
+                        <InstantTooltipPopover content="Use the current track as the reference." /></button>
                         <button
                           type="button"
-                          className="ghost"
+                          className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                           onClick={handleClearReferenceTrack}
                           data-testid="analysis-clear-reference"
                           disabled={!referenceTrack && referenceStatus !== 'error'}
-                          title="Clear the reference."
                         >
                           Clear
-                        </button>
+                        <InstantTooltipPopover content="Clear the reference." /></button>
                       </div>
                     </div>
                     {selectedSongId ? (
                       <label
-                        className="analysis-reference-restore-toggle muted"
+                        className="analysis-reference-restore-toggle muted instant-tooltip-host instant-tooltip-host--inline-flex"
                         data-testid="analysis-reference-restore-toggle"
-                        title="When ON, opening this track auto-loads its saved reference. When OFF (default), the currently loaded reference is kept across track switches. References are always saved when you pick them, regardless of this toggle."
                       >
                         <input
                           type="checkbox"
@@ -17211,7 +17173,7 @@ export function App(): JSX.Element {
                           data-testid="analysis-reference-restore-toggle-input"
                         />
                         <span>Restore this reference when I open this track</span>
-                      </label>
+                      <InstantTooltipPopover content="When ON, opening this track auto-loads its saved reference. When OFF (default), the currently loaded reference is kept across track switches. References are always saved when you pick them, regardless of this toggle." /></label>
                     ) : null}
                   </div>
 
@@ -17220,23 +17182,21 @@ export function App(): JSX.Element {
                 <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
                   <button
                     type="button"
-                    className={playbackPreviewMode === 'mix' ? 'active' : 'ghost'}
+                    className={`${playbackPreviewMode === 'mix' ? 'active' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                     onClick={() => handleReferencePreviewModeChange('mix')}
                     data-testid="analysis-ab-mix"
-                    title="Listen to your mix."
                   >
                     Mix
-                  </button>
+                  <InstantTooltipPopover content="Listen to your mix." /></button>
                   <button
                     type="button"
-                    className={`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`}
+                    className={`${`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                     onClick={() => handleReferencePreviewModeChange('reference')}
                     data-testid="analysis-ab-reference"
                     disabled={!referenceTrack || referenceStatus === 'loading'}
-                    title="Listen to the reference track."
                   >
                     Reference
-                  </button>
+                  <InstantTooltipPopover content="Listen to the reference track." /></button>
                 </div>
                 <p className="muted">
                   {referenceStatus === 'loading'
@@ -17298,10 +17258,8 @@ export function App(): JSX.Element {
                       <button
                         key={savedReference.filePath}
                         type="button"
-                        className={
-                          'recent-reference-track-btn ghost' +
-                          (referenceTrack?.filePath === savedReference.filePath ? ' active' : '')
-                        }
+                        className={`${'recent-reference-track-btn ghost' +
+                          (referenceTrack?.filePath === savedReference.filePath ? ' active' : '')} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => {
                           handleSavedReferenceTrackClick(savedReference);
                         }}
@@ -17309,11 +17267,10 @@ export function App(): JSX.Element {
                           void handleSavedReferenceTrackDoubleClick(savedReference);
                         }}
                         disabled={referenceStatus === 'loading'}
-                        title={savedReference.filePath}
                         data-testid="analysis-compact-saved-reference-quick-pick"
                       >
                         {savedReference.fileName}
-                      </button>
+                      <InstantTooltipPopover content={savedReference.filePath} /></button>
                     ))}
                   </div>
                 </div>
@@ -17381,9 +17338,8 @@ export function App(): JSX.Element {
           <div className="album-header-row">
             <button
               type="button"
-              className="album-art-trigger"
+              className="album-art-trigger instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={handleAlbumArtClick}
-              title="Click to upload album art"
               data-testid="album-art-trigger"
             >
               {albumArt ? (
@@ -17392,8 +17348,7 @@ export function App(): JSX.Element {
                   <span
                     role="button"
                     tabIndex={0}
-                    className="album-art-expand"
-                    title="View fullscreen"
+                    className="album-art-expand instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="album-art-expand"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -17410,12 +17365,12 @@ export function App(): JSX.Element {
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                       <path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
-                  </span>
+                  <InstantTooltipPopover content="View fullscreen" /></span>
                 </>
               ) : (
                 <span className="album-art-placeholder" aria-hidden="true">🎵</span>
               )}
-            </button>
+            <InstantTooltipPopover content="Click to upload album art" /></button>
             <input
               ref={albumArtInputRef}
               type="file"
@@ -17441,13 +17396,12 @@ export function App(): JSX.Element {
                 />
               ) : (
                 <h2
-                  className="album-title-text"
+                  className="album-title-text instant-tooltip-host instant-tooltip-host--inline-flex"
                   onClick={handleAlbumTitleStartEdit}
-                  title="Click to edit album title"
                   data-testid="album-title-text"
                 >
                   {albumTitle}
-                </h2>
+                <InstantTooltipPopover content="Click to edit album title" /></h2>
               )}
               <div className="panel-title-metadata-row">
                 <div className="panel-title-metadata-left">
@@ -17471,17 +17425,12 @@ export function App(): JSX.Element {
                 stretch the button taller than its text-only siblings. */}
             <button
               type="button"
-              className="action-button secondary"
+              className="action-button secondary instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={() => {
                 void handleSaveSongProjectCopyOnAll();
               }}
               data-testid="album-save-copy-on-all-button"
               disabled={bulkSaveCopyProgress !== null}
-              title={
-                bulkSaveCopyProgress !== null
-                  ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
-                  : "Save a copy of every track's linked DAW project file (.als / .logicx etc), tagged with each song's current version. Re-clicks append (2), (3), etc. — never overwrites."
-              }
               style={{ lineHeight: 1 }}
             >
               <span
@@ -17498,87 +17447,77 @@ export function App(): JSX.Element {
               {bulkSaveCopyProgress !== null
                 ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
                 : 'Save Copy on All'}
-            </button>
+            <InstantTooltipPopover content={bulkSaveCopyProgress !== null
+                  ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
+                  : "Save a copy of every track's linked DAW project file (.als / .logicx etc), tagged with each song's current version. Re-clicks append (2), (3), etc. — never overwrites."} /></button>
             <button
               type="button"
-              className="action-button secondary"
+              className="action-button secondary instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={handleOpenAlbumChecklist}
               data-testid="album-checklist-button"
-              title="Album Checklist — high-level to-do items for the whole album/project."
             >
               Checklist
-            </button>
+            <InstantTooltipPopover content="Album Checklist — high-level to-do items for the whole album/project." /></button>
             <button
               type="button"
-              className="action-button secondary"
+              className="action-button secondary instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={() => {
                 void handleOrganize();
               }}
               data-testid="organize-button"
-              title="Move older non-archived versions into old/ and keep the newest version in place."
             >
               Organize
-            </button>
+            <InstantTooltipPopover content="Move older non-archived versions into old/ and keep the newest version in place." /></button>
             <button
               type="button"
-              className="action-button secondary"
+              className="action-button secondary instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={() => {
                 void handleExportLatestVersionsInOrder();
               }}
               data-testid="export-latest-ordered-button"
-              title={
-                canExportLatestVersionsInOrder
-                  ? 'Create a new folder containing only the latest version of each track, renamed with ordered numeric prefixes.'
-                  : 'Link a folder first to export latest versions.'
-              }
               disabled={!canExportLatestVersionsInOrder}
             >
               Export Latest
-            </button>
+            <InstantTooltipPopover content={canExportLatestVersionsInOrder
+                  ? 'Create a new folder containing only the latest version of each track, renamed with ordered numeric prefixes.'
+                  : 'Link a folder first to export latest versions.'} /></button>
             <button
               type="button"
-              className="icon-button"
+              className="icon-button instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={() => {
                 void handleExportPlaylistOrder();
               }}
               data-testid="export-playlist-order-button"
               aria-label="Export playlist ordering"
-              title={
-                canExportPlaylistOrder
-                  ? 'Export track ordering + song metadata as a standalone JSON file for sharing or transferring between machines. (For a full settings/checklists/ratings backup, use Export State in Support & Feedback.)'
-                  : 'Link a folder first to export track order.'
-              }
               disabled={!canExportPlaylistOrder}
             >
               <span aria-hidden="true">⤓</span>
-            </button>
+            <InstantTooltipPopover content={canExportPlaylistOrder
+                  ? 'Export track ordering + song metadata as a standalone JSON file for sharing or transferring between machines. (For a full settings/checklists/ratings backup, use Export State in Support & Feedback.)'
+                  : 'Link a folder first to export track order.'} /></button>
             <button
               type="button"
-              className="icon-button"
+              className="icon-button instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={() => {
                 void handleImportPlaylistOrder();
               }}
               data-testid="import-playlist-order-button"
               aria-label="Import playlist ordering"
-              title={
-                canImportPlaylistOrder
-                  ? 'Import a previously exported playlist/order JSON and apply it to the current library. (For restoring a full settings backup, use Import State in Support & Feedback.)'
-                  : 'Link the album folder first to import track order.'
-              }
               disabled={!canImportPlaylistOrder}
             >
               <span aria-hidden="true">⤒</span>
-            </button>
+            <InstantTooltipPopover content={canImportPlaylistOrder
+                  ? 'Import a previously exported playlist/order JSON and apply it to the current library. (For restoring a full settings backup, use Import State in Support & Feedback.)'
+                  : 'Link the album folder first to import track order.'} /></button>
             <button
               type="button"
-              className="icon-button"
+              className="icon-button instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={handleOpenMigrationModal}
               data-testid="migration-modal-button"
               aria-label="Migrate notes from other apps via LLM"
-              title="Migrate notes from other apps (Apple Notes, etc.) into checklists using an LLM to parse your notes."
             >
               <span aria-hidden="true">🚶</span>
-            </button>
+            <InstantTooltipPopover content="Migrate notes from other apps (Apple Notes, etc.) into checklists using an LLM to parse your notes." /></button>
             <div className="actions-help-group">
               <HelpTooltip text={"Header buttons overview:\n\n• Rescan — Re-scans your watched folders for new or changed files. Your saved track ordering is preserved.\n\n• ☑ (Album Checklist) — Opens a project-wide checklist for high-level tasks that apply to the whole album, not individual songs.\n\n• Organize — Moves older, non-archived versions of each song into an 'old/' subfolder, keeping only the newest version in place.\n\n• 💾 (Save Copy on All) — Saves a versioned copy of every track's linked DAW project file (.als / .logicx etc) in one pass. Same as clicking the per-track Save Copy button for each track. Tracks without a linked DAW project are skipped.\n\n• Export Latest — Creates a new folder containing just the latest version of each track, renamed with ordered numeric prefixes (01, 02, …) matching your tracklist order.\n\n• ⤓ (Export Order) — Saves your current playlist ordering and song metadata as a standalone JSON file for sharing or transferring between machines. Different from Export State (in Support & Feedback), which backs up all settings, checklists, and ratings.\n\n• ⤒ (Import Order) — Imports a previously exported ordering JSON to restore track order. Different from Import State (in Support & Feedback), which restores a full settings backup.\n\n• 🚶 (Migrate) — Migrates notes from other apps (Apple Notes, etc.) into per-song checklists using an LLM to parse your notes."} />
             </div>
@@ -17587,26 +17526,22 @@ export function App(): JSX.Element {
 
         <div className="track-order-toolbar" data-testid="track-order-toolbar">
           <p
-            className="list-hint"
+            className="list-hint instant-tooltip-host instant-tooltip-host--inline-flex"
             data-testid="track-order-hint"
-            title="Drag tracks to reorder. Track positions are preserved across versions."
           >
             {listHintText}
-          </p>
+          <InstantTooltipPopover content="Drag tracks to reorder. Track positions are preserved across versions." /></p>
           <button
             type="button"
-            className="reset-all-times-button"
+            className="reset-all-times-button instant-tooltip-host instant-tooltip-host--inline-flex"
             data-testid="reset-all-times-button"
             onClick={handleResetAllPlaybackTimes}
             disabled={songs.length === 0}
-            title={
-              songs.length > 0
-                ? 'Set playback time to zero for every track.'
-                : 'Link tracks before resetting playback times.'
-            }
           >
             Reset All Times
-          </button>
+          <InstantTooltipPopover content={songs.length > 0
+                ? 'Set playback time to zero for every track.'
+                : 'Link tracks before resetting playback times.'} /></button>
         </div>
 
         <ul
@@ -17728,7 +17663,7 @@ export function App(): JSX.Element {
                 <div
                   role="button"
                   tabIndex={0}
-                  className={`main-list-row ${song.id === selectedSongId ? 'selected' : ''} ${
+                  className={`${`main-list-row ${song.id === selectedSongId ? 'selected' : ''} ${
                     dragSongId === song.id ? 'drag-source' : ''
                   } ${
                     // v3.195 — Click-feedback UX. When the user selects a row whose
@@ -17741,7 +17676,7 @@ export function App(): JSX.Element {
                     activeSongIntegratedLufsStatus === 'loading'
                       ? 'is-analyzing'
                       : ''
-                  }`}
+                  }`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                   data-analyzing={
                     song.id === selectedSongId &&
                     activeSongIntegratedLufsStatus === 'loading'
@@ -17777,11 +17712,6 @@ export function App(): JSX.Element {
                   onDragEnd={() => {
                     clearDragState();
                   }}
-                  title={
-                    canReorderSongs
-                      ? 'Click to select, drag to reorder.'
-                      : 'Click to select. Clear search to reorder.'
-                  }
                 >
                   <div className="main-list-row-top">
                     <strong className="main-list-row-title" data-testid="main-list-row-title">
@@ -17890,65 +17820,57 @@ export function App(): JSX.Element {
                           </button>
                           <button
                             type="button"
-                            className="song-project-button has-project-file"
+                            className="song-project-button has-project-file instant-tooltip-host instant-tooltip-host--inline-flex"
                             onClick={(event) => {
                               event.stopPropagation();
                               void handleOpenSongProjectFile(song.id);
                             }}
                             data-testid="song-project-open-button"
-                            title={`Open project\n${songProjectFilePath}`}
                             aria-label={`${songRowTitle} open project ${songProjectFileName ?? 'linked file'}`}
                           >
                             <span className="song-project-icon" aria-hidden="true">
                               🗂
                             </span>
                             <span>Open project</span>
-                          </button>
+                          <InstantTooltipPopover content={`Open project\n${songProjectFilePath}`} /></button>
                           <button
                             type="button"
-                            className="song-project-clear-button"
+                            className="song-project-clear-button instant-tooltip-host instant-tooltip-host--inline-flex"
                             onClick={(event) => {
                               event.stopPropagation();
                               setSongProjectFilePath(song.id, null);
                             }}
                             data-testid="song-project-clear-button"
-                            title="Clear project"
                             aria-label={`${songRowTitle} clear project`}
                           >
                             <span aria-hidden="true">×</span>
-                          </button>
+                          <InstantTooltipPopover content="Clear project" /></button>
                         </div>
                       ) : (
                         <button
                           type="button"
-                          className="song-project-button"
+                          className="song-project-button instant-tooltip-host instant-tooltip-host--inline-flex"
                           onClick={(event) => {
                             event.stopPropagation();
                             void handlePickSongProjectFile(song.id);
                           }}
                           data-testid="song-project-set-button"
-                          title="Set project"
                           aria-label={`${songRowTitle} set project`}
                         >
                           <span className="song-project-icon" aria-hidden="true">
                             🗂
                           </span>
                           <span>Set project</span>
-                        </button>
+                        <InstantTooltipPopover content="Set project" /></button>
                       )}
                       <button
                         type="button"
-                        className={`song-checklist-button${songChecklistRemainingTodoCount > 0 ? ' has-items' : ''}`}
+                        className={`${`song-checklist-button${songChecklistRemainingTodoCount > 0 ? ' has-items' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={(event) => {
                           event.stopPropagation();
                           handleOpenSongChecklist(song.id);
                         }}
                         data-testid="song-checklist-button"
-                        title={
-                          songChecklistCount > 0
-                            ? `${songChecklistRemainingTodoCount}/${songChecklistCount} checklist item(s) remaining`
-                            : 'Open checklist for this song.'
-                        }
                         aria-label={`${songRowTitle} checklist`}
                         style={{ opacity: songChecklistOpacity }}
                       >
@@ -17958,13 +17880,17 @@ export function App(): JSX.Element {
                             {`${songChecklistRemainingTodoCount}/${songChecklistCount}`}
                           </span>
                         ) : null}
-                      </button>
+                      <InstantTooltipPopover content={songChecklistCount > 0
+                            ? `${songChecklistRemainingTodoCount}/${songChecklistCount} checklist item(s) remaining`
+                            : 'Open checklist for this song.'} /></button>
                       <span className="muted" style={{ opacity: songDateOpacity }}>
                         {formatDate(song.latestExportAt)}
                       </span>
                     </div>
                   </div>
-                </div>
+                <InstantTooltipPopover content={canReorderSongs
+                      ? 'Click to select, drag to reorder.'
+                      : 'Click to select. Clear search to reorder.'} /></div>
                 <label className="song-rating-control" data-testid="song-rating-control">
                   <span className="song-rating-value">{songRatingValue}/10</span>
                   <input
@@ -17995,15 +17921,14 @@ export function App(): JSX.Element {
               {showEmptyStateAddFolder ? (
                 <button
                   type="button"
-                  className="add-folder-primary empty-state-add-folder"
+                  className="add-folder-primary empty-state-add-folder instant-tooltip-host instant-tooltip-host--inline-flex"
                   onClick={() => {
                     void handleOpenFolderDialog();
                   }}
                   data-testid="main-list-empty-add-folder"
-                  title="Choose a folder containing your exported audio files."
                 >
                   Add Folder…
-                </button>
+                <InstantTooltipPopover content="Choose a folder containing your exported audio files." /></button>
               ) : null}
             </li>
           )}
@@ -18051,33 +17976,31 @@ export function App(): JSX.Element {
                     </p>
                     <button
                       type="button"
-                      className="ghost spectrum-clear-solo-button spectrum-clear-solo-button-mini"
+                      className="ghost spectrum-clear-solo-button spectrum-clear-solo-button-mini instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="player-dock-clear-solo-bands"
                       onClick={handleClearSoloedBands}
-                      title="Stop soloing and return to full-spectrum playback."
                     >
                       Clear
-                    </button>
+                    <InstantTooltipPopover content="Stop soloing and return to full-spectrum playback." /></button>
                   </div>
                 ) : null}
               </div>
               <button
                 type="button"
-                className="ghost"
+                className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={() => {
                   if (activePlaybackFilePath) {
                     void window.producerPlayer.revealFile(activePlaybackFilePath);
                   }
                 }}
                 data-testid="player-reveal-version-button"
-                title={`Open this version in ${fileManagerLabel(environment.platform)}.`}
               >
                 {`Open in ${fileManagerLabel(environment.platform)}`}
-              </button>
+              <InstantTooltipPopover content={`Open this version in ${fileManagerLabel(environment.platform)}.`} /></button>
               {selectedPlaybackSongId && songProjectFilePaths[selectedPlaybackSongId] ? (
                 <button
                   type="button"
-                  className="ghost"
+                  className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                   onClick={() => {
                     const projectPath = songProjectFilePaths[selectedPlaybackSongId];
                     if (projectPath) {
@@ -18085,10 +18008,9 @@ export function App(): JSX.Element {
                     }
                   }}
                   data-testid="player-reveal-project-button"
-                  title={`Open this song's project file in ${fileManagerLabel(environment.platform)}.`}
                 >
                   {`Open project in ${fileManagerLabel(environment.platform)}`}
-                </button>
+                <InstantTooltipPopover content={`Open this song's project file in ${fileManagerLabel(environment.platform)}.`} /></button>
               ) : null}
             </div>
 
@@ -18098,98 +18020,88 @@ export function App(): JSX.Element {
                 <div className="transport-skip-row">
                   <button
                     type="button"
-                    className="skip-button"
+                    className="skip-button instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="player-skip-back-10"
                     onClick={() => handleSkipSeconds(-10)}
-                    title="Skip back 10 seconds."
                   >
                     −10s
-                  </button>
+                  <InstantTooltipPopover content="Skip back 10 seconds." /></button>
                   <button
                     type="button"
-                    className="skip-button skip-button-small"
+                    className="skip-button skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="player-skip-back-5"
                     onClick={() => handleSkipSeconds(-5)}
-                    title="Skip back 5 seconds."
                   >
                     −5s
-                  </button>
+                  <InstantTooltipPopover content="Skip back 5 seconds." /></button>
                   <button
                     type="button"
-                    className="skip-button skip-button-small"
+                    className="skip-button skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="player-skip-back-1"
                     onClick={() => handleSkipSeconds(-1)}
-                    title="Skip back 1 second."
                   >
                     −1s
-                  </button>
+                  <InstantTooltipPopover content="Skip back 1 second." /></button>
                   <button
                     type="button"
-                    className="skip-button skip-button-small"
+                    className="skip-button skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="player-skip-forward-1"
                     onClick={() => handleSkipSeconds(1)}
-                    title="Skip forward 1 second."
                   >
                     +1s
-                  </button>
+                  <InstantTooltipPopover content="Skip forward 1 second." /></button>
                   <button
                     type="button"
-                    className="skip-button skip-button-small"
+                    className="skip-button skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="player-skip-forward-5"
                     onClick={() => handleSkipSeconds(5)}
-                    title="Skip forward 5 seconds."
                   >
                     +5s
-                  </button>
+                  <InstantTooltipPopover content="Skip forward 5 seconds." /></button>
                   <button
                     type="button"
-                    className="skip-button"
+                    className="skip-button instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="player-skip-forward-10"
                     onClick={() => handleSkipSeconds(10)}
-                    title="Skip forward 10 seconds."
                   >
                     +10s
-                  </button>
+                  <InstantTooltipPopover content="Skip forward 10 seconds." /></button>
                 </div>
                 <div className="transport-main-row">
                   <button
                     type="button"
                     data-testid="player-prev"
-                    onClick={() => handlePreviousTrack()}
-                    title="Restart current track when past 0:02; otherwise go to previous track."
+                    onClick={() => handlePreviousTrack()} className="instant-tooltip-host instant-tooltip-host--inline-flex"
                   >
                     ◀◀
-                  </button>
+                  <InstantTooltipPopover content="Restart current track when past 0:02; otherwise go to previous track." /></button>
                   <button
                     type="button"
-                    className="play-toggle"
+                    className="play-toggle instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="player-play-toggle"
                     aria-label={isPlaying ? 'Pause' : 'Play'}
                     data-playing={isPlaying ? 'true' : 'false'}
                     onClick={() => {
                       void handleTogglePlayback();
                     }}
-                    title="Play or pause the selected track."
                   >
                     <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-                  </button>
+                  <InstantTooltipPopover content="Play or pause the selected track." /></button>
                   <button
                     type="button"
                     data-testid="player-next"
-                    onClick={() => handleNextTrack()}
-                    title="Jump to next track in the current queue."
+                    onClick={() => handleNextTrack()} className="instant-tooltip-host instant-tooltip-host--inline-flex"
                   >
                     ▶▶
-                  </button>
+                  <InstantTooltipPopover content="Jump to next track in the current queue." /></button>
                 </div>
               </div>
               {selectedPlaybackSongId ? (
                 <button
                   type="button"
-                  className={`transport-checklist-button${(songChecklists[selectedPlaybackSongId]?.length ?? 0) > 0 ? ' has-items' : ''}`}
+                  className={`${`transport-checklist-button${(songChecklists[selectedPlaybackSongId]?.length ?? 0) > 0 ? ' has-items' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                   data-testid="transport-checklist-button"
                   onClick={() => handleOpenSongChecklist(selectedPlaybackSongId)}
-                  title="Open checklist for this song."
                   aria-label="Song checklist"
                 >
                   <svg className="transport-checklist-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -18201,14 +18113,13 @@ export function App(): JSX.Element {
                       {songChecklists[selectedPlaybackSongId]?.length}
                     </span>
                   ) : null}
-                </button>
+                <InstantTooltipPopover content="Open checklist for this song." /></button>
               ) : null}
               <button
                 type="button"
-                className={`transport-repeat-button${repeatMode !== 'off' ? ' active' : ''}`}
+                className={`${`transport-repeat-button${repeatMode !== 'off' ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                 data-testid="player-repeat"
                 onClick={handleCycleRepeatMode}
-                title={`Repeat: ${REPEAT_MODE_LABEL[repeatMode]}. Click to cycle.`}
                 aria-label={`Repeat ${REPEAT_MODE_LABEL[repeatMode]}`}
               >
                 <svg className="transport-repeat-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -18218,11 +18129,10 @@ export function App(): JSX.Element {
                   <path d="M21 13v2a4 4 0 0 1-4 4H3" />
                 </svg>
                 {repeatMode === 'one' && <span className="transport-repeat-badge">1</span>}
-              </button>
+              <InstantTooltipPopover content={`Repeat: ${REPEAT_MODE_LABEL[repeatMode]}. Click to cycle.`} /></button>
               <label
-                className="player-volume-control"
+                className="player-volume-control instant-tooltip-host instant-tooltip-host--inline-flex"
                 data-testid="player-volume-control"
-                title="Final player volume. 100% is unity after any preview gain."
               >
                 <span className="muted">Vol {Math.round(volume * 100)}%</span>
                 <input
@@ -18236,7 +18146,7 @@ export function App(): JSX.Element {
                   data-testid="player-volume-slider"
                   aria-label="Final player volume"
                 />
-              </label>
+              <InstantTooltipPopover content="Final player volume. 100% is unity after any preview gain." /></label>
             </div>
 
             <div className="player-scrubber-row">
@@ -18345,21 +18255,19 @@ export function App(): JSX.Element {
 
                         setSelectedPlaybackVersionId(version.id);
                       }}
-                      data-testid="inspector-version-cue-button"
-                      title="Cue this version into the player."
+                      data-testid="inspector-version-cue-button" className="instant-tooltip-host instant-tooltip-host--inline-flex"
                     >
                       Cue
-                    </button>
+                    <InstantTooltipPopover content="Cue this version into the player." /></button>
                     <button
                       type="button"
                       onClick={() => {
                         void window.producerPlayer.revealFile(version.filePath);
                       }}
-                      data-testid="inspector-version-reveal-button"
-                      title={`Open this version in ${fileManagerLabel(environment.platform)}.`}
+                      data-testid="inspector-version-reveal-button" className="instant-tooltip-host instant-tooltip-host--inline-flex"
                     >
                       {`Open in ${fileManagerLabel(environment.platform)}`}
-                    </button>
+                    <InstantTooltipPopover content={`Open this version in ${fileManagerLabel(environment.platform)}.`} /></button>
                   </div>
                 </li>
               ))}
@@ -18377,22 +18285,20 @@ export function App(): JSX.Element {
             <div className="support-feedback-links">
               <button
                 type="button"
-                className="ghost"
+                className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={() => handleOpenSupportLink(BUG_REPORT_URL)}
                 data-testid="support-feedback-bug"
-                title="Open the bug report page."
               >
                 Report a Bug
-              </button>
+              <InstantTooltipPopover content="Open the bug report page." /></button>
               <button
                 type="button"
-                className="ghost"
+                className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={() => handleOpenSupportLink(FEATURE_REQUEST_URL)}
                 data-testid="support-feedback-feature"
-                title="Open the feature request page."
               >
                 Request a Feature
-              </button>
+              <InstantTooltipPopover content="Open the feature request page." /></button>
             </div>
             {/* --- Update section ------------------------------------------------ */}
             {/* "Check for Updates" — always visible unless a download/install is
@@ -18400,16 +18306,15 @@ export function App(): JSX.Element {
             {!isDownloadingUpdate && !isInstallingUpdate && !isUpdateDownloaded ? (
               <button
                 type="button"
-                className="ghost"
+                className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={() => {
                   void handleCheckForUpdates();
                 }}
                 data-testid="support-feedback-check-updates"
                 disabled={isCheckingForUpdate}
-                title="Check the update feed without downloading anything."
               >
                 {isCheckingForUpdate ? 'Checking\u2026' : 'Check for Updates'}
-              </button>
+              <InstantTooltipPopover content="Check the update feed without downloading anything." /></button>
             ) : null}
 
             {/* "Download and Install" — only rendered when an update is actually
@@ -18417,44 +18322,41 @@ export function App(): JSX.Element {
             {canDownloadAndInstallUpdate ? (
               <button
                 type="button"
-                className="ghost"
+                className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={() => {
                   void handleDownloadAndInstallUpdate();
                 }}
                 data-testid="support-feedback-download-install-update"
-                title="Download the update and install it automatically (the app will restart)."
               >
                 Download and Install
-              </button>
+              <InstantTooltipPopover content="Download the update and install it automatically (the app will restart)." /></button>
             ) : null}
 
             {/* "Restart & Update" — shown after the download has completed. */}
             {isUpdateDownloaded ? (
               <button
                 type="button"
-                className="ghost"
+                className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={() => {
                   void handleAutoUpdateInstall();
                 }}
                 data-testid="support-feedback-restart-update"
-                title="Restart now to finish installing the update."
               >
                 Restart &amp; Update
-              </button>
+              <InstantTooltipPopover content="Restart now to finish installing the update." /></button>
             ) : null}
             {isUpdateDownloaded ? (
               <button
                 type="button"
-                className="ghost"
+                className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                 disabled={isRecheckingUpdate}
                 onClick={() => {
                   void handleRecheckForUpdates();
                 }}
                 data-testid="support-feedback-recheck-update"
-                title="Check whether a newer update is available before restarting."
               >
                 📡 Recheck
-              </button>
+              <InstantTooltipPopover content="Check whether a newer update is available before restarting." /></button>
             ) : null}
 
             {/* Progress bar — only visible while downloading. */}
@@ -18496,7 +18398,7 @@ export function App(): JSX.Element {
                 {unifiedUpdateIsError ? (
                   <button
                     type="button"
-                    className="update-status-clickable"
+                    className="update-status-clickable instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={() =>
                       setErrorDetails({
                         title: 'Update failed',
@@ -18504,10 +18406,9 @@ export function App(): JSX.Element {
                       })
                     }
                     data-testid="support-feedback-update-status-details"
-                    title="Click to see the full error"
                   >
                     Update failed — click for details
-                  </button>
+                  <InstantTooltipPopover content="Click to see the full error" /></button>
                 ) : (
                   unifiedUpdateStatusText
                 )}
@@ -18588,9 +18489,8 @@ export function App(): JSX.Element {
                 </p>
               </div>
               <div
-                className={`checklist-daw-offset-control${checklistDawOffsetEnabled ? ' is-active' : ''}`}
+                className={`${`checklist-daw-offset-control${checklistDawOffsetEnabled ? ' is-active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                 data-testid="checklist-daw-offset-control"
-                title="Add a DAW time offset so timestamps displayed here line up with your digital audio workstation arrangement position. Does not change where clicks seek to."
               >
                 <span
                   className="checklist-daw-offset-help"
@@ -18633,7 +18533,7 @@ export function App(): JSX.Element {
                     data-testid="checklist-daw-offset-seconds"
                   />
                 </div>
-                <label className="checklist-daw-offset-toggle" title={checklistDawOffsetEnabled ? 'Disable DAW offset' : 'Enable DAW offset'}>
+                <label className="checklist-daw-offset-toggle instant-tooltip-host instant-tooltip-host--inline-flex">
                   <input
                     type="checkbox"
                     checked={checklistDawOffsetEnabled}
@@ -18642,11 +18542,11 @@ export function App(): JSX.Element {
                     data-testid="checklist-daw-offset-toggle"
                   />
                   <span aria-hidden="true" className="checklist-daw-offset-toggle-dot" />
-                </label>
-              </div>
-              <button type="button" className="checklist-header-done-button" onClick={handleCloseSongChecklist} title="Close checklist." data-testid="song-checklist-done-header">
+                <InstantTooltipPopover content={checklistDawOffsetEnabled ? 'Disable DAW offset' : 'Enable DAW offset'} /></label>
+              <InstantTooltipPopover content="Add a DAW time offset so timestamps displayed here line up with your digital audio workstation arrangement position. Does not change where clicks seek to." /></div>
+              <button type="button" className="checklist-header-done-button instant-tooltip-host instant-tooltip-host--inline-flex" onClick={handleCloseSongChecklist} data-testid="song-checklist-done-header">
                 Done
-              </button>
+              <InstantTooltipPopover content="Close checklist." /></button>
             </div>
 
             {checklistFindOpen ? (
@@ -18684,36 +18584,33 @@ export function App(): JSX.Element {
                 <div className="checklist-find-actions" aria-label="Find navigation">
                   <button
                     type="button"
-                    className="ghost checklist-find-action"
+                    className="ghost checklist-find-action instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={() => handleChecklistFindStep('previous')}
                     disabled={checklistFindMatches.length === 0}
                     aria-label="Previous checklist find match"
-                    title="Previous match (Shift+Enter)"
                     data-testid="song-checklist-find-previous"
                   >
                     ↑
-                  </button>
+                  <InstantTooltipPopover content="Previous match (Shift+Enter)" /></button>
                   <button
                     type="button"
-                    className="ghost checklist-find-action"
+                    className="ghost checklist-find-action instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={() => handleChecklistFindStep('next')}
                     disabled={checklistFindMatches.length === 0}
                     aria-label="Next checklist find match"
-                    title="Next match (Enter)"
                     data-testid="song-checklist-find-next"
                   >
                     ↓
-                  </button>
+                  <InstantTooltipPopover content="Next match (Enter)" /></button>
                   <button
                     type="button"
-                    className="ghost checklist-find-action checklist-find-close"
+                    className="ghost checklist-find-action checklist-find-close instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={() => handleCloseChecklistFind()}
                     aria-label="Close checklist find"
-                    title="Close find (Esc)"
                     data-testid="song-checklist-find-close"
                   >
                     ×
-                  </button>
+                  <InstantTooltipPopover content="Close find (Esc)" /></button>
                 </div>
               </div>
             ) : null}
@@ -18751,15 +18648,14 @@ export function App(): JSX.Element {
                   />
                   <button
                     type="button"
-                    className="listening-device-submit-button"
+                    className="listening-device-submit-button instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={handleSubmitListeningDevice}
                     disabled={listeningDeviceSubmitDisabled}
                     aria-label={isListeningDeviceRenameMode ? 'Submit listening device rename' : 'Add listening device'}
                     data-testid="listening-device-submit"
-                    title={isListeningDeviceRenameMode ? 'Save renamed listening device' : 'Add listening device'}
                   >
                     ✓
-                  </button>
+                  <InstantTooltipPopover content={isListeningDeviceRenameMode ? 'Save renamed listening device' : 'Add listening device'} /></button>
                 </div>
                 <div className="listening-device-editor-actions">
                   {/*
@@ -18771,13 +18667,8 @@ export function App(): JSX.Element {
                     silently when permissions / enumeration fails.
                   */}
                   <span
-                    className="listening-device-system-output"
+                    className="listening-device-system-output instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="listening-device-system-output"
-                    title={
-                      systemAudioDevice.deviceId.length > 0
-                        ? `Current operating-system audio output device. Auto-switches the active listening device when this changes to one you've linked.`
-                        : `Operating-system audio output device unavailable (permission not yet granted or no audio outputs detected).`
-                    }
                   >
                     <span className="listening-device-system-output-label">
                       Current audio device:
@@ -18787,7 +18678,9 @@ export function App(): JSX.Element {
                         ? systemAudioDevice.label
                         : '(unknown)'}
                     </span>
-                  </span>
+                  <InstantTooltipPopover content={systemAudioDevice.deviceId.length > 0
+                        ? `Current operating-system audio output device. Auto-switches the active listening device when this changes to one you've linked.`
+                        : `Operating-system audio output device unavailable (permission not yet granted or no audio outputs detected).`} /></span>
                   {/*
                     v3.197 — explicit Link button (replaces v3.193 silent
                     auto-bind). Writes the current system output device to the
@@ -18821,14 +18714,13 @@ export function App(): JSX.Element {
                       <span className="listening-device-link-group">
                         <button
                           type="button"
-                          className={`listening-device-secondary-button${hasLink ? ' is-active' : ''}`}
+                          className={`${`listening-device-secondary-button${hasLink ? ' is-active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                           onClick={handleLinkActiveListeningDevice}
                           disabled={!hasCurrent}
                           data-testid="listening-device-link-button"
-                          title={tooltip}
                         >
                           {buttonLabel}
-                        </button>
+                        <InstantTooltipPopover content={tooltip} /></button>
                         {/*
                           v3.203 — adjacent × button that fully unlinks the
                           active listening device (clears systemDeviceId +
@@ -18839,14 +18731,13 @@ export function App(): JSX.Element {
                         {hasLink ? (
                           <button
                             type="button"
-                            className="listening-device-link-clear-button"
+                            className="listening-device-link-clear-button instant-tooltip-host instant-tooltip-host--inline-flex"
                             onClick={handleUnlinkActiveListeningDevice}
                             data-testid="listening-device-unlink-button"
                             aria-label="Remove link to current audio device"
-                            title="Remove link to current audio device"
                           >
                             <span aria-hidden="true">×</span>
-                          </button>
+                          <InstantTooltipPopover content="Remove link to current audio device" /></button>
                         ) : null}
                       </span>
                     );
@@ -18865,19 +18756,18 @@ export function App(): JSX.Element {
                   */}
                   <button
                     type="button"
-                    className="listening-device-secondary-button listening-device-detect-button"
+                    className="listening-device-secondary-button listening-device-detect-button instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={() => {
                       void handleDetectListeningDevice();
                     }}
                     data-testid="listening-device-detect-button"
-                    title="Force re-detect the listening device linked to the current OS audio output. Bypasses the per-song auto-set toggle."
                     aria-label="Detect listening device for current audio output"
                   >
                     Detect
-                  </button>
+                  <InstantTooltipPopover content="Force re-detect the listening device linked to the current OS audio output. Bypasses the per-song auto-set toggle." /></button>
                   <button
                     type="button"
-                    className={`listening-device-secondary-button${isListeningDeviceRenameMode ? ' is-active' : ''}`}
+                    className={`${`listening-device-secondary-button${isListeningDeviceRenameMode ? ' is-active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                     onClick={
                       isListeningDeviceRenameMode
                         ? handleCancelListeningDeviceRename
@@ -18885,16 +18775,13 @@ export function App(): JSX.Element {
                     }
                     disabled={!isListeningDeviceRenameMode && listeningDeviceRenameTarget === null}
                     data-testid="listening-device-rename-mode"
-                    title={
-                      isListeningDeviceRenameMode
+                  >
+                    {isListeningDeviceRenameMode ? 'Cancel rename' : 'Rename selected'}
+                  <InstantTooltipPopover content={isListeningDeviceRenameMode
                         ? 'Cancel rename mode'
                         : listeningDeviceRenameTarget
                           ? `Rename "${listeningDeviceRenameTarget.name}"`
-                          : 'Select a listening device first'
-                    }
-                  >
-                    {isListeningDeviceRenameMode ? 'Cancel rename' : 'Rename selected'}
-                  </button>
+                          : 'Select a listening device first'} /></button>
                   {checklistListeningDeviceAssignmentItemId ? (
                     <span className="listening-device-mode-hint" data-testid="listening-device-assignment-hint">
                       Click device to add to existing checklist item
@@ -18981,21 +18868,19 @@ export function App(): JSX.Element {
                       >
                         <button
                           type="button"
-                          className="listening-device-chip-label"
+                          className="listening-device-chip-label instant-tooltip-host instant-tooltip-host--inline-flex"
                           onClick={() => handleSelectListeningDevice(device.id)}
-                          title={isActive ? `Clear "${device.name}" selection` : `Use "${device.name}" for new items`}
                         >
                           {isActive ? `${LISTENING_DEVICE_MARKER} ${device.name}` : device.name}
-                        </button>
+                        <InstantTooltipPopover content={isActive ? `Clear "${device.name}" selection` : `Use "${device.name}" for new items`} /></button>
                         <button
                           type="button"
-                          className="listening-device-chip-delete"
+                          className="listening-device-chip-delete instant-tooltip-host instant-tooltip-host--inline-flex"
                           onClick={() => handleDeleteListeningDevice(device.id)}
-                          title={`Remove "${device.name}" from saved devices`}
                           aria-label={`Remove ${device.name}`}
                         >
                           ×
-                        </button>
+                        <InstantTooltipPopover content={`Remove "${device.name}" from saved devices`} /></button>
                       </span>
                     );
                   })
@@ -19136,13 +19021,12 @@ export function App(): JSX.Element {
                         // slot so the row keeps a consistent layout with
                         // its todo siblings.
                         <span
-                          className="checklist-item-note-eyebrow"
+                          className="checklist-item-note-eyebrow instant-tooltip-host instant-tooltip-host--inline-flex"
                           data-testid="song-checklist-item-note-eyebrow"
                           aria-hidden="true"
-                          title="This item is a permanent note. It doesn't count toward todos."
                         >
                           NOTE
-                        </span>
+                        <InstantTooltipPopover content="This item is a permanent note. It doesn't count toward todos." /></span>
                       ) : (
                         <label className="checklist-item-toggle">
                           <input
@@ -19179,11 +19063,11 @@ export function App(): JSX.Element {
                             return (
                               <button
                                 type="button"
-                                className={`checklist-timestamp-badge${
+                                className={`${`checklist-timestamp-badge${
                                   isDraggingThis && timestampDragState!.moved
                                     ? ' is-dragging'
                                     : ''
-                                }${dawOffsetActive ? ' is-daw-offset' : ''}`}
+                                }${dawOffsetActive ? ' is-daw-offset' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                                 onPointerDown={(event) =>
                                   handleChecklistTimestampPointerDown(
                                     event,
@@ -19198,15 +19082,12 @@ export function App(): JSX.Element {
                                 }
                                 onPointerCancel={handleChecklistTimestampPointerCancel}
                                 data-testid="song-checklist-item-timestamp"
-                                title={
-                                  dawOffsetActive
-                                    ? `DAW offset active (+${formatTime(checklistDawOffsetSeconds)}). Displayed: ${formatTime(displaySeconds)}. Click seeks to raw ${formatTime(seekTargetRaw)}.`
-                                    : `Drag up/down to adjust, click to jump to ${formatTime(seekTargetRaw)}`
-                                }
                                 aria-label={`Seek to ${formatTime(seekTargetRaw)}`}
                               >
                                 {formatTime(displaySeconds)}
-                              </button>
+                              <InstantTooltipPopover content={dawOffsetActive
+                                    ? `DAW offset active (+${formatTime(checklistDawOffsetSeconds)}). Displayed: ${formatTime(displaySeconds)}. Click seeks to raw ${formatTime(seekTargetRaw)}.`
+                                    : `Drag up/down to adjust, click to jump to ${formatTime(seekTargetRaw)}`} /></button>
                             );
                           })() : null}
                           {item.versionNumber !== null ? (
@@ -19236,27 +19117,19 @@ export function App(): JSX.Element {
                             // (docs/UI.md). Kept compact so it doesn't
                             // dominate the row.
                             <span
-                              className="checklist-from-mastering-badge"
+                              className="checklist-from-mastering-badge instant-tooltip-host instant-tooltip-host--inline-flex"
                               data-testid="song-checklist-item-from-mastering"
-                              title="Promoted from the Mastering Checklist"
                             >
                               FROM MASTERING
-                            </span>
+                            <InstantTooltipPopover content="Promoted from the Mastering Checklist" /></span>
                           ) : null}
                           {deviceLabel !== null ? (
                             <button
                               type="button"
-                              className={`checklist-listening-device-badge${
+                              className={`${`checklist-listening-device-badge${
                                 deviceRef === null ? ' is-deleted' : ''
-                              }${isListeningDeviceAssignmentTarget ? ' is-awaiting-assignment' : ''}`}
+                              }${isListeningDeviceAssignmentTarget ? ' is-awaiting-assignment' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                               data-testid="song-checklist-item-listening-device"
-                              title={
-                                isListeningDeviceAssignmentTarget
-                                  ? 'Click a saved listening device above to assign it to this checklist item'
-                                  : deviceRef
-                                    ? `Listening device: ${deviceRef.name}. Click to change it.`
-                                    : 'This device has been removed from your saved list. Click to choose a replacement.'
-                              }
                               style={
                                 deviceColor
                                   ? {
@@ -19278,7 +19151,11 @@ export function App(): JSX.Element {
                               onMouseLeave={() => setHoveredChecklistTag(null)}
                             >
                               {isListeningDeviceAssignmentTarget ? 'Select listening device…' : deviceLabel}
-                            </button>
+                            <InstantTooltipPopover content={isListeningDeviceAssignmentTarget
+                                  ? 'Click a saved listening device above to assign it to this checklist item'
+                                  : deviceRef
+                                    ? `Listening device: ${deviceRef.name}. Click to change it.`
+                                    : 'This device has been removed from your saved list. Click to choose a replacement.'} /></button>
                           ) : null}
                         </div>
                       ) : null}
@@ -19321,19 +19198,16 @@ export function App(): JSX.Element {
                         {deviceLabel === null && item.isNote !== true ? (
                           <button
                             type="button"
-                            className={`checklist-listening-device-badge checklist-listening-device-badge--assign${
+                            className={`${`checklist-listening-device-badge checklist-listening-device-badge--assign${
                               isListeningDeviceAssignmentTarget ? ' is-awaiting-assignment' : ''
-                            }`}
+                            }`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                             onClick={() => handleToggleChecklistListeningDeviceAssignment(item.id)}
                             data-testid="song-checklist-item-assign-device"
-                            title={
-                              isListeningDeviceAssignmentTarget
-                                ? 'Click a saved listening device above to assign it to this checklist item'
-                                : 'Assign a listening device to this checklist item'
-                            }
                           >
                             {isListeningDeviceAssignmentTarget ? 'Select listening device…' : 'Set device'}
-                          </button>
+                          <InstantTooltipPopover content={isListeningDeviceAssignmentTarget
+                                ? 'Click a saved listening device above to assign it to this checklist item'
+                                : 'Assign a listening device to this checklist item'} /></button>
                         ) : null}
                         {/* v3.183.0 — Convert this row between todo and
                             note mode. Hidden by default, revealed on
@@ -19342,7 +19216,7 @@ export function App(): JSX.Element {
                             obvious how to flip back to a todo. */}
                         <button
                           type="button"
-                          className={`checklist-item-mode-toggle${item.isNote === true ? ' is-note' : ''}`}
+                          className={`${`checklist-item-mode-toggle${item.isNote === true ? ' is-note' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                           onClick={() =>
                             handleToggleChecklistItemNoteMode(checklistModalSong.id, item.id)
                           }
@@ -19352,23 +19226,19 @@ export function App(): JSX.Element {
                               ? 'Convert to todo'
                               : 'Convert to note'
                           }
-                          title={
-                            item.isNote === true
-                              ? 'Convert this note back into a todo (re-adds the checkbox).'
-                              : 'Convert this todo into a permanent note (removes the checkbox; not counted in progress).'
-                          }
                         >
                           {item.isNote === true ? 'To todo' : 'To note'}
-                        </button>
+                        <InstantTooltipPopover content={item.isNote === true
+                              ? 'Convert this note back into a todo (re-adds the checkbox).'
+                              : 'Convert this todo into a permanent note (removes the checkbox; not counted in progress).'} /></button>
                         <button
                           type="button"
-                          className="ghost checklist-remove-button"
+                          className="ghost checklist-remove-button instant-tooltip-host instant-tooltip-host--inline-flex"
                           onClick={() => handleRemoveChecklistItem(checklistModalSong.id, item.id)}
                           aria-label={`Remove ${item.text}`}
-                          title="Remove checklist item"
                         >
                           <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
-                        </button>
+                        <InstantTooltipPopover content="Remove checklist item" /></button>
                       </div>
                     </ChecklistSortableRow>
                     );
@@ -19501,10 +19371,9 @@ export function App(): JSX.Element {
                 <div className="checklist-timestamp-preview-group">
                   <button
                     type="button"
-                    className="checklist-set-now-button"
+                    className="checklist-set-now-button instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="song-checklist-set-now"
                     onClick={handleChecklistSetNow}
-                    title="Set the timestamp to the exact current playback position"
                     aria-label="Set timestamp to current playback position"
                   >
                     <svg className="checklist-set-now-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -19512,11 +19381,10 @@ export function App(): JSX.Element {
                       <path d="M8 4v4.5l3 1.5" />
                     </svg>
                     <span>Set now</span>
-                  </button>
+                  <InstantTooltipPopover content="Set the timestamp to the exact current playback position" /></button>
                   <button
                     type="button"
-                    className="checklist-timestamp-badge checklist-input-timestamp-preview"
-                    title={`Seek to ${formatTime(checklistCapturedTimestamp)} — scroll or drag vertically to adjust; hold Shift for coarser steps`}
+                    className="checklist-timestamp-badge checklist-input-timestamp-preview instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="song-checklist-input-timestamp-preview"
                     onClick={() => {
                       if (checklistPreviewSuppressNextClickRef.current) {
@@ -19533,7 +19401,7 @@ export function App(): JSX.Element {
                     onKeyDown={handleChecklistTimestampPreviewKeyDown}
                   >
                     {formatTime(checklistCapturedTimestamp)}
-                  </button>
+                  <InstantTooltipPopover content={`Seek to ${formatTime(checklistCapturedTimestamp)} — scroll or drag vertically to adjust; hold Shift for coarser steps`} /></button>
                 </div>
               ) : null}
               <textarea
@@ -19584,11 +19452,10 @@ export function App(): JSX.Element {
                   type="button"
                   onClick={() => handleAddChecklistItem({ source: 'button' })}
                   disabled={checklistDraftIsEmpty}
-                  data-testid="song-checklist-add"
-                  title="Add this checklist item."
+                  data-testid="song-checklist-add" className="instant-tooltip-host instant-tooltip-host--inline-flex"
                 >
                   Add
-                </button>
+                <InstantTooltipPopover content="Add this checklist item." /></button>
                 <div className="listening-device-reminder">
                   {activeListeningDevice && activeListeningDeviceId ? (() => {
                     const color = getListeningDeviceColor(activeListeningDeviceId);
@@ -19596,7 +19463,7 @@ export function App(): JSX.Element {
                       <div
                         role="button"
                         tabIndex={0}
-                        className="now-listening-pill is-active"
+                        className="now-listening-pill is-active instant-tooltip-host instant-tooltip-host--inline-flex"
                         style={{
                           color: color.fg,
                           borderColor: color.border,
@@ -19614,36 +19481,33 @@ export function App(): JSX.Element {
                           handleFocusListeningDeviceInput();
                         }}
                         data-testid="checklist-now-listening-pill"
-                        title="Jump to listening devices"
                       >
                         <span className="now-listening-pill-label">
                           {LISTENING_DEVICE_MARKER} {activeListeningDevice.name}
                         </span>
                         <button
                           type="button"
-                          className="now-listening-pill-clear"
+                          className="now-listening-pill-clear instant-tooltip-host instant-tooltip-host--inline-flex"
                           data-testid="checklist-now-listening-clear"
                           aria-label="Clear listening device selection"
-                          title="Clear listening device selection"
                           onClick={(event) => {
                             event.stopPropagation();
                             setActiveListeningDeviceId(null);
                           }}
                         >
                           ×
-                        </button>
-                      </div>
+                        <InstantTooltipPopover content="Clear listening device selection" /></button>
+                      <InstantTooltipPopover content="Jump to listening devices" /></div>
                     );
                   })() : (
                     <button
                       type="button"
-                      className="now-listening-pill is-idle"
+                      className="now-listening-pill is-idle instant-tooltip-host instant-tooltip-host--inline-flex"
                       onClick={handleFocusListeningDeviceInput}
                       data-testid="checklist-now-listening-pill"
-                      title="Jump to listening devices"
                     >
                       NA
-                    </button>
+                    <InstantTooltipPopover content="Jump to listening devices" /></button>
                   )}
                 </div>
               </div>
@@ -19669,7 +19533,7 @@ export function App(): JSX.Element {
                 <div className="checklist-mini-player-transport">
                   <button
                     type="button"
-                    className="checklist-mini-player-button"
+                    className="checklist-mini-player-button instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="song-checklist-mini-player-prev"
                     onClick={() => handlePreviousTrack({ syncChecklistModal: true })}
                     onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
@@ -19685,17 +19549,16 @@ export function App(): JSX.Element {
                         checklistComposerTextareaRef.current?.focus();
                       }
                     }}
-                    title="Previous track"
                     aria-label="Previous track"
                   >
                     ◀◀
-                  </button>
+                  <InstantTooltipPopover content="Previous track" /></button>
 
                   <div className="checklist-transport-group">
                     <button
                       ref={checklistSkipBackTenButtonRef}
                       type="button"
-                      className="checklist-skip-button"
+                      className="checklist-skip-button instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="song-checklist-skip-back-10"
                       onClick={() => handleSkipSeconds(-10)}
                       onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
@@ -19711,15 +19574,14 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip back 10 seconds"
                       aria-label="Skip back 10 seconds"
                     >
                       −10s
-                    </button>
+                    <InstantTooltipPopover content="Skip back 10 seconds" /></button>
                     <button
                       ref={checklistSkipBackFiveButtonRef}
                       type="button"
-                      className="checklist-skip-button checklist-skip-button-small"
+                      className="checklist-skip-button checklist-skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="song-checklist-skip-back-5"
                       onClick={() => handleSkipSeconds(-5)}
                       onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
@@ -19735,14 +19597,13 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip back 5 seconds"
                       aria-label="Skip back 5 seconds"
                     >
                       −5s
-                    </button>
+                    <InstantTooltipPopover content="Skip back 5 seconds" /></button>
                     <button
                       type="button"
-                      className="checklist-skip-button checklist-skip-button-small"
+                      className="checklist-skip-button checklist-skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="song-checklist-skip-back-2"
                       onClick={() => handleSkipSeconds(-2)}
                       onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
@@ -19758,17 +19619,15 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip back 2 seconds"
                       aria-label="Skip back 2 seconds"
                     >
                       −2s
-                    </button>
+                    <InstantTooltipPopover content="Skip back 2 seconds" /></button>
                     <button
                       type="button"
-                      className="checklist-play-toggle"
+                      className="checklist-play-toggle instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-playing={isPlaying ? 'true' : 'false'}
                       aria-label={isPlaying ? 'Pause' : 'Play'}
-                      title={isPlaying ? 'Pause playback' : 'Resume playback'}
                       data-testid="song-checklist-play-toggle"
                       onClick={() => {
                         void handleTogglePlayback();
@@ -19788,10 +19647,10 @@ export function App(): JSX.Element {
                       }}
                     >
                       <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-                    </button>
+                    <InstantTooltipPopover content={isPlaying ? 'Pause playback' : 'Resume playback'} /></button>
                     <button
                       type="button"
-                      className="checklist-skip-button checklist-skip-button-small"
+                      className="checklist-skip-button checklist-skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="song-checklist-skip-forward-2"
                       onClick={() => handleSkipSeconds(2)}
                       onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
@@ -19807,14 +19666,13 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip forward 2 seconds"
                       aria-label="Skip forward 2 seconds"
                     >
                       +2s
-                    </button>
+                    <InstantTooltipPopover content="Skip forward 2 seconds" /></button>
                     <button
                       type="button"
-                      className="checklist-skip-button checklist-skip-button-small"
+                      className="checklist-skip-button checklist-skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="song-checklist-skip-forward-5"
                       onClick={() => handleSkipSeconds(5)}
                       onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
@@ -19830,14 +19688,13 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip forward 5 seconds"
                       aria-label="Skip forward 5 seconds"
                     >
                       +5s
-                    </button>
+                    <InstantTooltipPopover content="Skip forward 5 seconds" /></button>
                     <button
                       type="button"
-                      className="checklist-skip-button"
+                      className="checklist-skip-button instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="song-checklist-skip-forward-10"
                       onClick={() => handleSkipSeconds(10)}
                       onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
@@ -19853,16 +19710,15 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip forward 10 seconds"
                       aria-label="Skip forward 10 seconds"
                     >
                       +10s
-                    </button>
+                    <InstantTooltipPopover content="Skip forward 10 seconds" /></button>
                   </div>
 
                   <button
                     type="button"
-                    className="checklist-mini-player-button"
+                    className="checklist-mini-player-button instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="song-checklist-mini-player-next"
                     onClick={() => handleNextTrack({ syncChecklistModal: true })}
                     onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
@@ -19878,11 +19734,10 @@ export function App(): JSX.Element {
                         checklistComposerTextareaRef.current?.focus();
                       }
                     }}
-                    title="Next track"
                     aria-label="Next track"
                   >
                     ▶▶
-                  </button>
+                  <InstantTooltipPopover content="Next track" /></button>
                 </div>
               </div>
             ) : null}
@@ -19890,7 +19745,7 @@ export function App(): JSX.Element {
             <div className="checklist-modal-actions">
               <button
                 type="button"
-                className="ghost danger"
+                className="ghost danger instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={(e) => {
                   if (e.shiftKey) {
                     const confirmed = window.confirm(
@@ -19912,33 +19767,30 @@ export function App(): JSX.Element {
                 }}
                 disabled={checklistModalItems.length === 0}
                 data-testid="song-checklist-delete-all"
-                title="Delete all checklist items for this song."
               >
                 Delete All
-              </button>
+              <InstantTooltipPopover content="Delete all checklist items for this song." /></button>
               <button
                 type="button"
-                className="ghost"
+                className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={() => handleClearCompletedChecklistItems(checklistModalSong.id)}
                 disabled={checklistCompletedCount === 0}
                 data-testid="song-checklist-clear-completed"
-                title="Remove all completed checklist items."
               >
                 Clear Completed
-              </button>
+              <InstantTooltipPopover content="Remove all completed checklist items." /></button>
               <span className="checklist-transport-hint" data-testid="song-checklist-shift-tab-hint">
                 Shift+Tab toggles input ↔ time jumping controls
               </span>
               <button
                 type="button"
-                className="ghost"
+                className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                 onClick={handleOpenMasteringFromChecklist}
                 disabled={!checklistModalCanOpenMastering}
                 data-testid="song-checklist-open-mastering"
-                title="Open this song in full-screen mastering."
               >
                 Mastering <span aria-hidden="true">⤢</span>
-              </button>
+              <InstantTooltipPopover content="Open this song in full-screen mastering." /></button>
             </div>
           </div>
         </div>
@@ -19973,9 +19825,9 @@ export function App(): JSX.Element {
                   ) : null}
                 </p>
               </div>
-              <button type="button" className="checklist-header-done-button" onClick={handleCloseAlbumChecklist} title="Close album checklist." data-testid="album-checklist-done-header">
+              <button type="button" className="checklist-header-done-button instant-tooltip-host instant-tooltip-host--inline-flex" onClick={handleCloseAlbumChecklist} data-testid="album-checklist-done-header">
                 Done
-              </button>
+              <InstantTooltipPopover content="Close album checklist." /></button>
             </div>
 
             <div
@@ -19991,13 +19843,12 @@ export function App(): JSX.Element {
                     >
                       {item.isNote === true ? (
                         <span
-                          className="checklist-item-note-eyebrow"
+                          className="checklist-item-note-eyebrow instant-tooltip-host instant-tooltip-host--inline-flex"
                           data-testid="album-checklist-item-note-eyebrow"
                           aria-hidden="true"
-                          title="This item is a permanent note. It doesn't count toward todos."
                         >
                           NOTE
-                        </span>
+                        <InstantTooltipPopover content="This item is a permanent note. It doesn't count toward todos." /></span>
                       ) : (
                         <label className="checklist-item-toggle">
                           <input
@@ -20046,27 +19897,23 @@ export function App(): JSX.Element {
                       <div className="checklist-item-actions">
                         <button
                           type="button"
-                          className={`checklist-item-mode-toggle${item.isNote === true ? ' is-note' : ''}`}
+                          className={`${`checklist-item-mode-toggle${item.isNote === true ? ' is-note' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                           onClick={() => handleToggleAlbumChecklistItemNoteMode(item.id)}
                           data-testid="album-checklist-item-mode-toggle"
                           aria-label={item.isNote === true ? 'Convert to todo' : 'Convert to note'}
-                          title={
-                            item.isNote === true
-                              ? 'Convert this note back into a todo (re-adds the checkbox).'
-                              : 'Convert this todo into a permanent note (removes the checkbox; not counted in progress).'
-                          }
                         >
                           {item.isNote === true ? 'To todo' : 'To note'}
-                        </button>
+                        <InstantTooltipPopover content={item.isNote === true
+                              ? 'Convert this note back into a todo (re-adds the checkbox).'
+                              : 'Convert this todo into a permanent note (removes the checkbox; not counted in progress).'} /></button>
                         <button
                           type="button"
-                          className="ghost checklist-remove-button"
+                          className="ghost checklist-remove-button instant-tooltip-host instant-tooltip-host--inline-flex"
                           onClick={() => handleRemoveAlbumChecklistItem(item.id)}
                           aria-label={`Remove ${item.text}`}
-                          title="Remove checklist item"
                         >
                           <span style={{ color: '#e74c3c', fontSize: '1.1em', fontWeight: 700, lineHeight: 1 }}>✕</span>
-                        </button>
+                        <InstantTooltipPopover content="Remove checklist item" /></button>
                       </div>
                     </li>
                   ))}
@@ -20110,11 +19957,10 @@ export function App(): JSX.Element {
                 type="button"
                 onClick={handleAddAlbumChecklistItem}
                 disabled={albumChecklistDraftText.trim().length === 0}
-                data-testid="album-checklist-add-button"
-                title="Add checklist item."
+                data-testid="album-checklist-add-button" className="instant-tooltip-host instant-tooltip-host--inline-flex"
               >
                 Add
-              </button>
+              <InstantTooltipPopover content="Add checklist item." /></button>
             </div>
           </div>
         </div>
@@ -20147,15 +19993,14 @@ export function App(): JSX.Element {
                   {normalizationPreviewEnabled && (
                     <button
                       type="button"
-                      className="normalization-preview-header-badge"
+                      className="normalization-preview-header-badge instant-tooltip-host instant-tooltip-host--inline-flex"
                       onClick={() => handleToggleNormalizationPreview(false)}
-                      title={`${selectedNormalizationPlatform.label} normalization preview active — click to disable`}
                       aria-label={`Platform normalization preview active: ${selectedNormalizationPlatform.label}. Click to disable.`}
                     >
                       <span className="normalization-preview-header-icon analysis-platform-icon" style={{ '--platform-accent': selectedNormalizationPlatform.accentColor } as React.CSSProperties}>
                         <PlatformIcon platformId={selectedNormalizationPlatformId} />
                       </span>
-                    </button>
+                    <InstantTooltipPopover content={`${selectedNormalizationPlatform.label} normalization preview active — click to disable`} /></button>
                   )}
                 </h2>
                 {playbackPreviewMode === 'reference' && referenceTrack ? (
@@ -20174,14 +20019,13 @@ export function App(): JSX.Element {
                    */}
                   <button
                     type="button"
-                    className="ai-rec-regenerate k-weighting-button"
+                    className="ai-rec-regenerate k-weighting-button instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="k-weighting-open"
                     onClick={() => setKWeightingModalOpen(true)}
                     aria-label="Explain LUFS frequency weighting"
-                    title="Explain LUFS and the BS.1770 K-weighting curve used during loudness measurement."
                   >
                     <span className="k-weighting-button-glyph">LUFS</span>
-                  </button>
+                  <InstantTooltipPopover content="Explain LUFS and the BS.1770 K-weighting curve used during loudness measurement." /></button>
                   {/*
                    * v3.63 — ✨ AI Stars button hoisted to the top of the
                    * mastering fullscreen header. Always visible (not gated by
@@ -20193,15 +20037,14 @@ export function App(): JSX.Element {
                    */}
                   <button
                     type="button"
-                    className="ai-rec-regenerate ai-stars-button"
+                    className="ai-rec-regenerate ai-stars-button instant-tooltip-host instant-tooltip-host--inline-flex"
                     data-testid="ai-rec-regenerate"
                     onClick={handleRegenerateAiRecommendations}
                     disabled={!selectedPlaybackSongId || currentPlaybackVersionNumber === null}
                     aria-label="Generate AI recommendations"
-                    title="Generate AI recommendations (✨)"
                   >
                     <span aria-hidden="true">✨</span>
-                  </button>
+                  <InstantTooltipPopover content="Generate AI recommendations (✨)" /></button>
                   {/*
                    * v3.31 — Phase 3a AI recommendations chain. Toggle hides /
                    * shows the light-blue per-metric caption across the
@@ -20212,9 +20055,8 @@ export function App(): JSX.Element {
                     data-testid="ai-rec-toolbar"
                   >
                     <label
-                      className="ai-rec-toggle"
+                      className="ai-rec-toggle instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="ai-rec-toggle-label"
-                      title="Show the AI-suggested value under each metric card and Mastering Checklist row."
                     >
                       <input
                         type="checkbox"
@@ -20225,36 +20067,33 @@ export function App(): JSX.Element {
                         }
                       />
                       <span>AI Recs</span>
-                    </label>
+                    <InstantTooltipPopover content="Show the AI-suggested value under each metric card and Mastering Checklist row." /></label>
                   </div>
                   <button
                     type="button"
-                    className="ghost"
+                    className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={handleOpenChecklistFromMastering}
                     disabled={!selectedPlaybackSongId}
                     data-testid="analysis-open-checklist-button"
-                    title="Open this track's checklist."
                   >
                     Checklist
-                  </button>
+                  <InstantTooltipPopover content="Open this track's checklist." /></button>
                   <button
                     type="button"
-                    className="ghost"
+                    className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={handleResetFullscreenMasteringSession}
                     data-testid="analysis-overlay-reset-session"
-                    title="Reset temporary full-screen mastering session state."
                   >
                     Reset session
-                  </button>
+                  <InstantTooltipPopover content="Reset temporary full-screen mastering session state." /></button>
                   <button
                     type="button"
-                    className="ghost"
+                    className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={() => setAnalysisExpanded(false)}
                     data-testid="analysis-close-button"
-                    title="Close the full-screen mastering view."
                   >
                     Close
-                  </button>
+                  <InstantTooltipPopover content="Close the full-screen mastering view." /></button>
                 </div>
               </div>
             </div>
@@ -20283,14 +20122,13 @@ export function App(): JSX.Element {
                         {renderMasteringPanelDragHandle('fullscreen', 'visualizations', (
                           <button
                             type="button"
-                            className="ideals-trigger-button"
+                            className="ideals-trigger-button instant-tooltip-host instant-tooltip-host--inline-flex"
                             data-testid="ideals-open"
                             onClick={() => setIdealsModalOpen(true)}
                             aria-label="Open ideal stem EQ curves"
-                            title="Open educational ideal EQ curves for vocals, drums, bass, and other stems."
                           >
                             Ideals
-                          </button>
+                          <InstantTooltipPopover content="Open educational ideal EQ curves for vocals, drums, bass, and other stems." /></button>
                         ))}
                       </div>
                       <SpectrumAnalyzer
@@ -20321,40 +20159,37 @@ export function App(): JSX.Element {
                             <div className="eq-inline-ab-actions" role="group" aria-label="Inline A/B toggle">
                               <button
                                 type="button"
-                                className={playbackPreviewMode === 'mix' ? 'active' : 'ghost'}
+                                className={`${playbackPreviewMode === 'mix' ? 'active' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                                 onClick={() => handleReferencePreviewModeChange('mix')}
                                 data-testid="eq-inline-ab-mix"
-                                title="Listen to your mix."
                               >
                                 Mix
-                              </button>
+                              <InstantTooltipPopover content="Listen to your mix." /></button>
                               <button
                                 type="button"
-                                className={`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`}
+                                className={`${`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                                 onClick={() => handleReferencePreviewModeChange('reference')}
                                 data-testid="eq-inline-ab-reference"
-                                title="Listen to the reference track."
                               >
                                 Ref
-                              </button>
+                              <InstantTooltipPopover content="Listen to the reference track." /></button>
                             </div>
                             <button
                               type="button"
-                              className={`ghost eq-inline-level-match${referenceLevelMatchEnabled ? ' eq-inline-level-match--active' : ''}`}
+                              className={`${`ghost eq-inline-level-match${referenceLevelMatchEnabled ? ' eq-inline-level-match--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                               onClick={() => setReferenceLevelMatchEnabled((v) => {
                                 const next = !v;
                                 window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                                 return next;
                               })}
                               data-testid="eq-inline-level-match"
-                              title={normalizationPreviewEnabled && referenceLevelMatchEnabled
+                            >
+                              LM
+                            <InstantTooltipPopover content={normalizationPreviewEnabled && referenceLevelMatchEnabled
                                 ? `Level Match On (${effectiveReferenceLevelMatchGainDb > 0 ? '+' : ''}${effectiveReferenceLevelMatchGainDb.toFixed(1)} dB residual after Platform Preview)`
                                 : referenceLevelMatchEnabled
                                 ? `Level Match On${referenceLevelMatchGainDb !== 0 ? ` (${referenceLevelMatchGainDb > 0 ? '+' : ''}${referenceLevelMatchGainDb.toFixed(1)} dB)` : ''}`
-                                : 'Level Match Off — enable to match reference volume to your mix'}
-                            >
-                              LM
-                            </button>
+                                : 'Level Match Off — enable to match reference volume to your mix'} /></button>
                           </div>
                         ) : undefined}
                       />
@@ -20362,18 +20197,17 @@ export function App(): JSX.Element {
                         {referenceTrack && (
                           <button
                             type="button"
-                            className={`ghost eq-overlay-toggle eq-overlay-toggle--ref-diff${showRefDiffCurve ? ' eq-overlay-toggle--active' : ''}`}
+                            className={`${`ghost eq-overlay-toggle eq-overlay-toggle--ref-diff${showRefDiffCurve ? ' eq-overlay-toggle--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                             data-testid="eq-overlay-toggle-ref-diff"
                             onClick={() => setShowRefDiffCurve((prev) => !prev)}
-                            title={showRefDiffCurve ? 'Hide reference difference EQ curve' : 'Show EQ curve needed to match the reference track\'s tonal balance'}
                           >
                             Ref {'\u0394'}
-                          </button>
+                          <InstantTooltipPopover content={showRefDiffCurve ? 'Hide reference difference EQ curve' : 'Show EQ curve needed to match the reference track\'s tonal balance'} /></button>
                         )}
                         {ENABLE_AGENT_FEATURES && (
                           <button
                             type="button"
-                            className={`ghost eq-overlay-toggle eq-overlay-toggle--ai-eq${showAiEqCurve && aiRecommendedEq ? ' eq-overlay-toggle--active' : ''}${aiEqLoading ? ' eq-overlay-toggle--loading' : ''}`}
+                            className={`${`ghost eq-overlay-toggle eq-overlay-toggle--ai-eq${showAiEqCurve && aiRecommendedEq ? ' eq-overlay-toggle--active' : ''}${aiEqLoading ? ' eq-overlay-toggle--loading' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                             data-testid="eq-overlay-toggle-ai-eq"
                             onClick={() => {
                               if (aiRecommendedEq) {
@@ -20383,24 +20217,21 @@ export function App(): JSX.Element {
                               }
                             }}
                             disabled={aiEqLoading}
-                            title={
-                              aiEqLoading
+                          >
+                            {aiEqLoading ? 'Analyzing...' : aiRecommendedEq ? 'AI EQ' : 'AI Recommend'}
+                          <InstantTooltipPopover content={aiEqLoading
                                 ? 'AI is analyzing your track...'
                                 : aiRecommendedEq
                                   ? showAiEqCurve
                                     ? 'Hide AI-recommended EQ curve'
                                     : 'Show AI-recommended EQ curve'
-                                  : 'Ask AI to recommend an EQ curve for this track'
-                            }
-                          >
-                            {aiEqLoading ? 'Analyzing...' : aiRecommendedEq ? 'AI EQ' : 'AI Recommend'}
-                          </button>
+                                  : 'Ask AI to recommend an EQ curve for this track'} /></button>
                         )}
                         {aiRecommendedEq && ENABLE_AGENT_FEATURES && (
                           <>
                             <button
                               type="button"
-                              className="ghost eq-overlay-toggle eq-overlay-toggle--ai-apply"
+                              className="ghost eq-overlay-toggle eq-overlay-toggle--ai-apply instant-tooltip-host instant-tooltip-host--inline-flex"
                               data-testid="eq-overlay-apply-ai-eq"
                               onClick={() => {
                                 if (aiRecommendedEq) {
@@ -20419,22 +20250,20 @@ export function App(): JSX.Element {
                                   setEqEnabled(true);
                                 }
                               }}
-                              title={soloedBands.size > 0
-                                ? 'Apply AI EQ only for the currently soloed frequency bands'
-                                : 'Copy the AI-recommended EQ values to the EQ sliders'}
                             >
                               {soloedBands.size > 0 ? 'Use AI EQ for selected range' : 'Use AI EQ'}
-                            </button>
+                            <InstantTooltipPopover content={soloedBands.size > 0
+                                ? 'Apply AI EQ only for the currently soloed frequency bands'
+                                : 'Copy the AI-recommended EQ values to the EQ sliders'} /></button>
                             <button
                               type="button"
-                              className="ghost eq-overlay-toggle eq-overlay-toggle--ai-refresh"
+                              className="ghost eq-overlay-toggle eq-overlay-toggle--ai-refresh instant-tooltip-host instant-tooltip-host--inline-flex"
                               data-testid="eq-overlay-refresh-ai-eq"
                               onClick={handleRequestAiEq}
                               disabled={aiEqLoading}
-                              title="Re-generate AI EQ recommendation"
                             >
                               {'\u21BB'}
-                            </button>
+                            <InstantTooltipPopover content="Re-generate AI EQ recommendation" /></button>
                           </>
                         )}
                       </div>
@@ -20459,13 +20288,12 @@ export function App(): JSX.Element {
                       </p>
                       <button
                         type="button"
-                        className="ghost spectrum-clear-solo-button"
+                        className="ghost spectrum-clear-solo-button instant-tooltip-host instant-tooltip-host--inline-flex"
                         data-testid="analysis-clear-solo-bands"
                         onClick={handleClearSoloedBands}
-                        title="Stop soloing and return to full-spectrum playback."
                       >
                         Clear selected ranges
-                      </button>
+                      <InstantTooltipPopover content="Stop soloing and return to full-spectrum playback." /></button>
                     </div>
                   )}
                 </section>
@@ -20497,32 +20325,29 @@ export function App(): JSX.Element {
                         void handleChooseReferenceTrack();
                       }}
                       data-testid="analysis-choose-reference-overlay"
-                      disabled={referenceStatus === 'loading'}
-                      title="Choose an external reference file."
+                      disabled={referenceStatus === 'loading'} className="instant-tooltip-host instant-tooltip-host--inline-flex"
                     >
                       {referenceStatus === 'loading' ? 'Loading reference…' : 'Choose Reference File…'}
-                    </button>
+                    <InstantTooltipPopover content="Choose an external reference file." /></button>
                     <button
                       type="button"
                       onClick={() => {
                         void handleUseCurrentTrackAsReference();
                       }}
                       data-testid="analysis-overlay-set-current-reference"
-                      disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'}
-                      title="Use the current track as the reference."
+                      disabled={analysisStatus !== 'ready' || !selectedPlaybackVersion || referenceStatus === 'loading'} className="instant-tooltip-host instant-tooltip-host--inline-flex"
                     >
                       {referenceStatus === 'loading' ? 'Loading reference…' : 'Set Current Track as Reference'}
-                    </button>
+                    <InstantTooltipPopover content="Use the current track as the reference." /></button>
                     <button
                       type="button"
-                      className="ghost"
+                      className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                       onClick={handleClearReferenceTrack}
                       data-testid="analysis-overlay-clear-reference"
                       disabled={!referenceTrack && referenceStatus !== 'error'}
-                      title="Clear the reference."
                     >
                       Clear Reference
-                    </button>
+                    <InstantTooltipPopover content="Clear the reference." /></button>
                   </div>
                   {/*
                     v3.19.0 — mirror of the compact reference panel's
@@ -20534,9 +20359,8 @@ export function App(): JSX.Element {
                   */}
                   {selectedSongId ? (
                     <label
-                      className="analysis-reference-restore-toggle analysis-reference-restore-toggle--fullscreen muted"
+                      className="analysis-reference-restore-toggle analysis-reference-restore-toggle--fullscreen muted instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="analysis-reference-restore-toggle-fullscreen"
-                      title="When ON, opening this track auto-loads its saved reference. When OFF (default), the currently loaded reference is kept across track switches. References are always saved when you pick them, regardless of this toggle."
                     >
                       <input
                         type="checkbox"
@@ -20547,7 +20371,7 @@ export function App(): JSX.Element {
                         data-testid="analysis-reference-restore-toggle-input-fullscreen"
                       />
                       <span>Restore this reference when I open this track</span>
-                    </label>
+                    <InstantTooltipPopover content="When ON, opening this track auto-loads its saved reference. When OFF (default), the currently loaded reference is kept across track switches. References are always saved when you pick them, regardless of this toggle." /></label>
                   ) : null}
 
                   <div className="analysis-ab-row">
@@ -20556,23 +20380,21 @@ export function App(): JSX.Element {
                     <div className="analysis-ab-actions" role="group" aria-label="A/B toggle">
                       <button
                         type="button"
-                        className={playbackPreviewMode === 'mix' ? 'active' : 'ghost'}
+                        className={`${playbackPreviewMode === 'mix' ? 'active' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => handleReferencePreviewModeChange('mix')}
                         data-testid="analysis-overlay-ab-mix"
-                        title="Listen to your mix."
                       >
                         Mix
-                      </button>
+                      <InstantTooltipPopover content="Listen to your mix." /></button>
                       <button
                         type="button"
-                        className={`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`}
+                        className={`${`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => handleReferencePreviewModeChange('reference')}
                         data-testid="analysis-overlay-ab-reference"
                         disabled={!referenceTrack || referenceStatus === 'loading'}
-                        title="Listen to the reference track."
                       >
                         Reference
-                      </button>
+                      <InstantTooltipPopover content="Listen to the reference track." /></button>
                     </div>
                   </div>
 
@@ -20581,22 +20403,19 @@ export function App(): JSX.Element {
                     <div className="analysis-ab-actions" role="group" aria-label="Level match toggle">
                       <button
                         type="button"
-                        className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
+                        className={`${referenceLevelMatchEnabled ? 'active' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => setReferenceLevelMatchEnabled((v) => {
                           const next = !v;
                           window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                           return next;
                         })}
                         disabled={!referenceTrack}
-                        title={
-                          normalizationPreviewEnabled && referenceLevelMatchEnabled
-                            ? 'While Platform Preview is on, Level Match applies only the residual LUFS difference after platform gain; when both sources land at the target, that residual is 0 dB.'
-                            : "Automatically adjust reference playback gain to match your mix's integrated LUFS"
-                        }
                         data-testid="analysis-level-match-toggle"
                       >
                         {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
-                      </button>
+                      <InstantTooltipPopover content={normalizationPreviewEnabled && referenceLevelMatchEnabled
+                            ? 'While Platform Preview is on, Level Match applies only the residual LUFS difference after platform gain; when both sources land at the target, that residual is 0 dB.'
+                            : "Automatically adjust reference playback gain to match your mix's integrated LUFS"} /></button>
                       {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
                           {normalizationPreviewEnabled
@@ -20610,41 +20429,38 @@ export function App(): JSX.Element {
                   <div className="analysis-ab-shortcut" style={{ marginLeft: 'auto', alignSelf: 'center' }}>
                     <button
                       type="button"
-                      className="ghost"
+                      className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                       style={{ fontSize: 11, padding: '2px 6px', opacity: 0.7 }}
                       onClick={() => setShortcutSectionExpanded((v) => !v)}
                       data-testid="shortcut-section-toggle"
-                      title="Configure the keyboard shortcut for Mix/Reference toggle"
                     >
                       {shortcutSectionExpanded ? '\u25BC' : '\u25B6'} Shortcut: {formatShortcutLabel(mixRefShortcut)}
-                    </button>
+                    <InstantTooltipPopover content="Configure the keyboard shortcut for Mix/Reference toggle" /></button>
                     {shortcutSectionExpanded ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 12 }}>
                         <span className="muted">Current: <strong>{formatShortcutLabel(mixRefShortcut)}</strong></span>
                         <button
                           type="button"
-                          className={shortcutRecording ? 'active' : 'ghost'}
+                          className={`${shortcutRecording ? 'active' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                           style={{ fontSize: 11, padding: '2px 8px' }}
                           onClick={() => setShortcutRecording((v) => !v)}
                           data-testid="shortcut-change-button"
-                          title={shortcutRecording ? 'Press any key combo to set the new shortcut' : 'Click to record a new shortcut'}
                         >
                           {shortcutRecording ? 'Press a key combo\u2026' : 'Change'}
-                        </button>
+                        <InstantTooltipPopover content={shortcutRecording ? 'Press any key combo to set the new shortcut' : 'Click to record a new shortcut'} /></button>
                         {JSON.stringify(mixRefShortcut) !== JSON.stringify(DEFAULT_MIX_REF_SHORTCUT) ? (
                           <button
                             type="button"
-                            className="ghost"
+                            className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                             style={{ fontSize: 11, padding: '2px 8px' }}
                             onClick={() => {
                               setMixRefShortcut(DEFAULT_MIX_REF_SHORTCUT);
                               persistStoredShortcut(DEFAULT_MIX_REF_SHORTCUT);
                             }}
                             data-testid="shortcut-reset-button"
-                            title="Reset to default shortcut"
                           >
                             Reset
-                          </button>
+                          <InstantTooltipPopover content="Reset to default shortcut" /></button>
                         ) : null}
                       </div>
                     ) : null}
@@ -20697,7 +20513,7 @@ export function App(): JSX.Element {
                           >
                             <button
                               type="button"
-                              className="saved-reference-track-load"
+                              className="saved-reference-track-load instant-tooltip-host instant-tooltip-host--inline-flex"
                               onClick={() => {
                                 handleSavedReferenceTrackClick(saved);
                               }}
@@ -20705,7 +20521,6 @@ export function App(): JSX.Element {
                                 void handleSavedReferenceTrackDoubleClick(saved);
                               }}
                               disabled={referenceStatus === 'loading'}
-                              title={saved.filePath}
                             >
                               <span className="saved-reference-track-name">{saved.fileName}</span>
                               <span className="saved-reference-track-meta">
@@ -20715,16 +20530,15 @@ export function App(): JSX.Element {
                                 {saved.integratedLufs !== null ? ' · ' : ''}
                                 {formatSavedReferenceDate(saved.dateLastUsed)}
                               </span>
-                            </button>
+                            <InstantTooltipPopover content={saved.filePath} /></button>
                             <button
                               type="button"
-                              className="saved-reference-track-remove ghost"
+                              className="saved-reference-track-remove ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                               onClick={() => handleRemoveSavedReferenceTrack(saved.filePath)}
-                              title="Remove from saved references"
                               aria-label={"Remove " + saved.fileName}
                             >
                               ×
-                            </button>
+                            <InstantTooltipPopover content="Remove from saved references" /></button>
                           </div>
                         ))}
                       </div>
@@ -20861,13 +20675,12 @@ export function App(): JSX.Element {
                     <div className="analysis-tonal-balance-eq-toggle-row">
                       <button
                         type="button"
-                        className={`ghost eq-tonal-toggle${showEqTonalBalance ? ' eq-tonal-toggle--active' : ''}`}
+                        className={`${`ghost eq-tonal-toggle${showEqTonalBalance ? ' eq-tonal-toggle--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => setShowEqTonalBalance((prev) => !prev)}
-                        title={showEqTonalBalance ? 'Show original tonal balance' : 'Preview how EQ adjustments would shift the tonal balance'}
                         data-testid="eq-tonal-balance-toggle"
                       >
                         {showEqTonalBalance ? 'Show Original Tonal Balance' : 'Show EQ\u2019d Tonal Balance'}
-                      </button>
+                      <InstantTooltipPopover content={showEqTonalBalance ? 'Show original tonal balance' : 'Preview how EQ adjustments would shift the tonal balance'} /></button>
                     </div>
                     <div
                       className={`analysis-tonal-balance detailed${showEqTonalBalance && hasActiveEqGains ? ' eq-adjusted' : ''}`}
@@ -20915,11 +20728,10 @@ export function App(): JSX.Element {
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide analysis-overlay-loudness-peaks-grid">
                     <div
-                      className="analysis-stat-card loudness-metric--primary"
+                      className="analysis-stat-card loudness-metric--primary instant-tooltip-host instant-tooltip-host--inline-flex"
                       data-testid="analysis-overlay-integrated-stat"
                       data-emphasized="true"
                       aria-label="Integrated LUFS — primary loudness measurement"
-                      title="Overall loudness of the entire track (EBU R128). A single value measured across the whole file."
                     >
                       <span className="loudness-metric-eyebrow" aria-hidden="true">Integrated</span>
                       <span className="analysis-stat-label">Integrated LUFS{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The overall perceived loudness of your entire track from start to finish, based on the EBU R128 / ITU-R BS.1770 standard. It averages loudness over the full duration using K-weighting that emphasizes frequencies the ear is most sensitive to. This is the single number streaming platforms use to decide whether to turn your track up or down.\n\nGood values: -14 LUFS for Spotify, YouTube, Tidal, and Amazon. -16 LUFS for Apple Music. Pop and EDM masters typically land between -6 and -14 LUFS. Quieter genres (jazz, classical, acoustic) often sit around -14 to -20 LUFS.\n\nIf it's wrong: Too loud (above -8 LUFS) means platforms will turn you down and you just lose dynamics for nothing. Too quiet (below -16 LUFS) means Spotify may boost you but caps the boost at true peak headroom, and YouTube/Tidal won't boost at all so your track plays quieter than others. Adjust your limiter ceiling or overall gain in mastering."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_INTEGRATED_LUFS} /></span>
@@ -20928,72 +20740,72 @@ export function App(): JSX.Element {
                         aiRecommendationsForCurrentTrack?.integrated_lufs,
                         { visible: showAiRecommendationsFullscreen, metricId: 'integrated_lufs' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback.">
+                    <InstantTooltipPopover content="Overall loudness of the entire track (EBU R128). A single value measured across the whole file." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">Current loudness{referenceModeSuffixNode} <HelpTooltip text={"What this measures: A rolling loudness estimate for what you're hearing right now, based on roughly the last 3 seconds of playback. Unlike Integrated LUFS, this is a live guide — useful for spotting louder and quieter sections, not for final delivery specs.\n\nGood values: It should move as the song moves. Verses often sit 2-4 LU below choruses. In a polished pop master, the loudest sections might hover around -8 to -12 LUFS, while quieter sections may dip to around -16 LUFS or lower.\n\nIf it's wrong: If it barely changes from start to finish, your mix may be over-compressed. If it swings by more than about 10 LU, some sections may feel too quiet compared with the loudest parts. Automation, arrangement tweaks, or gentle bus compression can help smooth the ride without flattening the song."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_CURRENT_LOUDNESS} /></span>
                       <strong>{shortTermEstimateText}</strong>
                       {renderAiRecommendationCaption(
                         aiRecommendationsForCurrentTrack?.current_loudness,
                         { visible: showAiRecommendationsFullscreen, metricId: 'current_loudness' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units.">
+                    <InstantTooltipPopover content="Estimated loudness at the current playback position (3-second window). Updates in real-time during playback." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">Loudness range{referenceModeSuffixNode} <HelpTooltip text={"What this measures: How much the loudness varies between the quietest and loudest passages of your track, measured in LU (Loudness Units). It is derived from the EBU R128 standard by analyzing the statistical distribution of short-term loudness values, excluding the top 5% and bottom 10% to ignore brief outliers. A higher LRA means more dynamic contrast.\n\nGood values: Pop/EDM: 5-8 LU. Rock: 6-10 LU. Jazz/folk: 8-14 LU. Classical/film scores: 10-20+ LU. A heavily limited master might show 3-4 LU. An unmastered live recording could be 15+ LU.\n\nIf it's wrong: Too low (under 4 LU) usually means over-compression or over-limiting — the track will sound flat and fatiguing. Too high (above 12 LU for pop) means the quiet sections may get lost on earbuds or in noisy environments. Use compression, limiting, or volume automation to bring it into range for your genre."} links={LRA_LINKS} /><TechnicalInfoPopover text={TECH_INFO_LRA} /></span>
                       <strong>{measuredLraText}</strong>
                       {renderAiRecommendationCaption(
                         aiRecommendationsForCurrentTrack?.loudness_range,
                         { visible: showAiRecommendationsFullscreen, metricId: 'loudness_range' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="True Peak — the highest inter-sample peak level in the track, measured via oversampling.">
+                    <InstantTooltipPopover content="Loudness Range (LRA) — the difference between the quietest and loudest parts of the track, in Loudness Units." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">True Peak{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The absolute highest signal peak including inter-sample peaks — peaks that occur between digital samples when the signal is reconstructed during D/A conversion. Measured via oversampling (typically 4x), this catches peaks that sample-level measurement misses. Reported in dBTP (decibels True Peak). This is the value streaming platforms check against their ceiling.\n\nGood values: Below -1.0 dBTP for Spotify, Apple Music, YouTube, and Tidal. Below -2.0 dBTP for Amazon Music (their stricter requirement). Many mastering engineers target -1.0 dBTP as their limiter ceiling. For vinyl or broadcast, -3 dBTP or lower is sometimes used.\n\nIf it's wrong: Above -1 dBTP means your track may clip on playback — DACs and lossy codecs (MP3, AAC, Ogg) can push inter-sample peaks into distortion. Lower your limiter output ceiling or reduce gain into the limiter. A true peak limiter (like FabFilter Pro-L 2 in ISP mode) is essential."} links={TRUE_PEAK_LINKS} /><TechnicalInfoPopover text={TECH_INFO_TRUE_PEAK} /></span>
                       <strong>{measuredTruePeakText}</strong>
                       {renderAiRecommendationCaption(
                         aiRecommendationsForCurrentTrack?.true_peak,
                         { visible: showAiRecommendationsFullscreen, metricId: 'true_peak' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="Sample Peak — the highest digital sample value in the track, without oversampling.">
+                    <InstantTooltipPopover content="True Peak — the highest inter-sample peak level in the track, measured via oversampling." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">Sample peak{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The highest absolute sample value found in the audio file, measured directly from the digital samples without oversampling. This is what your DAW's standard peak meter shows. It will always be equal to or lower than True Peak because it cannot detect peaks that form between samples during reconstruction.\n\nGood values: Below 0 dBFS. If sample peak is at 0 dBFS, the signal is hitting the digital ceiling. For a properly mastered track, sample peak should be below -0.3 dBFS at minimum, but True Peak is the more important number to watch.\n\nIf it's wrong: If sample peak is at 0 dBFS, you are almost certainly clipping on playback (True Peak will be even higher). Use a true peak limiter with the ceiling set to -1 dBTP. Sample peak matters most when working in contexts where true peak metering is unavailable, or when checking raw recordings before mastering."} links={TRUE_PEAK_LINKS} /><TechnicalInfoPopover text={TECH_INFO_SAMPLE_PEAK} /></span>
                       <strong>{measuredSamplePeakText}</strong>
                       {renderAiRecommendationCaption(
                         aiRecommendationsForCurrentTrack?.sample_peak,
                         { visible: showAiRecommendationsFullscreen, metricId: 'sample_peak' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time.">
+                    <InstantTooltipPopover content="Sample Peak — the highest digital sample value in the track, without oversampling." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">Peak short-term{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 3-second window across the entire track (EBU R128 short-term loudness). This is a static value from the file analysis — it tells you the peak loudness of your loudest section, not a real-time reading. The 3-second window smooths out brief transients to show sustained loudness.\n\nGood values: Typically 2-6 LU above your integrated LUFS. For a track at -14 LUFS integrated, the peak short-term might be around -10 to -8 LUFS. If it equals your integrated LUFS, the track has almost no dynamic variation.\n\nIf it's wrong: If the gap between peak short-term and integrated LUFS is very small (under 2 LU), the track is heavily compressed. If the gap is very large (over 8 LU), one section is dramatically louder than the rest — check for a sudden volume spike or an uncontrolled chorus. Use compression or automation to manage the difference."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PEAK_SHORT_TERM} /></span>
                       <strong>{measuredMaxShortTermText}</strong>
                       {renderAiRecommendationCaption(
                         aiRecommendationsForCurrentTrack?.peak_short_term,
                         { visible: showAiRecommendationsFullscreen, metricId: 'peak_short_term' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time.">
+                    <InstantTooltipPopover content="Highest 3-second loudness window in the track. A single static value from the file analysis — not real-time." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">Peak momentary{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The single loudest 400ms window across the entire track (EBU R128 momentary loudness). This catches the most extreme short bursts — a snare hit, a vocal shout, a bass drop. It is always equal to or louder than peak short-term since it uses a shorter measurement window.\n\nGood values: Usually 3-8 LU above your integrated LUFS. For a -14 LUFS track, peak momentary might be around -8 to -6 LUFS. EDM drops and heavy rock hits can push higher.\n\nIf it's wrong: A peak momentary that is far above peak short-term (more than 4 LU gap) means you have a very brief spike — possibly a stray transient, click, or uncompressed hit. Consider taming it with a transient shaper, clipper, or short-attack limiter. If peak momentary is very close to integrated, the track may be over-limited."} links={LUFS_LINKS} /><TechnicalInfoPopover text={TECH_INFO_PEAK_MOMENTARY} /></span>
                       <strong>{measuredMaxMomentaryText}</strong>
                       {renderAiRecommendationCaption(
                         aiRecommendationsForCurrentTrack?.peak_momentary,
                         { visible: showAiRecommendationsFullscreen, metricId: 'peak_momentary' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="Average volume level across the entire track (RMS-based), in dBFS.">
+                    <InstantTooltipPopover content="Highest 400ms loudness window in the track. A single static value from the file analysis — not real-time." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">Mean volume{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The average (RMS) level of your entire track expressed in dBFS. RMS stands for Root Mean Square — it squares every sample, averages them, then takes the square root, giving a value that correlates closely with perceived loudness. Unlike LUFS, it does not apply perceptual weighting, so it is a purely mathematical average of signal energy.\n\nGood values: For a mastered pop/rock track, typically -10 to -16 dBFS. Unmastered mixes are usually -18 to -24 dBFS. A heavily limited master might read -8 to -6 dBFS. Classical and acoustic music: -20 to -30 dBFS.\n\nIf it's wrong: Mean volume that is very close to the peak level means the track is heavily limited (low crest factor). If it is very far from the peak (more than 18 dB), the track has large untamed transients. Compare with the crest factor reading to assess your dynamic balance."} links={MEAN_VOLUME_LINKS} /><TechnicalInfoPopover text={TECH_INFO_MEAN_VOLUME} /></span>
                       <strong>{measuredMeanVolumeText}</strong>
                       {renderAiRecommendationCaption(
                         aiRecommendationsForCurrentTrack?.mean_volume,
                         { visible: showAiRecommendationsFullscreen, metricId: 'mean_volume' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="Crest Factor — difference between peak and RMS levels. Higher values indicate more dynamic range.">
+                    <InstantTooltipPopover content="Average volume level across the entire track (RMS-based), in dBFS." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">Crest Factor{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The difference between the sample peak level and the RMS (average) level, in dB. Formula: Crest Factor = Peak dBFS minus RMS dBFS. A higher crest factor means your transients stick out further above the average level — the music has more punch and snap. A lower value means the waveform is more like a brick wall.\n\nGood values: Unmastered/raw mixes: 12-18 dB. Well-mastered pop/rock: 8-12 dB. Heavily limited EDM/hip-hop: 4-8 dB. Extremely squashed masters: under 4 dB. Classical and jazz: 15-20+ dB.\n\nIf it's wrong: Below 6 dB usually means aggressive limiting has crushed your transients — the track will sound loud but lifeless and fatiguing. Above 18 dB could mean uncontrolled peaks that waste headroom. Use a limiter to tame peaks or back off limiting to restore dynamics, depending on which direction you need to go."} links={CREST_FACTOR_LINKS} /><TechnicalInfoPopover text={TECH_INFO_CREST_FACTOR} /></span>
                       <strong>{activeCrestFactorText}</strong>
                       {renderAiRecommendationCaption(
                         aiRecommendationsForCurrentTrack?.crest_factor,
                         { visible: showAiRecommendationsFullscreen, metricId: 'crest_factor' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="Number of samples at or above 0 dBFS (digital clipping).">
+                    <InstantTooltipPopover content="Crest Factor — difference between peak and RMS levels. Higher values indicate more dynamic range." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">Clip Count{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The number of individual samples in the file whose absolute value reaches or exceeds 1.0 (0 dBFS) — the digital ceiling. Each clipped sample represents a moment where the signal was too loud to be represented digitally and was hard-clipped, causing distortion.\n\nGood values: Zero. Any non-zero clip count means digital distortion is present in the file. Even a single clipped sample is technically distortion, though a handful may not be audible. Hundreds or thousands of clips will be clearly audible as harsh, crunchy distortion.\n\nIf it's wrong: Reduce gain before your limiter, or lower the limiter output ceiling. If clips are coming from the mix bus, pull down your fader or gain-stage your plugins. Note: some producers intentionally use hard clipping as a creative effect (e.g., clip-to-zero mastering in hip-hop), but the clips should be intentional and controlled, not accidental."} links={CLIP_COUNT_LINKS} /><TechnicalInfoPopover text={TECH_INFO_CLIP_COUNT} /></span>
                       <strong>
                         {activePreviewAnalysisStatus === 'ready' && activePreviewAnalysis
@@ -21008,8 +20820,8 @@ export function App(): JSX.Element {
                         aiRecommendationsForCurrentTrack?.clip_count,
                         { visible: showAiRecommendationsFullscreen, metricId: 'clip_count' },
                       )}
-                    </div>
-                    <div className="analysis-stat-card" title="DC Offset — mean sample value. Non-zero DC offset wastes headroom.">
+                    <InstantTooltipPopover content="Number of samples at or above 0 dBFS (digital clipping)." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">DC Offset{referenceModeSuffixNode} <HelpTooltip text={"What this measures: The mean (average) of all sample values in the file. A perfectly centered waveform has a DC offset of 0. A non-zero value means the entire waveform is shifted above or below the center line. The threshold for a warning here is 0.1% (mean sample value > 0.001).\n\nGood values: As close to 0% as possible. Anything under 0.1% is considered clean. Above 0.1% triggers a warning because it wastes headroom — if your waveform is shifted up by 0.5%, you lose 0.5% of your available peak range.\n\nIf it's wrong: DC offset is usually caused by faulty hardware (cheap audio interfaces, phantom power leakage), certain analog-modeled plugins, or recording with a bad cable. Fix it by applying a high-pass filter at a very low frequency (10-20 Hz) or use your DAW's DC offset removal tool (most have one in the audio editor). Always fix DC offset before mastering."} links={DC_OFFSET_LINKS} /><TechnicalInfoPopover text={TECH_INFO_DC_OFFSET} /></span>
                       <strong>
                         {activePreviewAnalysisStatus === 'ready' && activePreviewAnalysis
@@ -21024,7 +20836,7 @@ export function App(): JSX.Element {
                         aiRecommendationsForCurrentTrack?.dc_offset,
                         { visible: showAiRecommendationsFullscreen, metricId: 'dc_offset' },
                       )}
-                    </div>
+                    <InstantTooltipPopover content="DC Offset — mean sample value. Non-zero DC offset wastes headroom." /></div>
                   </div>
                 </section>
 
@@ -21111,14 +20923,13 @@ export function App(): JSX.Element {
                     </div>
                     <button
                       type="button"
-                      className={normalizationPreviewEnabled ? '' : 'ghost'}
+                      className={`${normalizationPreviewEnabled ? '' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                       onClick={() => handleToggleNormalizationPreview()}
                       data-testid="analysis-overlay-normalization-toggle"
                       disabled={normalizationSourceStatus !== 'ready' || !normalizationPreview}
-                      title="Apply this platform's loudness adjustment to your playback."
                     >
                       Preview {normalizationPreviewEnabled ? 'On' : 'Off'}
-                    </button>
+                    <InstantTooltipPopover content="Apply this platform's loudness adjustment to your playback." /></button>
                   </div>
 
                   <div
@@ -21166,16 +20977,15 @@ export function App(): JSX.Element {
                         <button
                           key={`overlay-${platform.id}`}
                           type="button"
-                          className={`analysis-platform-button analysis-platform-button-overlay${
+                          className={`${`analysis-platform-button analysis-platform-button-overlay${
                             selectedNormalizationPlatformId === platform.id ? ' selected' : ''
                           }${
                             normalizationPreviewEnabled && selectedNormalizationPlatformId === platform.id
                               ? ' preview-active'
                               : ''
-                          }`}
+                          }`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                           onClick={() => handleSelectNormalizationPlatform(platform.id)}
                           data-testid={`analysis-overlay-platform-${platform.id}`}
-                          title={platform.description}
                           aria-pressed={selectedNormalizationPlatformId === platform.id}
                           style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                         >
@@ -21208,7 +21018,7 @@ export function App(): JSX.Element {
                             <span className="analysis-platform-big-value">{platformBigReadout}</span>
                             <span className="analysis-platform-big-label">{platformBigLabel}</span>
                           </span>
-                        </button>
+                        <InstantTooltipPopover content={platform.description} /></button>
                       );
                     })}
                   </div>
@@ -21391,31 +21201,28 @@ export function App(): JSX.Element {
                     <div className="analysis-ab-actions" role="group" aria-label="Mid/Side toggle" style={{ display: 'flex', gap: 6 }}>
                       <button
                         type="button"
-                        className={midSideMode === 'stereo' ? '' : 'ghost'}
+                        className={`${midSideMode === 'stereo' ? '' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => setMidSideMode('stereo')}
                         data-testid="mid-side-mode-stereo"
-                        title="Normal stereo playback."
                       >
                         Stereo
-                      </button>
+                      <InstantTooltipPopover content="Normal stereo playback." /></button>
                       <button
                         type="button"
-                        className={midSideMode === 'mid' ? '' : 'ghost'}
+                        className={`${midSideMode === 'mid' ? '' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => setMidSideMode('mid')}
                         data-testid="mid-side-mode-mid"
-                        title="Listen to just the center (mid) channel."
                       >
                         Mid
-                      </button>
+                      <InstantTooltipPopover content="Listen to just the center (mid) channel." /></button>
                       <button
                         type="button"
-                        className={midSideMode === 'side' ? '' : 'ghost'}
+                        className={`${midSideMode === 'side' ? '' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                         onClick={() => setMidSideMode('side')}
                         data-testid="mid-side-mode-side"
-                        title="Listen to just the side (stereo width) channel."
                       >
                         Side
-                      </button>
+                      <InstantTooltipPopover content="Listen to just the side (stereo width) channel." /></button>
                     </div>
                     {midSideMode !== 'stereo' ? (
                       <p className="muted" style={{ fontSize: 12 }}>
@@ -21444,16 +21251,16 @@ export function App(): JSX.Element {
                     {renderMasteringPanelDragHandle('fullscreen', 'k-metering')}
                   </div>
                   <div className="analysis-detail-grid analysis-detail-grid-wide">
-                    <div className="analysis-stat-card" title="K-14: 0 dB on meter = -14 dBFS. Best for most music.">
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">K-14 Metering{referenceModeSuffixNode}</span>
                       <strong>{k14MeteringText}</strong>
                       <span className="muted">Reference: 0 dB = -14 dBFS (pop/rock/electronic)</span>
-                    </div>
-                    <div className="analysis-stat-card" title="K-20: 0 dB on meter = -20 dBFS. Best for film/classical.">
+                    <InstantTooltipPopover content="K-14: 0 dB on meter = -14 dBFS. Best for most music." /></div>
+                    <div className="analysis-stat-card instant-tooltip-host instant-tooltip-host--inline-flex">
                       <span className="analysis-stat-label">K-20 Metering{referenceModeSuffixNode}</span>
                       <strong>{k20MeteringText}</strong>
                       <span className="muted">Reference: 0 dB = -20 dBFS (film/classical/broadcast)</span>
-                    </div>
+                    <InstantTooltipPopover content="K-20: 0 dB on meter = -20 dBFS. Best for film/classical." /></div>
                   </div>
                 </section>
 
@@ -21683,17 +21490,16 @@ export function App(): JSX.Element {
                           return (
                             <button
                               type="button"
-                              className="mastering-checklist-row-add-button"
+                              className="mastering-checklist-row-add-button instant-tooltip-host instant-tooltip-host--inline-flex"
                               data-testid={`mastering-checklist-add-${rowId}`}
                               onClick={() =>
                                 handlePromoteMasteringRowToChecklist(rowId, masteringInputs)
                               }
-                              title="Add this finding to your song checklist"
                               aria-label="Add to checklist"
                             >
                               <span aria-hidden="true" className="mastering-checklist-row-add-icon">+</span>
                               <span className="mastering-checklist-row-add-label">Add to checklist</span>
-                            </button>
+                            <InstantTooltipPopover content="Add this finding to your song checklist" /></button>
                           );
                         };
                         const groups = groupMasteringChecklistRules();
@@ -21947,97 +21753,88 @@ export function App(): JSX.Element {
               <div className="analysis-overlay-transport" data-testid="analysis-overlay-transport">
                 <button
                   type="button"
-                  className="analysis-overlay-transport-button analysis-overlay-skip-button"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-overlay-skip-back-10"
                   onClick={() => handleSkipSeconds(-10)}
-                  title="Skip back 10 seconds"
                   aria-label="Skip back 10 seconds"
                 >
                   −10s
-                </button>
+                <InstantTooltipPopover content="Skip back 10 seconds" /></button>
                 <button
                   type="button"
-                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-overlay-skip-back-5"
                   onClick={() => handleSkipSeconds(-5)}
-                  title="Skip back 5 seconds"
                   aria-label="Skip back 5 seconds"
                 >
                   −5s
-                </button>
+                <InstantTooltipPopover content="Skip back 5 seconds" /></button>
                 <button
                   type="button"
-                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-overlay-skip-back-1"
                   onClick={() => handleSkipSeconds(-1)}
-                  title="Skip back 1 second"
                   aria-label="Skip back 1 second"
                 >
                   −1s
-                </button>
+                <InstantTooltipPopover content="Skip back 1 second" /></button>
                 <button
                   type="button"
-                  className="analysis-overlay-transport-button"
+                  className="analysis-overlay-transport-button instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-overlay-prev"
                   onClick={() => handlePreviousTrack()}
-                  title="Previous track"
                   aria-label="Previous track"
                 >
                   ◀◀
-                </button>
+                <InstantTooltipPopover content="Previous track" /></button>
                 <button
                   type="button"
-                  className="analysis-overlay-transport-button analysis-overlay-play-toggle"
+                  className="analysis-overlay-transport-button analysis-overlay-play-toggle instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-overlay-play-toggle"
                   data-playing={isPlaying ? 'true' : 'false'}
                   aria-label={isPlaying ? 'Pause' : 'Play'}
-                  title={isPlaying ? 'Pause playback' : 'Resume playback'}
                   onClick={() => {
                     void handleTogglePlayback();
                   }}
                 >
                   <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
-                </button>
+                <InstantTooltipPopover content={isPlaying ? 'Pause playback' : 'Resume playback'} /></button>
                 <button
                   type="button"
-                  className="analysis-overlay-transport-button"
+                  className="analysis-overlay-transport-button instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-overlay-next"
                   onClick={() => handleNextTrack()}
-                  title="Next track"
                   aria-label="Next track"
                 >
                   ▶▶
-                </button>
+                <InstantTooltipPopover content="Next track" /></button>
                 <button
                   type="button"
-                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-overlay-skip-forward-1"
                   onClick={() => handleSkipSeconds(1)}
-                  title="Skip forward 1 second"
                   aria-label="Skip forward 1 second"
                 >
                   +1s
-                </button>
+                <InstantTooltipPopover content="Skip forward 1 second" /></button>
                 <button
                   type="button"
-                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-overlay-skip-forward-5"
                   onClick={() => handleSkipSeconds(5)}
-                  title="Skip forward 5 seconds"
                   aria-label="Skip forward 5 seconds"
                 >
                   +5s
-                </button>
+                <InstantTooltipPopover content="Skip forward 5 seconds" /></button>
                 <button
                   type="button"
-                  className="analysis-overlay-transport-button analysis-overlay-skip-button"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button instant-tooltip-host instant-tooltip-host--inline-flex"
                   data-testid="analysis-overlay-skip-forward-10"
                   onClick={() => handleSkipSeconds(10)}
-                  title="Skip forward 10 seconds"
                   aria-label="Skip forward 10 seconds"
                 >
                   +10s
-                </button>
+                <InstantTooltipPopover content="Skip forward 10 seconds" /></button>
                 <span className="analysis-overlay-transport-time muted" data-testid="analysis-overlay-time">
                   {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
                 </span>
@@ -22062,42 +21859,37 @@ export function App(): JSX.Element {
               <div className="floating-ab-buttons" role="group" aria-label="A/B toggle">
                 <button
                   type="button"
-                  className={playbackPreviewMode === 'mix' ? 'active' : 'ghost'}
+                  className={`${playbackPreviewMode === 'mix' ? 'active' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                   onClick={() => handleReferencePreviewModeChange('mix')}
                   data-testid="floating-ab-mix"
-                  title="Listen to your mix."
                 >
                   Mix
-                </button>
+                <InstantTooltipPopover content="Listen to your mix." /></button>
                 <button
                   type="button"
-                  className={`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`}
+                  className={`${`reference-action${playbackPreviewMode === 'reference' ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                   onClick={() => handleReferencePreviewModeChange('reference')}
                   disabled={referenceStatus === 'loading'}
                   data-testid="floating-ab-reference"
-                  title="Listen to the reference track."
                 >
                   Reference
-                </button>
+                <InstantTooltipPopover content="Listen to the reference track." /></button>
               </div>
               <div className="floating-ab-level-match">
                 <button
                   type="button"
-                  className={referenceLevelMatchEnabled ? 'active' : 'ghost'}
+                  className={`${referenceLevelMatchEnabled ? 'active' : 'ghost'} instant-tooltip-host instant-tooltip-host--inline-flex`}
                   onClick={() => setReferenceLevelMatchEnabled((v) => {
                     const next = !v;
                     window.localStorage.setItem(REFERENCE_LEVEL_MATCH_KEY, String(next));
                     return next;
                   })}
-                  title={
-                    normalizationPreviewEnabled && referenceLevelMatchEnabled
-                      ? 'While Platform Preview is on, Level Match applies only the residual LUFS difference after platform gain; when both sources land at the target, that residual is 0 dB.'
-                      : 'Match playback levels between mix and reference'
-                  }
                   data-testid="floating-ab-level-match"
                 >
                   {referenceLevelMatchEnabled ? 'Level Match On' : 'Level Match Off'}
-                </button>
+                <InstantTooltipPopover content={normalizationPreviewEnabled && referenceLevelMatchEnabled
+                      ? 'While Platform Preview is on, Level Match applies only the residual LUFS difference after platform gain; when both sources land at the target, that residual is 0 dB.'
+                      : 'Match playback levels between mix and reference'} /></button>
                 {referenceLevelMatchEnabled && referenceLevelMatchGainDb !== 0 ? (
                   <span className="muted">
                     {normalizationPreviewEnabled
@@ -22132,9 +21924,9 @@ export function App(): JSX.Element {
                   Import checklist items from other note apps using an LLM to parse your notes.
                 </p>
               </div>
-              <button type="button" className="ghost" onClick={handleCloseMigrationModal} data-testid="migration-modal-close" title="Close the migration dialog.">
+              <button type="button" className="ghost instant-tooltip-host instant-tooltip-host--inline-flex" onClick={handleCloseMigrationModal} data-testid="migration-modal-close">
                 Close
-              </button>
+              <InstantTooltipPopover content="Close the migration dialog." /></button>
             </div>
 
             <div className="migration-workflow-steps">
@@ -22149,11 +21941,10 @@ export function App(): JSX.Element {
                     type="button"
                     onClick={handleCopyMigrationSchema}
                     data-testid="migration-copy-schema"
-                    className={migrationSchemaCopied ? 'migration-copied-button' : ''}
-                    title="Copy the JSON schema and song list to clipboard for pasting into an LLM."
+                    className={`${migrationSchemaCopied ? 'migration-copied-button' : ''} instant-tooltip-host instant-tooltip-host--inline-flex`}
                   >
                     {migrationSchemaCopied ? '✓ Copied to Clipboard' : 'Copy Schema to Clipboard'}
-                  </button>
+                  <InstantTooltipPopover content="Copy the JSON schema and song list to clipboard for pasting into an LLM." /></button>
                 </div>
               </div>
 
@@ -22198,11 +21989,10 @@ export function App(): JSX.Element {
                 type="button"
                 onClick={handleParseMigrationJson}
                 disabled={migrationJsonInput.trim().length === 0}
-                data-testid="migration-parse-button"
-                title="Parse the pasted JSON and show a preview of what will be imported."
+                data-testid="migration-parse-button" className="instant-tooltip-host instant-tooltip-host--inline-flex"
               >
                 Parse &amp; Preview
-              </button>
+              <InstantTooltipPopover content="Parse the pasted JSON and show a preview of what will be imported." /></button>
             </div>
 
             {migrationParseError ? (
@@ -22242,19 +22032,16 @@ export function App(): JSX.Element {
                         <strong>{entry.songName}</strong>
                         {entry.matchedSongId ? (
                           <span
-                            className={`migration-match-badge ${entry.matchConfidence}`}
-                            title={
-                              entry.matchConfidence === 'exact'
-                                ? 'Exact match'
-                                : `Fuzzy match → ${entry.matchedSongTitle}`
-                            }
+                            className={`${`migration-match-badge ${entry.matchConfidence}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                           >
                             {entry.matchConfidence === 'exact' ? '✓ exact' : `≈ ${entry.matchedSongTitle}`}
-                          </span>
+                          <InstantTooltipPopover content={entry.matchConfidence === 'exact'
+                                ? 'Exact match'
+                                : `Fuzzy match → ${entry.matchedSongTitle}`} /></span>
                         ) : (
-                          <span className="migration-match-badge none" title="No matching song found">
+                          <span className="migration-match-badge none instant-tooltip-host instant-tooltip-host--inline-flex">
                             ✗ no match — will be skipped
-                          </span>
+                          <InstantTooltipPopover content="No matching song found" /></span>
                         )}
                       </div>
                       <ul className="migration-preview-items">
@@ -22262,9 +22049,9 @@ export function App(): JSX.Element {
                           <li key={itemIndex}>
                             <span className="migration-preview-item-text">{item.text}</span>
                             {item.timestampSeconds !== null && (
-                              <span className="migration-preview-item-timestamp" title={`Timestamp: ${formatTime(item.timestampSeconds)}`}>
+                              <span className="migration-preview-item-timestamp instant-tooltip-host instant-tooltip-host--inline-flex">
                                 {formatTime(item.timestampSeconds)}
-                              </span>
+                              <InstantTooltipPopover content={`Timestamp: ${formatTime(item.timestampSeconds)}`} /></span>
                             )}
                           </li>
                         ))}
@@ -22276,23 +22063,21 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     onClick={handleConfirmMigrationImport}
-                    data-testid="migration-confirm-import"
-                    title="Confirm and import the matched checklist items."
+                    data-testid="migration-confirm-import" className="instant-tooltip-host instant-tooltip-host--inline-flex"
                   >
                     Import {migrationPreview.filter((s) => s.matchedSongId).length} Song(s)
-                  </button>
+                  <InstantTooltipPopover content="Confirm and import the matched checklist items." /></button>
                   <button
                     type="button"
-                    className="ghost"
+                    className="ghost instant-tooltip-host instant-tooltip-host--inline-flex"
                     onClick={() => {
                       setMigrationPreview(null);
                       setMigrationParseError(null);
                     }}
                     data-testid="migration-cancel-preview"
-                    title="Cancel the import and go back to editing."
                   >
                     Cancel
-                  </button>
+                  <InstantTooltipPopover content="Cancel the import and go back to editing." /></button>
                 </div>
               </div>
             ) : null}
@@ -22323,10 +22108,9 @@ export function App(): JSX.Element {
           via CSS. */}
       <button
         type="button"
-        className={`inspector-toggle-button${inspectorDrawerOpen ? ' inspector-toggle-button--active' : ''}`}
+        className={`${`inspector-toggle-button${inspectorDrawerOpen ? ' inspector-toggle-button--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
         onClick={() => setInspectorDrawerOpen((previous) => !previous)}
         data-testid="inspector-toggle"
-        title={inspectorDrawerOpen ? 'Close inspector' : 'Open inspector'}
         aria-label="Toggle inspector"
         aria-expanded={inspectorDrawerOpen}
         aria-controls="inspector-drawer"
@@ -22345,7 +22129,7 @@ export function App(): JSX.Element {
           <rect x="3" y="4" width="18" height="16" rx="2" />
           <line x1="15" y1="4" x2="15" y2="20" />
         </svg>
-      </button>
+      <InstantTooltipPopover content={inspectorDrawerOpen ? 'Close inspector' : 'Open inspector'} /></button>
 
       {/* Backdrop: a click outside the drawer closes it. Only rendered when the
           drawer is actually showing (narrow viewport + open). Pointer events
@@ -22369,14 +22153,11 @@ export function App(): JSX.Element {
         >
           <button
             type="button"
-            className="floating-platform-preview-toggle"
+            className="floating-platform-preview-toggle instant-tooltip-host instant-tooltip-host--inline-flex"
             onClick={() => handleToggleNormalizationPreview()}
             data-testid="floating-platform-preview-indicator"
             aria-pressed={normalizationPreviewEnabled}
             disabled={normalizationSourceStatus !== 'ready' || !normalizationPreview}
-            title={`${selectedNormalizationPlatform.label} normalization preview ${
-              normalizationPreviewEnabled ? 'on' : 'off'
-            } · ${floatingNormalizationGainText} — click to turn it ${normalizationPreviewEnabled ? 'off' : 'on'}`}
             aria-label={`${normalizationPreviewEnabled ? 'Turn off' : 'Turn on'} ${selectedNormalizationPlatform.label} normalization preview (${floatingNormalizationGainText})`}
           >
             <span className="floating-platform-preview-state" aria-hidden="true">
@@ -22388,16 +22169,17 @@ export function App(): JSX.Element {
             <span className="floating-platform-preview-gain" aria-hidden="true">
               {floatingNormalizationGainText}
             </span>
-          </button>
+          <InstantTooltipPopover content={`${selectedNormalizationPlatform.label} normalization preview ${
+              normalizationPreviewEnabled ? 'on' : 'off'
+            } · ${floatingNormalizationGainText} — click to turn it ${normalizationPreviewEnabled ? 'off' : 'on'}`} /></button>
           <button
             type="button"
-            className="floating-platform-preview-close"
+            className="floating-platform-preview-close instant-tooltip-host instant-tooltip-host--inline-flex"
             onClick={handleDismissNormalizationPreviewIndicator}
             aria-label="Hide platform normalization quick toggle"
-            title="Hide quick toggle"
           >
             &times;
-          </button>
+          <InstantTooltipPopover content="Hide quick toggle" /></button>
         </div>
       ) : null}
 
@@ -22409,10 +22191,9 @@ export function App(): JSX.Element {
       */}
       <button
         type="button"
-        className={`quick-switcher-toggle${quickSwitcherOpen ? ' active' : ''}`}
+        className={`${`quick-switcher-toggle${quickSwitcherOpen ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
         onClick={() => setQuickSwitcherOpen((v) => !v)}
         data-testid="quick-switcher-button"
-        title={quickSwitcherOpen ? 'Close song switcher' : 'Switch songs'}
         aria-label={quickSwitcherOpen ? 'Close song switcher' : 'Switch songs'}
       >
         <svg
@@ -22429,7 +22210,7 @@ export function App(): JSX.Element {
           <circle cx="6" cy="18" r="3" />
           <circle cx="18" cy="16" r="3" />
         </svg>
-      </button>
+      <InstantTooltipPopover content={quickSwitcherOpen ? 'Close song switcher' : 'Switch songs'} /></button>
       {quickSwitcherOpen ? (
         <div
           ref={quickSwitcherPanelRef}
@@ -22440,24 +22221,22 @@ export function App(): JSX.Element {
           data-testid="quick-switcher-panel"
         >
           <div
-            className="quick-switcher-header floating-switcher-header"
+            className="quick-switcher-header floating-switcher-header instant-tooltip-host instant-tooltip-host--inline-flex"
             data-testid="quick-switcher-header"
             onPointerDown={(event) => handleFloatingSwitcherHeaderPointerDown('quick', event)}
             onDoubleClick={(event) => handleFloatingSwitcherHeaderDoubleClick('quick', event)}
-            title="Drag to move. Double-click to reset."
           >
             <h4>Songs</h4>
             <button
               type="button"
-              className="quick-switcher-close"
+              className="quick-switcher-close instant-tooltip-host instant-tooltip-host--inline-flex"
               onClick={() => setQuickSwitcherOpen(false)}
               data-testid="quick-switcher-close"
               aria-label="Close song switcher"
-              title="Close"
             >
               &times;
-            </button>
-          </div>
+            <InstantTooltipPopover content="Close" /></button>
+          <InstantTooltipPopover content="Drag to move. Double-click to reset." /></div>
           <div className="quick-switcher-list">
             {albumSongs.map((song) => {
               const isActive = song.id === selectedPlaybackSongId;
@@ -22468,16 +22247,15 @@ export function App(): JSX.Element {
                   type="button"
                   role="option"
                   aria-selected={isActive}
-                  className={`quick-switcher-item${isActive ? ' quick-switcher-item--active' : ''}`}
+                  className={`${`quick-switcher-item${isActive ? ' quick-switcher-item--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                   onClick={() => handleQuickSwitcherSelect(song.id)}
                   data-testid={`quick-switcher-item-${song.id}`}
-                  title={song.title}
                 >
                   <span className="quick-switcher-item-title">{song.title}</span>
                   <span className="quick-switcher-item-meta">
                     {versionCount} {versionCount === 1 ? 'version' : 'versions'}
                   </span>
-                </button>
+                <InstantTooltipPopover content={song.title} /></button>
               );
             })}
             {albumSongs.length === 0 ? (
@@ -22499,10 +22277,9 @@ export function App(): JSX.Element {
         <>
           <button
             type="button"
-            className={`version-switcher-trigger${versionSwitcherOpen ? ' active' : ''}`}
+            className={`${`version-switcher-trigger${versionSwitcherOpen ? ' active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
             onClick={() => setVersionSwitcherOpen((v) => !v)}
             data-testid="version-switcher-trigger"
-            title={versionSwitcherOpen ? 'Close version switcher' : 'Switch version'}
             aria-label={versionSwitcherOpen ? 'Close version switcher' : 'Switch version'}
           >
             {/* Stack-of-layers glyph — the intuitive "pick one of several
@@ -22523,7 +22300,7 @@ export function App(): JSX.Element {
               <polyline points="2 17 12 22 22 17" />
               <polyline points="2 12 12 17 22 12" />
             </svg>
-          </button>
+          <InstantTooltipPopover content={versionSwitcherOpen ? 'Close version switcher' : 'Switch version'} /></button>
           {versionSwitcherOpen ? (
             <div
               ref={versionSwitcherPanelRef}
@@ -22534,26 +22311,24 @@ export function App(): JSX.Element {
               data-testid="version-switcher-panel"
             >
               <div
-                className="version-switcher-header floating-switcher-header"
+                className="version-switcher-header floating-switcher-header instant-tooltip-host instant-tooltip-host--inline-flex"
                 data-testid="version-switcher-header"
                 onPointerDown={(event) =>
                   handleFloatingSwitcherHeaderPointerDown('version', event)
                 }
                 onDoubleClick={(event) => handleFloatingSwitcherHeaderDoubleClick('version', event)}
-                title="Drag to move. Double-click to reset."
               >
                 <h4>Versions{versionSwitcherSong ? ` — ${getSongDisplayTitle(versionSwitcherSong)}` : ''}</h4>
                 <button
                   type="button"
-                  className="version-switcher-close"
+                  className="version-switcher-close instant-tooltip-host instant-tooltip-host--inline-flex"
                   onClick={() => setVersionSwitcherOpen(false)}
                   data-testid="version-switcher-close"
                   aria-label="Close version switcher"
-                  title="Close"
                 >
                   &times;
-                </button>
-              </div>
+                <InstantTooltipPopover content="Close" /></button>
+              <InstantTooltipPopover content="Drag to move. Double-click to reset." /></div>
               <div className="version-switcher-list">
                 {versionSwitcherVersions.map((version) => {
                   // isActive drives the visible "now playing" affordances
@@ -22572,10 +22347,9 @@ export function App(): JSX.Element {
                       type="button"
                       role="option"
                       aria-selected={isActive}
-                      className={`version-switcher-item${isActive ? ' version-switcher-item--active' : ''}`}
+                      className={`${`version-switcher-item${isActive ? ' version-switcher-item--active' : ''}`} instant-tooltip-host instant-tooltip-host--inline-flex`}
                       onClick={() => handleVersionSwitcherSelect(version.id)}
                       data-testid={`version-switcher-item-${version.id}`}
-                      title={version.fileName}
                     >
                       <span className="version-switcher-item-title">
                         {version.fileName}
@@ -22583,20 +22357,19 @@ export function App(): JSX.Element {
                       <span className="version-switcher-item-meta">
                         {isActive ? (
                           <span
-                            className="version-switcher-now-playing-badge"
+                            className="version-switcher-now-playing-badge instant-tooltip-host instant-tooltip-host--inline-flex"
                             aria-label="Now playing"
-                            title="This version is currently loaded in the player"
                           >
                             <span
                               className="version-switcher-now-playing-badge-dot"
                               aria-hidden="true"
                             />
                             Now playing
-                          </span>
+                          <InstantTooltipPopover content="This version is currently loaded in the player" /></span>
                         ) : null}
                         {durationLabel}
                       </span>
-                    </button>
+                    <InstantTooltipPopover content={version.fileName} /></button>
                   );
                 })}
               </div>

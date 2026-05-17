@@ -35,6 +35,18 @@ import { createPortal } from 'react-dom';
  * positioning — the body lives at the top of the DOM tree, so there is
  * no clipping ancestor to escape from.
  *
+ * v3.233 — horizontal-axis auto-flip. v3.231 + v3.232 fixed the
+ * vertical axis + ancestor clipping, but the Add Folder host sits
+ * near the LEFT edge of the viewport: after flipping to `bottom-end`,
+ * the popover's right edge anchors to the host's right (≈229px) and
+ * extends LEFTWARD for ~305px, which puts the left edge at ≈-76px —
+ * off the viewport-left. The fix mirrors the vertical helper: if the
+ * default `*-end` placement would push the popover's left edge past
+ * the viewport-left, flip to `*-start` (anchor to host's left edge,
+ * extend rightward). Symmetric for `*-start` → `*-end` overflow on
+ * the right. Both axes are evaluated independently, so a host hugging
+ * the top-left corner correctly resolves to `bottom-start`.
+ *
  * The native `title=` attribute is slow (≥500ms OS delay), OS-styled
  * (inconsistent across platforms), and not customisable. The custom
  * popover gives us a 60ms opacity transition and full styling control.
@@ -76,6 +88,17 @@ export type InstantTooltipWrap = 'inline-flex' | 'block' | 'contents';
  * can later swap in `popoverEl.offsetHeight` if we want a tighter fit.
  */
 export const INSTANT_TOOLTIP_ESTIMATED_HEIGHT = 120;
+
+/**
+ * v3.233 — Estimated popover width for the horizontal-axis auto-flip.
+ * Most tooltips in the app cap at ~280–320px (the CSS `max-width`).
+ * 320px is a deliberate slight overshoot so a tooltip hugging the
+ * viewport-left edge errs on the side of flipping (rendering rightward,
+ * which is always safe inside the viewport) rather than rendering off
+ * the left edge. The runtime path can later swap in `popoverEl.offsetWidth`
+ * after first render if we want a tighter fit, mirroring the height path.
+ */
+export const INSTANT_TOOLTIP_ESTIMATED_WIDTH = 320;
 
 /**
  * Host-popover gap in pixels. Matches the v3.231 CSS `calc(100% + 6px)`
@@ -122,6 +145,110 @@ export function decideTooltipPlacement(
       : (`top-${horizontalSuffix}` as InstantTooltipPlacement);
   }
   return defaultPlacement;
+}
+
+/**
+ * v3.233 — Pure decision helper for the HORIZONTAL axis. Given the
+ * host's left/right edges, the viewport width, and the caller's
+ * preferred placement (already vertically resolved), return the
+ * placement with the horizontal suffix swapped if-and-only-if the
+ * default would overflow the viewport.
+ *
+ * The vertical prefix (`top-` / `bottom-`) is preserved exactly — this
+ * helper only touches the suffix (`-start` / `-end`). Compose with
+ * `decideTooltipPlacement` to resolve both axes independently.
+ *
+ * Geometry, mirroring `computeTooltipAnchor`:
+ *   • `*-end`   anchors popover RIGHT to host RIGHT; popover extends
+ *               LEFTWARD. Left edge ≈ host.right - popoverWidth.
+ *               Overflows viewport-left when host.right < popoverWidth.
+ *   • `*-start` anchors popover LEFT to host LEFT; popover extends
+ *               RIGHTWARD. Right edge ≈ host.left + popoverWidth.
+ *               Overflows viewport-right when host.left + popoverWidth > viewportWidth.
+ *
+ * Symmetric tiebreak when NEITHER suffix fits the estimate (very
+ * narrow viewports / very wide popovers): keep the side with more
+ * room. The vertical helper uses the same tiebreak pattern.
+ */
+export function decideTooltipHorizontalAlignment(
+  hostLeft: number,
+  hostRight: number,
+  viewportWidth: number,
+  defaultPlacement: InstantTooltipPlacement,
+  popoverWidth: number = INSTANT_TOOLTIP_ESTIMATED_WIDTH,
+): InstantTooltipPlacement {
+  const verticalPrefix = defaultPlacement.startsWith('top-') ? 'top' : 'bottom';
+  const wantsEnd = defaultPlacement.endsWith('-end');
+
+  if (wantsEnd) {
+    // Popover anchors to host RIGHT, extends LEFTWARD.
+    const leftEdgeIfEnd = hostRight - popoverWidth;
+    if (leftEdgeIfEnd < 0) {
+      // Would overflow viewport-left. Consider flipping to -start.
+      const rightEdgeIfStart = hostLeft + popoverWidth;
+      const fitsAsStart = rightEdgeIfStart <= viewportWidth;
+      if (fitsAsStart) {
+        return `${verticalPrefix}-start` as InstantTooltipPlacement;
+      }
+      // Neither fits — pick the side with more room. `-end` keeps
+      // anchor at hostRight (room = hostRight). `-start` anchors at
+      // hostLeft (room = viewportWidth - hostLeft).
+      const roomAsEnd = hostRight;
+      const roomAsStart = viewportWidth - hostLeft;
+      return roomAsStart > roomAsEnd
+        ? (`${verticalPrefix}-start` as InstantTooltipPlacement)
+        : defaultPlacement;
+    }
+    return defaultPlacement;
+  }
+
+  // wantsStart — popover anchors to host LEFT, extends RIGHTWARD.
+  const rightEdgeIfStart = hostLeft + popoverWidth;
+  if (rightEdgeIfStart > viewportWidth) {
+    // Would overflow viewport-right. Consider flipping to -end.
+    const leftEdgeIfEnd = hostRight - popoverWidth;
+    const fitsAsEnd = leftEdgeIfEnd >= 0;
+    if (fitsAsEnd) {
+      return `${verticalPrefix}-end` as InstantTooltipPlacement;
+    }
+    // Neither fits — pick the side with more room.
+    const roomAsStart = viewportWidth - hostLeft;
+    const roomAsEnd = hostRight;
+    return roomAsEnd > roomAsStart
+      ? (`${verticalPrefix}-end` as InstantTooltipPlacement)
+      : defaultPlacement;
+  }
+  return defaultPlacement;
+}
+
+/**
+ * v3.233 — Convenience composer. Resolves the vertical axis first, then
+ * the horizontal axis on the already-vertically-resolved placement.
+ * Both axes are decided independently from the SAME `defaultPlacement`,
+ * so a host hugging the top-left corner with default `top-end` correctly
+ * resolves to `bottom-start`.
+ */
+export function decideTooltipPlacementBothAxes(
+  hostRect: { top: number; bottom: number; left: number; right: number },
+  viewport: { width: number; height: number },
+  defaultPlacement: InstantTooltipPlacement,
+  popoverHeight: number = INSTANT_TOOLTIP_ESTIMATED_HEIGHT,
+  popoverWidth: number = INSTANT_TOOLTIP_ESTIMATED_WIDTH,
+): InstantTooltipPlacement {
+  const vertical = decideTooltipPlacement(
+    hostRect.top,
+    hostRect.bottom,
+    viewport.height,
+    defaultPlacement,
+    popoverHeight,
+  );
+  return decideTooltipHorizontalAlignment(
+    hostRect.left,
+    hostRect.right,
+    viewport.width,
+    vertical,
+    popoverWidth,
+  );
 }
 
 /**
@@ -250,10 +377,9 @@ export function InstantTooltipPopover({
 
     const measureAndOpen = () => {
       const rect = host.getBoundingClientRect();
-      const next = decideTooltipPlacement(
-        rect.top,
-        rect.bottom,
-        window.innerHeight,
+      const next = decideTooltipPlacementBothAxes(
+        rect,
+        { width: window.innerWidth, height: window.innerHeight },
         placement,
       );
       setResolvedPlacement(next);
@@ -286,10 +412,9 @@ export function InstantTooltipPopover({
 
     const reanchor = () => {
       const rect = host.getBoundingClientRect();
-      const next = decideTooltipPlacement(
-        rect.top,
-        rect.bottom,
-        window.innerHeight,
+      const next = decideTooltipPlacementBothAxes(
+        rect,
+        { width: window.innerWidth, height: window.innerHeight },
         placement,
       );
       setResolvedPlacement(next);

@@ -107,11 +107,9 @@ import {
 } from './platformNormalization';
 import { computePlaybackGainState } from './playbackGainModel';
 import {
-  getTrackSwitchFadeDurationSeconds,
   shouldAutoplayOnTransportSwitch,
   shouldAttemptPlaybackOutputRecovery,
-  shouldHoldGainBeforePlayback,
-  shouldRunAudiblePlaybackGainRestoration,
+  shouldRestoreAudiblePlaybackGain,
   type PlaybackContextState,
 } from './audioPlaybackResilience';
 import {
@@ -844,12 +842,18 @@ const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
 const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
 const PLAYBACK_OUTPUT_RECOVERY_DELAY_MS = 80;
 const PLAYBACK_OUTPUT_RECOVERY_MIN_INTERVAL_MS = 750;
-// v3.226 — Codex CONSIDER. Aligned with the cold-start `onPlaying` ramp
-// (`getTrackSwitchFadeDurationSeconds` returns 0.06 for firstPlayOfSession).
-// Recovery from a stalled/suspended context can land mid-frame on a freshly-
-// loaded decoder, so the recovery ramp must be at least as long as the
-// cold-start fade-in to mask the same jitter window.
-const PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS = 0.06;
+const PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS = 0.025;
+// v3.237 — Defer non-critical analysis warmup jobs (preview WebAudio decode,
+// measured ffmpeg) for this many ms after the user-selected version effect
+// fires. The audio engine's decoder cold start and the user's play click can
+// both land in the first ~200ms; queueing heavy ffmpeg/decode work in that
+// same window competes for the renderer's main thread and causes audible
+// playback crackle/lag at the very start of the track. By the time the delay
+// elapses, audio output is settled and the jobs can run without interfering.
+// The delay is cleared if the user selects a different track in the meantime
+// so we never block a fresh selection's analysis on a stale predecessor's
+// timer.
+const PLAYBACK_BACKGROUND_JOB_DELAY_MS = 500;
 const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
@@ -3735,11 +3739,6 @@ export function App(): JSX.Element {
   const playbackTransformGainNodeRef = useRef<GainNode | null>(null);
   const playbackGainNodeRef = useRef<GainNode | null>(null);
   const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // v3.225 — track-switch crackle fix. True from the moment a new source is
-  // committed until the FIRST `playing` event for that source fires. Used to
-  // pick the longer cold-start fade-in and to know when the fade should be
-  // applied. Reset to true on every source switch.
-  const awaitingFirstPlayingEventRef = useRef(false);
   const playbackOutputRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPlaybackOutputRecoveryAtRef = useRef(0);
   const targetGainLinearRef = useRef(DEFAULT_PLAYBACK_VOLUME);
@@ -3837,28 +3836,8 @@ export function App(): JSX.Element {
         baseVolume: nextVolume,
         transformGainDb: nextNormalizationGainDb,
       });
-      // Always update the targets — the `onPlaying` handler reads these refs
-      // to know where to ramp TO, even while the GainNode itself is pinned at
-      // 0 awaiting the first `playing` event.
       targetGainLinearRef.current = gainState.playerVolumeLinear;
       targetTransformGainLinearRef.current = gainState.transformGainLinear;
-
-      // v3.226 — Codex CONSIDER. While a new source is held at 0 awaiting its
-      // first `playing` event, do NOT hard-write the GainNode value here —
-      // doing so would overwrite the pin-at-0 hold (volume slider movements
-      // mid-load would un-pin the bus and re-introduce the leading-frame
-      // click). The targets above are still updated so the `onPlaying`
-      // handler ramps to the right final value. Once that handler runs and
-      // clears `awaitingFirstPlayingEventRef`, subsequent `applyPlaybackGain`
-      // calls write through normally.
-      if (awaitingFirstPlayingEventRef.current) {
-        if (audio) {
-          audio.volume = playbackGainNodeRef.current
-            ? 1
-            : Math.max(0, Math.min(gainState.audibleGainLinear, 1));
-        }
-        return;
-      }
 
       const transformGainNode = playbackTransformGainNodeRef.current;
       if (transformGainNode) {
@@ -4121,119 +4100,154 @@ export function App(): JSX.Element {
       promotePreviewAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
     }
 
+    // v3.237 — Defer the heavy analysis kick-offs by
+    // PLAYBACK_BACKGROUND_JOB_DELAY_MS so we don't queue ffmpeg + WebAudio
+    // decode work in the same ~200ms window the audio engine is doing its
+    // decoder cold start + first-frame schedule. Both jobs are eventually
+    // consistent (the UI shows a 'loading' state for measured stats / waveform
+    // until they land), and the queue still de-dupes when a follow-up effect
+    // run requests the same cache key — so this delay only suppresses the
+    // CPU-spike window at playback start. The timer is cleared if the effect
+    // tears down for a new selection.
+    const deferredJobTimers: ReturnType<typeof setTimeout>[] = [];
+
     if (!cached.previewAnalysis && selectedPlaybackSourceUrl) {
-      void analyzeTrackFromUrl(selectedPlaybackSourceUrl, undefined, {
-        priority: ANALYSIS_PRIORITY_USER_SELECTED,
-        key: analysisCacheKey,
-        label: selectedVersion.fileName,
-      })
-        .then((previewResult) => {
-          cacheMasteringAnalysisValue(
-            previewAnalysisCacheRef.current,
-            analysisCacheKey,
-            previewResult
-          );
-
-          if (cancelled) {
-            return;
-          }
-
-          setAnalysis(previewResult);
-          setAnalysisStatus('ready');
-          setAnalysisError(null);
+      const previewSourceUrl = selectedPlaybackSourceUrl;
+      const previewKey = analysisCacheKey;
+      const previewLabel = selectedVersion.fileName;
+      const previewCachedFallback = cached.previewAnalysis;
+      const previewTimer = setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+        void analyzeTrackFromUrl(previewSourceUrl, undefined, {
+          priority: ANALYSIS_PRIORITY_USER_SELECTED,
+          key: previewKey,
+          label: previewLabel,
         })
-        .catch((analysisIssue: unknown) => {
-          if (cancelled) {
-            return;
-          }
+          .then((previewResult) => {
+            cacheMasteringAnalysisValue(
+              previewAnalysisCacheRef.current,
+              previewKey,
+              previewResult
+            );
 
-          // v3.198 — Defensive: cancellation from a preempt path should
-          // not flip the preview status to 'error'. Leave existing state
-          // intact so the requeued task can complete it; previously a
-          // preempted preview could surface a misleading "Analysis was
-          // interrupted" message in the UI.
-          if (isAnalysisAbortError(analysisIssue)) {
-            return;
-          }
+            if (cancelled) {
+              return;
+            }
 
-          setAnalysis(cached.previewAnalysis);
-          setAnalysisStatus(cached.previewAnalysis ? 'ready' : 'error');
-          setAnalysisError(
-            analysisIssue instanceof Error
-              ? analysisIssue.message
-              : 'Could not analyse this track preview.'
-          );
-        });
+            setAnalysis(previewResult);
+            setAnalysisStatus('ready');
+            setAnalysisError(null);
+          })
+          .catch((analysisIssue: unknown) => {
+            if (cancelled) {
+              return;
+            }
+
+            // v3.198 — Defensive: cancellation from a preempt path should
+            // not flip the preview status to 'error'. Leave existing state
+            // intact so the requeued task can complete it; previously a
+            // preempted preview could surface a misleading "Analysis was
+            // interrupted" message in the UI.
+            if (isAnalysisAbortError(analysisIssue)) {
+              return;
+            }
+
+            setAnalysis(previewCachedFallback);
+            setAnalysisStatus(previewCachedFallback ? 'ready' : 'error');
+            setAnalysisError(
+              analysisIssue instanceof Error
+                ? analysisIssue.message
+                : 'Could not analyse this track preview.'
+            );
+          });
+      }, PLAYBACK_BACKGROUND_JOB_DELAY_MS);
+      deferredJobTimers.push(previewTimer);
     }
 
     if (!cached.measuredAnalysis) {
-      void runMeasuredAnalysis(analysisFilePath, {
-        priority: ANALYSIS_PRIORITY_USER_SELECTED,
-        cacheKey: analysisCacheKey,
-        label: selectedVersion.fileName,
-      })
-        .then((measuredResult) => {
-          // Always populate the measured session cache and mastering entry,
-          // even if this effect run was superseded before ffmpeg returned. The
-          // entry is keyed by schema + file path + size + mtime, so it is
-          // idempotent and lets the next selection/effect hit the completed
-          // shared cache instead of queueing duplicate measured analysis.
-          cacheMasteringAnalysisValue(
-            measuredAnalysisCacheRef.current,
-            analysisCacheKey,
-            measuredResult
-          );
-
-          const selectedVersionSong =
-            snapshot.songs.find((song) => song.id === selectedVersion.songId) ?? null;
-
-          if (selectedVersionSong) {
-            upsertMasteringCacheEntry(
-              createMasteringCacheEntry({
-                source: 'selected-track',
-                version: selectedVersion,
-                song: selectedVersionSong,
-                measured: measuredResult,
-              })
-            );
-          }
-
-          if (cancelled) {
-            return;
-          }
-
-          setMeasuredAnalysis(measuredResult);
-          setMeasuredAnalysisStatus('ready');
-          setMeasuredAnalysisError(null);
+      const measuredFilePath = analysisFilePath;
+      const measuredKey = analysisCacheKey;
+      const measuredLabel = selectedVersion.fileName;
+      const measuredCachedFallback = cached.measuredAnalysis;
+      const measuredTimer = setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+        void runMeasuredAnalysis(measuredFilePath, {
+          priority: ANALYSIS_PRIORITY_USER_SELECTED,
+          cacheKey: measuredKey,
+          label: measuredLabel,
         })
-        .catch((analysisIssue: unknown) => {
-          if (cancelled) {
-            return;
-          }
+          .then((measuredResult) => {
+            // Always populate the measured session cache and mastering entry,
+            // even if this effect run was superseded before ffmpeg returned.
+            // The entry is keyed by schema + file path + size + mtime, so it
+            // is idempotent and lets the next selection/effect hit the
+            // completed shared cache instead of queueing duplicate measured
+            // analysis.
+            cacheMasteringAnalysisValue(
+              measuredAnalysisCacheRef.current,
+              measuredKey,
+              measuredResult
+            );
 
-          // v3.198 — Defensive: cancellation from v3.195's USER preempt
-          // pathway should never flip the selected-track status to 'error'.
-          // The queue silently requeues preempted tasks, but if the
-          // AbortError reaches this catch for any reason (direct cancel,
-          // future edge case), leave the existing state intact.
-          if (isAnalysisAbortError(analysisIssue)) {
-            return;
-          }
+            const selectedVersionSong =
+              snapshot.songs.find((song) => song.id === selectedVersion.songId) ?? null;
 
-          setMeasuredAnalysis(cached.measuredAnalysis);
-          setMeasuredAnalysisStatus(cached.measuredAnalysis ? 'ready' : 'error');
-          setMeasuredAnalysisError(
-            analysisIssue instanceof AnalysisTaskTimeoutError
-              ? 'Measured analysis timed out. Try selecting this track again.'
-              : analysisIssue instanceof Error
-                ? analysisIssue.message
-                : 'Could not analyse this track yet.'
-          );
-        });
+            if (selectedVersionSong) {
+              upsertMasteringCacheEntry(
+                createMasteringCacheEntry({
+                  source: 'selected-track',
+                  version: selectedVersion,
+                  song: selectedVersionSong,
+                  measured: measuredResult,
+                })
+              );
+            }
+
+            if (cancelled) {
+              return;
+            }
+
+            setMeasuredAnalysis(measuredResult);
+            setMeasuredAnalysisStatus('ready');
+            setMeasuredAnalysisError(null);
+          })
+          .catch((analysisIssue: unknown) => {
+            if (cancelled) {
+              return;
+            }
+
+            // v3.198 — Defensive: cancellation from v3.195's USER preempt
+            // pathway should never flip the selected-track status to 'error'.
+            // The queue silently requeues preempted tasks, but if the
+            // AbortError reaches this catch for any reason (direct cancel,
+            // future edge case), leave the existing state intact.
+            if (isAnalysisAbortError(analysisIssue)) {
+              return;
+            }
+
+            setMeasuredAnalysis(measuredCachedFallback);
+            setMeasuredAnalysisStatus(measuredCachedFallback ? 'ready' : 'error');
+            setMeasuredAnalysisError(
+              analysisIssue instanceof AnalysisTaskTimeoutError
+                ? 'Measured analysis timed out. Try selecting this track again.'
+                : analysisIssue instanceof Error
+                  ? analysisIssue.message
+                  : 'Could not analyse this track yet.'
+            );
+          });
+      }, PLAYBACK_BACKGROUND_JOB_DELAY_MS);
+      deferredJobTimers.push(measuredTimer);
     }
 
     return () => {
       cancelled = true;
+      for (const timer of deferredJobTimers) {
+        clearTimeout(timer);
+      }
     };
   }, [
     createMasteringCacheEntry,
@@ -6333,45 +6347,24 @@ export function App(): JSX.Element {
       return;
     }
 
-    // v3.226 — Codex MUST-FIX #1. While waiting for the first `playing` event
-    // on a freshly-loaded source, the GainNode is intentionally pinned at 0 so
-    // the `playing` handler can ramp from 0 → target in sync with the actual
-    // leading audio frames. Recovery is scheduled from the `canplay` and `play`
-    // events; if codec startup takes >80ms (common macOS first-play), `play`
-    // fires and `audio.paused` flips to false BEFORE `playing` ever arrives.
-    // Without this guard, recovery here would ramp the held-0 gain up over the
-    // recovery window — the very window the pin-at-0 hold was meant to mask —
-    // and the click returns. The `playing` handler owns the audible ramp;
-    // recovery is a no-op for the gain ramp until then. transformGainNode is
-    // also skipped because it would compound into the held-0 pin via the
-    // upstream gain chain.
-    //
-    // Encoded in `shouldRunAudiblePlaybackGainRestoration` so the event-order
-    // contract is unit-testable independent of the React component.
-    const currentGainLinear = gainNode.gain.value;
-    const targetGainLinear = targetGainLinearRef.current;
-    if (
-      !shouldRunAudiblePlaybackGainRestoration({
-        awaitingFirstPlayingEvent: awaitingFirstPlayingEventRef.current,
-        audioPaused: audio.paused,
-        currentGainLinear,
-        targetGainLinear,
-      })
-    ) {
-      if (awaitingFirstPlayingEventRef.current) {
-        logPlaybackEvent('output-gain-restore-deferred-awaiting-playing', {
-          reason,
-        });
-      }
-      return;
-    }
-
     if (transformGainNode) {
       try {
         transformGainNode.gain.value = targetTransformGainLinearRef.current;
       } catch {
         transformGainNode.gain.value = targetTransformGainLinearRef.current;
       }
+    }
+
+    const currentGainLinear = gainNode.gain.value;
+    const targetGainLinear = targetGainLinearRef.current;
+    if (
+      !shouldRestoreAudiblePlaybackGain({
+        audioPaused: audio.paused,
+        currentGainLinear,
+        targetGainLinear,
+      })
+    ) {
+      return;
     }
 
     try {
@@ -6390,47 +6383,6 @@ export function App(): JSX.Element {
       currentGainLinear,
       targetGainLinear,
     });
-  }
-
-  // v3.226 — Codex MUST-FIX #2. The pin-at-0 + ramp-on-playing contract is
-  // what makes paused → play click-free. This helper pins the GainNode to 0
-  // before `audio.play()` is called, so the `onPlaying` handler's ramp from
-  // current-value → target masks the decoder's leading frames hitting output.
-  // Previously the contract lived only inline inside the main play button
-  // (`handlePlayPauseToggle`); three other direct-play paths skipped it, so a
-  // same-loaded-source play from those entry points still hard-cut to full
-  // amplitude and clicked. All four play paths now route through this wrapper.
-  //
-  // `firstPlayOfNewSource` controls which ramp duration the `onPlaying`
-  // handler picks: when callers know they're playing a freshly-committed
-  // source (cold-start decoder), they should set this to `true` so the longer
-  // 60ms ramp masks the larger jitter. Same-source paused → play uses the
-  // shorter 35ms warm-decoder ramp by default.
-  function pinPlaybackGainBeforeDirectPlay(options: {
-    firstPlayOfNewSource?: boolean;
-  } = {}): void {
-    const ctx = playbackAudioContextRef.current;
-    const gn = playbackGainNodeRef.current;
-    if (!ctx || !gn) {
-      return;
-    }
-    if (
-      !shouldHoldGainBeforePlayback({
-        targetGainLinear: targetGainLinearRef.current,
-      })
-    ) {
-      return;
-    }
-    try {
-      gn.gain.cancelScheduledValues(ctx.currentTime);
-      gn.gain.setValueAtTime(0, ctx.currentTime);
-    } catch {
-      // GainNode scheduling can throw on closed contexts — fall through and
-      // let the `playing` handler set the value imperatively.
-    }
-    if (options.firstPlayOfNewSource) {
-      awaitingFirstPlayingEventRef.current = true;
-    }
   }
 
   async function recoverPlaybackOutput(reason: string): Promise<void> {
@@ -6681,6 +6633,15 @@ export function App(): JSX.Element {
 
       void resumePlaybackContextIfNeeded()
         .then(() => audio.play())
+        .then(() => {
+          // Micro-crossfade: ramp gain back up after playback starts
+          const gn = playbackGainNodeRef.current;
+          const ctx = playbackAudioContextRef.current;
+          if (gn && ctx) {
+            gn.gain.setValueAtTime(gn.gain.value, ctx.currentTime);
+            gn.gain.linearRampToValueAtTime(targetGainLinearRef.current, ctx.currentTime + 0.015);
+          }
+        })
         .catch((cause: unknown) => {
           const message = cause instanceof Error ? cause.message : String(cause);
           setPlaybackError(
@@ -6692,10 +6653,6 @@ export function App(): JSX.Element {
             message,
           });
         });
-      // v3.225 — Fade-in is no longer triggered here. The `playing` event
-      // fires when audio output actually begins (not when `audio.play()`'s
-      // Promise resolves), which is the only event that reliably masks
-      // decoder cold-start jitter on first play. See onPlaying.
     };
 
     const onPlay = () => {
@@ -6714,38 +6671,6 @@ export function App(): JSX.Element {
       playbackIntentPlayingRef.current = true;
       logPlaybackEvent('playing');
       schedulePlaybackOutputRecovery('playing');
-
-      // v3.225 — Click-free fade-in. `playing` fires when audio output
-      // actually starts emitting (not when `audio.play()`'s Promise resolves,
-      // which is much earlier). Scheduling the ramp here is what makes the
-      // ramp coincide with the actual leading audio frames hitting the
-      // output device — eliminating the track-switch crackle.
-      //
-      // We pick a longer ramp on the FIRST `playing` event after a source
-      // switch (decoder cold start; jitter is largest there) and a shorter
-      // ramp on subsequent `playing` events (resume from buffer underrun /
-      // device-route recovery, where the decoder is already warm).
-      const gn = playbackGainNodeRef.current;
-      const ctx = playbackAudioContextRef.current;
-      const targetGainLinear = targetGainLinearRef.current;
-      if (
-        gn &&
-        ctx &&
-        shouldHoldGainBeforePlayback({ targetGainLinear })
-      ) {
-        const firstPlayOfSession = awaitingFirstPlayingEventRef.current;
-        awaitingFirstPlayingEventRef.current = false;
-        const fadeSeconds = getTrackSwitchFadeDurationSeconds({ firstPlayOfSession });
-        try {
-          gn.gain.cancelScheduledValues(ctx.currentTime);
-          gn.gain.setValueAtTime(gn.gain.value, ctx.currentTime);
-          gn.gain.linearRampToValueAtTime(targetGainLinear, ctx.currentTime + fadeSeconds);
-        } catch {
-          gn.gain.value = targetGainLinear;
-        }
-      } else {
-        awaitingFirstPlayingEventRef.current = false;
-      }
     };
 
     const onPause = () => {
@@ -9165,43 +9090,19 @@ export function App(): JSX.Element {
         pendingRestoreTimeSeconds: pendingRestoreTimeRef.current,
       });
 
-      // v3.225 — Hold gain at 0 during load so the fade-in after `playing`
-      // fires is click-free. Pre-v3.225 this only ran on the crossfade path,
-      // which left the "first play of a new track" case at full gain when the
-      // decoder cold-start emitted its leading frames — audible as a click.
-      // Now pinned unconditionally (subject to the mute-guard helper) so both
-      // playing→switch and paused→switch paths converge on a silent leading
-      // edge.
-      if (
-        gainNode &&
-        audioContext &&
-        shouldHoldGainBeforePlayback({ targetGainLinear: targetGainLinearRef.current })
-      ) {
-        gainNode.gain.cancelScheduledValues(audioContext.currentTime);
+      // Hold gain at 0 during load so the fade-in after canplay is click-free.
+      // Only needed when playback was active (crossfade path).
+      if (shouldCrossfade && gainNode && audioContext) {
         gainNode.gain.setValueAtTime(0, audioContext.currentTime);
       }
-
-      // Mark that we're waiting for the first `playing` event on this newly
-      // committed source. The `playing` handler reads this to pick the longer
-      // cold-start fade-in.
-      awaitingFirstPlayingEventRef.current = true;
 
       audio.load();
     };
 
-    // Micro-crossfade: ramp gain to 0 before switching to avoid an audible click.
-    //
-    // v3.226 — Codex CONSIDER. Bumped from 15ms → 30ms and added
-    // `cancelScheduledValues` before the ramp. 15ms was too short to fully
-    // mask the worst-case trailing-edge transient on platform-normalized
-    // tracks; 30ms is still imperceptible as a "fade" but reliably zeroes the
-    // bus before `audio.load()` swaps the source. `cancelScheduledValues`
-    // guards against an outstanding ramp from a prior crossfade or recovery
-    // event still being in flight at switch time.
+    // Micro-crossfade: ramp gain to 0 before switching to avoid an audible click
     if (shouldCrossfade && gainNode && audioContext) {
-      gainNode.gain.cancelScheduledValues(audioContext.currentTime);
       gainNode.gain.setValueAtTime(gainNode.gain.value, audioContext.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.03);
+      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.015);
 
       if (crossfadeTimerRef.current !== null) {
         clearTimeout(crossfadeTimerRef.current);
@@ -9209,7 +9110,7 @@ export function App(): JSX.Element {
       crossfadeTimerRef.current = setTimeout(() => {
         crossfadeTimerRef.current = null;
         commitSourceSwitch();
-      }, 30);
+      }, 15);
     } else {
       commitSourceSwitch();
     }
@@ -11250,10 +11151,6 @@ export function App(): JSX.Element {
       if (audio.paused) {
         try {
           playbackIntentPlayingRef.current = true;
-          // v3.226 — Codex MUST-FIX #2. Route this paused → play path through
-          // the pin-at-0 wrapper so the `onPlaying` ramp masks the leading
-          // frames. Pre-v3.226 this path hard-cut to full amplitude.
-          pinPlaybackGainBeforeDirectPlay();
           await resumePlaybackContextIfNeeded();
           await audio.play();
           logPlaybackEvent('song-row-double-click-played-current-selection');
@@ -11457,23 +11354,6 @@ export function App(): JSX.Element {
 
       try {
         playbackIntentPlayingRef.current = true;
-        // v3.225 — Pin gain to 0 before play so the `playing` handler can
-        // ramp it back up over the first ~35-60ms, masking any leading-frame
-        // click. This is the explicit play-button path (paused → play on an
-        // already-loaded source) which previously hard-cut to full amplitude.
-        //
-        // v3.226 — Codex MUST-FIX #2. Routed through the shared
-        // pinPlaybackGainBeforeDirectPlay wrapper so the same contract applies
-        // to all four direct-play entry points (this one, song-row
-        // double-click, quick-switcher, checklist-timestamp same-song).
-        //
-        // We don't reset awaitingFirstPlayingEventRef here. If this play is
-        // for the SAME source that was already loaded (i.e. source switch
-        // didn't just happen), the flag is already false and we'll get the
-        // shorter resume ramp on `playing`. If this play is for a fresh
-        // source, commitSourceSwitch already set the flag to true and
-        // we'll get the longer cold-start ramp on `playing`.
-        pinPlaybackGainBeforeDirectPlay();
         await resumePlaybackContextIfNeeded();
         await audio.play();
         logPlaybackEvent('play-requested-direct');
@@ -14126,10 +14006,6 @@ export function App(): JSX.Element {
       if (audio.paused) {
         try {
           playbackIntentPlayingRef.current = true;
-          // v3.226 — Codex MUST-FIX #2. Route this paused → play path through
-          // the pin-at-0 wrapper so the `onPlaying` ramp masks the leading
-          // frames. Pre-v3.226 this path hard-cut to full amplitude.
-          pinPlaybackGainBeforeDirectPlay();
           await resumePlaybackContextIfNeeded();
           await audio.play();
           logPlaybackEvent('quick-switcher-played-current-selection');
@@ -14311,10 +14187,6 @@ export function App(): JSX.Element {
     handleSeek(seconds);
 
     if (audio.paused) {
-      // v3.226 — Codex MUST-FIX #2. Route this paused → play path through the
-      // pin-at-0 wrapper so the `onPlaying` ramp masks the leading frames.
-      // Pre-v3.226 this path hard-cut to full amplitude.
-      pinPlaybackGainBeforeDirectPlay();
       void resumePlaybackContextIfNeeded()
         .then(() => {
           playbackIntentPlayingRef.current = true;

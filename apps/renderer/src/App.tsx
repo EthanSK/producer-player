@@ -18775,6 +18775,66 @@ export function App(): JSX.Element {
                   >
                     Detect
                   </button>
+                  {/*
+                    v3.220 — thin per-song "auto-set listening device on open"
+                    checkbox (voice 3130). Default ON. The Detect button
+                    next to it always works regardless of this checkbox
+                    state — this only gates the AUTOMATIC run that fires
+                    whenever the checklist modal opens.
+
+                    v3.223 — compact label "Auto set" + CSS hover tooltip
+                    (voice 3151). Renders inline-sized so it doesn't shove
+                    the chip strip around. Detailed explanation lives in
+                    the instant-fade popover (Save Copy / V·WAV pill pattern).
+
+                    v3.235 (Ethan voice 3243) — moved INSIDE
+                    `.listening-device-editor` (col-1 flex column) onto its
+                    own row beneath editor-actions so it stopped occupying
+                    col-2 row-1 of the strip grid.
+
+                    v3.238 (Ethan voice 3263) — promoted into the
+                    editor-actions row itself, sitting between Detect and
+                    Rename Selected so all three controls share ONE
+                    horizontal row instead of stacking. Reclaims the
+                    vertical gap v3.235 introduced. Rename Selected keeps
+                    its `margin-left: auto` so Detect + Auto set cluster
+                    on the left while Rename hugs the right edge.
+                  */}
+                  <label
+                    className="listening-device-auto-set-toggle"
+                    data-testid="listening-device-auto-set-toggle"
+                    aria-describedby="listening-device-auto-set-toggle-popover"
+                  >
+                    <input
+                      type="checkbox"
+                      className="listening-device-auto-set-toggle-input"
+                      checked={checklistModalAutoSetListeningDeviceEnabled}
+                      onChange={(event) =>
+                        handleToggleChecklistAutoSetListeningDevice(
+                          event.currentTarget.checked,
+                        )
+                      }
+                      aria-label="Auto-set listening device when this checklist opens"
+                      data-testid="listening-device-auto-set-toggle-input"
+                    />
+                    <span className="listening-device-auto-set-toggle-text">
+                      Auto set
+                    </span>
+                    <span
+                      id="listening-device-auto-set-toggle-popover"
+                      className="main-list-row-metadata-popover listening-device-auto-set-toggle-popover"
+                      role="tooltip"
+                    >
+                      <span className="main-list-row-metadata-popover-label">
+                        Auto set listening device
+                      </span>
+                      <span className="listening-device-auto-set-toggle-popover-body">
+                        {checklistModalAutoSetListeningDeviceEnabled
+                          ? 'When this checklist opens, the listening device is auto-set based on the current system audio output. Uncheck to disable for this track — the Detect button still works manually.'
+                          : 'Auto-set is OFF for this track when its checklist opens. Re-check to enable. The Detect button still works manually regardless of this setting.'}
+                      </span>
+                    </span>
+                  </label>
                   <button
                     type="button"
                     className={`listening-device-secondary-button${isListeningDeviceRenameMode ? ' is-active' : ''}`}
@@ -18806,66 +18866,6 @@ export function App(): JSX.Element {
                     </span>
                   ) : null}
                 </div>
-                {/*
-                  v3.220 — thin per-song "auto-set listening device on open"
-                  checkbox (voice 3130). Default ON. Sits between the
-                  editor-actions row and the chip strip so it reads as a
-                  modifier on the auto-switch behavior without dominating
-                  the modal. The Detect button above always works regardless
-                  of this checkbox state — this only gates the AUTOMATIC
-                  run that fires whenever the checklist modal opens.
-
-                  v3.223 — compact label "Auto set" + CSS hover tooltip
-                  (voice 3151). Was eating the full row width with the
-                  long "Auto-set listening device on open" label; now
-                  renders inline-sized so the chip strip / other elements
-                  aren't pushed around. Detailed explanation moved into
-                  the instant-fade popover (same pattern as Save Copy
-                  button / V·WAV pill).
-
-                  v3.235 (Ethan voice 3243) — moved INSIDE
-                  `.listening-device-editor` (the col-1 flex column). As a
-                  strip-level sibling the <label> landed in col-2 row-1 of
-                  the 2-column grid and visually hogged 50% of the header.
-                  Now nested under the editor it sits beneath the
-                  editor-actions row in col 1, takes only its own content
-                  width, and frees col 2 for the chip strip.
-                */}
-                <label
-                  className="listening-device-auto-set-toggle"
-                  data-testid="listening-device-auto-set-toggle"
-                  aria-describedby="listening-device-auto-set-toggle-popover"
-                >
-                  <input
-                    type="checkbox"
-                    className="listening-device-auto-set-toggle-input"
-                    checked={checklistModalAutoSetListeningDeviceEnabled}
-                    onChange={(event) =>
-                      handleToggleChecklistAutoSetListeningDevice(
-                        event.currentTarget.checked,
-                      )
-                    }
-                    aria-label="Auto-set listening device when this checklist opens"
-                    data-testid="listening-device-auto-set-toggle-input"
-                  />
-                  <span className="listening-device-auto-set-toggle-text">
-                    Auto set
-                  </span>
-                  <span
-                    id="listening-device-auto-set-toggle-popover"
-                    className="main-list-row-metadata-popover listening-device-auto-set-toggle-popover"
-                    role="tooltip"
-                  >
-                    <span className="main-list-row-metadata-popover-label">
-                      Auto set listening device
-                    </span>
-                    <span className="listening-device-auto-set-toggle-popover-body">
-                      {checklistModalAutoSetListeningDeviceEnabled
-                        ? 'When this checklist opens, the listening device is auto-set based on the current system audio output. Uncheck to disable for this track — the Detect button above still works manually.'
-                        : 'Auto-set is OFF for this track when its checklist opens. Re-check to enable. The Detect button above still works manually regardless of this setting.'}
-                    </span>
-                  </span>
-                </label>
               </div>
               <div
                 className="listening-device-chip-row"

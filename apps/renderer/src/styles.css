@@ -4303,12 +4303,14 @@ body.is-dragging-checklist-timestamp * {
 .listening-device-auto-set-toggle-popover {
   right: auto;
   left: 0;
+  width: min(360px, calc(100vw - 24px));
   max-width: min(360px, calc(100vw - 24px));
   text-transform: none;
   letter-spacing: normal;
 }
 
 .listening-device-auto-set-toggle-popover-body {
+  display: block;
   color: var(--text-main);
   font-weight: 500;
   white-space: normal;

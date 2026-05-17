@@ -9718,8 +9718,35 @@ button.reference-action.active {
   display: contents;
 }
 
-.instant-tooltip-popover {
+/* v3.232 — popover now renders via React Portal to document.body, so
+ * its layout `top`/`left` come from JS (`position: fixed`) rather than
+ * being anchored to the host via CSS. The CSS still owns visual styling
+ * (background, padding, font, transition) and the slide-in transform
+ * direction per placement variant.
+ *
+ * Note: the inline `style` attribute set by InstantTooltipPopover.tsx
+ * provides `position: fixed`, `top`, `left`, and a layout `transform`
+ * that translates the popover by `-100%` on the axes where the anchor
+ * point describes a far edge (right-edge for `*-end`, bottom-edge for
+ * `top-*`). The slide-in transform from the CSS variants is APPENDED to
+ * that layout transform via the `--instant-tooltip-slide` custom
+ * property — see the `.instant-tooltip-popover--*` rules below.
+ *
+ * The tracker element (zero-size sibling of the host's other children)
+ * is just a DOM marker that lets the popover walk up to its host.
+ */
+.instant-tooltip-tracker {
   position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.instant-tooltip-popover {
+  /* `position: fixed`, `top`, `left`, `transform` are set inline by
+     InstantTooltipPopover.tsx — JS-driven layout escapes every ancestor
+     clipping context. */
   z-index: 80;
   display: flex;
   flex-direction: column;
@@ -9740,47 +9767,29 @@ button.reference-action.active {
   text-align: left;
   text-transform: none;
   white-space: normal;
+  /* Opacity controlled by the `--open` modifier class. Portal mount is
+     unconditional once open, so we animate just the opacity. */
   opacity: 0;
   pointer-events: none;
-  transition:
-    opacity 60ms ease,
-    transform 60ms ease;
+  transition: opacity 60ms ease;
 }
 
-/* Placement variants — control which edge the popover anchors to and
-   which direction it slides in from. */
-.instant-tooltip-popover--top-end {
-  bottom: calc(100% + 6px);
-  right: 0;
-  transform: translateY(2px);
-}
-
-.instant-tooltip-popover--top-start {
-  bottom: calc(100% + 6px);
-  left: 0;
-  transform: translateY(2px);
-}
-
-.instant-tooltip-popover--bottom-end {
-  top: calc(100% + 6px);
-  right: 0;
-  transform: translateY(-2px);
-}
-
-.instant-tooltip-popover--bottom-start {
-  top: calc(100% + 6px);
-  left: 0;
-  transform: translateY(-2px);
-}
-
-/* Reveal on hover / focus of the host OR any descendant. `focus-within`
-   covers keyboard focus on the inner button/link/input. */
-.instant-tooltip-host:hover > .instant-tooltip-popover,
-.instant-tooltip-host:focus-within > .instant-tooltip-popover,
-.instant-tooltip-host:focus-visible > .instant-tooltip-popover {
+/* When the React state flips `open=true`, the JS sets the inline
+   transform, then we fade in. */
+.instant-tooltip-popover--open {
   opacity: 1;
-  transform: translateY(0);
-  /* Keep pointer-events:none so the popover never blocks clicks. */
+}
+
+/* Placement variants — retained as data classes for any external CSS
+   that wants to target them, and (intentionally a no-op for layout) for
+   forward-compat. Layout is JS-driven; these classes no longer set
+   `top`/`bottom`/`left`/`right`/`transform`. */
+.instant-tooltip-popover--top-end,
+.instant-tooltip-popover--top-start,
+.instant-tooltip-popover--bottom-end,
+.instant-tooltip-popover--bottom-start {
+  /* Intentionally empty — placement is encoded in the inline transform.
+     Kept as targetable selectors for future tweaks. */
 }
 
 .instant-tooltip-popover-label {

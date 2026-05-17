@@ -3,12 +3,14 @@ import {
   isValidElement,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
   type ReactElement,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * v3.226 — instant-fade custom tooltip components. Standardise every
@@ -18,31 +20,30 @@ import {
  * v3.231 — viewport-edge auto-flip. Top-bar tooltips (branding card,
  * Add Folder, album-area toolbar) sit near the top of the viewport
  * with no room above; the default top-end placement renders offscreen
- * and Chromium clips it. On hover/focus, we now measure the host's
- * bounding rect and flip the placement to the opposite vertical side
- * when the preferred side doesn't fit. The CSS still owns the actual
- * positioning — we only swap which `instant-tooltip-popover--*` class
- * is applied. Auto-flip works for BOTH usage patterns:
- *   1) `<InstantTooltipPopover>` standalone (the bulk-migration shape)
- *      — the popover walks up to its parent `.instant-tooltip-host`
- *      and listens for pointer/focus on that host.
- *   2) `<InstantTooltip>` wrapper — the wrapper owns the host ref and
- *      drives the flip directly.
+ * and Chromium clips it.
+ *
+ * v3.232 — React Portal for clipping escape. v3.231 fixed viewport-edge
+ * clipping but ancestor `overflow:hidden|auto` clipping remained:
+ * `folder-tools-card` + `panel-left` (Add Folder) and the `.actions` row
+ * + `panel-main` (Save Copy on All) clip absolutely-positioned children
+ * regardless of CSS placement. The fix is to render the popover via
+ * `ReactDOM.createPortal(..., document.body)` so the DOM node escapes
+ * every clipping ancestor, then position it via JS using
+ * `host.getBoundingClientRect()` with `position: fixed`. The CSS
+ * placement classes are retained for visual styling (slide-in transform
+ * direction, border-radius corner) but no longer drive layout
+ * positioning — the body lives at the top of the DOM tree, so there is
+ * no clipping ancestor to escape from.
  *
  * The native `title=` attribute is slow (≥500ms OS delay), OS-styled
- * (inconsistent across platforms), and not customisable. We mirror the
- * `.main-list-row-metadata-popover` pattern: a pure-CSS instant-fade
- * popover that anchors absolutely against a `position: relative` host
- * element, with a 60ms opacity/transform transition triggered on
- * `:hover` / `:focus-within`.
+ * (inconsistent across platforms), and not customisable. The custom
+ * popover gives us a 60ms opacity transition and full styling control.
  *
  * Two usage patterns are offered, in order of preference:
  *
  * 1) `<InstantTooltipPopover>` — non-invasive. Render it as the LAST
  *    CHILD of an existing element, and add `instant-tooltip-host` and
- *    `instant-tooltip-host--<wrap>` to the element's className. Zero
- *    layout impact. Use this for the bulk migration (replaces the
- *    native `title=` attribute one-for-one without wrapping).
+ *    `instant-tooltip-host--<wrap>` to the element's className.
  *
  *      <button
  *        className="reset-all-times-button instant-tooltip-host instant-tooltip-host--inline-flex"
@@ -53,10 +54,6 @@ import {
  *      </button>
  *
  * 2) `<InstantTooltip>` — wrapper. Wraps the child in a host `<span>`.
- *    Convenient when adding a tooltip to an element you can't easily
- *    modify (third-party component, deeply nested JSX), but does add a
- *    wrapper span and may affect inline-flex/grid layouts. Prefer
- *    pattern 1 unless wrapping is genuinely needed.
  *
  *      <InstantTooltip content="...">
  *        <SomeThirdPartyComponent />
@@ -72,29 +69,25 @@ export type InstantTooltipPlacement =
 export type InstantTooltipWrap = 'inline-flex' | 'block' | 'contents';
 
 /**
- * Estimated popover height including the 6px host-margin from the CSS
- * `bottom/top: calc(100% + 6px)`. Real popovers run ~24–72px depending
- * on body length; we deliberately overshoot a touch so a 1-line tooltip
- * near the top doesn't render in negative-y. The CSS still wraps long
- * content at `max-width: min(360px, calc(100vw - 24px))`, so flipping a
- * tall tooltip from top to bottom is always safe — there's always more
- * room below than above for a top-bar element.
+ * Estimated popover height including the 6px host-margin. Real popovers
+ * run ~24–72px depending on body length; we deliberately overshoot a
+ * touch so a 1-line tooltip near the top doesn't render in negative-y.
+ * Used by the pure decision helper for vertical flip; the runtime path
+ * can later swap in `popoverEl.offsetHeight` if we want a tighter fit.
  */
 export const INSTANT_TOOLTIP_ESTIMATED_HEIGHT = 120;
 
 /**
+ * Host-popover gap in pixels. Matches the v3.231 CSS `calc(100% + 6px)`
+ * spacing so the visual position is identical pre/post-portal.
+ */
+export const INSTANT_TOOLTIP_HOST_GAP = 6;
+
+/**
  * Pure decision helper — given the host's top/bottom edges and the
  * viewport height plus the caller's preferred placement, return the
- * placement that will actually fit on screen.
- *
- * The CSS placement names encode TWO axes:
- *   - `top-*`    / `bottom-*`  — vertical (which side the popover sits on)
- *   - `*-start`  / `*-end`     — horizontal (which edge it aligns to)
- *
- * v3.231 only flips the vertical axis when there isn't enough room above
- * a top-* placement (or below a bottom-* placement). Horizontal flipping
- * follows for free if we later want it; right now the bug is purely
- * top-edge clipping on the top-bar.
+ * placement that will actually fit on screen. Unchanged from v3.231 —
+ * still vertical-axis only; horizontal axis is preserved.
  */
 export function decideTooltipPlacement(
   hostTop: number,
@@ -112,7 +105,6 @@ export function decideTooltipPlacement(
       if (roomBelow >= popoverHeight) {
         return `bottom-${horizontalSuffix}` as InstantTooltipPlacement;
       }
-      // Neither side has room — pick the larger one.
       return hostTop >= roomBelow
         ? defaultPlacement
         : (`bottom-${horizontalSuffix}` as InstantTooltipPlacement);
@@ -120,7 +112,6 @@ export function decideTooltipPlacement(
     return defaultPlacement;
   }
 
-  // bottom-* default
   const roomBelow = viewportHeight - hostBottom;
   if (roomBelow < popoverHeight) {
     if (hostTop >= popoverHeight) {
@@ -134,10 +125,63 @@ export function decideTooltipPlacement(
 }
 
 /**
+ * v3.232 — Pure position helper. Given the host's DOMRect-shape, the
+ * resolved placement (post-auto-flip) and the host-popover gap, return
+ * the `position: fixed` coordinates for the popover.
+ *
+ * The CSS for each placement variant continues to provide the visual
+ * `transform` (a 2px slide-in on the opening direction), but the layout
+ * `top`/`left` no longer come from CSS — they come from here.
+ *
+ * Conventions, mirroring the v3.231 CSS:
+ *   • `*-end`    aligns the popover's RIGHT edge to the host's right edge.
+ *   • `*-start`  aligns the popover's LEFT edge to the host's left edge.
+ *   • `top-*`    sits the popover ABOVE the host (BOTTOM edge ≈ host top - gap).
+ *   • `bottom-*` sits the popover BELOW the host (TOP edge ≈ host bottom + gap).
+ *
+ * Because `position: fixed` is set against the viewport (root containing
+ * block) instead of `position: absolute` against the host (per-ancestor
+ * containing block), the popover's coordinate origin is the same as the
+ * host's `getBoundingClientRect()` origin — no scroll-offset math needed.
+ *
+ * For `top-*` placements we describe the BOTTOM edge of the popover (the
+ * caller uses `transform: translateY(-100%)` to convert that to a `top`
+ * value). For `bottom-*` we describe the TOP edge directly. The CSS
+ * already declares the right translate for each variant.
+ */
+export interface InstantTooltipAnchorPoint {
+  /**
+   * Vertical reference point for the popover.
+   *   • For `top-*`    placements this is the y of the popover's BOTTOM edge.
+   *   • For `bottom-*` placements this is the y of the popover's TOP edge.
+   */
+  y: number;
+  /**
+   * Horizontal reference point for the popover.
+   *   • For `*-end`    placements this is the x of the popover's RIGHT edge.
+   *   • For `*-start`  placements this is the x of the popover's LEFT edge.
+   */
+  x: number;
+}
+
+export function computeTooltipAnchor(
+  hostRect: { top: number; bottom: number; left: number; right: number },
+  placement: InstantTooltipPlacement,
+  gap: number = INSTANT_TOOLTIP_HOST_GAP,
+): InstantTooltipAnchorPoint {
+  const wantsTop = placement.startsWith('top-');
+  const wantsEnd = placement.endsWith('-end');
+  return {
+    y: wantsTop ? hostRect.top - gap : hostRect.bottom + gap,
+    x: wantsEnd ? hostRect.right : hostRect.left,
+  };
+}
+
+/**
  * Walks up from the popover element to find its `.instant-tooltip-host`
- * ancestor. Used by the standalone `<InstantTooltipPopover>` pattern
- * (the bulk-migration shape) to attach auto-flip listeners to the host
- * element it's nested inside. Exported only for testing.
+ * ancestor. Kept for the standalone `<InstantTooltipPopover>` pattern
+ * (the popover is rendered as a sibling of the host's other children
+ * inside the host element). Exported only for testing.
  */
 export function findTooltipHost(start: Element | null): HTMLElement | null {
   let node: Element | null = start;
@@ -154,34 +198,34 @@ export function findTooltipHost(start: Element | null): HTMLElement | null {
 }
 
 export interface InstantTooltipPopoverProps {
-  /**
-   * Tooltip body content. May be plain text or rich ReactNode.
-   */
   content: ReactNode;
-  /**
-   * Anchor placement relative to the host element. Defaults to
-   * `top-end` (matches Save Copy: anchored to the right edge,
-   * fading in above-then-down).
-   */
   placement?: InstantTooltipPlacement;
-  /**
-   * Optional short uppercase label rendered above the body.
-   * Mirrors the `.main-list-row-metadata-popover-label` heading.
-   */
   label?: ReactNode;
-  /**
-   * Override the popover's max-width (passed through as inline style).
-   * Defaults to the CSS-side `min(360px, calc(100vw - 24px))`.
-   */
   maxWidth?: number | string;
-  /**
-   * Optional id; auto-generated if not supplied. Useful when the
-   * host element wants to set `aria-describedby` to point at the
-   * popover.
-   */
   id?: string;
 }
 
+/**
+ * v3.232 — Portal-based popover.
+ *
+ * Implementation notes:
+ *   • A tiny tracker `<span>` is rendered inline as the last child of the
+ *     host. We use it only to locate the `.instant-tooltip-host` ancestor
+ *     (same mechanism as v3.231). It has zero size and no visual effect.
+ *   • Pointer/focus listeners attach to the host. On enter, we measure
+ *     the host rect, decide the placement, compute the anchor, and open
+ *     the portal. On leave/blur, we close.
+ *   • The portal renders the popover to `document.body`, so no ancestor
+ *     `overflow:hidden|auto` can clip it. Position is `fixed` (driven by
+ *     the computed anchor).
+ *   • The popover is `pointer-events: none` and `aria-hidden` when not
+ *     open, matching the v3.231 invariant: it never blocks clicks and is
+ *     hidden from assistive tech when closed.
+ *   • The tracker carries the `id` attribute so any `aria-describedby`
+ *     reference from the trigger still resolves; when the portal is open
+ *     we also expose the same id on the floating popover for SR consumers
+ *     that follow the live tree.
+ */
 export function InstantTooltipPopover({
   content,
   placement = 'top-end',
@@ -189,85 +233,149 @@ export function InstantTooltipPopover({
   maxWidth,
   id,
 }: InstantTooltipPopoverProps): JSX.Element {
+  const trackerRef = useRef<HTMLSpanElement | null>(null);
   const popoverRef = useRef<HTMLSpanElement | null>(null);
+  const [open, setOpen] = useState(false);
   const [resolvedPlacement, setResolvedPlacement] =
     useState<InstantTooltipPlacement>(placement);
+  const [anchor, setAnchor] = useState<InstantTooltipAnchorPoint | null>(null);
 
-  // Auto-flip when the host is hovered/focused. We attach listeners to
-  // the *host* (the popover itself is pointer-events:none and never
-  // gets pointer events) so we can measure before the CSS opacity
-  // transition completes. The 60ms fade is plenty of headroom for a
-  // synchronous setState + reflow.
+  // Find the host once on mount (and after re-renders that swap the host).
   useEffect(() => {
-    const popover = popoverRef.current;
-    if (!popover) return;
-    const host = findTooltipHost(popover.parentElement);
+    const tracker = trackerRef.current;
+    if (!tracker) return;
+    const host = findTooltipHost(tracker.parentElement);
     if (!host) return;
+    if (typeof window === 'undefined') return;
 
-    const measureAndFlip = () => {
+    const measureAndOpen = () => {
       const rect = host.getBoundingClientRect();
-      const viewportHeight =
-        typeof window !== 'undefined' ? window.innerHeight : 0;
       const next = decideTooltipPlacement(
         rect.top,
         rect.bottom,
-        viewportHeight,
+        window.innerHeight,
         placement,
       );
-      setResolvedPlacement((prev) => (prev === next ? prev : next));
+      setResolvedPlacement(next);
+      setAnchor(computeTooltipAnchor(rect, next));
+      setOpen(true);
     };
+    const close = () => setOpen(false);
 
-    host.addEventListener('pointerenter', measureAndFlip);
-    host.addEventListener('focusin', measureAndFlip);
+    host.addEventListener('pointerenter', measureAndOpen);
+    host.addEventListener('pointerleave', close);
+    host.addEventListener('focusin', measureAndOpen);
+    host.addEventListener('focusout', close);
     return () => {
-      host.removeEventListener('pointerenter', measureAndFlip);
-      host.removeEventListener('focusin', measureAndFlip);
+      host.removeEventListener('pointerenter', measureAndOpen);
+      host.removeEventListener('pointerleave', close);
+      host.removeEventListener('focusin', measureAndOpen);
+      host.removeEventListener('focusout', close);
     };
   }, [placement]);
 
+  // While open, keep the anchor in sync with scroll/resize so the popover
+  // tracks the host (e.g. a sticky toolbar that scrolls under it).
+  useLayoutEffect(() => {
+    if (!open) return;
+    const tracker = trackerRef.current;
+    if (!tracker) return;
+    const host = findTooltipHost(tracker.parentElement);
+    if (!host) return;
+    if (typeof window === 'undefined') return;
+
+    const reanchor = () => {
+      const rect = host.getBoundingClientRect();
+      const next = decideTooltipPlacement(
+        rect.top,
+        rect.bottom,
+        window.innerHeight,
+        placement,
+      );
+      setResolvedPlacement(next);
+      setAnchor(computeTooltipAnchor(rect, next));
+    };
+
+    window.addEventListener('scroll', reanchor, true);
+    window.addEventListener('resize', reanchor);
+    return () => {
+      window.removeEventListener('scroll', reanchor, true);
+      window.removeEventListener('resize', reanchor);
+    };
+  }, [open, placement]);
+
   const popoverClassName = [
     'instant-tooltip-popover',
+    'instant-tooltip-popover--portal',
     `instant-tooltip-popover--${resolvedPlacement}`,
     label ? 'instant-tooltip-popover--has-label' : null,
+    open ? 'instant-tooltip-popover--open' : null,
   ]
     .filter(Boolean)
     .join(' ');
 
-  const popoverStyle: CSSProperties | undefined =
-    maxWidth !== undefined ? { maxWidth } : undefined;
+  // Vertical: `top-*` describes the popover's BOTTOM edge → translate
+  // up by 100% of its own height. `bottom-*` describes the TOP edge →
+  // no Y translation needed (slide-in transform comes from CSS).
+  // Horizontal: `*-end` describes the popover's RIGHT edge → translate
+  // left by 100% of its own width. `*-start` describes the LEFT edge →
+  // no X translation needed.
+  const wantsTop = resolvedPlacement.startsWith('top-');
+  const wantsEnd = resolvedPlacement.endsWith('-end');
+  const layoutTransform = `translate(${wantsEnd ? '-100%' : '0'}, ${wantsTop ? '-100%' : '0'})`;
+
+  const popoverStyle: CSSProperties = {
+    position: 'fixed',
+    top: anchor ? `${anchor.y}px` : '-9999px',
+    left: anchor ? `${anchor.x}px` : '-9999px',
+    transform: layoutTransform,
+    ...(maxWidth !== undefined ? { maxWidth } : {}),
+  };
+
+  // Tracker is a minimal inline marker that exists in the host's DOM so
+  // we can resolve `findTooltipHost`. Zero-size, aria-hidden, no styling.
+  const tracker = (
+    <span
+      ref={trackerRef}
+      className="instant-tooltip-tracker"
+      aria-hidden="true"
+      data-tooltip-id={id}
+    />
+  );
+
+  if (typeof document === 'undefined') return tracker;
+
+  const portal = open
+    ? createPortal(
+        <span
+          ref={popoverRef}
+          id={id}
+          className={popoverClassName}
+          role="tooltip"
+          style={popoverStyle}
+          data-placement={resolvedPlacement}
+        >
+          {label ? (
+            <span className="instant-tooltip-popover-label">{label}</span>
+          ) : null}
+          <span className="instant-tooltip-popover-body">{content}</span>
+        </span>,
+        document.body,
+      )
+    : null;
 
   return (
-    <span
-      ref={popoverRef}
-      id={id}
-      className={popoverClassName}
-      role="tooltip"
-      style={popoverStyle}
-    >
-      {label ? <span className="instant-tooltip-popover-label">{label}</span> : null}
-      <span className="instant-tooltip-popover-body">{content}</span>
-    </span>
+    <>
+      {tracker}
+      {portal}
+    </>
   );
 }
 
 export interface InstantTooltipProps extends InstantTooltipPopoverProps {
-  /**
-   * Host wrapper display mode. `inline-flex` (default) works for nearly
-   * everything; switch to `block` when wrapping a block-level child
-   * (e.g. a card that uses flex/grid for its own layout).
-   */
   wrap?: InstantTooltipWrap;
-  /**
-   * Extra className applied to the host wrapper.
-   */
   className?: string;
-  /**
-   * The trigger element. Should be exactly one element.
-   */
   children: ReactNode;
-  /**
-   * Optional `data-testid` for the host wrapper.
-   */
   'data-testid'?: string;
 }
 
@@ -292,8 +400,6 @@ export function InstantTooltip({
     .filter(Boolean)
     .join(' ');
 
-  // Merge our aria-describedby with any existing one on the child so we
-  // don't clobber a caller-provided describedby.
   let trigger: ReactNode = children;
   if (isValidElement(children)) {
     const childElement = children as ReactElement<{ 'aria-describedby'?: string }>;
@@ -306,10 +412,6 @@ export function InstantTooltip({
     });
   }
 
-  // The wrapper component delegates auto-flip to the popover (which
-  // walks up to find this host element via the shared `.instant-tooltip-host`
-  // class — the same mechanism as the standalone pattern). No extra
-  // wiring needed here.
   return (
     <span className={hostClassName} data-testid={dataTestId}>
       {trigger}

@@ -6,16 +6,32 @@
  * popover. `decideTooltipPlacement` is the pure decision function that
  * picks the placement that will actually fit.
  *
- * The full integration (host pointerenter listener → measure rect →
- * setState) lives in InstantTooltipPopover/InstantTooltip; those are
- * covered by Playwright spot-checks on Mini. The pure helper is what
- * we unit-test here.
+ * v3.232 — add coverage for `computeTooltipAnchor` (the second pure
+ * helper introduced when we moved the popover into a React Portal) and
+ * source-contract checks for the portal wiring. The portal/runtime
+ * behaviour itself is covered by the Mini spot-checks; here we lock in
+ * the pure math + the fact that the source uses `createPortal` against
+ * `document.body` and a `position: fixed` layout (so an accidental
+ * refactor back to `position: absolute` against the host would fail
+ * locally before getting near a release).
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
+  computeTooltipAnchor,
   decideTooltipPlacement,
   INSTANT_TOOLTIP_ESTIMATED_HEIGHT,
+  INSTANT_TOOLTIP_HOST_GAP,
 } from './InstantTooltip';
+
+const componentSource = readFileSync(
+  new URL('./InstantTooltip.tsx', import.meta.url),
+  'utf8',
+) as string;
+const stylesSource = readFileSync(
+  new URL('./styles.css', import.meta.url),
+  'utf8',
+) as string;
 
 const VIEWPORT = 900;
 
@@ -122,5 +138,83 @@ describe('decideTooltipPlacement', () => {
     expect(
       decideTooltipPlacement(VIEWPORT - 20, VIEWPORT - 4, VIEWPORT, 'bottom-end'),
     ).toBe('top-end');
+  });
+});
+
+describe('computeTooltipAnchor', () => {
+  const HOST = { top: 200, bottom: 232, left: 400, right: 480 };
+
+  it('top-end → y is host top - gap, x is host right', () => {
+    expect(computeTooltipAnchor(HOST, 'top-end')).toEqual({
+      y: 200 - INSTANT_TOOLTIP_HOST_GAP,
+      x: 480,
+    });
+  });
+
+  it('top-start → y is host top - gap, x is host left', () => {
+    expect(computeTooltipAnchor(HOST, 'top-start')).toEqual({
+      y: 200 - INSTANT_TOOLTIP_HOST_GAP,
+      x: 400,
+    });
+  });
+
+  it('bottom-end → y is host bottom + gap, x is host right', () => {
+    expect(computeTooltipAnchor(HOST, 'bottom-end')).toEqual({
+      y: 232 + INSTANT_TOOLTIP_HOST_GAP,
+      x: 480,
+    });
+  });
+
+  it('bottom-start → y is host bottom + gap, x is host left', () => {
+    expect(computeTooltipAnchor(HOST, 'bottom-start')).toEqual({
+      y: 232 + INSTANT_TOOLTIP_HOST_GAP,
+      x: 400,
+    });
+  });
+
+  it('honours a custom gap override (e.g. denser layouts)', () => {
+    expect(computeTooltipAnchor(HOST, 'top-end', 12)).toEqual({
+      y: 188,
+      x: 480,
+    });
+    expect(computeTooltipAnchor(HOST, 'bottom-start', 0)).toEqual({
+      y: 232,
+      x: 400,
+    });
+  });
+});
+
+describe('InstantTooltipPopover source contract (v3.232 portal)', () => {
+  it('imports `createPortal` from react-dom', () => {
+    // Locks in the portal wiring at the source level — accidental
+    // refactor back to a plain absolutely-positioned span would fail
+    // here long before it reaches Mini E2E.
+    expect(componentSource).toMatch(
+      /import\s*\{[^}]*\bcreatePortal\b[^}]*\}\s*from\s*['"]react-dom['"]/,
+    );
+  });
+
+  it('renders the popover into document.body via createPortal', () => {
+    expect(componentSource).toMatch(/createPortal\([^,]+,\s*document\.body\s*\)/);
+  });
+
+  it('uses position: fixed for the popover (not absolute)', () => {
+    // The inline style object on the popover must declare
+    // `position: 'fixed'` so it escapes ancestor scroll/clip contexts.
+    expect(componentSource).toMatch(/position:\s*['"]fixed['"]/);
+  });
+
+  it('removes the legacy CSS `position: absolute` on `.instant-tooltip-popover`', () => {
+    // Regression guard for the v3.232 CSS migration: the popover rule
+    // must not declare `position: absolute` any more (layout now comes
+    // from the inline `position: fixed`).
+    const popoverRule =
+      stylesSource.match(/\.instant-tooltip-popover\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(popoverRule).not.toMatch(/position:\s*absolute/);
+  });
+
+  it('attaches pointerleave/focusout listeners so the portal hides on exit', () => {
+    expect(componentSource).toMatch(/addEventListener\(['"]pointerleave['"]/);
+    expect(componentSource).toMatch(/addEventListener\(['"]focusout['"]/);
   });
 });

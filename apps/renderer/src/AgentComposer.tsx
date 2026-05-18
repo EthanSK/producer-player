@@ -23,6 +23,7 @@ import {
   stopMediaStream,
   transcribeAudioBlob,
 } from './lib/sttTranscribe';
+import { requestOpenAgentSettings } from './AgentChatPanel';
 
 interface AgentComposerProps {
   onSend: (message: string) => void | Promise<void>;
@@ -40,6 +41,28 @@ interface AgentComposerProps {
    * pasted files up so the panel can stage them alongside drag-and-drop.
    */
   onPasteFiles?: (files: File[]) => void;
+}
+
+/**
+ * v3.239 — true when `getUserMedia` rejected because the user / OS denied
+ * microphone access. See identical helper in `lib/useMicTranscribe.ts`.
+ */
+function isMicPermissionError(error: unknown): boolean {
+  if (!error) return false;
+  const name =
+    typeof (error as { name?: unknown }).name === 'string'
+      ? (error as { name: string }).name
+      : '';
+  const message =
+    typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message.toLowerCase()
+      : '';
+  return (
+    name === 'NotAllowedError' ||
+    name === 'SecurityError' ||
+    message.includes('permission denied') ||
+    message.includes('not allowed')
+  );
 }
 
 function formatAttachmentSize(bytes: number): string {
@@ -386,6 +409,10 @@ export function AgentComposer({
       key = await readKeyForProvider(activeProvider);
       if (!key) {
         const providerName = getProviderDisplayName(activeProvider);
+        // v3.239 — reroute the user straight to the relevant API key
+        // section in the Settings tab so they can configure it without
+        // hunting for the panel.
+        requestOpenAgentSettings({ scrollTo: 'sttKey' });
         showToast(
           `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
         );
@@ -395,6 +422,7 @@ export function AgentComposer({
       // Key exists — fall through to start recording
     } else if (!hasSelectedProviderKey) {
       const providerName = getProviderDisplayName(activeProvider);
+      requestOpenAgentSettings({ scrollTo: 'sttKey' });
       showToast(
         `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
       );
@@ -456,6 +484,7 @@ export function AgentComposer({
         key ??= await readKeyForProvider(activeProvider);
         if (!key) {
           await refreshVoiceSettings();
+          requestOpenAgentSettings({ scrollTo: 'sttKey' });
           showToast(
             `${getProviderDisplayName(activeProvider)} API key is missing. Add it in Producey Boy settings.`
           );
@@ -495,6 +524,13 @@ export function AgentComposer({
       stopMediaStream(mediaStreamRef.current);
       mediaStreamRef.current = null;
       cleanupAudioContext();
+      // v3.239 — if the mic was blocked at the OS / browser permission
+      // layer, send the user to the Settings panel so they can grant
+      // microphone permission (the row sits adjacent to the API key
+      // sections we anchor to).
+      if (isMicPermissionError(error)) {
+        requestOpenAgentSettings({ scrollTo: 'sttKey' });
+      }
       showToast(errorToMessage(error));
       flashError();
     }

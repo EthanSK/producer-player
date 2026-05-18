@@ -205,6 +205,55 @@ function writeStoredAgentChatBounds(bounds: AgentChatPanelBounds | null): void {
 export const OPEN_AGENT_SETTINGS_EVENT = 'producer-player:open-agent-settings';
 
 /**
+ * Internal event re-dispatched AFTER the settings panel has been mounted,
+ * carrying a {scrollTo} hint so AgentSettings can scroll its API-key
+ * anchors into view. Subscribers live inside the AgentSettings component.
+ */
+export const AGENT_SETTINGS_SCROLL_EVENT =
+  'producer-player:agent-settings-scroll-to';
+
+/**
+ * v3.239 — when a mic button is clicked but the corresponding STT API key is
+ * missing (or the mic permission is denied), the click is rerouted to
+ * "open the agent chat panel → Settings tab → scroll to the relevant API
+ * key section". The reroute is driven by dispatching
+ * OPEN_AGENT_SETTINGS_EVENT with this scroll-target hint in the event
+ * `detail`. AgentSettings listens for the same event and runs
+ * `scrollIntoView()` on the matching anchor.
+ *
+ * `'sttKey'` resolves to whichever provider section matches the currently
+ * selected sttProvider (Deepgram vs AssemblyAI) — callers don't need to
+ * know which provider is active.
+ */
+export type AgentSettingsScrollTarget = 'sttKey' | 'deepgram' | 'assemblyai';
+
+export interface OpenAgentSettingsEventDetail {
+  scrollTo?: AgentSettingsScrollTarget;
+}
+
+/**
+ * Helper: open the agent chat panel, switch to the Settings tab, and
+ * (optionally) scroll the API key section into view. Safe to call from
+ * any component without taking a direct dependency on AgentChatPanel
+ * state — the panel is event-driven.
+ */
+export function requestOpenAgentSettings(
+  detail: OpenAgentSettingsEventDetail = {}
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent<OpenAgentSettingsEventDetail>(OPEN_AGENT_SETTINGS_EVENT, {
+        detail,
+      })
+    );
+  } catch {
+    // Older environments without CustomEvent — fall back to a plain Event.
+    window.dispatchEvent(new Event(OPEN_AGENT_SETTINGS_EVENT));
+  }
+}
+
+/**
  * A DataTransfer drag is relevant to the file-drop overlay only when the drag
  * contains at least one "Files" item. This lets us ignore purely text drags
  * (e.g. dragging selected text inside the renderer for the panel-reorder
@@ -1332,8 +1381,28 @@ export function AgentChatPanel({
   }, []);
 
   useEffect(() => {
-    const handleOpenSettingsRequest = () => {
+    const handleOpenSettingsRequest = (event: Event) => {
       handleOpenSettings();
+      // v3.239 — if the dispatch carried a scrollTo hint, re-emit it as
+      // an internal event AFTER the settings panel has mounted so
+      // AgentSettings can pick it up and scroll the right section into
+      // view. The setTimeout(0) gives React a tick to mount the
+      // <AgentSettings> subtree.
+      const detail = (event as CustomEvent<OpenAgentSettingsEventDetail>).detail;
+      if (detail && detail.scrollTo) {
+        setTimeout(() => {
+          try {
+            window.dispatchEvent(
+              new CustomEvent<OpenAgentSettingsEventDetail>(
+                AGENT_SETTINGS_SCROLL_EVENT,
+                { detail }
+              )
+            );
+          } catch {
+            /* ignore */
+          }
+        }, 0);
+      }
     };
 
     window.addEventListener(OPEN_AGENT_SETTINGS_EVENT, handleOpenSettingsRequest);

@@ -3724,9 +3724,31 @@ body.floating-switcher-panel-dragging * {
   height: 12px;
 }
 
+/* v3.239 — Per-item edit mic.
+   1. Size bumped from 22px → 26px so it's visually consistent with the
+      add-item composer's mic (also 26px) and is no longer "absolutely
+      tiny" next to the sibling action buttons (Ethan voice 3283).
+   2. Focus-gated: hidden by default; only revealed when the row's
+      textarea (or the mic itself) has focus. Position stays inside
+      .checklist-item-actions where it was in v3.236 — Ethan initially
+      asked for an overlay-bottom-right placement, then reverted:
+      "keep it where it is now actually, but only show it when its
+      input is focused". :focus-within on the row covers both the
+      textarea-focused state AND the moment the user clicks the mic
+      itself, so the button doesn't snap-hide mid-click. */
 .checklist-mic-button--item.agent-mic-button {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.checklist-item-row:focus-within .checklist-mic-button--item.agent-mic-button {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .checklist-add-device-group {

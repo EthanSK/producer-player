@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AgentModelDefinition,
   AgentModelId,
@@ -8,6 +8,10 @@ import type {
   AgentThinkingOption,
 } from '@producer-player/contracts';
 import { AGENT_PROVIDER_LABELS } from './agentModels';
+import {
+  AGENT_SETTINGS_SCROLL_EVENT,
+  type OpenAgentSettingsEventDetail,
+} from './AgentChatPanel';
 import {
   AGENT_STT_PROVIDER_LABELS,
   type AgentMicChannelMode,
@@ -107,6 +111,68 @@ export function AgentSettings({
   const [assemblyAiKey, setAssemblyAiKey] = useState('');
   const [assemblyAiKeySet, setAssemblyAiKeySet] = useState(false);
   const [assemblyAiKeyError, setAssemblyAiKeyError] = useState<string | null>(null);
+
+  // v3.239 — anchors for "scroll to API key section" handoff when a mic
+  // button is clicked while the corresponding key is missing. See
+  // AGENT_SETTINGS_SCROLL_EVENT in AgentChatPanel.tsx.
+  const deepgramSectionRef = useRef<HTMLDivElement | null>(null);
+  const assemblyAiSectionRef = useRef<HTMLDivElement | null>(null);
+  const deepgramKeyInputRef = useRef<HTMLInputElement | null>(null);
+  const assemblyAiKeyInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const handleScrollRequest = (event: Event) => {
+      const detail = (event as CustomEvent<OpenAgentSettingsEventDetail>).detail;
+      if (!detail || !detail.scrollTo) return;
+
+      // Resolve which section to scroll: 'sttKey' picks whichever provider
+      // is currently selected so the user lands on the relevant key.
+      let target: 'deepgram' | 'assemblyai';
+      if (detail.scrollTo === 'sttKey') {
+        target = sttProvider === 'assemblyai' ? 'assemblyai' : 'deepgram';
+      } else {
+        target = detail.scrollTo;
+      }
+
+      const sectionEl =
+        target === 'assemblyai'
+          ? assemblyAiSectionRef.current
+          : deepgramSectionRef.current;
+      const inputEl =
+        target === 'assemblyai'
+          ? assemblyAiKeyInputRef.current
+          : deepgramKeyInputRef.current;
+
+      if (sectionEl) {
+        try {
+          sectionEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch {
+          sectionEl.scrollIntoView();
+        }
+      }
+      // If the key isn't set, focus the input so the user can type
+      // immediately. If it is set, leave focus alone — a "Clear" button
+      // is showing instead of an input.
+      if (inputEl) {
+        // Two RAFs to wait out the smooth-scroll's first paint so the
+        // focus ring lands cleanly.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            try {
+              inputEl.focus({ preventScroll: true });
+            } catch {
+              inputEl.focus();
+            }
+          });
+        });
+      }
+    };
+
+    window.addEventListener(AGENT_SETTINGS_SCROLL_EVENT, handleScrollRequest);
+    return () => {
+      window.removeEventListener(AGENT_SETTINGS_SCROLL_EVENT, handleScrollRequest);
+    };
+  }, [sttProvider]);
 
   const refreshMicDevices = useCallback(async () => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
@@ -725,7 +791,11 @@ export function AgentSettings({
         </div>
       </details>
 
-      <div className="agent-settings-section">
+      <div
+        className="agent-settings-section"
+        id="agent-settings-deepgram-key-section"
+        ref={deepgramSectionRef}
+      >
         <label className="agent-settings-label">Deepgram API key</label>
         {deepgramKeySet ? (
           <div className="agent-settings-key-row">
@@ -749,6 +819,7 @@ export function AgentSettings({
               onChange={(event) => setDeepgramKey(event.target.value)}
               placeholder="Enter API key"
               data-testid="agent-deepgram-key-input"
+              ref={deepgramKeyInputRef}
             />
             <button
               type="button"
@@ -775,7 +846,11 @@ export function AgentSettings({
         )}
       </div>
 
-      <div className="agent-settings-section">
+      <div
+        className="agent-settings-section"
+        id="agent-settings-assemblyai-key-section"
+        ref={assemblyAiSectionRef}
+      >
         <label className="agent-settings-label">AssemblyAI Universal-3 Pro API key</label>
         {assemblyAiKeySet ? (
           <div className="agent-settings-key-row">
@@ -799,6 +874,7 @@ export function AgentSettings({
               onChange={(event) => setAssemblyAiKey(event.target.value)}
               placeholder="Enter API key"
               data-testid="agent-assemblyai-key-input"
+              ref={assemblyAiKeyInputRef}
             />
             <button
               type="button"

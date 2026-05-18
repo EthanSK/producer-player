@@ -24,6 +24,7 @@ import {
   type AgentMicChannelMode,
   type AgentSttProviderId,
 } from '../agentVoiceSettings';
+import { requestOpenAgentSettings } from '../AgentChatPanel';
 import {
   buildRecordingGraph,
   errorToMessage,
@@ -86,6 +87,32 @@ export interface UseMicTranscribeResult {
    * hook ignores the call if it's mid-arming or mid-processing.
    */
   toggle: () => Promise<void>;
+}
+
+/**
+ * v3.239 — true when `getUserMedia` rejected because the user / OS denied
+ * microphone access (NotAllowedError on Chromium / Webkit, "Permission
+ * denied" on some older browsers). Distinguishes a permission failure
+ * from a hardware / NotFoundError so we only reroute the user to the
+ * settings panel when the fix is actually there.
+ */
+function isMicPermissionError(error: unknown): boolean {
+  if (!error) return false;
+  // DOMException has `name`; Error has `message`.
+  const name =
+    typeof (error as { name?: unknown }).name === 'string'
+      ? (error as { name: string }).name
+      : '';
+  const message =
+    typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message.toLowerCase()
+      : '';
+  return (
+    name === 'NotAllowedError' ||
+    name === 'SecurityError' ||
+    message.includes('permission denied') ||
+    message.includes('not allowed')
+  );
 }
 
 async function readKeyForProvider(
@@ -217,7 +244,12 @@ export function useMicTranscribe(
       key = null;
     }
     if (!key) {
+      // v3.239 — instead of silently flashing the error and forcing the
+      // user to hunt for the settings panel, open the Agent Chat panel,
+      // switch to the Settings tab, and scroll to the relevant API key
+      // section. We still show the error toast so the reason is clear.
       const providerName = getProviderDisplayName(activeProvider);
+      requestOpenAgentSettings({ scrollTo: 'sttKey' });
       flashError(
         `Set up a ${providerName} API key in Producey Boy settings to enable voice input`
       );
@@ -280,6 +312,7 @@ export function useMicTranscribe(
         audioChunksRef.current = [];
 
         if (!key) {
+          requestOpenAgentSettings({ scrollTo: 'sttKey' });
           flashError(
             `${getProviderDisplayName(activeProvider)} API key is missing. Add it in Producey Boy settings.`
           );
@@ -319,6 +352,14 @@ export function useMicTranscribe(
       if (audioContextRef.current) {
         void audioContextRef.current.close().catch(() => {});
         audioContextRef.current = null;
+      }
+      // v3.239 — if the mic was blocked at the OS / browser permission
+      // layer, send the user to the Settings panel so they can find the
+      // microphone permission row (which sits right above the API key
+      // sections). Anchor to the STT key section — it's adjacent and
+      // ensures the mic-permission UI is visible.
+      if (isMicPermissionError(error)) {
+        requestOpenAgentSettings({ scrollTo: 'sttKey' });
       }
       flashError(errorToMessage(error));
     }

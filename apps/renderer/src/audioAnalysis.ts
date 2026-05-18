@@ -4,6 +4,7 @@ import {
   ANALYSIS_PRIORITY_USER_SELECTED,
   type AnalysisPriority,
 } from './audioAnalysisQueue';
+import { analyzeAudioBufferInWorker } from './lib/trackAnalysisClient';
 
 export interface TonalBalanceSnapshot {
   low: number;
@@ -27,9 +28,6 @@ export interface TrackAnalysisResult {
 
 const MIN_DECIBELS = -96;
 const LOUDNESS_WINDOW_SECONDS = 3;
-const LOUDNESS_FRAME_SECONDS = 0.25;
-const LOW_BAND_CUTOFF_HZ = 250;
-const HIGH_BAND_CUTOFF_HZ = 4_000;
 
 // Full-track decode can be very memory-hungry for long WAV/AIFF files.
 // We keep concurrency=1 here so we never have two huge decoded AudioBuffers
@@ -96,22 +94,6 @@ function createCompositeAbortSignal(
       }
     },
   };
-}
-
-function clampUnit(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-
-  if (value <= 0) {
-    return 0;
-  }
-
-  if (value >= 1) {
-    return 1;
-  }
-
-  return value;
 }
 
 function amplitudeToDbfs(value: number): number {
@@ -182,178 +164,6 @@ export function dumpPreviewAnalysisQueue(): ReturnType<AnalysisQueue['dump']> {
   return previewAnalysisQueue.dump();
 }
 
-function createMonoData(buffer: AudioBuffer): Float32Array {
-  const mono = new Float32Array(buffer.length);
-  const channelCount = buffer.numberOfChannels;
-
-  for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
-    const channel = buffer.getChannelData(channelIndex);
-    for (let sampleIndex = 0; sampleIndex < channel.length; sampleIndex += 1) {
-      mono[sampleIndex] += channel[sampleIndex] / channelCount;
-    }
-  }
-
-  return mono;
-}
-
-function calculateFrameLoudnessDbfs(
-  mono: Float32Array,
-  sampleRate: number
-): { frameDurationSeconds: number; frameLoudnessDbfs: number[] } {
-  const frameSize = Math.max(1, Math.round(sampleRate * LOUDNESS_FRAME_SECONDS));
-  const frames: number[] = [];
-
-  for (let start = 0; start < mono.length; start += frameSize) {
-    let sumSquares = 0;
-    const end = Math.min(mono.length, start + frameSize);
-
-    for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
-      const sample = mono[sampleIndex];
-      sumSquares += sample * sample;
-    }
-
-    const frameLength = end - start;
-    const rms = frameLength > 0 ? Math.sqrt(sumSquares / frameLength) : 0;
-    frames.push(amplitudeToDbfs(rms));
-  }
-
-  return {
-    frameDurationSeconds: frameSize / sampleRate,
-    frameLoudnessDbfs: frames,
-  };
-}
-
-function calculatePeakAndIntegrated(mono: Float32Array): {
-  peakDbfs: number;
-  integratedLufsEstimate: number;
-} {
-  let peak = 0;
-  let sumSquares = 0;
-
-  for (let sampleIndex = 0; sampleIndex < mono.length; sampleIndex += 1) {
-    const sample = mono[sampleIndex];
-    const absolute = Math.abs(sample);
-    if (absolute > peak) {
-      peak = absolute;
-    }
-    sumSquares += sample * sample;
-  }
-
-  const rms = mono.length > 0 ? Math.sqrt(sumSquares / mono.length) : 0;
-
-  return {
-    peakDbfs: amplitudeToDbfs(peak),
-    integratedLufsEstimate: amplitudeToDbfs(rms),
-  };
-}
-
-function lowPassAlpha(cutoffHz: number, sampleRate: number): number {
-  const dt = 1 / sampleRate;
-  const rc = 1 / (2 * Math.PI * cutoffHz);
-  return dt / (rc + dt);
-}
-
-function highPassAlpha(cutoffHz: number, sampleRate: number): number {
-  const dt = 1 / sampleRate;
-  const rc = 1 / (2 * Math.PI * cutoffHz);
-  return rc / (rc + dt);
-}
-
-function calculateTonalBalance(mono: Float32Array, sampleRate: number): TonalBalanceSnapshot {
-  const lowAlpha = lowPassAlpha(LOW_BAND_CUTOFF_HZ, sampleRate);
-  const highAlpha = highPassAlpha(HIGH_BAND_CUTOFF_HZ, sampleRate);
-  const midHighPassAlpha = highPassAlpha(LOW_BAND_CUTOFF_HZ, sampleRate);
-  const midLowPassAlpha = lowPassAlpha(HIGH_BAND_CUTOFF_HZ, sampleRate);
-
-  let lowState = 0;
-  let highState = 0;
-  let previousHighInput = 0;
-  let midHighPassState = 0;
-  let previousMidHighPassInput = 0;
-  let midLowPassState = 0;
-
-  let lowEnergy = 0;
-  let midEnergy = 0;
-  let highEnergy = 0;
-
-  for (let sampleIndex = 0; sampleIndex < mono.length; sampleIndex += 1) {
-    const sample = mono[sampleIndex];
-
-    lowState += lowAlpha * (sample - lowState);
-    lowEnergy += lowState * lowState;
-
-    highState = highAlpha * (highState + sample - previousHighInput);
-    previousHighInput = sample;
-    highEnergy += highState * highState;
-
-    midHighPassState =
-      midHighPassAlpha * (midHighPassState + sample - previousMidHighPassInput);
-    previousMidHighPassInput = sample;
-    midLowPassState += midLowPassAlpha * (midHighPassState - midLowPassState);
-    midEnergy += midLowPassState * midLowPassState;
-  }
-
-  const totalEnergy = lowEnergy + midEnergy + highEnergy;
-  if (totalEnergy <= 0) {
-    return { low: 0, mid: 0, high: 0 };
-  }
-
-  return {
-    low: clampUnit(lowEnergy / totalEnergy),
-    mid: clampUnit(midEnergy / totalEnergy),
-    high: clampUnit(highEnergy / totalEnergy),
-  };
-}
-
-function calculateRmsDbfs(mono: Float32Array): number {
-  let sumSquares = 0;
-  for (let i = 0; i < mono.length; i++) {
-    sumSquares += mono[i] * mono[i];
-  }
-  const rms = mono.length > 0 ? Math.sqrt(sumSquares / mono.length) : 0;
-  return amplitudeToDbfs(rms);
-}
-
-function calculateDcOffset(mono: Float32Array): number {
-  let sum = 0;
-  for (let i = 0; i < mono.length; i++) {
-    sum += mono[i];
-  }
-  return mono.length > 0 ? sum / mono.length : 0;
-}
-
-function countClips(mono: Float32Array): number {
-  let count = 0;
-  for (let i = 0; i < mono.length; i++) {
-    if (mono[i] >= 1.0 || mono[i] <= -1.0) {
-      count++;
-    }
-  }
-  return count;
-}
-
-const WAVEFORM_BUCKET_COUNT = 800;
-
-function computeWaveformPeaks(mono: Float32Array, bucketCount: number): Float32Array {
-  const peaks = new Float32Array(bucketCount);
-  const samplesPerBucket = mono.length / bucketCount;
-
-  for (let b = 0; b < bucketCount; b++) {
-    const start = Math.floor(b * samplesPerBucket);
-    const end = Math.min(Math.floor((b + 1) * samplesPerBucket), mono.length);
-    let maxAbs = 0;
-
-    for (let i = start; i < end; i++) {
-      const abs = Math.abs(mono[i]);
-      if (abs > maxAbs) maxAbs = abs;
-    }
-
-    peaks[b] = maxAbs;
-  }
-
-  return peaks;
-}
-
 export async function analyzeTrackFromUrl(
   url: string,
   signal?: AbortSignal,
@@ -387,32 +197,17 @@ export async function analyzeTrackFromUrl(
       const buffer = await context.decodeAudioData(bytes);
       ensureNotAborted(composite.signal);
 
-      const mono = createMonoData(buffer);
-      const { peakDbfs, integratedLufsEstimate } = calculatePeakAndIntegrated(mono);
-      const { frameDurationSeconds, frameLoudnessDbfs } = calculateFrameLoudnessDbfs(
-        mono,
-        buffer.sampleRate
-      );
-      const tonalBalance = calculateTonalBalance(mono, buffer.sampleRate);
-      const rmsDbfs = calculateRmsDbfs(mono);
-      const crestFactorDb = peakDbfs - rmsDbfs;
-      const dcOffset = calculateDcOffset(mono);
-      const clipCount = countClips(mono);
-      const waveformPeaks = computeWaveformPeaks(mono, WAVEFORM_BUCKET_COUNT);
-
-      return {
-        peakDbfs,
-        integratedLufsEstimate,
-        frameLoudnessDbfs,
-        frameDurationSeconds,
-        durationSeconds: buffer.duration,
-        tonalBalance,
-        rmsDbfs,
-        crestFactorDb,
-        dcOffset,
-        clipCount,
-        waveformPeaks,
-      };
+      // v3.240 — Push the per-sample CPU loops off the renderer main thread
+      // into a dedicated module worker. Voice 3288: the v3.237 setTimeout(500)
+      // only deferred WHEN the loops ran; they still blocked the audio engine
+      // once they started. By transferring the channel data into a worker,
+      // the main thread stays free for high-resolution audio scheduling
+      // during play-start. Same pattern as `idealStemWorker.ts` which has
+      // shipped cross-platform since v3.179. See `trackAnalysisCore.ts` for
+      // the pure-function pipeline shared with the in-process fallback.
+      const result = await analyzeAudioBufferInWorker(buffer, composite.signal);
+      ensureNotAborted(composite.signal);
+      return result;
     } catch (error) {
       if (composite.signal.aborted) {
         throw createAbortError();

@@ -18017,6 +18017,15 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="skip-button skip-button-small"
+                    data-testid="player-skip-back-2"
+                    onClick={() => handleSkipSeconds(-2)}
+                    title="Skip back 2 seconds."
+                  >
+                    −2s
+                  </button>
+                  <button
+                    type="button"
+                    className="skip-button skip-button-small"
                     data-testid="player-skip-back-1"
                     onClick={() => handleSkipSeconds(-1)}
                     title="Skip back 1 second."
@@ -18031,6 +18040,15 @@ export function App(): JSX.Element {
                     title="Skip forward 1 second."
                   >
                     +1s
+                  </button>
+                  <button
+                    type="button"
+                    className="skip-button skip-button-small"
+                    data-testid="player-skip-forward-2"
+                    onClick={() => handleSkipSeconds(2)}
+                    title="Skip forward 2 seconds."
+                  >
+                    +2s
                   </button>
                   <button
                     type="button"

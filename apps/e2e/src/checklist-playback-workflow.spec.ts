@@ -729,8 +729,30 @@ test.describe('checklist playback workflow', () => {
 
       const skipBack5 = page.getByTestId('player-skip-back-5');
       const skipForward5 = page.getByTestId('player-skip-forward-5');
+      const skipBack2 = page.getByTestId('player-skip-back-2');
+      const skipForward2 = page.getByTestId('player-skip-forward-2');
       await expect(skipBack5).toBeVisible();
       await expect(skipForward5).toBeVisible();
+      await expect(skipBack2).toBeVisible();
+      await expect(skipForward2).toBeVisible();
+
+      // Verify button order: -5, -2, -1, +1, +2, +5 (left to right)
+      const skipRowOrder = await page.evaluate(() => {
+        const buttons = Array.from(
+          document.querySelectorAll('.transport-skip-row [data-testid^="player-skip-"]')
+        );
+        return buttons.map((b) => (b as HTMLElement).dataset.testid);
+      });
+      expect(skipRowOrder).toEqual([
+        'player-skip-back-10',
+        'player-skip-back-5',
+        'player-skip-back-2',
+        'player-skip-back-1',
+        'player-skip-forward-1',
+        'player-skip-forward-2',
+        'player-skip-forward-5',
+        'player-skip-forward-10',
+      ]);
 
       const scrubber = page.getByTestId('player-scrubber');
       const scrubberStart = Number(await scrubber.inputValue());
@@ -742,6 +764,18 @@ test.describe('checklist playback workflow', () => {
       await expect.poll(async () => Number(await scrubber.inputValue())).toBeLessThanOrEqual(
         scrubberStart + 0.1
       );
+
+      // Verify +2 / -2 buttons actually seek by the expected delta
+      const beforeForward2 = Number(await scrubber.inputValue());
+      await skipForward2.click();
+      await expect.poll(async () => Number(await scrubber.inputValue())).toBeGreaterThan(
+        beforeForward2 + 0.5
+      );
+      const afterForward2 = Number(await scrubber.inputValue());
+      await skipBack2.click();
+      await expect
+        .poll(async () => Number(await scrubber.inputValue()))
+        .toBeLessThan(afterForward2 - 0.5);
 
       const firstBandClickX = Math.max(8, Math.round(miniSpectrumWidth * 0.25));
       const secondBandClickX = Math.min(miniSpectrumWidth - 8, Math.round(miniSpectrumWidth * 0.75));

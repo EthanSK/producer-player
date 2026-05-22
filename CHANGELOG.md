@@ -4,6 +4,15 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.243] - 2026-05-22
+
+### Features
+- Inspector Version History: new "Use as reference" button on every past version row. Click loads that version as the Reference track so you can A/B it against the current mix with Cmd+R (Mix/Reference toggle). Mirrors the manual global-reference-pointer behaviour so a restore=OFF song-switch will respect the pick.
+
+### Polish
+- Inspector Version History: "Open in Finder" / "Open in Explorer" no longer wraps onto two rows — buttons get a single-line label via `white-space: nowrap` + slight font/padding shrink so the longest OS label still fits.
+- Inspector Version History buttons (Cue, Use as reference, Open in Finder) now show PP's in-app hover popover tooltip instead of the native OS tooltip — matches the Save Copy pattern from v3.209.
+
 ## [3.242] - 2026-05-22
 
 ### Features

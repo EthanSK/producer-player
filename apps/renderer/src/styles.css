@@ -4969,6 +4969,62 @@ button.checklist-play-toggle[data-playing='true'] {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* Buttons sit at the right edge of the row; let any tooltip popovers
+     extend leftwards without being clipped. */
+  overflow: visible;
+}
+
+/* v3.243 — version-history per-item action buttons (Cue, Use as reference,
+ * Open in Finder/Explorer). Compact, single-line label, with an in-app
+ * hover tooltip popover anchored to the LEFT of the button (so it doesn't
+ * spill outside the inspector panel). */
+.inspector-version-action-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Keep labels on a single line, even longer ones like "Open in Finder"
+     or "Use as reference". Slight padding shrink + font-size shrink lets
+     "Open in Finder" / "Open in Explorer" sit on one row inside the
+     inspector's narrow right column. */
+  white-space: nowrap;
+  padding: 3px 10px;
+  font-size: 11px;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+/* Open in Finder / Open in Explorer needs marginally more horizontal room
+ * because the label is the longest of the three. Bumping min-width keeps
+ * the three buttons visually aligned even when the OS label is short
+ * ("Finder" is 6 chars, "Explorer" is 8). */
+.inspector-version-reveal-button {
+  min-width: 110px;
+}
+
+/* Hover popover (in-app tooltip). Inherits the instant-fade panel from
+ * `.main-list-row-metadata-popover`. Anchors LEFT so it doesn't clip
+ * against the right edge of the inspector drawer. */
+.inspector-version-action-popover {
+  right: calc(100% + 6px);
+  left: auto;
+  top: 50%;
+  transform: translateY(calc(-50% - 2px));
+  max-width: 240px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.inspector-version-action-button:hover .inspector-version-action-popover,
+.inspector-version-action-button:focus-visible .inspector-version-action-popover {
+  opacity: 1;
+  transform: translateY(-50%);
+}
+
+.inspector-version-action-popover-body {
+  color: var(--text-main);
+  font-weight: 500;
+  white-space: normal;
 }
 
 .checkbox-row {

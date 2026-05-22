@@ -11928,6 +11928,62 @@ export function App(): JSX.Element {
     );
   }
 
+  /**
+   * v3.243 — Inspector Version History "Use as reference" button.
+   *
+   * Loads any past version of the currently-selected song as the
+   * Reference track so the user can A/B that version against the
+   * current mix via the Mix/Reference toggle (Cmd+R).
+   *
+   * Mirrors `handleUseCurrentTrackAsReference`'s stale-cancellation
+   * pattern and marks the load as a MANUAL global pick so the
+   * restore=OFF fallback respects it.
+   */
+  async function handleUseVersionAsReference(version: SongVersion): Promise<void> {
+    logAction('reference.use-version-from-inspector', {
+      songId: selectedSongId,
+      versionId: version.id,
+      filePath: version.filePath,
+    });
+    setReferenceError(null);
+
+    // Claim a new request id BEFORE the resolvePlaybackSource await so
+    // concurrent reference loads don't race past the staleness check.
+    referenceLoadRequestIdRef.current += 1;
+    const entryRequestId = referenceLoadRequestIdRef.current;
+
+    try {
+      const resolvedPlaybackSource = await window.producerPlayer.resolvePlaybackSource(
+        version.filePath,
+      );
+      if (referenceLoadRequestIdRef.current !== entryRequestId) {
+        // A newer song-switch / clear / reference-load happened while we
+        // were resolving. Drop this on the floor.
+        return;
+      }
+
+      await loadReferenceTrack(
+        'linked-track',
+        {
+          filePath: version.filePath,
+          fileName: version.fileName,
+          subtitle: selectedSong ? selectedSong.title : 'Linked track',
+          playbackSource: resolvedPlaybackSource,
+        },
+        {
+          // Manual user action — update the global-reference pointer.
+          markAsGlobalReference: true,
+        },
+      );
+    } catch {
+      // Resolve failure — surface a friendly error rather than throwing.
+      setReferenceError(
+        `Reference file could not be loaded: ${version.filePath}`,
+      );
+      setReferenceStatus('error');
+    }
+  }
+
   async function handleChooseReferenceTrack(): Promise<void> {
     logAction('reference.pick-external');
     setReferenceError(null);
@@ -18275,6 +18331,7 @@ export function App(): JSX.Element {
                   <div className="version-actions">
                     <button
                       type="button"
+                      className="inspector-version-action-button"
                       onClick={() => {
                         if (shouldAutoplayOnTransport()) {
                           playOnNextLoadRef.current = true;
@@ -18285,19 +18342,66 @@ export function App(): JSX.Element {
                         setSelectedPlaybackVersionId(version.id);
                       }}
                       data-testid="inspector-version-cue-button"
-                      title="Cue this version into the player."
+                      aria-describedby={`inspector-version-cue-popover-${version.id}`}
                     >
                       Cue
+                      <span
+                        id={`inspector-version-cue-popover-${version.id}`}
+                        className="main-list-row-metadata-popover inspector-version-action-popover"
+                        role="tooltip"
+                      >
+                        <span className="main-list-row-metadata-popover-label">Cue version</span>
+                        <span className="inspector-version-action-popover-body">
+                          Cue this version into the player.
+                        </span>
+                      </span>
                     </button>
                     <button
                       type="button"
+                      className="inspector-version-action-button"
+                      onClick={() => {
+                        void handleUseVersionAsReference(version);
+                      }}
+                      data-testid="inspector-version-use-as-reference-button"
+                      aria-describedby={`inspector-version-use-as-reference-popover-${version.id}`}
+                    >
+                      Use as reference
+                      <span
+                        id={`inspector-version-use-as-reference-popover-${version.id}`}
+                        className="main-list-row-metadata-popover inspector-version-action-popover"
+                        role="tooltip"
+                      >
+                        <span className="main-list-row-metadata-popover-label">
+                          Use as reference
+                        </span>
+                        <span className="inspector-version-action-popover-body">
+                          Load this version as the Reference track so you can A/B it against the
+                          current mix (toggle with Cmd+R).
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="inspector-version-action-button inspector-version-reveal-button"
                       onClick={() => {
                         void window.producerPlayer.revealFile(version.filePath);
                       }}
                       data-testid="inspector-version-reveal-button"
-                      title={`Open this version in ${fileManagerLabel(environment.platform)}.`}
+                      aria-describedby={`inspector-version-reveal-popover-${version.id}`}
                     >
                       {`Open in ${fileManagerLabel(environment.platform)}`}
+                      <span
+                        id={`inspector-version-reveal-popover-${version.id}`}
+                        className="main-list-row-metadata-popover inspector-version-action-popover"
+                        role="tooltip"
+                      >
+                        <span className="main-list-row-metadata-popover-label">
+                          {`Open in ${fileManagerLabel(environment.platform)}`}
+                        </span>
+                        <span className="inspector-version-action-popover-body">
+                          {`Reveal this version's file in ${fileManagerLabel(environment.platform)}.`}
+                        </span>
+                      </span>
                     </button>
                   </div>
                 </li>

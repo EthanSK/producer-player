@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.248] - 2026-05-22
+
+### Improvements
+- Checklist Won't Fix toggle: relocated directly under the checkbox on hover, instead of floating off to the right of the row (Ethan voice 3735). The space under the checkbox was previously empty on hover; now it holds the small "—" Won't Fix button so the toggle reads as a sibling of the checkbox / wontfix indicator above it. Also swapped the native browser title for an in-app popover tooltip ("Mark as Won't Fix" + a one-sentence explainer) using the same instant-fade panel pattern that v3.243's "Use as reference" button uses. Behaviour is unchanged — same handler, same wontFix data — only the position and tooltip style differ. Applies to both per-song and album checklists.
+
 ## [3.247] - 2026-05-22
 
 ### Features

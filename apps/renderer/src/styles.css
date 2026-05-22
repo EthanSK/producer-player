@@ -4903,17 +4903,35 @@ body.is-dragging-checklist-timestamp * {
   color: rgba(235, 238, 244, 0.95);
 }
 
-/* Hover-revealed Won't Fix toggle in the actions area, shown on
-   normal open todo rows. Matches the dimensions / hover-reveal of
-   `.checklist-item-mode-toggle` for visual symmetry. */
+/* v3.248 — Checkbox column wrapper. Lays out the checkbox (or its
+   wontfix-indicator / NOTE eyebrow equivalent) on top, with the
+   hover-revealed Won't Fix toggle directly underneath (Ethan voice
+   3735). The row's grid still allocates column 1 as `auto`, so this
+   column sizes to the wider of the two children (the toggle button is
+   slightly wider than the 28px checkbox at ~36px, which is fine —
+   nothing else lives in that column). */
+.checklist-item-checkbox-column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 28px;
+}
+
+/* v3.248 — Hover-revealed Won't Fix toggle, now positioned directly
+   under the checkbox in the checkbox column. Dimensions tuned so the
+   button reads as a sibling of the checkbox / wontfix-indicator above
+   it (same minimum width, similar rounded-rect treatment) rather than
+   a "pill" from the previous actions-column placement. */
 .checklist-item-wontfix-toggle {
   appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 18px;
-  padding: 0 9px;
-  border-radius: 999px;
+  min-width: 28px;
+  min-height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
   border: 1px solid rgba(170, 170, 170, 0.35);
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-muted);
@@ -4927,6 +4945,8 @@ body.is-dragging-checklist-timestamp * {
   pointer-events: none;
   transform: translateY(-2px);
   transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+  /* Anchor for the in-app popover tooltip (.checklist-item-wontfix-popover) */
+  position: relative;
 }
 
 .checklist-item-row:hover .checklist-item-wontfix-toggle,
@@ -4941,6 +4961,33 @@ body.is-dragging-checklist-timestamp * {
   border-color: rgba(170, 170, 170, 0.7);
   color: var(--text-main);
   box-shadow: 0 0 0 2px rgba(170, 170, 170, 0.12);
+}
+
+/* v3.248 — In-app popover tooltip for the Won't Fix toggle. Inherits
+   the instant-fade panel from `.main-list-row-metadata-popover`. Anchor
+   to the RIGHT of the button (the checkbox column lives at the left
+   edge of the row, so the popover has plenty of room to open to the
+   right without clipping). */
+.checklist-item-wontfix-popover {
+  left: calc(100% + 6px);
+  right: auto;
+  top: 50%;
+  transform: translateY(calc(-50% - 2px));
+  max-width: 260px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.checklist-item-wontfix-toggle:hover .checklist-item-wontfix-popover,
+.checklist-item-wontfix-toggle:focus-visible .checklist-item-wontfix-popover {
+  opacity: 1;
+  transform: translateY(-50%);
+}
+
+.checklist-item-wontfix-popover-body {
+  color: var(--text-main);
+  font-weight: 500;
+  white-space: normal;
 }
 
 /* Row-level wontFix tint — slightly desaturated so the item reads as

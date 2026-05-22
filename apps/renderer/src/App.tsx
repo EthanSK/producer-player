@@ -19579,55 +19579,103 @@ export function App(): JSX.Element {
                           : undefined
                       }
                     >
-                      {item.isNote === true ? (
-                        // v3.183.0 — Notes have no checkbox. Render a
-                        // small "NOTE" eyebrow badge in the same grid
-                        // slot so the row keeps a consistent layout with
-                        // its todo siblings.
-                        <span
-                          className="checklist-item-note-eyebrow"
-                          data-testid="song-checklist-item-note-eyebrow"
-                          aria-hidden="true"
-                          title="This item is a permanent note. It doesn't count toward todos."
-                        >
-                          NOTE
-                        </span>
-                      ) : item.wontFix === true ? (
-                        // v3.244.0 — Won't Fix occupies the same grid slot
-                        // as the checkbox. Clicking the horizontal-bar
-                        // button returns the item to "open" (clears
-                        // wontFix). Counts as done for progress math but
-                        // visually distinct from a blue tick.
-                        <button
-                          type="button"
-                          className="checklist-item-wontfix-indicator"
-                          data-testid="song-checklist-item-wontfix-indicator"
-                          aria-label="Won't Fix — click to reopen"
-                          title="Won't Fix (counts as done). Click to reopen."
-                          onClick={() =>
-                            handleToggleChecklistItemWontFix(
-                              checklistModalSong.id,
-                              item.id
-                            )
-                          }
-                        >
-                          <span aria-hidden="true">—</span>
-                        </button>
-                      ) : (
-                        <label className="checklist-item-toggle">
-                          <input
-                            type="checkbox"
-                            checked={item.completed}
-                            onChange={(event) => {
-                              handleToggleChecklistItem(
+                      {/* v3.248 — Checkbox column: contains the
+                          checkbox/indicator/note-eyebrow PLUS the
+                          hover-revealed Won't Fix toggle directly
+                          beneath it (so the empty space under the
+                          checkbox gets used). */}
+                      <div className="checklist-item-checkbox-column">
+                        {item.isNote === true ? (
+                          // v3.183.0 — Notes have no checkbox. Render a
+                          // small "NOTE" eyebrow badge in the same grid
+                          // slot so the row keeps a consistent layout
+                          // with its todo siblings.
+                          <span
+                            className="checklist-item-note-eyebrow"
+                            data-testid="song-checklist-item-note-eyebrow"
+                            aria-hidden="true"
+                            title="This item is a permanent note. It doesn't count toward todos."
+                          >
+                            NOTE
+                          </span>
+                        ) : item.wontFix === true ? (
+                          // v3.244.0 — Won't Fix occupies the same grid
+                          // slot as the checkbox. Clicking the
+                          // horizontal-bar button returns the item to
+                          // "open" (clears wontFix). Counts as done for
+                          // progress math but visually distinct from a
+                          // blue tick.
+                          <button
+                            type="button"
+                            className="checklist-item-wontfix-indicator"
+                            data-testid="song-checklist-item-wontfix-indicator"
+                            aria-label="Won't Fix — click to reopen"
+                            title="Won't Fix (counts as done). Click to reopen."
+                            onClick={() =>
+                              handleToggleChecklistItemWontFix(
                                 checklistModalSong.id,
-                                item.id,
-                                event.currentTarget.checked
-                              );
-                            }}
-                          />
-                        </label>
-                      )}
+                                item.id
+                              )
+                            }
+                          >
+                            <span aria-hidden="true">—</span>
+                          </button>
+                        ) : (
+                          <label className="checklist-item-toggle">
+                            <input
+                              type="checkbox"
+                              checked={item.completed}
+                              onChange={(event) => {
+                                handleToggleChecklistItem(
+                                  checklistModalSong.id,
+                                  item.id,
+                                  event.currentTarget.checked
+                                );
+                              }}
+                            />
+                          </label>
+                        )}
+                        {/* v3.248 — Won't Fix toggle. Was previously in
+                            the actions column on the right (v3.244);
+                            relocated here so it sits directly under the
+                            checkbox (Ethan voice 3735). Uses the
+                            in-app popover tooltip pattern instead of
+                            the native `title`. Hidden when the row is
+                            already wontFix (the indicator-button in
+                            the checkbox slot handles un-toggle) and on
+                            notes (notes ignore completion math). */}
+                        {item.isNote !== true && item.wontFix !== true ? (
+                          <button
+                            type="button"
+                            className="checklist-item-wontfix-toggle"
+                            onClick={() =>
+                              handleToggleChecklistItemWontFix(
+                                checklistModalSong.id,
+                                item.id
+                              )
+                            }
+                            data-testid="song-checklist-item-wontfix-toggle"
+                            aria-label="Mark as Won't Fix"
+                            aria-describedby={`song-checklist-item-wontfix-popover-${item.id}`}
+                          >
+                            <span aria-hidden="true">—</span>
+                            <span
+                              id={`song-checklist-item-wontfix-popover-${item.id}`}
+                              className="main-list-row-metadata-popover checklist-item-wontfix-popover"
+                              role="tooltip"
+                            >
+                              <span className="main-list-row-metadata-popover-label">
+                                Mark as Won't Fix
+                              </span>
+                              <span className="checklist-item-wontfix-popover-body">
+                                Marks this item resolved without ticking it. Counts toward
+                                progress, but renders with a struck-through "won't fix" look
+                                instead of a blue check.
+                              </span>
+                            </span>
+                          </button>
+                        ) : null}
+                      </div>
                       {hasItemMetadata ? (
                         <div className="checklist-item-meta">
                           {item.timestampSeconds !== null ? (() => {
@@ -19822,35 +19870,14 @@ export function App(): JSX.Element {
                             {isListeningDeviceAssignmentTarget ? 'Select listening device…' : 'Set device'}
                           </button>
                         ) : null}
-                        {/* v3.244.0 — Won't Fix toggle. Hover-revealed on
-                            normal todo rows (item.isNote !== true and
-                            item.wontFix !== true). When wontFix is set
-                            the indicator-button in the checkbox slot
-                            handles the un-toggle, so we don't render
-                            this button in that state. Hidden on notes
-                            entirely (notes ignore completion math). */}
-                        {item.isNote !== true && item.wontFix !== true ? (
-                          <button
-                            type="button"
-                            className="checklist-item-wontfix-toggle"
-                            onClick={() =>
-                              handleToggleChecklistItemWontFix(
-                                checklistModalSong.id,
-                                item.id
-                              )
-                            }
-                            data-testid="song-checklist-item-wontfix-toggle"
-                            aria-label="Mark as Won't Fix"
-                            title="Mark as Won't Fix (counts as done)"
-                          >
-                            <span aria-hidden="true">—</span>
-                          </button>
-                        ) : null}
                         {/* v3.183.0 — Convert this row between todo and
                             note mode. Hidden by default, revealed on
                             hover / focus-within (see styles.css). Stays
                             permanently visible on note rows so it's
-                            obvious how to flip back to a todo. */}
+                            obvious how to flip back to a todo.
+                            (v3.248: Won't Fix toggle moved out of this
+                            actions column into the checkbox column on
+                            the left — Ethan voice 3735.) */}
                         <button
                           type="button"
                           className={`checklist-item-mode-toggle${item.isNote === true ? ' is-note' : ''}`}
@@ -19929,20 +19956,22 @@ export function App(): JSX.Element {
                             item.wontFix === true ? ' checklist-item-row--wontfix' : ''
                           }`}
                         >
-                          {item.isNote === true ? (
-                            <span className="checklist-item-note-eyebrow" aria-hidden="true">NOTE</span>
-                          ) : item.wontFix === true ? (
-                            <span
-                              className="checklist-item-wontfix-indicator"
-                              aria-hidden="true"
-                            >
-                              <span aria-hidden="true">—</span>
-                            </span>
-                          ) : (
-                            <label className="checklist-item-toggle">
-                              <input type="checkbox" checked={item.completed} readOnly tabIndex={-1} />
-                            </label>
-                          )}
+                          <div className="checklist-item-checkbox-column">
+                            {item.isNote === true ? (
+                              <span className="checklist-item-note-eyebrow" aria-hidden="true">NOTE</span>
+                            ) : item.wontFix === true ? (
+                              <span
+                                className="checklist-item-wontfix-indicator"
+                                aria-hidden="true"
+                              >
+                                <span aria-hidden="true">—</span>
+                              </span>
+                            ) : (
+                              <label className="checklist-item-toggle">
+                                <input type="checkbox" checked={item.completed} readOnly tabIndex={-1} />
+                              </label>
+                            )}
+                          </div>
                           {hasItemMetadata ? (
                             <div className="checklist-item-meta">
                               {item.timestampSeconds !== null ? (
@@ -20521,42 +20550,78 @@ export function App(): JSX.Element {
                       key={item.id}
                       className={`checklist-item-row${item.isNote === true ? ' checklist-item-row--note' : ''}${item.wontFix === true ? ' checklist-item-row--wontfix' : ''}`}
                     >
-                      {item.isNote === true ? (
-                        <span
-                          className="checklist-item-note-eyebrow"
-                          data-testid="album-checklist-item-note-eyebrow"
-                          aria-hidden="true"
-                          title="This item is a permanent note. It doesn't count toward todos."
-                        >
-                          NOTE
-                        </span>
-                      ) : item.wontFix === true ? (
-                        // v3.244.0 — Won't Fix occupies the checkbox slot.
-                        // Clicking the horizontal-bar button reopens the
-                        // item. Counts as done for progress math.
-                        <button
-                          type="button"
-                          className="checklist-item-wontfix-indicator"
-                          data-testid="album-checklist-item-wontfix-indicator"
-                          aria-label="Won't Fix — click to reopen"
-                          title="Won't Fix (counts as done). Click to reopen."
-                          onClick={() =>
-                            handleToggleAlbumChecklistItemWontFix(item.id)
-                          }
-                        >
-                          <span aria-hidden="true">—</span>
-                        </button>
-                      ) : (
-                        <label className="checklist-item-toggle">
-                          <input
-                            type="checkbox"
-                            checked={item.completed}
-                            onChange={(event) => {
-                              handleToggleAlbumChecklistItem(item.id, event.currentTarget.checked);
-                            }}
-                          />
-                        </label>
-                      )}
+                      {/* v3.248 — Checkbox column wrapper, see song-checklist
+                          equivalent above. Houses checkbox + hover-revealed
+                          Won't Fix toggle directly underneath. */}
+                      <div className="checklist-item-checkbox-column">
+                        {item.isNote === true ? (
+                          <span
+                            className="checklist-item-note-eyebrow"
+                            data-testid="album-checklist-item-note-eyebrow"
+                            aria-hidden="true"
+                            title="This item is a permanent note. It doesn't count toward todos."
+                          >
+                            NOTE
+                          </span>
+                        ) : item.wontFix === true ? (
+                          // v3.244.0 — Won't Fix occupies the checkbox
+                          // slot. Clicking the horizontal-bar button
+                          // reopens the item. Counts as done for
+                          // progress math.
+                          <button
+                            type="button"
+                            className="checklist-item-wontfix-indicator"
+                            data-testid="album-checklist-item-wontfix-indicator"
+                            aria-label="Won't Fix — click to reopen"
+                            title="Won't Fix (counts as done). Click to reopen."
+                            onClick={() =>
+                              handleToggleAlbumChecklistItemWontFix(item.id)
+                            }
+                          >
+                            <span aria-hidden="true">—</span>
+                          </button>
+                        ) : (
+                          <label className="checklist-item-toggle">
+                            <input
+                              type="checkbox"
+                              checked={item.completed}
+                              onChange={(event) => {
+                                handleToggleAlbumChecklistItem(item.id, event.currentTarget.checked);
+                              }}
+                            />
+                          </label>
+                        )}
+                        {/* v3.248 — Won't Fix toggle, relocated from the
+                            actions column into the checkbox column
+                            beneath the checkbox itself (Ethan voice
+                            3735). In-app popover tooltip. */}
+                        {item.isNote !== true && item.wontFix !== true ? (
+                          <button
+                            type="button"
+                            className="checklist-item-wontfix-toggle"
+                            onClick={() => handleToggleAlbumChecklistItemWontFix(item.id)}
+                            data-testid="album-checklist-item-wontfix-toggle"
+                            aria-label="Mark as Won't Fix"
+                            aria-describedby={`album-checklist-item-wontfix-popover-${item.id}`}
+                          >
+                            <span aria-hidden="true">—</span>
+                            <span
+                              id={`album-checklist-item-wontfix-popover-${item.id}`}
+                              className="main-list-row-metadata-popover checklist-item-wontfix-popover"
+                              role="tooltip"
+                            >
+                              <span className="main-list-row-metadata-popover-label">
+                                Mark as Won't Fix
+                              </span>
+                              <span className="checklist-item-wontfix-popover-body">
+                                Marks this item resolved without ticking it. Counts toward
+                                progress, but renders with a struck-through "won't fix" look
+                                instead of a blue check.
+                              </span>
+                            </span>
+                          </button>
+                        ) : null}
+                      </div>
                       <textarea
                         className={`checklist-item-text${item.completed ? ' completed' : ''}${item.wontFix === true ? ' wontfix' : ''}`}
                         value={item.text}
@@ -20592,23 +20657,9 @@ export function App(): JSX.Element {
                         data-testid="album-checklist-item-text"
                       />
                       <div className="checklist-item-actions">
-                        {/* v3.244.0 — Won't Fix toggle. Hover-revealed on
-                            normal album-checklist todo rows. Hidden when
-                            the row is already wontFix (the indicator in
-                            the checkbox slot handles un-toggle) or when
-                            it's a note. */}
-                        {item.isNote !== true && item.wontFix !== true ? (
-                          <button
-                            type="button"
-                            className="checklist-item-wontfix-toggle"
-                            onClick={() => handleToggleAlbumChecklistItemWontFix(item.id)}
-                            data-testid="album-checklist-item-wontfix-toggle"
-                            aria-label="Mark as Won't Fix"
-                            title="Mark as Won't Fix (counts as done)"
-                          >
-                            <span aria-hidden="true">—</span>
-                          </button>
-                        ) : null}
+                        {/* v3.248 — Won't Fix toggle moved out of this
+                            actions column into the checkbox column on
+                            the left (Ethan voice 3735). */}
                         <button
                           type="button"
                           className={`checklist-item-mode-toggle${item.isNote === true ? ' is-note' : ''}`}

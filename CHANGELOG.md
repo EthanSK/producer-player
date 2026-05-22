@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.246] - 2026-05-22
+
+### Bug fixes
+- Checklist item mic button: fixed the visibility flicker on click (Ethan voice 3674). Symptom in v3.245 was: tap the per-item mic, brief loader, button vanishes, briefly comes back red, vanishes again — clicking anywhere makes it reappear. Root cause was the same `MicTranscribeButton` that backs both checklist mics setting `disabled={!mic.clickable}` during the transient `arming` / `processing` states. When a focused button flips to native `disabled`, the browser blurs it. For the per-item mic — which is only visible while its row has `:focus-within` — that blur dropped focus off the row and hid the mic mid-recording. The mic kept recording (audio was fine), but the UI looked broken because the visibility was decoupled from the actual mic state. Fix drops native `disabled` for the transient busy states (manual click-gating via `mic.clickable` still prevents double-toggles, `aria-disabled` still tells assistive tech the button is busy) and adds a defensive CSS rule pinning the item mic visible whenever `data-mic-state` is anything other than `idle` — covers OS permission prompts and any other focus-loss path. Add-item composer mic (always visible) was unaffected by the bug and stays untouched.
+
 ## [3.245] - 2026-05-22
 
 ### Features

@@ -75,6 +75,22 @@ export function MicTranscribeButton({
 
   const showSpinner = mic.state === 'arming' || mic.state === 'processing';
 
+  // v3.246 — Do NOT use native `disabled` for the transient busy states
+  // (arming / processing). When the button is focused and then becomes
+  // `disabled`, the browser blurs it. For the focus-gated `--item` variant
+  // (only visible while .checklist-item-row is `:focus-within`), that blur
+  // propagates out and drops focus-within on the row, hiding the mic
+  // mid-recording — the bug Ethan reported in v3.245 (voice 3674): click ->
+  // brief loader -> disappears -> reappears red -> disappears. We still
+  // surface the busy state via `aria-disabled` for assistive tech and gate
+  // the click manually via `mic.clickable` so we don't double-fire toggle().
+  // Native `disabled` is reserved for the explicit parent-`disabled` prop
+  // (e.g. parent input is disabled) where focus loss is intentional.
+  const handleClick = (): void => {
+    if (!mic.clickable) return;
+    void mic.toggle();
+  };
+
   return (
     <button
       type="button"
@@ -86,8 +102,9 @@ export function MicTranscribeButton({
       ]
         .filter(Boolean)
         .join(' ')}
-      onClick={() => void mic.toggle()}
-      disabled={!mic.clickable}
+      onClick={handleClick}
+      disabled={disabled}
+      aria-disabled={!mic.clickable || undefined}
       data-testid={testId}
       data-mic-state={mic.state}
       title={title}

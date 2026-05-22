@@ -3751,6 +3751,25 @@ body.floating-switcher-panel-dragging * {
   transform: translateY(0);
 }
 
+/* v3.246 — Defensive visibility: keep the item mic visible whenever it's
+   actively in any non-idle state, regardless of :focus-within. The bug
+   Ethan reported in v3.245 (voice 3674) was that clicking the mic moved
+   focus away (native `disabled` blur on the button, OS permission prompt,
+   audio-context resume gestures, etc.) which dropped .checklist-item-row's
+   :focus-within and hid the mic mid-recording. The TS-side fix in
+   MicTranscribeButton stops using native `disabled` for transient busy
+   states, but this CSS belt-and-braces ensures the visibility never
+   detaches from the mic's actual state even if some future focus path
+   bypasses it. Targets the data-mic-state attribute set by the button. */
+.checklist-mic-button--item.agent-mic-button[data-mic-state="arming"],
+.checklist-mic-button--item.agent-mic-button[data-mic-state="recording"],
+.checklist-mic-button--item.agent-mic-button[data-mic-state="processing"],
+.checklist-mic-button--item.agent-mic-button[data-mic-state="error"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
 .checklist-add-device-group {
   display: flex;
   flex-direction: column;

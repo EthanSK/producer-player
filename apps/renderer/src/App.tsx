@@ -10582,6 +10582,27 @@ export function App(): JSX.Element {
         return;
       }
 
+      // Digit-key jump shortcuts (v3.242):
+      //   1 / 2 / 5 / 0 → jump back  1s / 2s / 5s / 10s
+      //   Shift + same → jump forward 1s / 2s / 5s / 10s
+      // 0 maps to 10s because it sits next to 1 on the number row and is the
+      // most intuitive single-key for "ten." Guarded by !textEntryFocused so
+      // numeric inputs (e.g. DAW offset minutes/seconds) still accept literal
+      // digit input. No Cmd/Ctrl/Alt — those modifiers are reserved.
+      if (
+        !textEntryFocused &&
+        !hasUndoModifier &&
+        !event.altKey &&
+        (event.key === '1' || event.key === '2' || event.key === '5' || event.key === '0')
+      ) {
+        const seconds = event.key === '0' ? 10 : Number(event.key);
+        const direction = event.shiftKey ? 1 : -1;
+        event.preventDefault();
+        event.stopPropagation();
+        handleSkipSecondsRef.current(direction * seconds);
+        return;
+      }
+
       if (event.repeat || event.code !== 'Space') {
         return;
       }
@@ -18001,7 +18022,7 @@ export function App(): JSX.Element {
                     className="skip-button"
                     data-testid="player-skip-back-10"
                     onClick={() => handleSkipSeconds(-10)}
-                    title="Skip back 10 seconds."
+                    title="Skip back 10 seconds. (Shortcut: 0)"
                   >
                     −10s
                   </button>
@@ -18010,7 +18031,7 @@ export function App(): JSX.Element {
                     className="skip-button skip-button-small"
                     data-testid="player-skip-back-5"
                     onClick={() => handleSkipSeconds(-5)}
-                    title="Skip back 5 seconds."
+                    title="Skip back 5 seconds. (Shortcut: 5)"
                   >
                     −5s
                   </button>
@@ -18019,7 +18040,7 @@ export function App(): JSX.Element {
                     className="skip-button skip-button-small"
                     data-testid="player-skip-back-2"
                     onClick={() => handleSkipSeconds(-2)}
-                    title="Skip back 2 seconds."
+                    title="Skip back 2 seconds. (Shortcut: 2)"
                   >
                     −2s
                   </button>
@@ -18028,7 +18049,7 @@ export function App(): JSX.Element {
                     className="skip-button skip-button-small"
                     data-testid="player-skip-back-1"
                     onClick={() => handleSkipSeconds(-1)}
-                    title="Skip back 1 second."
+                    title="Skip back 1 second. (Shortcut: 1)"
                   >
                     −1s
                   </button>
@@ -18037,7 +18058,7 @@ export function App(): JSX.Element {
                     className="skip-button skip-button-small"
                     data-testid="player-skip-forward-1"
                     onClick={() => handleSkipSeconds(1)}
-                    title="Skip forward 1 second."
+                    title="Skip forward 1 second. (Shortcut: Shift+1)"
                   >
                     +1s
                   </button>
@@ -18046,7 +18067,7 @@ export function App(): JSX.Element {
                     className="skip-button skip-button-small"
                     data-testid="player-skip-forward-2"
                     onClick={() => handleSkipSeconds(2)}
-                    title="Skip forward 2 seconds."
+                    title="Skip forward 2 seconds. (Shortcut: Shift+2)"
                   >
                     +2s
                   </button>
@@ -18055,7 +18076,7 @@ export function App(): JSX.Element {
                     className="skip-button skip-button-small"
                     data-testid="player-skip-forward-5"
                     onClick={() => handleSkipSeconds(5)}
-                    title="Skip forward 5 seconds."
+                    title="Skip forward 5 seconds. (Shortcut: Shift+5)"
                   >
                     +5s
                   </button>
@@ -18064,7 +18085,7 @@ export function App(): JSX.Element {
                     className="skip-button"
                     data-testid="player-skip-forward-10"
                     onClick={() => handleSkipSeconds(10)}
-                    title="Skip forward 10 seconds."
+                    title="Skip forward 10 seconds. (Shortcut: Shift+0)"
                   >
                     +10s
                   </button>
@@ -19666,7 +19687,7 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip back 10 seconds"
+                      title="Skip back 10 seconds (Shortcut: 0)"
                       aria-label="Skip back 10 seconds"
                     >
                       −10s
@@ -19690,7 +19711,7 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip back 5 seconds"
+                      title="Skip back 5 seconds (Shortcut: 5)"
                       aria-label="Skip back 5 seconds"
                     >
                       −5s
@@ -19713,7 +19734,7 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip back 2 seconds"
+                      title="Skip back 2 seconds (Shortcut: 2)"
                       aria-label="Skip back 2 seconds"
                     >
                       −2s
@@ -19762,7 +19783,7 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip forward 2 seconds"
+                      title="Skip forward 2 seconds (Shortcut: Shift+2)"
                       aria-label="Skip forward 2 seconds"
                     >
                       +2s
@@ -19785,7 +19806,7 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip forward 5 seconds"
+                      title="Skip forward 5 seconds (Shortcut: Shift+5)"
                       aria-label="Skip forward 5 seconds"
                     >
                       +5s
@@ -19808,7 +19829,7 @@ export function App(): JSX.Element {
                           checklistComposerTextareaRef.current?.focus();
                         }
                       }}
-                      title="Skip forward 10 seconds"
+                      title="Skip forward 10 seconds (Shortcut: Shift+0)"
                       aria-label="Skip forward 10 seconds"
                     >
                       +10s
@@ -21917,7 +21938,7 @@ export function App(): JSX.Element {
                   className="analysis-overlay-transport-button analysis-overlay-skip-button"
                   data-testid="analysis-overlay-skip-back-10"
                   onClick={() => handleSkipSeconds(-10)}
-                  title="Skip back 10 seconds"
+                  title="Skip back 10 seconds (Shortcut: 0)"
                   aria-label="Skip back 10 seconds"
                 >
                   −10s
@@ -21927,7 +21948,7 @@ export function App(): JSX.Element {
                   className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
                   data-testid="analysis-overlay-skip-back-5"
                   onClick={() => handleSkipSeconds(-5)}
-                  title="Skip back 5 seconds"
+                  title="Skip back 5 seconds (Shortcut: 5)"
                   aria-label="Skip back 5 seconds"
                 >
                   −5s
@@ -21937,7 +21958,7 @@ export function App(): JSX.Element {
                   className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
                   data-testid="analysis-overlay-skip-back-1"
                   onClick={() => handleSkipSeconds(-1)}
-                  title="Skip back 1 second"
+                  title="Skip back 1 second (Shortcut: 1)"
                   aria-label="Skip back 1 second"
                 >
                   −1s
@@ -21980,7 +22001,7 @@ export function App(): JSX.Element {
                   className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
                   data-testid="analysis-overlay-skip-forward-1"
                   onClick={() => handleSkipSeconds(1)}
-                  title="Skip forward 1 second"
+                  title="Skip forward 1 second (Shortcut: Shift+1)"
                   aria-label="Skip forward 1 second"
                 >
                   +1s
@@ -21990,7 +22011,7 @@ export function App(): JSX.Element {
                   className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"
                   data-testid="analysis-overlay-skip-forward-5"
                   onClick={() => handleSkipSeconds(5)}
-                  title="Skip forward 5 seconds"
+                  title="Skip forward 5 seconds (Shortcut: Shift+5)"
                   aria-label="Skip forward 5 seconds"
                 >
                   +5s
@@ -22000,7 +22021,7 @@ export function App(): JSX.Element {
                   className="analysis-overlay-transport-button analysis-overlay-skip-button"
                   data-testid="analysis-overlay-skip-forward-10"
                   onClick={() => handleSkipSeconds(10)}
-                  title="Skip forward 10 seconds"
+                  title="Skip forward 10 seconds (Shortcut: Shift+0)"
                   aria-label="Skip forward 10 seconds"
                 >
                   +10s

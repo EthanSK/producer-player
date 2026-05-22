@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.242] - 2026-05-22
+
+### Features
+- Keyboard shortcuts for jump-back / jump-forward: press `1` / `2` / `5` / `0` to jump back 1s / 2s / 5s / 10s. Hold `Shift` for the equivalent forward jump (Shift+1 = +1s, Shift+0 = +10s). Guarded against firing while a text/number input is focused so DAW-offset numeric entry still works. Skip-button tooltips updated across main transport, checklist mini-player, and floating analysis overlay to surface the shortcut keys.
+
 ## [3.53] - 2026-04-20
 
 ### Features

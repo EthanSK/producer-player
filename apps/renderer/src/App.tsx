@@ -898,6 +898,14 @@ const ALBUM_TITLE_STORAGE_KEY = 'producer-player.album-title.v1';
 const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const ALBUM_CHECKLIST_STORAGE_KEY = 'producer-player.album-checklist.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
+// v3.247 — collapsed/expanded state for the listening-device strip on the
+// song checklist page (Ethan voice 3677). Default = COLLAPSED so new users
+// (and reloads) get the thin one-row layout; click the chevron to expand
+// to the full capsule row. Persisted to localStorage so it survives
+// reloads. Only applies to the checklist modal context; other surfaces
+// that reuse listening-device UI keep their existing default behaviour.
+const CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY =
+  'producer-player.checklist-listening-strip-collapsed.v1';
 const NORMALIZATION_PLATFORM_STORAGE_KEY = 'producer-player.normalization-platform.v1';
 const NORMALIZATION_PREVIEW_FLOATING_VISIBLE_KEY =
   'producer-player.normalization-preview-floating-visible.v1';
@@ -3495,6 +3503,14 @@ export function App(): JSX.Element {
   const [shortcutSectionExpanded, setShortcutSectionExpanded] = useState(false);
   const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(() =>
     window.localStorage.getItem(MORE_METRICS_EXPANDED_KEY) === 'true'
+  );
+  // v3.247 — collapsed/expanded state for the checklist-page listening-device
+  // strip (Ethan voice 3677). Default `true` (collapsed) so the strip
+  // opens as a thin one-row affordance on first launch; localStorage value
+  // 'false' explicitly opts into expanded. Any unrecognised / missing value
+  // = default collapsed.
+  const [checklistListeningStripCollapsed, setChecklistListeningStripCollapsed] = useState(
+    () => window.localStorage.getItem(CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY) !== 'false'
   );
   const [compactMasteringPanelOrder, setCompactMasteringPanelOrder] = useState<
     CompactMasteringPanelId[]
@@ -18912,7 +18928,165 @@ export function App(): JSX.Element {
               </div>
             ) : null}
 
-            <div className="listening-device-strip" data-testid="listening-device-strip">
+            <div
+              className={`listening-device-strip${
+                checklistListeningStripCollapsed ? ' is-collapsed' : ''
+              }`}
+              data-testid="listening-device-strip"
+              data-collapsed={checklistListeningStripCollapsed ? 'true' : 'false'}
+            >
+              {/*
+                v3.247 (Ethan voice 3677) — collapsed-mode thin row. Shows
+                the current listening device name + an expand chevron. The
+                v3.245 "Sort: completed to bottom" button is rendered on
+                the right so it stays clickable without expanding the
+                strip. Clicking anywhere on the chevron / label toggles
+                back to the full capsule layout. Persisted via
+                `CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY`.
+              */}
+              {checklistListeningStripCollapsed ? (
+                <div
+                  className="listening-device-strip-collapsed-row"
+                  data-testid="listening-device-strip-collapsed-row"
+                >
+                  <button
+                    type="button"
+                    className="listening-device-strip-collapsed-toggle"
+                    onClick={() =>
+                      setChecklistListeningStripCollapsed((current) => {
+                        const next = !current;
+                        window.localStorage.setItem(
+                          CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY,
+                          String(next),
+                        );
+                        return next;
+                      })
+                    }
+                    aria-expanded={false}
+                    aria-controls="listening-device-strip-body"
+                    data-testid="listening-device-strip-collapsed-toggle"
+                    title="Expand listening device controls"
+                  >
+                    <span
+                      className="listening-device-strip-collapsed-caret"
+                      aria-hidden="true"
+                    >
+                      ▸
+                    </span>
+                    <span className="listening-device-strip-collapsed-label">
+                      Listening device:
+                    </span>{' '}
+                    <span
+                      className="listening-device-strip-collapsed-value"
+                      data-testid="listening-device-strip-collapsed-value"
+                      style={
+                        activeListeningDevice
+                          ? (() => {
+                              const color = getListeningDeviceColor(
+                                activeListeningDevice.id,
+                              );
+                              return { color: color.fg };
+                            })()
+                          : undefined
+                      }
+                    >
+                      {activeListeningDevice
+                        ? `${LISTENING_DEVICE_MARKER} ${activeListeningDevice.name}`
+                        : 'none'}
+                    </span>
+                  </button>
+                  {/*
+                    v3.247 — keep the v3.245 Sort button reachable while
+                    collapsed. Identical logic + disabled-state heuristic
+                    to the expanded copy below, just rendered here so
+                    Ethan never has to expand the strip just to sort.
+                  */}
+                  {(() => {
+                    const items = checklistModalItemsChronological;
+                    const hasDone = items.some(
+                      (it) =>
+                        it.isNote !== true &&
+                        (it.completed === true || it.wontFix === true),
+                    );
+                    const hasOpen = items.some(
+                      (it) =>
+                        it.isNote === true ||
+                        !(it.completed === true || it.wontFix === true),
+                    );
+                    let alreadyPartitioned = true;
+                    let seenDone = false;
+                    for (const it of items) {
+                      const isDone =
+                        it.isNote !== true &&
+                        (it.completed === true || it.wontFix === true);
+                      if (isDone) {
+                        seenDone = true;
+                      } else if (seenDone) {
+                        alreadyPartitioned = false;
+                        break;
+                      }
+                    }
+                    const canSort = hasDone && hasOpen && !alreadyPartitioned;
+                    const tooltipText = canSort
+                      ? 'Move completed items to the bottom. Notes and open todos stay on top in their current order. Won’t Fix items count as completed.'
+                      : items.length === 0
+                        ? 'No items to sort.'
+                        : !hasDone
+                          ? 'No completed items to move — the list is already organised.'
+                          : !hasOpen
+                            ? 'All items are completed — nothing to keep on top.'
+                            : 'Already sorted — completed items are at the bottom.';
+                    return (
+                      <button
+                        type="button"
+                        className="listening-device-secondary-button checklist-sort-completed-button checklist-sort-completed-button--collapsed"
+                        onClick={() =>
+                          handleSortChecklistMoveCompletedToBottom(
+                            checklistModalSong.id,
+                          )
+                        }
+                        disabled={!canSort}
+                        data-testid="checklist-sort-completed-to-bottom-collapsed"
+                        title={tooltipText}
+                        aria-label="Sort checklist: move completed items to the bottom"
+                      >
+                        Sort: completed to bottom
+                      </button>
+                    );
+                  })()}
+                </div>
+              ) : null}
+              <div
+                id="listening-device-strip-body"
+                className="listening-device-strip-body"
+                hidden={checklistListeningStripCollapsed}
+              >
+              {/*
+                v3.247 — small inline collapse button at the top of the
+                expanded body so Ethan can collapse without scrolling all
+                the way back up. Mirrors the chevron from the collapsed
+                row but pointing down (expanded indicator).
+              */}
+              <button
+                type="button"
+                className="listening-device-strip-collapse-button"
+                onClick={() =>
+                  setChecklistListeningStripCollapsed((current) => {
+                    const next = !current;
+                    window.localStorage.setItem(
+                      CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY,
+                      String(next),
+                    );
+                    return next;
+                  })
+                }
+                aria-expanded={true}
+                aria-controls="listening-device-strip-body"
+                data-testid="listening-device-strip-collapse-button"
+                title="Collapse listening device controls"
+              >
+                <span aria-hidden="true">▾</span> Collapse
+              </button>
               <div className="listening-device-editor">
                 <div className="listening-device-input-wrap">
                   <input
@@ -19276,6 +19450,7 @@ export function App(): JSX.Element {
                     </button>
                   );
                 })()}
+              </div>
               </div>
             </div>
 

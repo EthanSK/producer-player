@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.247] - 2026-05-22
+
+### Features
+- Checklist: the listening device strip now defaults to a COLLAPSED single thin row (Ethan voice 3677). Shows the current listening device name (with its colour-coded marker) on the left and a chevron toggle that expands to the full capsule layout. The v3.245 "Sort: completed to bottom" button stays visible on the right of the collapsed row so you can sort without expanding. State is persisted in localStorage (`producer-player.checklist-listening-strip-collapsed.v1`) and survives reloads — new users start collapsed, your last choice is remembered after that. A small "▾ Collapse" pill at the top of the expanded body re-collapses without scrolling. The expanded layout (input, Detect, Auto-set, Link, Rename, capsule chips, Sort) is unchanged — only its default visibility flipped.
+
 ## [3.246] - 2026-05-22
 
 ### Bug fixes

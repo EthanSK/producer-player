@@ -4116,6 +4116,116 @@ body.is-dragging-checklist-timestamp * {
   margin-top: 2px;
 }
 
+/* v3.247 (Ethan voice 3677) — Collapsed-mode for the listening-device strip
+ * on the checklist page. Default state is COLLAPSED, showing a single thin
+ * row with the current device name and a chevron. Click expands to the
+ * existing capsule layout. The strip outer container drops the two-column
+ * grid in collapsed mode so the thin row uses the full width naturally. */
+.listening-device-strip.is-collapsed {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.listening-device-strip-collapsed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  /* Match the input row's vertical rhythm so the strip's collapsed footprint
+   * mirrors a single capsule row exactly — that's the "thin row" Ethan
+   * asked for. */
+  min-height: 24px;
+}
+
+.listening-device-strip-collapsed-toggle {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  /* Long device names truncate gracefully so the chevron + sort button never
+   * get pushed off-screen on narrow viewports. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.listening-device-strip-collapsed-toggle:hover,
+.listening-device-strip-collapsed-toggle:focus-visible {
+  border-color: rgba(92, 167, 255, 0.45);
+  background: rgba(92, 167, 255, 0.06);
+}
+
+.listening-device-strip-collapsed-caret {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-muted);
+  transform: translateY(-0.5px);
+}
+
+.listening-device-strip-collapsed-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.listening-device-strip-collapsed-value {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sort button while collapsed: drop the default `margin-left: auto` from
+ * `.listening-device-secondary-button` (the toggle already absorbs the free
+ * horizontal space via flex: 1) and pin it tight to the right of the row. */
+.checklist-sort-completed-button--collapsed {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
+.listening-device-strip-body {
+  display: contents;
+}
+
+/* v3.247 — inline collapse button at the top of the expanded body. Uses
+ * the secondary-button visual language but sits in its own row above the
+ * editor + aside grid so it doesn't interfere with the existing 2-col
+ * layout. Right-aligned via `margin-left: auto` + a thin wrapper. */
+.listening-device-strip-collapse-button {
+  appearance: none;
+  grid-column: 1 / -1;
+  justify-self: end;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+.listening-device-strip-collapse-button:hover,
+.listening-device-strip-collapse-button:focus-visible {
+  color: var(--text);
+  border-color: rgba(92, 167, 255, 0.45);
+}
+
 .listening-device-editor {
   display: flex;
   flex-direction: column;

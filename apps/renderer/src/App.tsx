@@ -14710,6 +14710,63 @@ export function App(): JSX.Element {
     });
   }
 
+  // v3.245.0 — "Sort: completed to bottom" stable partition (voice 3661).
+  // Operates on the rendered (chronological) order: items classified as
+  // "done" sink to the bottom, items classified as "open" stay on top,
+  // and within each group the original relative order is preserved.
+  //
+  // Classification rules:
+  //   - DONE = (completed === true OR wontFix === true) AND NOT a note.
+  //   - OPEN = everything else (open todos, notes, mastering-promoted
+  //            findings, listening-device-tagged rows). Notes (isNote)
+  //            never sink because they're permanent context — not work
+  //            you're trying to push aside.
+  //
+  // Interpretation note: Ethan's verbatim ask was "moves all the incomplete
+  // checklist items to the bottom", but the surrounding context allowed
+  // judgement-call on which group sinks. Conventional checklist UX puts
+  // completed at the bottom so open work stays in view; that's what this
+  // implements (see commit message for the full rationale).
+  function sortChecklistMoveCompletedToBottom(
+    songId: string,
+  ): void {
+    updateSongChecklistItems(songId, (storedItems) => {
+      if (storedItems.length < 2) return storedItems;
+      const chronological = [...storedItems].reverse();
+      const isDone = (it: SongChecklistItem): boolean => {
+        if (it.isNote === true) return false;
+        return it.completed === true || it.wontFix === true;
+      };
+      const top: SongChecklistItem[] = [];
+      const bottom: SongChecklistItem[] = [];
+      for (const item of chronological) {
+        if (isDone(item)) bottom.push(item);
+        else top.push(item);
+      }
+      // No-op when there's nothing to move (all-open or all-done) — return
+      // the exact same reference so updateSongChecklistItems skips the
+      // history snapshot and re-render.
+      if (top.length === 0 || bottom.length === 0) return storedItems;
+      const sortedChronological = [...top, ...bottom];
+      // If the sort produced no movement (already in this order), return
+      // the original reference so we don't spam undo history.
+      let identical = true;
+      for (let i = 0; i < sortedChronological.length; i += 1) {
+        if (sortedChronological[i] !== chronological[i]) {
+          identical = false;
+          break;
+        }
+      }
+      if (identical) return storedItems;
+      return [...sortedChronological].reverse();
+    });
+  }
+
+  function handleSortChecklistMoveCompletedToBottom(songId: string): void {
+    logAction('checklist.sort.completed-to-bottom', { songId });
+    sortChecklistMoveCompletedToBottom(songId);
+  }
+
   function handleSubmitListeningDevice(): void {
     const trimmed = listeningDeviceDraftName.trim();
     if (trimmed.length === 0) {
@@ -19104,51 +19161,121 @@ export function App(): JSX.Element {
                   ) : null}
                 </div>
               </div>
-              <div
-                className="listening-device-chip-row"
-                data-testid="listening-device-chip-row"
-                aria-label="Saved listening devices"
-              >
-                {listeningDevices.length > 0 ? (
-                  listeningDevices.map((device) => {
-                    const color = getListeningDeviceColor(device.id);
-                    const isActive = device.id === activeListeningDeviceId;
-                    return (
-                      <span
-                        key={device.id}
-                        className={`listening-device-chip${isActive ? ' is-active' : ''}`}
-                        style={{
-                          color: color.fg,
-                          borderColor: color.border,
-                          background: isActive ? color.bg : 'transparent',
-                        }}
-                        data-testid={`listening-device-chip-${device.id}`}
-                      >
-                        <button
-                          type="button"
-                          className="listening-device-chip-label"
-                          onClick={() => handleSelectListeningDevice(device.id)}
-                          title={isActive ? `Clear "${device.name}" selection` : `Use "${device.name}" for new items`}
+              {/*
+                v3.245.0 — Wrap the chip row + the new "Sort: completed to
+                bottom" button in a column-flex container so the button
+                sits in the empty vertical space UNDER the chip capsules
+                (Ethan voice 3661 — "in the right-hand area under the
+                listening device capsules"). Right-aligned via the
+                container's `align-items: flex-end`.
+              */}
+              <div className="listening-device-strip-aside">
+                <div
+                  className="listening-device-chip-row"
+                  data-testid="listening-device-chip-row"
+                  aria-label="Saved listening devices"
+                >
+                  {listeningDevices.length > 0 ? (
+                    listeningDevices.map((device) => {
+                      const color = getListeningDeviceColor(device.id);
+                      const isActive = device.id === activeListeningDeviceId;
+                      return (
+                        <span
+                          key={device.id}
+                          className={`listening-device-chip${isActive ? ' is-active' : ''}`}
+                          style={{
+                            color: color.fg,
+                            borderColor: color.border,
+                            background: isActive ? color.bg : 'transparent',
+                          }}
+                          data-testid={`listening-device-chip-${device.id}`}
                         >
-                          {isActive ? `${LISTENING_DEVICE_MARKER} ${device.name}` : device.name}
-                        </button>
-                        <button
-                          type="button"
-                          className="listening-device-chip-delete"
-                          onClick={() => handleDeleteListeningDevice(device.id)}
-                          title={`Remove "${device.name}" from saved devices`}
-                          aria-label={`Remove ${device.name}`}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    );
-                  })
-                ) : (
-                  <span className="listening-device-chip-row-empty" aria-hidden="true">
-                    Saved devices appear here
-                  </span>
-                )}
+                          <button
+                            type="button"
+                            className="listening-device-chip-label"
+                            onClick={() => handleSelectListeningDevice(device.id)}
+                            title={isActive ? `Clear "${device.name}" selection` : `Use "${device.name}" for new items`}
+                          >
+                            {isActive ? `${LISTENING_DEVICE_MARKER} ${device.name}` : device.name}
+                          </button>
+                          <button
+                            type="button"
+                            className="listening-device-chip-delete"
+                            onClick={() => handleDeleteListeningDevice(device.id)}
+                            title={`Remove "${device.name}" from saved devices`}
+                            aria-label={`Remove ${device.name}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span className="listening-device-chip-row-empty" aria-hidden="true">
+                      Saved devices appear here
+                    </span>
+                  )}
+                </div>
+                {/*
+                  v3.245.0 — "Sort: completed to bottom" button (Ethan voice
+                  3661). Stable partition over the rendered chronological
+                  order: items with `completed === true || wontFix === true`
+                  (and NOT notes) sink to the bottom, everything else keeps
+                  its existing relative order at the top. Idempotent — a
+                  second click on an already-sorted list is a no-op (no
+                  undo-stack churn). Disabled when there's nothing to do
+                  (empty list, or all items are in one group already).
+                */}
+                {(() => {
+                  const items = checklistModalItemsChronological;
+                  const hasDone = items.some(
+                    (it) =>
+                      it.isNote !== true && (it.completed === true || it.wontFix === true),
+                  );
+                  const hasOpen = items.some(
+                    (it) =>
+                      it.isNote === true || !(it.completed === true || it.wontFix === true),
+                  );
+                  // Detect "already partitioned" so the button can grey out
+                  // when clicking it would be a no-op anyway.
+                  let alreadyPartitioned = true;
+                  let seenDone = false;
+                  for (const it of items) {
+                    const isDone =
+                      it.isNote !== true && (it.completed === true || it.wontFix === true);
+                    if (isDone) {
+                      seenDone = true;
+                    } else if (seenDone) {
+                      alreadyPartitioned = false;
+                      break;
+                    }
+                  }
+                  const canSort = hasDone && hasOpen && !alreadyPartitioned;
+                  const tooltipText = canSort
+                    ? 'Move completed items to the bottom. Notes and open todos stay on top in their current order. Won’t Fix items count as completed.'
+                    : items.length === 0
+                      ? 'No items to sort.'
+                      : !hasDone
+                        ? 'No completed items to move — the list is already organised.'
+                        : !hasOpen
+                          ? 'All items are completed — nothing to keep on top.'
+                          : 'Already sorted — completed items are at the bottom.';
+                  return (
+                    <button
+                      type="button"
+                      className="listening-device-secondary-button checklist-sort-completed-button"
+                      onClick={() =>
+                        handleSortChecklistMoveCompletedToBottom(checklistModalSong.id)
+                      }
+                      disabled={!canSort}
+                      data-testid="checklist-sort-completed-to-bottom"
+                      title={tooltipText}
+                      aria-label="Sort checklist: move completed items to the bottom"
+                    >
+                      Sort: completed to bottom
+                    </button>
+                  );
+                })()}
               </div>
             </div>
 

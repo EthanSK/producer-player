@@ -4387,6 +4387,27 @@ body.is-dragging-checklist-timestamp * {
   font-style: italic;
 }
 
+/* v3.245.0 — column-flex wrapper that occupies col-2 of the listening-device
+ * strip grid. Stacks the chip-row above the "Sort: completed to bottom"
+ * button so the button uses the previously-empty vertical space beneath the
+ * capsules (Ethan voice 3661 — "in the right-hand area under the listening
+ * device capsules"). Right-aligns its children so the button sits flush to
+ * the strip's right edge. */
+.listening-device-strip-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.listening-device-strip-aside > .listening-device-chip-row {
+  /* Chip row keeps its full width inside the aside column so wrapping
+   * capsules still flow naturally — only the button below is right-aligned
+   * by the aside's `align-items: flex-end`. */
+  width: 100%;
+}
+
 .listening-device-chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -4399,6 +4420,16 @@ body.is-dragging-checklist-timestamp * {
    * requiring a separate "expand" affordance. */
   min-height: 30px;
   padding-bottom: 2px;
+}
+
+/* v3.245.0 — "Sort: completed to bottom" pill. Inherits the visual style
+ * from .listening-device-secondary-button (slim border, rounded, subtle
+ * hover); only the sort-specific spacing lives here. */
+.checklist-sort-completed-button {
+  /* Slightly tighter top margin since the chip row already has its own
+   * padding-bottom, so the visual gap reads ~6-8px without doubling up. */
+  margin-top: 0;
+  white-space: nowrap;
 }
 
 .listening-device-chip-row-empty {

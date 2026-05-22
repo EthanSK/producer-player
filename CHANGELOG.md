@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.245] - 2026-05-22
+
+### Features
+- Checklist: new "Sort: completed to bottom" button in the right-hand area of the listening-device strip (under the capsules) on every song-checklist page. Click it to stable-partition the items — completed ticks (blue or Won't Fix) sink to the bottom while open todos and notes keep their existing relative order on top. Idempotent: re-clicking on an already-sorted list is a no-op (no undo-stack churn) and the button greys out when there's nothing to move. Native hover tooltip explains the behaviour. Notes don't sink because they're permanent context, not work you're pushing aside.
+
 ## [3.244] - 2026-05-22
 
 ### Features

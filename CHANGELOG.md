@@ -4,6 +4,16 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.249] - 2026-05-22
+
+### Bug fixes
+- Checklist collapse now hides the ENTIRE top header section (Ethan voice 3774 — "The collapse thing doesn't collapse the fucking entire top header section. Everything to the listening device and the actual list of devices."). v3.247's collapse button only hid the listening-device-strip body; the modal header above it (song title, DAW offset, counts) stayed visible. v3.249 hides the modal-header entirely while collapsed, so the only thing above the items list is the thin one-row "Listening device: X" strip. The "Done" close button moves inline onto that same collapsed row (next to the Sort button) so the checklist can still be closed without expanding.
+- Auto-set listening device toggle now actually does something when flipped ON (Ethan voice 3774 — "AUTO SET doesn't do shit"). Previously, ticking the per-song "Auto set" checkbox silently persisted the flag and only fired the auto-detect on the NEXT modal open — from the user's point of view the click looked like a no-op. v3.249 also fires an immediate detect cycle when the user enables the toggle, so the listening-device chip flips right away (or surfaces the same "can't detect" toast the manual Detect button would).
+- Hardened the v3.245 "Sort: completed to bottom" sort against the "puts them at the top" regression report (Ethan voice 3774). The sort logic was correct on paper but had no unit-test coverage. v3.249 extracts the sort into a pure helper (`apps/renderer/src/checklistSort.ts`) and adds a vitest suite that pins the expected post-sort layout across mixed Won't Fix / completed / open / note inputs — including the exact "Won't Fix items end up at the BOTTOM, not the top" assertion. Any future regression on either direction will fail the suite.
+
+### Features
+- Checklist: new "Sort completed by time" button right under the v3.245 "Sort: completed to bottom" pill (Ethan voice 3774 — "There should be another sort button just underneath called sort by time or sort completed by time"). Sorts completed items (blue tick OR Won't Fix) by the time they were marked done — oldest-first → newest-last. Open todos and notes stay where they are. To make this possible the `SongChecklistItem` contract gained an optional `completedAt: number` field (Date.now() millis) that the tick / Won't Fix handlers stamp on transition to "done" and clear on transition back to "open". Items completed before v3.249 don't have the field; the sort puts those at the very bottom of the completed group in their existing relative order. The button greys out with an explanatory tooltip until you've completed at least two items since v3.249.
+
 ## [3.248] - 2026-05-22
 
 ### Improvements

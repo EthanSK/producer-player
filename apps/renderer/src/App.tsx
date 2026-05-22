@@ -119,6 +119,10 @@ import {
   sanitizeSongRatings,
 } from './sharedUserState';
 import {
+  sortChecklistMoveCompletedToBottom as sortChecklistMoveCompletedToBottomPure,
+  sortChecklistCompletedByTime as sortChecklistCompletedByTimePure,
+} from './checklistSort';
+import {
   computeSongDateOpacitiesByAge,
   SONG_DATE_OPACITY_RANGE,
 } from './songAgeOpacity';
@@ -13562,6 +13566,18 @@ export function App(): JSX.Element {
       const currentItems = current[songId] ?? [];
       const nextItems = updater(currentItems);
 
+      // v3.249.0 — short-circuit when the updater returns the same array
+      // reference (i.e. it detected a no-op). Returning `current` here
+      // lets the outer `updateSongChecklists` skip the undo-stack snapshot
+      // AND avoids a re-render that would otherwise fire just because we
+      // spread into a new outer object below. Reported by Codex review
+      // — the pure sort helpers always short-circuit on identical input,
+      // but the original implementation always allocated a new wrapper
+      // object so history still grew on idempotent clicks.
+      if (nextItems === currentItems && songId in current) {
+        return current;
+      }
+
       if (nextItems.length === 0) {
         if (!(songId in current)) {
           return current;
@@ -14747,40 +14763,34 @@ export function App(): JSX.Element {
     songId: string,
   ): void {
     updateSongChecklistItems(songId, (storedItems) => {
-      if (storedItems.length < 2) return storedItems;
-      const chronological = [...storedItems].reverse();
-      const isDone = (it: SongChecklistItem): boolean => {
-        if (it.isNote === true) return false;
-        return it.completed === true || it.wontFix === true;
-      };
-      const top: SongChecklistItem[] = [];
-      const bottom: SongChecklistItem[] = [];
-      for (const item of chronological) {
-        if (isDone(item)) bottom.push(item);
-        else top.push(item);
-      }
-      // No-op when there's nothing to move (all-open or all-done) — return
-      // the exact same reference so updateSongChecklistItems skips the
-      // history snapshot and re-render.
-      if (top.length === 0 || bottom.length === 0) return storedItems;
-      const sortedChronological = [...top, ...bottom];
-      // If the sort produced no movement (already in this order), return
-      // the original reference so we don't spam undo history.
-      let identical = true;
-      for (let i = 0; i < sortedChronological.length; i += 1) {
-        if (sortedChronological[i] !== chronological[i]) {
-          identical = false;
-          break;
-        }
-      }
-      if (identical) return storedItems;
-      return [...sortedChronological].reverse();
+      const next = sortChecklistMoveCompletedToBottomPure(storedItems);
+      // The pure helper returns the SAME reference when it's a no-op so
+      // updateSongChecklistItems skips the undo snapshot + re-render in
+      // that case.
+      return next as SongChecklistItem[];
     });
   }
 
   function handleSortChecklistMoveCompletedToBottom(songId: string): void {
     logAction('checklist.sort.completed-to-bottom', { songId });
     sortChecklistMoveCompletedToBottom(songId);
+  }
+
+  // v3.249.0 — "Sort completed by time" (Ethan voice 3774). A SECOND sort
+  // button below the existing "Sort: completed to bottom" that sorts the
+  // COMPLETED items by their completion timestamp. Pure logic lives in
+  // ./checklistSort.ts so it's unit-testable; this wrapper just plumbs
+  // through `updateSongChecklistItems`.
+  function sortChecklistCompletedByTime(songId: string): void {
+    updateSongChecklistItems(songId, (storedItems) => {
+      const next = sortChecklistCompletedByTimePure(storedItems);
+      return next as SongChecklistItem[];
+    });
+  }
+
+  function handleSortChecklistCompletedByTime(songId: string): void {
+    logAction('checklist.sort.completed-by-time', { songId });
+    sortChecklistCompletedByTime(songId);
   }
 
   function handleSubmitListeningDevice(): void {
@@ -14930,6 +14940,12 @@ export function App(): JSX.Element {
    * `readAutoSetListeningDeviceForSong` consults on the next modal-open
    * cycle. The unified-state sync picks the value up from localStorage on
    * the next debounced flush so it round-trips to disk.
+   *
+   * v3.249.0 (Ethan voice 3774 — "AUTO SET doesn't do shit") — when the
+   * user FLIPS the toggle ON, also fire an immediate detect cycle so the
+   * effect is visible right away instead of waiting until the next modal
+   * open. The previous behaviour persisted the flag silently, which read
+   * as "nothing happened" from the user's perspective.
    */
   function handleToggleChecklistAutoSetListeningDevice(enabled: boolean): void {
     setChecklistModalAutoSetListeningDeviceEnabled(enabled);
@@ -14939,6 +14955,10 @@ export function App(): JSX.Element {
         songId: checklistModalSongId,
         enabled,
       });
+    }
+    if (enabled) {
+      // Fire-and-forget; the detect handler manages its own toasts.
+      void handleDetectListeningDevice();
     }
   }
 
@@ -15123,7 +15143,14 @@ export function App(): JSX.Element {
         if (item.id !== itemId) return item;
         // v3.244.0 — ticking the blue check always clears wontFix. The
         // two completion states are mutually exclusive.
-        const { wontFix: _wontFix, ...rest } = item;
+        const { wontFix: _wontFix, completedAt: _prevCompletedAt, ...rest } = item;
+        // v3.249.0 — stamp / clear completedAt so the new "Sort completed
+        // by time" button has a real signal. New tick → stamp now;
+        // untick → drop the stamp so a re-tick later records a fresh
+        // time.
+        if (completed) {
+          return { ...rest, completed, completedAt: Date.now() };
+        }
         return { ...rest, completed };
       })
     );
@@ -15142,10 +15169,14 @@ export function App(): JSX.Element {
         if (item.id !== itemId) return item;
         const nextWontFix = !(item.wontFix === true);
         if (nextWontFix) {
-          return { ...item, wontFix: true, completed: false };
+          // v3.249.0 — record completion timestamp on transition to
+          // Won't Fix. Sort-by-time treats Won't Fix identically to a
+          // blue-tick completion.
+          return { ...item, wontFix: true, completed: false, completedAt: Date.now() };
         }
-        // Returning to "open" — strip the wontFix key entirely.
-        const { wontFix: _wontFix, ...rest } = item;
+        // Returning to "open" — strip the wontFix key entirely and drop
+        // the completedAt stamp so re-toggling later records a fresh one.
+        const { wontFix: _wontFix, completedAt: _prevCompletedAt, ...rest } = item;
         return { ...rest, completed: false };
       })
     );
@@ -15166,7 +15197,11 @@ export function App(): JSX.Element {
           // true` never leaks into a todo count if it later flips back.
           // v3.244.0 — notes ignore completion math entirely so also
           // strip any wontFix flag.
-          const { wontFix: _wontFix, ...rest } = item;
+          // v3.249.0 — also drop the completedAt timestamp so a stale
+          // value can't survive the note round-trip and pollute the
+          // "Sort completed by time" ordering if the item is later
+          // converted back to a todo and re-ticked.
+          const { wontFix: _wontFix, completedAt: _completedAt, ...rest } = item;
           return { ...rest, isNote: true, completed: false };
         }
         // Becoming a todo again: strip the isNote key entirely.
@@ -18781,7 +18816,22 @@ export function App(): JSX.Element {
             }
           }}
         >
-          <div ref={checklistModalCardRef} className="checklist-modal-card">
+          <div
+            ref={checklistModalCardRef}
+            className={`checklist-modal-card${
+              checklistListeningStripCollapsed ? ' is-header-collapsed' : ''
+            }`}
+            data-header-collapsed={checklistListeningStripCollapsed ? 'true' : 'false'}
+          >
+            {/*
+              v3.249.0 (Ethan voice 3774) — the existing collapse button only
+              hid the listening-device-strip body. Ethan expects the SAME
+              click to also hide the modal header above (title, DAW offset,
+              counts) so the only thing visible at the top is the thin
+              "Listening device: X" row + Done + Sort. We render the full
+              header only when the strip is EXPANDED.
+            */}
+            {!checklistListeningStripCollapsed ? (
             <div className="checklist-modal-header">
               <div>
                 <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Mark new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to use that device for subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
@@ -18858,6 +18908,7 @@ export function App(): JSX.Element {
                 Done
               </button>
             </div>
+            ) : null}
 
             {checklistFindOpen ? (
               <div
@@ -19054,6 +19105,21 @@ export function App(): JSX.Element {
                       </button>
                     );
                   })()}
+                  {/*
+                    v3.249.0 — Done button inline on the collapsed row so
+                    Ethan can close the checklist without expanding the
+                    strip (the modal header — which previously hosted
+                    Done — is hidden while collapsed per voice 3774).
+                  */}
+                  <button
+                    type="button"
+                    className="checklist-header-done-button checklist-header-done-button--collapsed"
+                    onClick={handleCloseSongChecklist}
+                    title="Close checklist."
+                    data-testid="song-checklist-done-header-collapsed"
+                  >
+                    Done
+                  </button>
                 </div>
               ) : null}
               <div
@@ -19447,6 +19513,57 @@ export function App(): JSX.Element {
                       aria-label="Sort checklist: move completed items to the bottom"
                     >
                       Sort: completed to bottom
+                    </button>
+                  );
+                })()}
+                {/*
+                  v3.249.0 — "Sort completed by time" (Ethan voice 3774).
+                  Second sort button right under the v3.245 button. Sorts
+                  the completed (incl. Won't Fix) items by their
+                  completedAt timestamp, oldest-first. Open todos + notes
+                  are untouched. Disabled when there are fewer than two
+                  TIMED-completed items to reorder, OR when the list is
+                  already in the requested order.
+                */}
+                {(() => {
+                  const items = checklistModalItemsChronological;
+                  // v3.249 — enablement check mirrors the pure helper's
+                  // own no-op detection so the disabled state never lies
+                  // (Codex feedback: the previous "count timed-completed
+                  // items" heuristic disabled the button on lists like
+                  // `[legacyDone, timed100, timed200]` even though the
+                  // sort WOULD move legacyDone to the very bottom of the
+                  // completed group). We run the pure helper on a probe
+                  // copy and compare references — exactly what
+                  // `updateSongChecklistItems` will see at click time.
+                  const storage = [...items].reverse();
+                  const probeResult = sortChecklistCompletedByTimePure(storage);
+                  const canSortByTime = probeResult !== storage;
+                  const doneWithTime = items.filter(
+                    (it) =>
+                      it.isNote !== true &&
+                      (it.completed === true || it.wontFix === true) &&
+                      typeof it.completedAt === 'number',
+                  );
+                  const hasEnoughTimed = doneWithTime.length >= 2;
+                  const tooltipText = canSortByTime
+                    ? 'Sort completed items by when they were ticked off — oldest first, newest last. Open todos and notes stay where they are. Items ticked before v3.249 (no recorded time) sink to the very bottom of the completed group.'
+                    : !hasEnoughTimed
+                      ? 'Need at least two items completed since v3.249 to sort by time. (Items ticked before v3.249 don\'t have a recorded completion time.)'
+                      : 'Already sorted by completion time.';
+                  return (
+                    <button
+                      type="button"
+                      className="listening-device-secondary-button checklist-sort-completed-button checklist-sort-completed-by-time-button"
+                      onClick={() =>
+                        handleSortChecklistCompletedByTime(checklistModalSong.id)
+                      }
+                      disabled={!canSortByTime}
+                      data-testid="checklist-sort-completed-by-time"
+                      title={tooltipText}
+                      aria-label="Sort completed checklist items by completion time"
+                    >
+                      Sort completed by time
                     </button>
                   );
                 })()}

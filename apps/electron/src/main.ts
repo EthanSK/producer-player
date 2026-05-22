@@ -2074,6 +2074,31 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       candidate.listeningDeviceId.trim().length > 0
         ? candidate.listeningDeviceId
         : null;
+    // v3.249.0 — preserve every optional flag that the renderer-side
+    // sanitizer carries through. This legacy-state parser previously
+    // dropped fromMastering / isNote / wontFix / completedAt on the floor
+    // every time the LEGACY shared-state file (producer-player-shared-user-
+    // state.json) was read on cold-start; that silently reverted Won't Fix
+    // items to plain completed, demoted notes back to todos, and erased
+    // v3.249 completion timestamps on app restart whenever the legacy file
+    // was the active migration source. Match the unified-state parser in
+    // state-service.ts exactly.
+    const fromMastering = candidate.fromMastering === true ? true : undefined;
+    const isNote = candidate.isNote === true ? true : undefined;
+    const wontFix =
+      isNote !== true &&
+      (candidate as { wontFix?: unknown }).wontFix === true
+        ? true
+        : undefined;
+    const rawCompletedAt = (candidate as { completedAt?: unknown }).completedAt;
+    const isDoneRow = candidate.completed === true || wontFix === true;
+    const completedAt =
+      isDoneRow &&
+      typeof rawCompletedAt === 'number' &&
+      Number.isFinite(rawCompletedAt) &&
+      rawCompletedAt > 0
+        ? rawCompletedAt
+        : undefined;
 
     return [
       {
@@ -2083,6 +2108,10 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
         timestampSeconds,
         versionNumber,
         listeningDeviceId,
+        ...(fromMastering ? { fromMastering: true } : {}),
+        ...(isNote ? { isNote: true } : {}),
+        ...(wontFix ? { wontFix: true } : {}),
+        ...(completedAt !== undefined ? { completedAt } : {}),
       },
     ];
   });

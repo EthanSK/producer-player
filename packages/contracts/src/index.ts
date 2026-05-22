@@ -405,6 +405,17 @@ export interface SongChecklistItem {
    * explicitly true so historical items round-trip unchanged.
    */
   wontFix?: boolean;
+  /**
+   * v3.249.0 — Timestamp (Date.now() millis) when the item was marked done
+   * (either via the blue tick or via Won't Fix). Used by the new "Sort
+   * completed by time" button so the user can group completed work by
+   * when it was finished (e.g. "today's tickoffs vs last week's").
+   * Cleared when the item is reopened. Only present on items whose
+   * completion was recorded after v3.249 — historical items have it
+   * undefined; the sort treats those as "no timestamp" and keeps them in
+   * their existing relative order at the bottom of the completed group.
+   */
+  completedAt?: number;
 }
 
 /**

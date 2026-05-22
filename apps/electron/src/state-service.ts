@@ -157,6 +157,25 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
     // isNote, but this main-process parse path was stripping it on
     // disk-load, causing notes to revert to todos on app restart.)
     const isNote = c.isNote === true ? true : undefined;
+    // v3.249.0 — Won't Fix state (added in v3.244) AND completedAt timestamp
+    // (new in v3.249) were both being silently STRIPPED by this main-process
+    // parser, causing v3.244+ Won't Fix items to revert to plain completed
+    // across app restarts and v3.249 completion times to be lost. Both
+    // fields now round-trip here exactly as in the renderer sanitizer.
+    const wontFix =
+      isNote !== true &&
+      (c as { wontFix?: unknown }).wontFix === true
+        ? true
+        : undefined;
+    const rawCompletedAt = (c as { completedAt?: unknown }).completedAt;
+    const isDoneRow = c.completed === true || wontFix === true;
+    const completedAt =
+      isDoneRow &&
+      typeof rawCompletedAt === 'number' &&
+      Number.isFinite(rawCompletedAt) &&
+      rawCompletedAt > 0
+        ? rawCompletedAt
+        : undefined;
     return [{
       id: c.id,
       text: c.text,
@@ -166,6 +185,8 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       listeningDeviceId,
       ...(fromMastering ? { fromMastering: true } : {}),
       ...(isNote ? { isNote: true } : {}),
+      ...(wontFix ? { wontFix: true } : {}),
+      ...(completedAt !== undefined ? { completedAt } : {}),
     }];
   });
 }

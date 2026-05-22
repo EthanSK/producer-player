@@ -4561,6 +4561,15 @@ body.is-dragging-checklist-timestamp * {
   white-space: nowrap;
 }
 
+/* v3.249.0 — second sort button "Sort completed by time" stacks
+ * immediately under the v3.245 button (Ethan voice 3774 — "another sort
+ * button just underneath"). The aside container is already
+ * `flex-direction: column` so it naturally falls below; this rule just
+ * keeps any future vertical spacing tweak local to the new pill. */
+.checklist-sort-completed-by-time-button {
+  margin-top: 0;
+}
+
 .listening-device-chip-row-empty {
   font-size: 11px;
   font-style: italic;

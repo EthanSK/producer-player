@@ -81,6 +81,21 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
       isNote !== true && (candidate as { wontFix?: unknown }).wontFix === true
         ? true
         : undefined;
+    // v3.249.0 — Optional completion timestamp (Date.now() millis). Only
+    // carried forward when the item is actually done (completed === true
+    // or wontFix === true) AND the raw value is a finite positive
+    // number. Open todos and notes never carry a completedAt — clearing
+    // ensures round-tripping never resurrects a stale value after the
+    // user reopens an item.
+    const rawCompletedAt = (candidate as { completedAt?: unknown }).completedAt;
+    const isDone = candidate.completed === true || wontFix === true;
+    const completedAt =
+      isDone &&
+      typeof rawCompletedAt === 'number' &&
+      Number.isFinite(rawCompletedAt) &&
+      rawCompletedAt > 0
+        ? rawCompletedAt
+        : undefined;
 
     return [
       {
@@ -93,6 +108,7 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
         ...(fromMastering ? { fromMastering: true } : {}),
         ...(isNote ? { isNote: true } : {}),
         ...(wontFix ? { wontFix: true } : {}),
+        ...(completedAt !== undefined ? { completedAt } : {}),
       },
     ];
   });

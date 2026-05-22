@@ -2132,15 +2132,24 @@ function readStoredAlbumChecklists(): Record<string, AlbumChecklistItem[]> {
           // v3.183.0 — preserve isNote when explicitly true so the
           // note/todo mode survives reloads. Historical items round-trip
           // unchanged (no stray `isNote: false` key).
+          // v3.244.0 — also preserve wontFix when explicitly true. Notes
+          // ignore completion math entirely so wontFix is cleared when
+          // isNote is set.
           .map((item) => {
             const candidate = item as AlbumChecklistItem;
             const isNote =
               (candidate as { isNote?: unknown }).isNote === true ? true : undefined;
+            const wontFix =
+              isNote !== true &&
+              (candidate as { wontFix?: unknown }).wontFix === true
+                ? true
+                : undefined;
             return {
               id: candidate.id,
               text: candidate.text,
               completed: candidate.completed,
               ...(isNote ? { isNote: true } : {}),
+              ...(wontFix ? { wontFix: true } : {}),
             };
           });
       }
@@ -7065,8 +7074,12 @@ export function App(): JSX.Element {
       computeChecklistOpacitiesByRemainingTodoCount(
         songs.map((song) => ({
           id: song.id,
-          remainingTodoCount: (songChecklists[song.id] ?? []).filter((item) => !item.completed)
-            .length,
+          // v3.244.0 — Won't Fix counts as resolved (same as `completed`)
+          // so it no longer contributes to a song's "remaining todos"
+          // opacity weighting.
+          remainingTodoCount: (songChecklists[song.id] ?? []).filter(
+            (item) => !(item.completed || item.wontFix === true)
+          ).length,
         }))
       ),
     [songChecklists, songs]
@@ -13959,9 +13972,38 @@ export function App(): JSX.Element {
       const existing = prev[key] ?? [];
       return {
         ...prev,
-        [key]: existing.map((item) =>
-          item.id === itemId ? { ...item, completed } : item
-        ),
+        [key]: existing.map((item) => {
+          if (item.id !== itemId) return item;
+          // v3.244.0 — ticking the blue check always clears wontFix.
+          // The two completion states are mutually exclusive.
+          const { wontFix: _wontFix, ...rest } = item;
+          return { ...rest, completed };
+        }),
+      };
+    });
+  }
+
+  // v3.244.0 — flip an album-checklist row's Won't Fix state. When set,
+  // the item counts as DONE for progress math but renders with the muted
+  // "Won't Fix" appearance. Mutually exclusive with `completed`.
+  function handleToggleAlbumChecklistItemWontFix(itemId: string): void {
+    logAction('checklist.album.toggle-wontfix', { itemId });
+    const key = getAlbumChecklistKey();
+    setAlbumChecklists((prev) => {
+      const existing = prev[key] ?? [];
+      return {
+        ...prev,
+        [key]: existing.map((item) => {
+          if (item.id !== itemId) return item;
+          const nextWontFix = !(item.wontFix === true);
+          if (nextWontFix) {
+            return { ...item, wontFix: true, completed: false };
+          }
+          // Returning to "open" — strip the wontFix key entirely so
+          // historical items round-trip without a stray false value.
+          const { wontFix: _wontFix, ...rest } = item;
+          return { ...rest, completed: false };
+        }),
       };
     });
   }
@@ -13978,7 +14020,10 @@ export function App(): JSX.Element {
           if (item.id !== itemId) return item;
           const nextIsNote = !(item.isNote === true);
           if (nextIsNote) {
-            return { ...item, isNote: true, completed: false };
+            // v3.244.0 — notes ignore completion math entirely so also
+            // strip any wontFix flag when becoming a note.
+            const { wontFix: _wontFix, ...rest } = item;
+            return { ...rest, isNote: true, completed: false };
           }
           const { isNote: _isNote, ...rest } = item;
           return rest;
@@ -15001,7 +15046,35 @@ export function App(): JSX.Element {
   function handleToggleChecklistItem(songId: string, itemId: string, completed: boolean): void {
     logAction('checklist.song.toggle', { songId, itemId, completed });
     updateSongChecklistItems(songId, (items) =>
-      items.map((item) => (item.id === itemId ? { ...item, completed } : item))
+      items.map((item) => {
+        if (item.id !== itemId) return item;
+        // v3.244.0 — ticking the blue check always clears wontFix. The
+        // two completion states are mutually exclusive.
+        const { wontFix: _wontFix, ...rest } = item;
+        return { ...rest, completed };
+      })
+    );
+  }
+
+  // v3.244.0 — flip a song-checklist row's Won't Fix state. When set,
+  // the item counts as DONE for progress math (same as `completed`) but
+  // renders with the muted "Won't Fix" appearance and horizontal-bar
+  // icon. Mutually exclusive with `completed`. We omit `wontFix` rather
+  // than storing `false` so historical items round-trip cleanly through
+  // the sanitizer.
+  function handleToggleChecklistItemWontFix(songId: string, itemId: string): void {
+    logAction('checklist.song.toggle-wontfix', { songId, itemId });
+    updateSongChecklistItems(songId, (items) =>
+      items.map((item) => {
+        if (item.id !== itemId) return item;
+        const nextWontFix = !(item.wontFix === true);
+        if (nextWontFix) {
+          return { ...item, wontFix: true, completed: false };
+        }
+        // Returning to "open" — strip the wontFix key entirely.
+        const { wontFix: _wontFix, ...rest } = item;
+        return { ...rest, completed: false };
+      })
     );
   }
 
@@ -15018,7 +15091,10 @@ export function App(): JSX.Element {
         if (nextIsNote) {
           // Becoming a note: drop the checkbox state so a stray `completed:
           // true` never leaks into a todo count if it later flips back.
-          return { ...item, isNote: true, completed: false };
+          // v3.244.0 — notes ignore completion math entirely so also
+          // strip any wontFix flag.
+          const { wontFix: _wontFix, ...rest } = item;
+          return { ...rest, isNote: true, completed: false };
         }
         // Becoming a todo again: strip the isNote key entirely.
         const { isNote: _isNote, ...rest } = item;
@@ -15234,7 +15310,12 @@ export function App(): JSX.Element {
   // count and excluded from the completed/total todo math.
   const albumChecklistTodoItems = albumChecklistItems.filter((item) => item.isNote !== true);
   const albumChecklistNoteCount = albumChecklistItems.length - albumChecklistTodoItems.length;
-  const albumChecklistCompletedCount = albumChecklistTodoItems.filter((item) => item.completed).length;
+  // v3.244.0 — Won't Fix counts as done (Ethan: "counts it like everything
+  // else is as if it's checked"). Both `completed` and `wontFix` resolve
+  // a todo for progress math.
+  const albumChecklistCompletedCount = albumChecklistTodoItems.filter(
+    (item) => item.completed || item.wontFix === true
+  ).length;
 
   const checklistModalSong = checklistModalSongId
     ? snapshot.songs.find((song) => song.id === checklistModalSongId) ?? null
@@ -15583,7 +15664,11 @@ export function App(): JSX.Element {
   // both numbers side-by-side as "X / Y todos · N notes".
   const checklistModalTodoItems = checklistModalItems.filter((item) => item.isNote !== true);
   const checklistNoteCount = checklistModalItems.length - checklistModalTodoItems.length;
-  const checklistCompletedCount = checklistModalTodoItems.filter((item) => item.completed).length;
+  // v3.244.0 — Won't Fix counts as done. Both `completed` and `wontFix`
+  // resolve a todo for progress math.
+  const checklistCompletedCount = checklistModalTodoItems.filter(
+    (item) => item.completed || item.wontFix === true
+  ).length;
   const checklistModalCanOpenMastering = checklistModalSong
     ? getPreferredPlaybackVersionId(checklistModalSong) !== null
     : false;
@@ -16186,10 +16271,16 @@ export function App(): JSX.Element {
             id: item.id,
             text: item.text,
             completed: item.completed,
+            // v3.244.0 — surface Won't Fix to the AI context so it
+            // doesn't re-recommend something the user already decided
+            // to skip.
+            wontFix: item.wontFix === true ? true : undefined,
             timestampSeconds: item.timestampSeconds,
             versionNumber: item.versionNumber,
           })),
-          completedCount: checklistItems.filter((i) => i.completed).length,
+          completedCount: checklistItems.filter(
+            (i) => i.completed || i.wontFix === true
+          ).length,
           totalCount: checklistItems.length,
         }
       : null;
@@ -17670,8 +17761,11 @@ export function App(): JSX.Element {
               (item) => item.isNote !== true
             );
             const songChecklistCount = songChecklistTodoItems.length;
+            // v3.244.0 — "Remaining" excludes both `completed` and
+            // `wontFix` items so the row badge reflects Won't Fix as
+            // resolved work, matching the modal's completion math.
             const songChecklistRemainingTodoCount = songChecklistTodoItems.filter(
-              (item) => !item.completed
+              (item) => !(item.completed || item.wontFix === true)
             ).length;
             const songChecklistOpacity =
               songChecklistOpacityBySongId.get(song.id) ?? CHECKLIST_TODO_OPACITY_RANGE.zeroTodos;
@@ -19174,7 +19268,9 @@ export function App(): JSX.Element {
                         isChecklistFindActiveMatch ? ' is-find-active-match' : ''
                       }${
                         isCurrentVersionTag ? ' checklist-item--current-version' : ''
-                      }${item.isNote === true ? ' checklist-item-row--note' : ''}`}
+                      }${item.isNote === true ? ' checklist-item-row--note' : ''}${
+                        item.wontFix === true ? ' checklist-item-row--wontfix' : ''
+                      }`}
                       style={
                         groupHighlightColor
                           ? ({ '--group-highlight-color': groupHighlightColor } as CSSProperties)
@@ -19194,6 +19290,27 @@ export function App(): JSX.Element {
                         >
                           NOTE
                         </span>
+                      ) : item.wontFix === true ? (
+                        // v3.244.0 — Won't Fix occupies the same grid slot
+                        // as the checkbox. Clicking the horizontal-bar
+                        // button returns the item to "open" (clears
+                        // wontFix). Counts as done for progress math but
+                        // visually distinct from a blue tick.
+                        <button
+                          type="button"
+                          className="checklist-item-wontfix-indicator"
+                          data-testid="song-checklist-item-wontfix-indicator"
+                          aria-label="Won't Fix — click to reopen"
+                          title="Won't Fix (counts as done). Click to reopen."
+                          onClick={() =>
+                            handleToggleChecklistItemWontFix(
+                              checklistModalSong.id,
+                              item.id
+                            )
+                          }
+                        >
+                          <span aria-hidden="true">—</span>
+                        </button>
                       ) : (
                         <label className="checklist-item-toggle">
                           <input
@@ -19334,7 +19451,7 @@ export function App(): JSX.Element {
                         </div>
                       ) : null}
                       <textarea
-                        className={`checklist-item-text${item.completed ? ' completed' : ''}`}
+                        className={`checklist-item-text${item.completed ? ' completed' : ''}${item.wontFix === true ? ' wontfix' : ''}`}
                         value={item.text}
                         rows={1}
                         // Keep textarea editing native. The dnd-kit pointer
@@ -19401,6 +19518,30 @@ export function App(): JSX.Element {
                             }
                           >
                             {isListeningDeviceAssignmentTarget ? 'Select listening device…' : 'Set device'}
+                          </button>
+                        ) : null}
+                        {/* v3.244.0 — Won't Fix toggle. Hover-revealed on
+                            normal todo rows (item.isNote !== true and
+                            item.wontFix !== true). When wontFix is set
+                            the indicator-button in the checkbox slot
+                            handles the un-toggle, so we don't render
+                            this button in that state. Hidden on notes
+                            entirely (notes ignore completion math). */}
+                        {item.isNote !== true && item.wontFix !== true ? (
+                          <button
+                            type="button"
+                            className="checklist-item-wontfix-toggle"
+                            onClick={() =>
+                              handleToggleChecklistItemWontFix(
+                                checklistModalSong.id,
+                                item.id
+                              )
+                            }
+                            data-testid="song-checklist-item-wontfix-toggle"
+                            aria-label="Mark as Won't Fix"
+                            title="Mark as Won't Fix (counts as done)"
+                          >
+                            <span aria-hidden="true">—</span>
                           </button>
                         ) : null}
                         {/* v3.183.0 — Convert this row between todo and
@@ -19482,10 +19623,19 @@ export function App(): JSX.Element {
                             hasItemMetadata ? ' has-metadata' : ''
                           }${
                             isCurrentVersionTag ? ' checklist-item--current-version' : ''
-                          }${item.isNote === true ? ' checklist-item-row--note' : ''}`}
+                          }${item.isNote === true ? ' checklist-item-row--note' : ''}${
+                            item.wontFix === true ? ' checklist-item-row--wontfix' : ''
+                          }`}
                         >
                           {item.isNote === true ? (
                             <span className="checklist-item-note-eyebrow" aria-hidden="true">NOTE</span>
+                          ) : item.wontFix === true ? (
+                            <span
+                              className="checklist-item-wontfix-indicator"
+                              aria-hidden="true"
+                            >
+                              <span aria-hidden="true">—</span>
+                            </span>
                           ) : (
                             <label className="checklist-item-toggle">
                               <input type="checkbox" checked={item.completed} readOnly tabIndex={-1} />
@@ -19535,7 +19685,7 @@ export function App(): JSX.Element {
                             </div>
                           ) : null}
                           <textarea
-                            className={`checklist-item-text${item.completed ? ' completed' : ''}`}
+                            className={`checklist-item-text${item.completed ? ' completed' : ''}${item.wontFix === true ? ' wontfix' : ''}`}
                             value={item.text}
                             rows={1}
                             readOnly
@@ -20067,7 +20217,7 @@ export function App(): JSX.Element {
                   {albumChecklistItems.map((item) => (
                     <li
                       key={item.id}
-                      className={`checklist-item-row${item.isNote === true ? ' checklist-item-row--note' : ''}`}
+                      className={`checklist-item-row${item.isNote === true ? ' checklist-item-row--note' : ''}${item.wontFix === true ? ' checklist-item-row--wontfix' : ''}`}
                     >
                       {item.isNote === true ? (
                         <span
@@ -20078,6 +20228,22 @@ export function App(): JSX.Element {
                         >
                           NOTE
                         </span>
+                      ) : item.wontFix === true ? (
+                        // v3.244.0 — Won't Fix occupies the checkbox slot.
+                        // Clicking the horizontal-bar button reopens the
+                        // item. Counts as done for progress math.
+                        <button
+                          type="button"
+                          className="checklist-item-wontfix-indicator"
+                          data-testid="album-checklist-item-wontfix-indicator"
+                          aria-label="Won't Fix — click to reopen"
+                          title="Won't Fix (counts as done). Click to reopen."
+                          onClick={() =>
+                            handleToggleAlbumChecklistItemWontFix(item.id)
+                          }
+                        >
+                          <span aria-hidden="true">—</span>
+                        </button>
                       ) : (
                         <label className="checklist-item-toggle">
                           <input
@@ -20090,7 +20256,7 @@ export function App(): JSX.Element {
                         </label>
                       )}
                       <textarea
-                        className={`checklist-item-text${item.completed ? ' completed' : ''}`}
+                        className={`checklist-item-text${item.completed ? ' completed' : ''}${item.wontFix === true ? ' wontfix' : ''}`}
                         value={item.text}
                         rows={1}
                         onChange={(event) => {
@@ -20124,6 +20290,23 @@ export function App(): JSX.Element {
                         data-testid="album-checklist-item-text"
                       />
                       <div className="checklist-item-actions">
+                        {/* v3.244.0 — Won't Fix toggle. Hover-revealed on
+                            normal album-checklist todo rows. Hidden when
+                            the row is already wontFix (the indicator in
+                            the checkbox slot handles un-toggle) or when
+                            it's a note. */}
+                        {item.isNote !== true && item.wontFix !== true ? (
+                          <button
+                            type="button"
+                            className="checklist-item-wontfix-toggle"
+                            onClick={() => handleToggleAlbumChecklistItemWontFix(item.id)}
+                            data-testid="album-checklist-item-wontfix-toggle"
+                            aria-label="Mark as Won't Fix"
+                            title="Mark as Won't Fix (counts as done)"
+                          >
+                            <span aria-hidden="true">—</span>
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className={`checklist-item-mode-toggle${item.isNote === true ? ' is-note' : ''}`}

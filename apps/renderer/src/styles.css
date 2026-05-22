@@ -4696,6 +4696,113 @@ body.is-dragging-checklist-timestamp * {
   font-weight: 600;
 }
 
+/* v3.244.0 — Won't Fix alternative completion state.
+   ----------------------------------------------------
+   Visual language:
+   - Muted slate-grey palette (distinct from the blue tick and from the
+     amber "note" tint) so the row reads as "resolved without action".
+   - Horizontal-bar icon (em-dash glyph) in the checkbox slot, framed in
+     a button that matches the size of the regular checkbox toggle.
+   - Row text is dimmed + struck-through (heavier strike than the
+     plain `.completed` opacity-only treatment so wontFix is glance-
+     distinguishable from a normal completed tick).
+   - Hover-revealed "Won't Fix" entry button lives in the row actions
+     area and matches the same hover-reveal pattern as
+     `.checklist-item-mode-toggle`. */
+
+/* Indicator-button in the checkbox grid slot, shown when an item IS
+   wontFix. Clicking reopens the item. */
+.checklist-item-wontfix-indicator {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin-top: 2px;
+  align-self: flex-start;
+  border-radius: 6px;
+  border: 1px solid rgba(170, 170, 170, 0.42);
+  background: rgba(160, 170, 180, 0.16);
+  color: rgba(220, 224, 230, 0.78);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.checklist-item-wontfix-indicator:hover,
+.checklist-item-wontfix-indicator:focus-visible {
+  border-color: rgba(170, 170, 170, 0.72);
+  background: rgba(160, 170, 180, 0.24);
+  color: rgba(235, 238, 244, 0.95);
+}
+
+/* Hover-revealed Won't Fix toggle in the actions area, shown on
+   normal open todo rows. Matches the dimensions / hover-reveal of
+   `.checklist-item-mode-toggle` for visual symmetry. */
+.checklist-item-wontfix-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(170, 170, 170, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+
+.checklist-item-row:hover .checklist-item-wontfix-toggle,
+.checklist-item-row:focus-within .checklist-item-wontfix-toggle {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.checklist-item-wontfix-toggle:hover,
+.checklist-item-wontfix-toggle:focus-visible {
+  border-color: rgba(170, 170, 170, 0.7);
+  color: var(--text-main);
+  box-shadow: 0 0 0 2px rgba(170, 170, 170, 0.12);
+}
+
+/* Row-level wontFix tint — slightly desaturated so the item reads as
+   "settled, not actively pursued" without dominating the list. */
+.checklist-item-row--wontfix {
+  background: rgba(150, 160, 170, 0.06);
+  border-color: rgba(170, 170, 170, 0.22);
+}
+
+.checklist-item-row--wontfix:hover {
+  background: rgba(150, 160, 170, 0.09);
+}
+
+/* Won't-Fix text is struck through + dimmed so the visual delta from a
+   normal blue-tick "completed" item is obvious at a glance. */
+.checklist-item-text.wontfix {
+  text-decoration: line-through;
+  text-decoration-color: rgba(170, 170, 170, 0.55);
+  color: rgba(200, 205, 210, 0.62);
+  font-style: italic;
+}
+
 .checklist-empty-state {
   margin: 0;
   min-height: 100%;

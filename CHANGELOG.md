@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.244] - 2026-05-22
+
+### Features
+- Checklist: "Won't Fix" alternative completion state on per-song + album checklist items. A second tick option (horizontal-bar icon) sits in the row's actions area, hover-revealed so it doesn't clutter open todos. Clicking it marks the item resolved — counts toward `n / total` progress same as a normal tick — but renders with a muted strike-through "won't fix" look instead of a blue check, so you can see at a glance which items were decided-not-to-do vs done. Clicking the horizontal-bar indicator in the checkbox slot reopens the item. Persisted alongside notes/from-mastering on the existing checklist storage; historical items round-trip cleanly.
+
 ## [3.243] - 2026-05-22
 
 ### Features

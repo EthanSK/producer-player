@@ -394,6 +394,17 @@ export interface SongChecklistItem {
    * values back to false so existing stored checklists load unchanged.
    */
   isNote?: boolean;
+  /**
+   * v3.244.0 — Won't Fix alternative completion state. When true, the item
+   * is considered DONE for completion math (e.g. "3 / 5 done") but is
+   * rendered with a distinct muted "Won't Fix" appearance (horizontal-bar
+   * icon instead of the blue tick). Mutually exclusive with `completed`:
+   * setting wontFix=true clears completed; ticking the blue check on a
+   * wontfix row clears wontFix. The Won't Fix button is hover-revealed
+   * (same pattern as the to-note mode toggle). Only carried forward when
+   * explicitly true so historical items round-trip unchanged.
+   */
+  wontFix?: boolean;
 }
 
 /**
@@ -442,6 +453,12 @@ export interface AlbumChecklistItem {
    * undefined/false for historical items.
    */
   isNote?: boolean;
+  /**
+   * v3.244.0 — Won't Fix alternative completion state. Same semantics as
+   * `SongChecklistItem.wontFix`: counts as DONE for progress math but
+   * renders with a muted "Won't Fix" style and the horizontal-bar icon.
+   */
+  wontFix?: boolean;
 }
 
 export interface SavedReferenceTrack {

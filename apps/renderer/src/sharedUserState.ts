@@ -73,6 +73,14 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
     // v3.183.0 — note-vs-todo mode flag. Only carry forward when
     // explicitly true so historical items round-trip unchanged.
     const isNote = candidate.isNote === true ? true : undefined;
+    // v3.244.0 — Won't Fix alternative completion state. Only carry
+    // forward when explicitly true so historical items round-trip
+    // unchanged. Notes can never be wontFix (notes ignore completion
+    // math entirely), so we clear it when isNote is set.
+    const wontFix =
+      isNote !== true && (candidate as { wontFix?: unknown }).wontFix === true
+        ? true
+        : undefined;
 
     return [
       {
@@ -84,6 +92,7 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
         listeningDeviceId,
         ...(fromMastering ? { fromMastering: true } : {}),
         ...(isNote ? { isNote: true } : {}),
+        ...(wontFix ? { wontFix: true } : {}),
       },
     ];
   });

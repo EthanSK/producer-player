@@ -11450,29 +11450,70 @@ export function App(): JSX.Element {
   }
 
   function handleResetAllPlaybackTimes(): void {
-    playbackPositionBySongIdRef.current.clear();
-    pendingRestoreTimeRef.current = null;
-
     const audio = audioRef.current;
-    if (audio) {
+    const activePlaybackKey =
+      audio && !audio.paused ? lastLoadedSongIdRef.current : null;
+    const preservedPlaybackKey =
+      activePlaybackKey && songs.some((song) => song.id === activePlaybackKey)
+        ? activePlaybackKey
+        : null;
+    const preservedCurrentTimeSeconds =
+      audio && Number.isFinite(audio.currentTime) ? audio.currentTime : null;
+    const preservedPendingRestoreTime =
+      preservedPlaybackKey !== null &&
+      pendingRestoreTimeRef.current !== null &&
+      Number.isFinite(pendingRestoreTimeRef.current)
+        ? pendingRestoreTimeRef.current
+        : null;
+    const preservedStoredTime =
+      preservedPlaybackKey !== null
+        ? playbackPositionBySongIdRef.current.get(preservedPlaybackKey) ?? null
+        : null;
+    const preservedPlaybackTime =
+      preservedCurrentTimeSeconds ?? preservedPendingRestoreTime ?? preservedStoredTime;
+    const durationSeconds =
+      audio && Number.isFinite(audio.duration) ? audio.duration : undefined;
+
+    // Bug fix (2026-05-24): Ethan uses Reset All Times while auditioning a
+    // playing track, so the bulk action must clear stale remembered positions
+    // without yanking the album track he is currently hearing back to 0:00.
+    // Paused tracks and reference-audio auditioning are intentionally still
+    // reset because they are not a currently playing album track.
+    playbackPositionBySongIdRef.current.clear();
+    pendingRestoreTimeRef.current = preservedPendingRestoreTime;
+
+    if (preservedPlaybackKey && preservedPlaybackTime !== null) {
+      rememberSongPlayhead(preservedPlaybackKey, preservedPlaybackTime, {
+        durationSeconds,
+      });
+    }
+
+    if (preservedPlaybackKey && preservedCurrentTimeSeconds !== null) {
+      setCurrentTimeSeconds(preservedCurrentTimeSeconds);
+    } else {
       try {
-        audio.currentTime = 0;
+        if (audio) {
+          audio.currentTime = 0;
+        }
       } catch {
         // Ignore transient seek errors while metadata is still settling.
       }
+
+      setCurrentTimeSeconds(0);
     }
 
-    setCurrentTimeSeconds(0);
-    rememberSongPlayhead(lastLoadedSongIdRef.current, 0, {
-      durationSeconds: audio && Number.isFinite(audio.duration) ? audio.duration : undefined,
-    });
     logPlaybackEvent('reset-all-playback-times', {
       songCount: songs.length,
+      resetSongCount: preservedPlaybackKey ? Math.max(0, songs.length - 1) : songs.length,
+      preservedPlaybackKey,
+      preservedPlaybackTimeSeconds: preservedPlaybackTime,
     });
     toast.show({
       id: 'reset-all-playback-times',
       kind: 'success',
-      text: 'Playback time reset to zero on all tracks.',
+      text: preservedPlaybackKey
+        ? 'Playback times reset to zero on all other tracks.'
+        : 'Playback time reset to zero on all tracks.',
     });
   }
 
@@ -17783,7 +17824,9 @@ export function App(): JSX.Element {
             disabled={songs.length === 0}
             title={
               songs.length > 0
-                ? 'Set playback time to zero for every track.'
+                ? isPlaying
+                  ? 'Set playback time to zero for every track except the one currently playing.'
+                  : 'Set playback time to zero for every track.'
                 : 'Link tracks before resetting playback times.'
             }
           >

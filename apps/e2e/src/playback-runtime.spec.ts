@@ -2324,12 +2324,38 @@ test.describe('playback runtime deep dive', () => {
       await expect(page.getByTestId('player-track-name')).toContainText('Reset Times Beta');
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
 
+      await expect(page.getByTestId('player-scrubber')).toBeEnabled();
+      await page.getByTestId('player-scrubber').evaluate((element) => {
+        const input = element as HTMLInputElement;
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value'
+        )?.set;
+        valueSetter?.call(input, '4.4');
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      await page.waitForTimeout(250);
+      await expect
+        .poll(async () => Number(await page.getByTestId('player-scrubber').inputValue()))
+        .toBeGreaterThan(4);
+
+      await expect(page.getByTestId('reset-all-times-button')).toHaveAttribute(
+        'title',
+        'Set playback time to zero for every track except the one currently playing.'
+      );
+      await page.getByTestId('reset-all-times-button').click();
+      await expect(page.getByText('Playback times reset to zero on all other tracks.')).toBeVisible();
+      // Regression pin (2026-05-24): Reset All Times is a bulk cleanup tool,
+      // not a transport command. The current track must stay exactly where
+      // Ethan is listening while the remembered positions for the other tracks
+      // are cleared.
+      expect(Number(await page.getByTestId('player-scrubber').inputValue())).toBeGreaterThan(
+        4
+      );
+
       await page.getByTestId('player-play-toggle').click();
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
-
-      await page.getByTestId('reset-all-times-button').click();
-      await expect(page.getByText('Playback time reset to zero on all tracks.')).toBeVisible();
-      expect(Number(await page.getByTestId('player-scrubber').inputValue())).toBeLessThan(0.1);
 
       await page
         .getByTestId('main-list-row')

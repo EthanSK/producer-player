@@ -140,6 +140,10 @@ test.describe('Producer Player desktop shell', () => {
         'track positions are preserved across versions'
       );
       await expect(page.getByTestId('reset-all-times-button')).toHaveText('Reset All Times');
+      await expect(page.getByTestId('reset-all-times-button')).toHaveAttribute(
+        'title',
+        'Link tracks before resetting playback times.'
+      );
       await expect(page.getByTestId('reset-all-times-button')).toBeDisabled();
       await expect(page.locator('.panel-left [data-testid="status-card"]')).toHaveCount(1);
       await expect(page.locator('.panel-right [data-testid="status-card"]')).toHaveCount(0);
@@ -152,6 +156,10 @@ test.describe('Producer Player desktop shell', () => {
       // Nested folders are ignored by scan policy.
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await expect(page.getByTestId('reset-all-times-button')).toBeEnabled();
+      await expect(page.getByTestId('reset-all-times-button')).toHaveAttribute(
+        'title',
+        'Set playback time to zero for every track.'
+      );
       await page.getByTestId('reset-all-times-button').click();
       await expect(page.getByText('Playback time reset to zero on all tracks.')).toBeVisible();
       await expect(page.getByTestId('main-list-row').first()).toContainText('Midnight Echo');

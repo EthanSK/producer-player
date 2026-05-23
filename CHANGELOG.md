@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.250] - 2026-05-23
+
+### Bug fixes
+- Restored the 5th floating bottom-right trigger (platform-preview indicator at `right:224px`). The slot rhythm post-v3.192 is `16/68/120/172/224` (inspector / agent / quick-song / version / platform-preview). The platform-preview trigger is gated by `normalizationPreviewFloatingVisible`, which defaulted to `false` when localStorage was empty and stayed permanently `false` for any user who had ever clicked the "×" close on the indicator — the only re-entry point was the platform-picker UI most users never touch. Result: the bottom-right slot at `right:224px` was empty, leaving a visible gap in the floating-trigger rhythm. v3.250 flips the default to `true` and bumps the storage key from `v1` to `v2` so existing stale `false` values are dropped once. Users who dismiss it after the upgrade will still see their dismissal persisted normally.
+
 ## [3.249] - 2026-05-22
 
 ### Bug fixes

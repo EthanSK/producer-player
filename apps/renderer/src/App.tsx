@@ -911,8 +911,14 @@ const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
 const CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY =
   'producer-player.checklist-listening-strip-collapsed.v1';
 const NORMALIZATION_PLATFORM_STORAGE_KEY = 'producer-player.normalization-platform.v1';
+// Bug fix (v3.250): bumped from v1 to v2 to clear stale `false` values from users who had ever
+// dismissed the floating preview indicator — that 5th floating bottom-right slot (right:224px)
+// was permanently empty after dismissal because the only path to re-show it required interacting
+// with platform-picker UI most users never touch. The slot order (16/68/120/172/224) had a visible
+// gap where the platform-preview button should have been. Repro without this: clear localStorage,
+// dismiss the floating preview, refresh — only 4 of the 5 floating triggers render.
 const NORMALIZATION_PREVIEW_FLOATING_VISIBLE_KEY =
-  'producer-player.normalization-preview-floating-visible.v1';
+  'producer-player.normalization-preview-floating-visible.v2';
 // v3.79: collapse the inspector earlier on compact laptop viewports so the
 // main/left columns keep enough room. Kept in sync with the matching `@media`
 // query in styles.css (`.inspector-toggle-button`, `.app-shell`).
@@ -3640,7 +3646,7 @@ export function App(): JSX.Element {
       const stored = window.localStorage.getItem(
         NORMALIZATION_PREVIEW_FLOATING_VISIBLE_KEY
       );
-      return stored === 'true';
+      return stored === null ? true : stored === 'true'; // Bug fix (v3.250): default to visible so the 5th floating bottom-right trigger (platform-preview at right:224px) renders on first run instead of leaving a permanent gap in the 16/68/120/172/224 slot rhythm.
     });
   const [midSideMode, setMidSideMode] = useState<'stereo' | 'mid' | 'side'>('stereo');
   const [analyserNodeL, setAnalyserNodeL] = useState<AnalyserNode | null>(null);

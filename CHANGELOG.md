@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.251] - 2026-05-23
+
+### Bug fixes
+- Checklist collapse now actually hides the listening-device / filter editor body and stops hiding the wrong thing (Ethan voice 3860 — "It's not collapsing anything. It's just moving back and forth left to right. Oh, you're collapsing the actual header. I'm not talking about the header. I'm talking about the filter section, the listening device."). v3.249 made TWO mistakes that combined into the "nothing collapses" feeling: (1) it conditionally rendered the modal header (song title, DAW offset, counts, Done button) only when the strip was EXPANDED, hiding the wrong thing on collapse, and (2) it used `hidden={collapsed}` on `.listening-device-strip-body` which gets silently overridden by the `display: contents` CSS rule (`styles.css:4198`) — author CSS specificity wins over the user-agent `[hidden] { display: none }` rule, so the strip body kept rendering even when the `hidden` attribute was true. Result from Ethan's POV: clicking Collapse hid the title bar (wrong target) while the listening-device editor body STAYED visible (also wrong), and the only visible change was the horizontal rearrangement of the collapsed-row toggle vs the expanded body's "Collapse" button — hence "moving back and forth left to right". v3.251 reverts both mistakes: the modal header always renders, and the strip body is now conditionally rendered with `{!collapsed ? (<div...>) : null}` which dodges the CSS-specificity issue entirely. Also removed the v3.249 duplicate "Done" button on the collapsed strip row since the original Done in the modal header is always reachable again. The Sort button on the collapsed row stays — Ethan explicitly liked having sort accessible without expanding per the original v3.247 ask.
+
 ## [3.250] - 2026-05-23
 
 ### Bug fixes

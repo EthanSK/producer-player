@@ -18830,14 +18830,20 @@ export function App(): JSX.Element {
             data-header-collapsed={checklistListeningStripCollapsed ? 'true' : 'false'}
           >
             {/*
-              v3.249.0 (Ethan voice 3774) — the existing collapse button only
-              hid the listening-device-strip body. Ethan expects the SAME
-              click to also hide the modal header above (title, DAW offset,
-              counts) so the only thing visible at the top is the thin
-              "Listening device: X" row + Done + Sort. We render the full
-              header only when the strip is EXPANDED.
+              v3.251 (Ethan voice 3860) — REVERTED v3.249's modal-header
+              hiding. Voice 3860 verbatim: "I'm not talking about the
+              header. I'm talking about the filter section, the listening
+              device. I was just calling it header because it was at the
+              top." Ethan wanted ONLY the listening-device-strip body to
+              collapse (v3.247 behavior), NOT the modal header (title,
+              DAW offset, counts, Done button). The modal header now
+              ALWAYS renders regardless of collapse state. The
+              listening-device-strip body is now conditionally rendered
+              below (was `hidden={...}` which got overridden by CSS
+              `display: contents` on `.listening-device-strip-body`,
+              hence Ethan's "it's not collapsing anything" observation —
+              the body kept rendering even with the hidden attr).
             */}
-            {!checklistListeningStripCollapsed ? (
             <div className="checklist-modal-header">
               <div>
                 <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Mark new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to use that device for subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
@@ -18914,7 +18920,6 @@ export function App(): JSX.Element {
                 Done
               </button>
             </div>
-            ) : null}
 
             {checklistFindOpen ? (
               <div
@@ -19112,26 +19117,35 @@ export function App(): JSX.Element {
                     );
                   })()}
                   {/*
-                    v3.249.0 — Done button inline on the collapsed row so
-                    Ethan can close the checklist without expanding the
-                    strip (the modal header — which previously hosted
-                    Done — is hidden while collapsed per voice 3774).
+                    v3.251 (Ethan voice 3860) — REMOVED the v3.249 duplicate
+                    Done button. Modal header always renders again now,
+                    so the original Done button up there is always
+                    reachable — no need for a second one on the collapsed
+                    strip row. (The Sort button above stays — Ethan
+                    explicitly liked having sort accessible without
+                    expanding per the original v3.247 ask.)
                   */}
-                  <button
-                    type="button"
-                    className="checklist-header-done-button checklist-header-done-button--collapsed"
-                    onClick={handleCloseSongChecklist}
-                    title="Close checklist."
-                    data-testid="song-checklist-done-header-collapsed"
-                  >
-                    Done
-                  </button>
                 </div>
               ) : null}
+              {/*
+                v3.251 (Ethan voice 3860) — switched from
+                `hidden={...}` attribute to conditional render. The
+                `hidden` attribute applies `display: none` via UA stylesheet
+                but `.listening-device-strip-body { display: contents }`
+                in styles.css:4198 has higher specificity and overrode it,
+                so the body kept rendering even when collapsed. That's the
+                "it's not collapsing anything. it's just moving back and
+                forth left to right" bug Ethan observed — the modal header
+                was hiding (because that was a separate conditional render)
+                but the strip body itself stayed visible, making the only
+                visible change be the layout shift from the collapsed-row
+                vs expanded-body header swap. Conditional render dodges the
+                CSS-specificity issue entirely.
+              */}
+              {!checklistListeningStripCollapsed ? (
               <div
                 id="listening-device-strip-body"
                 className="listening-device-strip-body"
-                hidden={checklistListeningStripCollapsed}
               >
               {/*
                 v3.247 — small inline collapse button at the top of the
@@ -19575,6 +19589,7 @@ export function App(): JSX.Element {
                 })()}
               </div>
               </div>
+              ) : null}
             </div>
 
             <div

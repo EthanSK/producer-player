@@ -67,6 +67,64 @@ test.describe('Checklist and export UX improvements', () => {
     }
   });
 
+  test('listening-device strip collapse control sits at the top-left when expanded', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-collapse-left'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      await expect(page.getByTestId('listening-device-strip-collapsed-row')).toBeVisible();
+      await page.getByTestId('listening-device-strip-collapsed-toggle').click();
+
+      const collapseButton = page.getByTestId('listening-device-strip-collapse-button');
+      await expect(collapseButton).toBeVisible();
+
+      const metrics = await page.evaluate(() => {
+        const strip = document.querySelector<HTMLElement>(
+          '[data-testid="listening-device-strip"]'
+        );
+        const button = document.querySelector<HTMLElement>(
+          '[data-testid="listening-device-strip-collapse-button"]'
+        );
+        if (!strip || !button) {
+          throw new Error('Listening-device strip or collapse button was not rendered.');
+        }
+        const stripRect = strip.getBoundingClientRect();
+        const buttonRect = button.getBoundingClientRect();
+        return {
+          stripLeft: stripRect.left,
+          stripRight: stripRect.right,
+          buttonLeft: buttonRect.left,
+          buttonRight: buttonRect.right,
+        };
+      });
+
+      // Regression guard for Ethan voice 70957: the expanded strip's Collapse
+      // button used to justify to the far top-right of the grid row. Keeping it
+      // within a few pixels of the strip's left edge proves it now anchors at
+      // the top-left, while the right-edge check catches accidental reverts.
+      expect(Math.abs(metrics.buttonLeft - metrics.stripLeft)).toBeLessThanOrEqual(4);
+      expect(metrics.buttonRight).toBeLessThan(metrics.stripRight - 24);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('clear completed checklist asks for confirmation and respects cancel/confirm', async () => {
     const directories = await createE2ETestDirectories('producer-player-checklist-clear-confirm');
 

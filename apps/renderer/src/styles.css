@@ -4199,14 +4199,15 @@ body.is-dragging-checklist-timestamp * {
   display: contents;
 }
 
-/* v3.247 — inline collapse button at the top of the expanded body. Uses
- * the secondary-button visual language but sits in its own row above the
- * editor + aside grid so it doesn't interfere with the existing 2-col
- * layout. Right-aligned via `margin-left: auto` + a thin wrapper. */
+/* v3.254 — inline collapse button at the top-left of the expanded body.
+ * Ethan's checklist workflow reads the listening-device strip from left to
+ * right, so the control that hides the strip needs to start where the
+ * section starts instead of living at the far top-right edge. It still spans
+ * the full grid row so the editor/chip columns begin cleanly below it. */
 .listening-device-strip-collapse-button {
   appearance: none;
   grid-column: 1 / -1;
-  justify-self: end;
+  justify-self: start;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1px 8px;

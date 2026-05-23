@@ -64,12 +64,12 @@ export function sortChecklistMoveCompletedToBottom(
 }
 
 /**
- * v3.249.0 — Sort: order the COMPLETED items by their completion
- * timestamp (oldest first → newest last). Open todos and notes are
+ * v3.252.0 — Sort: order the COMPLETED items by their completion
+ * timestamp (newest first → oldest last). Open todos and notes are
  * untouched and stay at the top of the list in their existing order.
- * Items without a completedAt (any pre-v3.249 ticks) sink to the bottom
- * of the completed group in their existing relative order — we don't
- * invent a fake timestamp for them.
+ * Items without a completedAt (any pre-v3.249 ticks) stay after the
+ * timestamped completed items in their existing relative order — we
+ * don't invent a fake timestamp for them.
  *
  * Caller contract identical to `sortChecklistMoveCompletedToBottom`:
  * pass STORAGE order in, get STORAGE order back (or the same reference
@@ -92,10 +92,15 @@ export function sortChecklistCompletedByTime(
       doneWithoutTime.push(item);
     }
   }
+  // Regression guard: the rendered list is top → bottom, so completedAt
+  // must be DESCENDING here. Ascending order made newly completed items
+  // sink below older completed work, which is exactly the bug Ethan
+  // reported in the completed-to-bottom/time sort flow.
+  //
   // Array.prototype.sort is guaranteed stable since ES2019 — items with
   // identical timestamps therefore retain their incoming relative order.
   doneWithTime.sort(
-    (a, b) => (a.completedAt as number) - (b.completedAt as number),
+    (a, b) => (b.completedAt as number) - (a.completedAt as number),
   );
   const sortedChronological = [...opens, ...doneWithTime, ...doneWithoutTime];
   if (arraysIdentical(sortedChronological, chronological)) return storedItems;

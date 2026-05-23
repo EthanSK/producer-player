@@ -19537,13 +19537,13 @@ export function App(): JSX.Element {
                   );
                 })()}
                 {/*
-                  v3.249.0 — "Sort completed by time" (Ethan voice 3774).
-                  Second sort button right under the v3.245 button. Sorts
-                  the completed (incl. Won't Fix) items by their
-                  completedAt timestamp, oldest-first. Open todos + notes
-                  are untouched. Disabled when there are fewer than two
-                  TIMED-completed items to reorder, OR when the list is
-                  already in the requested order.
+                  v3.252.0 — "Sort completed by time" (Ethan voice 3774,
+                  corrected by voice 3884). Second sort button right under
+                  the v3.245 button. Sorts completed (incl. Won't Fix) items
+                  by completedAt newest-first because the rendered list reads
+                  top → bottom; oldest-first made the newest completed item
+                  sink to the bottom, which is the regression Ethan noticed.
+                  Open todos + notes are untouched.
                 */}
                 {(() => {
                   const items = checklistModalItemsChronological;
@@ -19567,7 +19567,7 @@ export function App(): JSX.Element {
                   );
                   const hasEnoughTimed = doneWithTime.length >= 2;
                   const tooltipText = canSortByTime
-                    ? 'Sort completed items by when they were ticked off — oldest first, newest last. Open todos and notes stay where they are. Items ticked before v3.249 (no recorded time) sink to the very bottom of the completed group.'
+                    ? 'Sort completed items by when they were ticked off — newest first, oldest last. Open todos and notes stay where they are. Items ticked before v3.249 (no recorded time) stay below timestamped completed items.'
                     : !hasEnoughTimed
                       ? 'Need at least two items completed since v3.249 to sort by time. (Items ticked before v3.249 don\'t have a recorded completion time.)'
                       : 'Already sorted by completion time.';

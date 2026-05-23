@@ -130,7 +130,7 @@ describe('sortChecklistCompletedByTime', () => {
     expect(sortChecklistCompletedByTime(one)).toBe(one);
   });
 
-  it('sorts completed items by completedAt (oldest first)', () => {
+  it('sorts completed items by completedAt (newest first)', () => {
     const storage = rendered(
       makeItem('o1'),
       makeItem('c2', { completed: true, completedAt: 3000 }),
@@ -138,7 +138,11 @@ describe('sortChecklistCompletedByTime', () => {
       makeItem('c4', { completed: true, completedAt: 2000 }),
     );
     const out = sortChecklistCompletedByTime(storage);
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['o1', 'c3', 'c4', 'c2']);
+    // Regression guard for Ethan voice 3884: the UI renders top -> bottom,
+    // so the newest completion timestamp must be FIRST inside the completed
+    // group. Ascending order made the newest ticked-off item sink to the
+    // bottom, which made "sort completed by time" feel backwards.
+    expect(renderedOf(out).map((it) => it.id)).toEqual(['o1', 'c2', 'c4', 'c3']);
   });
 
   it('sorts Won\'t Fix items by completedAt alongside blue-tick completed items', () => {
@@ -149,8 +153,9 @@ describe('sortChecklistCompletedByTime', () => {
       makeItem('o4'),
     );
     const out = sortChecklistCompletedByTime(storage);
-    // Opens first (o4), then done sorted by time: w3=1000, c2=2000, w1=5000
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['o4', 'w3', 'c2', 'w1']);
+    // Opens first (o4), then done sorted newest-first by time:
+    // w1=5000, c2=2000, w3=1000.
+    expect(renderedOf(out).map((it) => it.id)).toEqual(['o4', 'w1', 'c2', 'w3']);
   });
 
   it('puts done items WITHOUT a completedAt at the very bottom in their existing relative order (legacy ticks)', () => {
@@ -162,13 +167,13 @@ describe('sortChecklistCompletedByTime', () => {
       makeItem('o5'),
     );
     const out = sortChecklistCompletedByTime(storage);
-    // o5 (open) on top, then timed ascending: c4=1000, c2=2000, then
-    // legacy entries in their existing chronological relative order:
+    // o5 (open) on top, then timed newest-first: c2=2000, c4=1000,
+    // then legacy entries in their existing chronological relative order:
     // legacy1, legacy3
     expect(renderedOf(out).map((it) => it.id)).toEqual([
       'o5',
-      'c4',
       'c2',
+      'c4',
       'legacy1',
       'legacy3',
     ]);
@@ -187,19 +192,19 @@ describe('sortChecklistCompletedByTime', () => {
   it('is idempotent on an already-sorted list (returns the same reference)', () => {
     const storage = rendered(
       makeItem('o1'),
-      makeItem('c2', { completed: true, completedAt: 1000 }),
       makeItem('c3', { completed: true, completedAt: 2000 }),
+      makeItem('c2', { completed: true, completedAt: 1000 }),
     );
     expect(sortChecklistCompletedByTime(storage)).toBe(storage);
   });
 
   it('is stable: items with the same completedAt keep their existing relative order', () => {
     const storage = rendered(
+      makeItem('c', { completed: true, completedAt: 500 }),
       makeItem('a', { completed: true, completedAt: 1000 }),
       makeItem('b', { completed: true, completedAt: 1000 }),
-      makeItem('c', { completed: true, completedAt: 500 }),
     );
     const out = sortChecklistCompletedByTime(storage);
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['c', 'a', 'b']);
+    expect(renderedOf(out).map((it) => it.id)).toEqual(['a', 'b', 'c']);
   });
 });

@@ -128,6 +128,33 @@ test('PER_TRACK_KEYS surface is stable and matches expected songId-keyed fields'
   ]);
 });
 
+test('autoplay-next global preference defaults on and preserves explicit opt-out', () => {
+  const defaults = createDefaultUserState();
+
+  assert.equal(defaults.autoplayNextEnabled, true);
+  assert.equal(parseUserState({}).autoplayNextEnabled, true);
+  assert.equal(
+    parseUserState({ ...defaults, autoplayNextEnabled: false }).autoplayNextEnabled,
+    false,
+  );
+  assert.equal(
+    parseUserState({ ...defaults, autoplayNextEnabled: 'false' }).autoplayNextEnabled,
+    true,
+    'malformed legacy values must keep the default-on upgrade behavior',
+  );
+
+  const { globalFields } = splitStateForDisk({
+    ...defaults,
+    autoplayNextEnabled: false,
+  });
+
+  assert.equal(
+    globalFields.autoplayNextEnabled,
+    false,
+    'autoplay-next is global transport state and should not be hoisted per-track',
+  );
+});
+
 test('splitStateForDisk hoists songId-keyed fields into per-track buckets', () => {
   const rich = makeRichState();
   const { globalFields, trackBuckets } = splitStateForDisk(rich);

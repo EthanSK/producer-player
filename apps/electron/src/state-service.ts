@@ -715,6 +715,11 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     listeningDevices: [],
     activeListeningDeviceId: null,
     playbackVolume: 1,
+    // Default ON preserves pre-toggle behavior: reaching the end of a song
+    // advances and starts the next queue item unless the user explicitly opts
+    // out. This is global state because it describes playback behavior, not
+    // song metadata.
+    autoplayNextEnabled: true,
     referenceLevelMatchEnabled: true,
     iCloudBackupEnabled: false,
     autoUpdateEnabled: true,
@@ -805,6 +810,12 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.playbackVolume === 'number' && Number.isFinite(raw.playbackVolume)
         ? Math.max(0, Math.min(raw.playbackVolume, 1))
         : fallback.playbackVolume,
+    // Missing or malformed legacy state falls back to ON so the upgrade does
+    // not surprise existing users by suddenly stopping at every track end.
+    autoplayNextEnabled:
+      typeof raw.autoplayNextEnabled === 'boolean'
+        ? raw.autoplayNextEnabled
+        : fallback.autoplayNextEnabled,
     referenceLevelMatchEnabled:
       typeof raw.referenceLevelMatchEnabled === 'boolean' ? raw.referenceLevelMatchEnabled : fallback.referenceLevelMatchEnabled,
     iCloudBackupEnabled:
@@ -1702,6 +1713,14 @@ export class UserStateService {
     const refLevelMatch = data['producer-player.reference-level-match.v1'];
     if (refLevelMatch !== undefined && refLevelMatch !== null) {
       state.referenceLevelMatchEnabled = refLevelMatch === 'true';
+    }
+
+    // Autoplay-next (global transport preference). LocalStorage only exists as
+    // a renderer bootstrap mirror; the unified state field above is the
+    // durable source once the app has migrated.
+    const autoplayNext = data['producer-player.autoplay-next-enabled.v1'];
+    if (autoplayNext !== undefined && autoplayNext !== null) {
+      state.autoplayNextEnabled = autoplayNext !== 'false';
     }
 
     // iCloud backup enabled

@@ -602,6 +602,89 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('autoplay-next toggle is shared, persisted, and stops natural track-end advance', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-autoplay-next-toggle'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 1_600,
+      frequencyHz: 300,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
+      durationMs: 1_600,
+      frequencyHz: 700,
+    });
+
+    let launched: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+
+    try {
+      launched = await launchProducerPlayer(directories.userDataDirectory);
+      let page = launched.page;
+
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const queueTitles = await page.getByTestId('main-list-row-title').allTextContents();
+      const [firstSongTitle] = queueTitles.map((title) => title.trim());
+      expect(firstSongTitle).toBeTruthy();
+
+      await cueSongVersion(page, firstSongTitle, `${firstSongTitle} v1.wav`);
+
+      const mainAutoplay = page.getByTestId('player-autoplay-next');
+      await expect(mainAutoplay).toHaveAttribute('aria-pressed', 'true');
+      await expect(mainAutoplay).toHaveAttribute('data-tooltip', /Autoplay next: On/);
+
+      await mainAutoplay.click();
+      await expect(mainAutoplay).toHaveAttribute('aria-pressed', 'false');
+      await expect(mainAutoplay).toHaveAttribute('data-tooltip', /saved between app restarts/);
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.getByTestId('song-checklist-autoplay-next')).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      );
+      await page.getByTestId('song-checklist-done-header').click();
+
+      await page.getByTestId('analysis-expand-button').click();
+      await expect(page.getByTestId('analysis-modal')).toBeVisible();
+      await expect(page.getByTestId('analysis-overlay-autoplay-next')).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      );
+
+      // The renderer mirrors the setting to localStorage immediately and also
+      // debounces it into unified state. Wait for the debounce so this test
+      // proves both real app restart paths see the same user choice.
+      await page.waitForTimeout(700);
+      await launched.electronApp.close();
+
+      launched = await launchProducerPlayer(directories.userDataDirectory);
+      page = launched.page;
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+      await expect(page.getByTestId('player-autoplay-next')).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      );
+
+      await cueSongVersion(page, firstSongTitle, `${firstSongTitle} v1.wav`);
+      await page.getByTestId('player-play-toggle').click();
+
+      await page.waitForTimeout(2_200);
+      await expect(page.getByTestId('player-track-name')).toContainText(
+        `${firstSongTitle} v1.wav`
+      );
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute(
+        'data-playing',
+        'false'
+      );
+    } finally {
+      await launched?.electronApp.close().catch(() => undefined);
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('reference listening mode labels tonal/spectrum panels and shows reference tonal balance', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-reference-mode-tonal-balance-labels'

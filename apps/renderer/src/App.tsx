@@ -869,6 +869,7 @@ const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
 const SONG_PROJECT_FILE_PATHS_STORAGE_KEY = 'producer-player.song-project-file-paths.v1';
 const PLAYBACK_VOLUME_STORAGE_KEY = 'producer-player.playback-volume.v1';
+const AUTOPLAY_NEXT_ENABLED_STORAGE_KEY = 'producer-player.autoplay-next-enabled.v1';
 const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
 const ICLOUD_LAST_SYNC_KEY = 'producer-player.icloud-last-sync.v1';
 const SAVED_REFERENCE_TRACKS_KEY = 'producer-player.saved-reference-tracks.v1';
@@ -2246,6 +2247,33 @@ function persistPlaybackVolume(volume: number): void {
   window.localStorage.setItem(PLAYBACK_VOLUME_STORAGE_KEY, String(normalizedVolume));
 }
 
+function readStoredAutoplayNextEnabled(): boolean {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(AUTOPLAY_NEXT_ENABLED_STORAGE_KEY);
+    // Default ON preserves the pre-toggle behavior. Only an explicit falsey
+    // stored value means the user intentionally wants natural track ends to
+    // stop instead of advancing.
+    return raw !== 'false' && raw !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function persistAutoplayNextEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(
+    AUTOPLAY_NEXT_ENABLED_STORAGE_KEY,
+    enabled ? 'true' : 'false'
+  );
+}
+
 function readICloudBackupEnabled(): boolean {
   if (typeof window === 'undefined') {
     return false;
@@ -2859,6 +2887,62 @@ function getMeasuredQueueDump(): ReturnType<typeof MEASURED_ANALYSIS_QUEUE.dump>
   return MEASURED_ANALYSIS_QUEUE.dump();
 }
 
+function getAutoplayNextTooltip(enabled: boolean): string {
+  const state = enabled ? 'On' : 'Off';
+  return `Autoplay next: ${state}. When on, reaching the end of a track automatically starts the next song. This setting is saved between app restarts.`;
+}
+
+function AutoplayNextIcon(): JSX.Element {
+  // Material Symbols exposes an "autoplay" icon; this inline version keeps the
+  // same familiar play-triangle-plus-loop idea without adding a new icon
+  // dependency to a screen that already uses local SVG controls.
+  return (
+    <svg className="autoplay-next-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path className="autoplay-next-loop" d="M5.5 14.5A6.5 6.5 0 1 0 6.8 6.8" />
+      <path className="autoplay-next-arrow" d="M6.7 3.9v3h-3" />
+      <path className="autoplay-next-play" d="M10 8.2v7.6l6-3.8-6-3.8z" />
+    </svg>
+  );
+}
+
+interface AutoplayNextButtonProps {
+  enabled: boolean;
+  className: string;
+  testId: string;
+  onClick: () => void;
+  onFocus?: (event: React.FocusEvent<HTMLButtonElement>) => void;
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
+}
+
+function AutoplayNextButton({
+  enabled,
+  className,
+  testId,
+  onClick,
+  onFocus,
+  onKeyDown,
+}: AutoplayNextButtonProps): JSX.Element {
+  const tooltip = getAutoplayNextTooltip(enabled);
+
+  return (
+    <button
+      type="button"
+      className={`${className} autoplay-next-button${enabled ? ' active' : ''}`}
+      data-testid={testId}
+      data-enabled={enabled ? 'true' : 'false'}
+      data-tooltip={tooltip}
+      aria-label={enabled ? 'Autoplay next on' : 'Autoplay next off'}
+      aria-pressed={enabled}
+      title={tooltip}
+      onClick={onClick}
+      onFocus={onFocus}
+      onKeyDown={onKeyDown}
+    >
+      <AutoplayNextIcon />
+    </button>
+  );
+}
+
 export function App(): JSX.Element {
   // Surface short-lived status updates (plugin scan start/finish,
   // AI recommendation start/finish) through the Sonner-backed toast adapter.
@@ -2900,6 +2984,9 @@ export function App(): JSX.Element {
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [playbackSourceReady, setPlaybackSourceReady] = useState(false);
   const [volume, setVolume] = useState(() => readStoredPlaybackVolume());
+  const [autoplayNextEnabled, setAutoplayNextEnabled] = useState(
+    () => readStoredAutoplayNextEnabled()
+  );
   const initialPlaybackVolumeRef = useRef(volume);
   const [songRatings, setSongRatings] = useState<Record<string, number>>(() =>
     readStoredSongRatings()
@@ -3688,6 +3775,7 @@ export function App(): JSX.Element {
   const playOnNextLoadRef = useRef(false);
   const playbackIntentPlayingRef = useRef(false);
   const repeatModeRef = useRef<RepeatMode>('off');
+  const autoplayNextEnabledRef = useRef(autoplayNextEnabled);
   const isPlayingRef = useRef(isPlaying);
   const currentTimeSecondsRef = useRef(currentTimeSeconds);
   const durationSecondsRef = useRef(durationSeconds);
@@ -3958,6 +4046,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     repeatModeRef.current = repeatMode;
   }, [repeatMode]);
+
+  useEffect(() => {
+    autoplayNextEnabledRef.current = autoplayNextEnabled;
+  }, [autoplayNextEnabled]);
 
   useEffect(() => {
     playbackSourceRef.current = playbackSource;
@@ -5122,6 +5214,22 @@ export function App(): JSX.Element {
             }
           } catch { /* ignore */ }
 
+          // Autoplay-next (global transport preference). This localStorage
+          // mirror is intentionally allowed to override default unified state
+          // during startup so a quick quit immediately after toggling still
+          // rehydrates the user's latest visible choice on the next launch.
+          try {
+            const lsAutoplayNext = window.localStorage.getItem(AUTOPLAY_NEXT_ENABLED_STORAGE_KEY);
+            if (lsAutoplayNext !== null) {
+              const lsVal = lsAutoplayNext !== 'false' && lsAutoplayNext !== '0';
+              if (lsVal !== userState.autoplayNextEnabled) {
+                userState.autoplayNextEnabled = lsVal;
+                migrated = true;
+                migratedFields.push(`autoplayNext=${lsVal}`);
+              }
+            }
+          } catch { /* ignore */ }
+
           // iCloud backup enabled (only migrate if unified state has default)
           try {
             const lsICloud = window.localStorage.getItem(ICLOUD_BACKUP_ENABLED_KEY);
@@ -5319,6 +5427,11 @@ export function App(): JSX.Element {
 
         if (typeof userState.playbackVolume === 'number' && Number.isFinite(userState.playbackVolume)) {
           setVolume(Math.max(0, Math.min(userState.playbackVolume, 1)));
+        }
+
+        if (typeof userState.autoplayNextEnabled === 'boolean') {
+          setAutoplayNextEnabled(userState.autoplayNextEnabled);
+          persistAutoplayNextEnabled(userState.autoplayNextEnabled);
         }
 
         if (typeof userState.iCloudBackupEnabled === 'boolean') {
@@ -5695,6 +5808,7 @@ export function App(): JSX.Element {
         listeningDevices,
         activeListeningDeviceId,
         playbackVolume: volume,
+        autoplayNextEnabled,
         referenceLevelMatchEnabled,
         iCloudBackupEnabled,
         autoUpdateEnabled,
@@ -5809,11 +5923,16 @@ export function App(): JSX.Element {
     listeningDevices,
     activeListeningDeviceId,
     volume,
+    autoplayNextEnabled,
   ]);
 
   useEffect(() => {
     persistPlaybackVolume(volume);
   }, [volume]);
+
+  useEffect(() => {
+    persistAutoplayNextEnabled(autoplayNextEnabled);
+  }, [autoplayNextEnabled]);
 
   // -----------------------------------------------------------------------
   // Unified state: listen for changes pushed from main process (e.g. import)
@@ -5869,6 +5988,11 @@ export function App(): JSX.Element {
         const nextPlaybackVolume = Math.max(0, Math.min(userState.playbackVolume, 1));
         setVolume(nextPlaybackVolume);
         persistPlaybackVolume(nextPlaybackVolume);
+      }
+
+      if (typeof userState.autoplayNextEnabled === 'boolean') {
+        setAutoplayNextEnabled(userState.autoplayNextEnabled);
+        persistAutoplayNextEnabled(userState.autoplayNextEnabled);
       }
 
       if (typeof userState.iCloudBackupEnabled === 'boolean') {
@@ -6751,6 +6875,19 @@ export function App(): JSX.Element {
         playbackIntentPlayingRef.current = false;
         logPlaybackEvent('ended-paused-for-checklist-typing', {
           currentTimeSeconds: endedAt,
+        });
+        return;
+      }
+
+      if (!autoplayNextEnabledRef.current) {
+        const endedAt = Number.isFinite(audio.duration) ? audio.duration : currentTimeSecondsRef.current;
+        setCurrentTimeSeconds(endedAt);
+        setIsPlaying(false);
+        playOnNextLoadRef.current = false;
+        playbackIntentPlayingRef.current = false;
+        logPlaybackEvent('ended-autoplay-next-disabled', {
+          currentTimeSeconds: endedAt,
+          repeatMode: mode,
         });
         return;
       }
@@ -11603,6 +11740,16 @@ export function App(): JSX.Element {
       }
 
       return 'off';
+    });
+  }
+
+  function handleToggleAutoplayNext(): void {
+    setAutoplayNextEnabled((current) => {
+      const next = !current;
+      logPlaybackEvent('autoplay-next-toggle', {
+        enabled: next,
+      });
+      return next;
     });
   }
 
@@ -18425,6 +18572,12 @@ export function App(): JSX.Element {
                   >
                     ▶▶
                   </button>
+                  <AutoplayNextButton
+                    enabled={autoplayNextEnabled}
+                    className="transport-autoplay-button"
+                    testId="player-autoplay-next"
+                    onClick={handleToggleAutoplayNext}
+                  />
                 </div>
               </div>
               {selectedPlaybackSongId ? (
@@ -20506,6 +20659,19 @@ export function App(): JSX.Element {
                     >
                       <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
                     </button>
+                    <AutoplayNextButton
+                      enabled={autoplayNextEnabled}
+                      className="checklist-mini-player-button checklist-autoplay-button"
+                      testId="song-checklist-autoplay-next"
+                      onClick={handleToggleAutoplayNext}
+                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
+                      onKeyDown={(event) => {
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                        }
+                      }}
+                    />
                     <button
                       type="button"
                       className="checklist-skip-button checklist-skip-button-small"
@@ -22792,6 +22958,12 @@ export function App(): JSX.Element {
                 >
                   ▶▶
                 </button>
+                <AutoplayNextButton
+                  enabled={autoplayNextEnabled}
+                  className="analysis-overlay-transport-button analysis-overlay-autoplay-button"
+                  testId="analysis-overlay-autoplay-next"
+                  onClick={handleToggleAutoplayNext}
+                />
                 <button
                   type="button"
                   className="analysis-overlay-transport-button analysis-overlay-skip-button analysis-overlay-skip-button-small"

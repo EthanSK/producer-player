@@ -794,6 +794,11 @@ export interface ProducerPlayerUserState {
 
   // Preferences
   playbackVolume: number;
+  // Autoplay-next is a global playback preference, not a per-song field: it
+  // decides whether a natural track-end should start the next queue item.
+  // Default ON to preserve the app's historical end-of-track behavior, while
+  // still letting the user opt out and keep that choice across restarts.
+  autoplayNextEnabled: boolean;
   referenceLevelMatchEnabled: boolean;
   iCloudBackupEnabled: boolean;
   autoUpdateEnabled: boolean;

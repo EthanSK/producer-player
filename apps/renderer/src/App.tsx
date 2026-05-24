@@ -905,11 +905,11 @@ const ALBUM_ART_STORAGE_KEY = 'producer-player.album-art.v1';
 const ALBUM_CHECKLIST_STORAGE_KEY = 'producer-player.album-checklist.v1';
 const MORE_METRICS_EXPANDED_KEY = 'producer-player.more-metrics-expanded.v1';
 // v3.247 — collapsed/expanded state for the listening-device strip on the
-// song checklist page (Ethan voice 3677). Default = COLLAPSED so new users
-// (and reloads) get the thin one-row layout; click the chevron to expand
-// to the full capsule row. Persisted to localStorage so it survives
-// reloads. Only applies to the checklist modal context; other surfaces
-// that reuse listening-device UI keep their existing default behaviour.
+// song checklist page (Ethan voice 3677). v3.258 promotes it into unified
+// state because Ethan expects this workflow choice to survive full Electron
+// restarts, not just one renderer lifetime. localStorage remains as a
+// same-tick mirror so a quick quit immediately after clicking the chevron still
+// rehydrates before the debounced unified-state sync has a chance to write.
 const CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY =
   'producer-player.checklist-listening-strip-collapsed.v1';
 const NORMALIZATION_PLATFORM_STORAGE_KEY = 'producer-player.normalization-platform.v1';
@@ -2274,6 +2274,32 @@ function persistAutoplayNextEnabled(enabled: boolean): void {
   );
 }
 
+function readStoredChecklistListeningStripCollapsed(): boolean {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY);
+    // Default collapsed keeps the compact checklist layout. Only an explicit
+    // false/0 means the user expanded the strip and wants that remembered.
+    return raw !== 'false' && raw !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function persistChecklistListeningStripCollapsed(collapsed: boolean): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(
+    CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY,
+    collapsed ? 'true' : 'false'
+  );
+}
+
 function readICloudBackupEnabled(): boolean {
   if (typeof window === 'undefined') {
     return false;
@@ -3602,13 +3628,12 @@ export function App(): JSX.Element {
   const [analysisCompactStatsExpanded, setAnalysisCompactStatsExpanded] = useState(() =>
     window.localStorage.getItem(MORE_METRICS_EXPANDED_KEY) === 'true'
   );
-  // v3.247 — collapsed/expanded state for the checklist-page listening-device
-  // strip (Ethan voice 3677). Default `true` (collapsed) so the strip
-  // opens as a thin one-row affordance on first launch; localStorage value
-  // 'false' explicitly opts into expanded. Any unrecognised / missing value
-  // = default collapsed.
+  // v3.247/v3.258 — global checklist-page listening-device strip preference.
+  // true means the compact one-row affordance; false means keep the full
+  // editor open. It starts from localStorage for instant boot, then hydrates
+  // from unified user state once the main process responds.
   const [checklistListeningStripCollapsed, setChecklistListeningStripCollapsed] = useState(
-    () => window.localStorage.getItem(CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY) !== 'false'
+    () => readStoredChecklistListeningStripCollapsed()
   );
   const [compactMasteringPanelOrder, setCompactMasteringPanelOrder] = useState<
     CompactMasteringPanelId[]
@@ -5230,6 +5255,24 @@ export function App(): JSX.Element {
             }
           } catch { /* ignore */ }
 
+          // Checklist listening-device collapse state. Like autoplay-next, the
+          // renderer mirror is allowed to override default unified state during
+          // startup so the latest click survives even if the app was quit before
+          // the debounced full-state sync flushed.
+          try {
+            const lsChecklistStrip = window.localStorage.getItem(
+              CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY
+            );
+            if (lsChecklistStrip !== null) {
+              const lsVal = lsChecklistStrip !== 'false' && lsChecklistStrip !== '0';
+              if (lsVal !== userState.checklistListeningStripCollapsed) {
+                userState.checklistListeningStripCollapsed = lsVal;
+                migrated = true;
+                migratedFields.push(`checklistListeningStripCollapsed=${lsVal}`);
+              }
+            }
+          } catch { /* ignore */ }
+
           // iCloud backup enabled (only migrate if unified state has default)
           try {
             const lsICloud = window.localStorage.getItem(ICLOUD_BACKUP_ENABLED_KEY);
@@ -5432,6 +5475,11 @@ export function App(): JSX.Element {
         if (typeof userState.autoplayNextEnabled === 'boolean') {
           setAutoplayNextEnabled(userState.autoplayNextEnabled);
           persistAutoplayNextEnabled(userState.autoplayNextEnabled);
+        }
+
+        if (typeof userState.checklistListeningStripCollapsed === 'boolean') {
+          setChecklistListeningStripCollapsed(userState.checklistListeningStripCollapsed);
+          persistChecklistListeningStripCollapsed(userState.checklistListeningStripCollapsed);
         }
 
         if (typeof userState.iCloudBackupEnabled === 'boolean') {
@@ -5807,6 +5855,7 @@ export function App(): JSX.Element {
         agentSttProvider: '',
         listeningDevices,
         activeListeningDeviceId,
+        checklistListeningStripCollapsed,
         playbackVolume: volume,
         autoplayNextEnabled,
         referenceLevelMatchEnabled,
@@ -5922,6 +5971,7 @@ export function App(): JSX.Element {
     songDawOffsets,
     listeningDevices,
     activeListeningDeviceId,
+    checklistListeningStripCollapsed,
     volume,
     autoplayNextEnabled,
   ]);
@@ -5933,6 +5983,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     persistAutoplayNextEnabled(autoplayNextEnabled);
   }, [autoplayNextEnabled]);
+
+  useEffect(() => {
+    persistChecklistListeningStripCollapsed(checklistListeningStripCollapsed);
+  }, [checklistListeningStripCollapsed]);
 
   // -----------------------------------------------------------------------
   // Unified state: listen for changes pushed from main process (e.g. import)
@@ -5993,6 +6047,11 @@ export function App(): JSX.Element {
       if (typeof userState.autoplayNextEnabled === 'boolean') {
         setAutoplayNextEnabled(userState.autoplayNextEnabled);
         persistAutoplayNextEnabled(userState.autoplayNextEnabled);
+      }
+
+      if (typeof userState.checklistListeningStripCollapsed === 'boolean') {
+        setChecklistListeningStripCollapsed(userState.checklistListeningStripCollapsed);
+        persistChecklistListeningStripCollapsed(userState.checklistListeningStripCollapsed);
       }
 
       if (typeof userState.iCloudBackupEnabled === 'boolean') {
@@ -14937,6 +14996,16 @@ export function App(): JSX.Element {
     });
   }
 
+  function handleSetChecklistListeningStripCollapsed(nextCollapsed: boolean): void {
+    // Persist synchronously before the React render cycle so an immediate app
+    // quit after the click still preserves Ethan's expanded/collapsed choice.
+    persistChecklistListeningStripCollapsed(nextCollapsed);
+    setChecklistListeningStripCollapsed(nextCollapsed);
+    logAction('checklist.listening-strip-collapse-state', {
+      collapsed: nextCollapsed,
+    });
+  }
+
   // v3.255.0 — "Sort: outstanding to bottom" stable partition (voice
   // 33568/f50a/13842). Operates on the rendered (chronological) order: active
   // unfinished todos sink to the bottom working edge, while completed / Won't
@@ -19197,8 +19266,8 @@ export function App(): JSX.Element {
                 v3.255 "Sort: outstanding to bottom" button is rendered on
                 the right so active-work sorting stays clickable without expanding the
                 strip. Clicking anywhere on the chevron / label toggles
-                back to the full capsule layout. Persisted via
-                `CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY`.
+                back to the full capsule layout; the click writes both the
+                immediate localStorage mirror and the debounced unified state.
               */}
               {checklistListeningStripCollapsed ? (
                 <div
@@ -19208,16 +19277,7 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="listening-device-strip-collapsed-toggle"
-                    onClick={() =>
-                      setChecklistListeningStripCollapsed((current) => {
-                        const next = !current;
-                        window.localStorage.setItem(
-                          CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY,
-                          String(next),
-                        );
-                        return next;
-                      })
-                    }
+                    onClick={() => handleSetChecklistListeningStripCollapsed(false)}
                     aria-expanded={false}
                     aria-controls="listening-device-strip-body"
                     data-testid="listening-device-strip-collapsed-toggle"
@@ -19340,16 +19400,7 @@ export function App(): JSX.Element {
               <button
                 type="button"
                 className="listening-device-strip-collapse-button"
-                onClick={() =>
-                  setChecklistListeningStripCollapsed((current) => {
-                    const next = !current;
-                    window.localStorage.setItem(
-                      CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY,
-                      String(next),
-                    );
-                    return next;
-                  })
-                }
+                onClick={() => handleSetChecklistListeningStripCollapsed(true)}
                 aria-expanded={true}
                 aria-controls="listening-device-strip-body"
                 data-testid="listening-device-strip-collapse-button"

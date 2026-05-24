@@ -125,6 +125,86 @@ test.describe('Checklist and export UX improvements', () => {
     }
   });
 
+  test('listening-device strip collapse state persists across app restarts', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-collapse-restart'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    let launched: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+
+    try {
+      launched = await launchProducerPlayer(directories.userDataDirectory);
+      let page = launched.page;
+
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.getByTestId('listening-device-strip-collapsed-row')).toBeVisible();
+
+      await page.getByTestId('listening-device-strip-collapsed-toggle').click();
+      await expect(page.getByTestId('listening-device-strip')).toHaveAttribute(
+        'data-collapsed',
+        'false'
+      );
+      await expect(page.getByTestId('listening-device-strip-collapse-button')).toBeVisible();
+
+      // The click writes localStorage immediately and the renderer also debounces
+      // into unified user state. Waiting here proves a full Electron relaunch
+      // sees the durable state-service field, not just the current React state.
+      await page.waitForTimeout(700);
+      await launched.electronApp.close();
+      launched = null;
+
+      launched = await launchProducerPlayer(directories.userDataDirectory);
+      page = launched.page;
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.getByTestId('listening-device-strip')).toHaveAttribute(
+        'data-collapsed',
+        'false'
+      );
+      await expect(page.getByTestId('listening-device-strip-collapsed-row')).toHaveCount(0);
+      await expect(page.getByTestId('listening-device-strip-collapse-button')).toBeVisible();
+
+      await page.getByTestId('listening-device-strip-collapse-button').click();
+      await expect(page.getByTestId('listening-device-strip')).toHaveAttribute(
+        'data-collapsed',
+        'true'
+      );
+
+      await page.waitForTimeout(700);
+      await launched.electronApp.close();
+      launched = null;
+
+      launched = await launchProducerPlayer(directories.userDataDirectory);
+      page = launched.page;
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.getByTestId('listening-device-strip-collapsed-row')).toBeVisible();
+      await expect(page.getByTestId('listening-device-strip')).toHaveAttribute(
+        'data-collapsed',
+        'true'
+      );
+    } finally {
+      if (launched) {
+        await launched.electronApp.close();
+      }
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('checklist sort keeps outstanding work at the bottom and sorts it by song time', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-outstanding-sort'

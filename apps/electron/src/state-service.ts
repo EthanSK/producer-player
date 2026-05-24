@@ -714,6 +714,10 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     agentSttProvider: '',
     listeningDevices: [],
     activeListeningDeviceId: null,
+    // Default collapsed keeps the newer compact checklist layout for fresh
+    // installs, while the persisted field below makes an explicit expand/collapse
+    // choice survive full app restarts instead of being renderer-only UI memory.
+    checklistListeningStripCollapsed: true,
     playbackVolume: 1,
     // Default ON preserves pre-toggle behavior: reaching the end of a song
     // advances and starts the next queue item unless the user explicitly opts
@@ -806,6 +810,10 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
       typeof raw.activeListeningDeviceId === 'string' && raw.activeListeningDeviceId.trim().length > 0
         ? raw.activeListeningDeviceId
         : null,
+    checklistListeningStripCollapsed:
+      typeof raw.checklistListeningStripCollapsed === 'boolean'
+        ? raw.checklistListeningStripCollapsed
+        : fallback.checklistListeningStripCollapsed,
     playbackVolume:
       typeof raw.playbackVolume === 'number' && Number.isFinite(raw.playbackVolume)
         ? Math.max(0, Math.min(raw.playbackVolume, 1))
@@ -1721,6 +1729,21 @@ export class UserStateService {
     const autoplayNext = data['producer-player.autoplay-next-enabled.v1'];
     if (autoplayNext !== undefined && autoplayNext !== null) {
       state.autoplayNextEnabled = autoplayNext !== 'false';
+    }
+
+    // Checklist listening-device strip collapse state. Older builds wrote this
+    // only to renderer localStorage; migrating it here makes the preference part
+    // of the unified app state so it survives relaunches, imports, and future
+    // state-service migrations.
+    const checklistListeningStripCollapsed =
+      data['producer-player.checklist-listening-strip-collapsed.v1'];
+    if (
+      checklistListeningStripCollapsed !== undefined &&
+      checklistListeningStripCollapsed !== null
+    ) {
+      state.checklistListeningStripCollapsed =
+        checklistListeningStripCollapsed !== 'false' &&
+        checklistListeningStripCollapsed !== '0';
     }
 
     // iCloud backup enabled

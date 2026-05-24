@@ -155,6 +155,39 @@ test('autoplay-next global preference defaults on and preserves explicit opt-out
   );
 });
 
+test('checklist listening-device collapse state defaults collapsed and preserves explicit expand', () => {
+  const defaults = createDefaultUserState();
+
+  assert.equal(defaults.checklistListeningStripCollapsed, true);
+  assert.equal(parseUserState({}).checklistListeningStripCollapsed, true);
+  assert.equal(
+    parseUserState({
+      ...defaults,
+      checklistListeningStripCollapsed: false,
+    }).checklistListeningStripCollapsed,
+    false,
+  );
+  assert.equal(
+    parseUserState({
+      ...defaults,
+      checklistListeningStripCollapsed: 'false',
+    }).checklistListeningStripCollapsed,
+    true,
+    'malformed legacy values must keep the default-collapsed checklist layout',
+  );
+
+  const { globalFields } = splitStateForDisk({
+    ...defaults,
+    checklistListeningStripCollapsed: false,
+  });
+
+  assert.equal(
+    globalFields.checklistListeningStripCollapsed,
+    false,
+    'checklist strip collapse state is global UI state, not song-specific data',
+  );
+});
+
 test('splitStateForDisk hoists songId-keyed fields into per-track buckets', () => {
   const rich = makeRichState();
   const { globalFields, trackBuckets } = splitStateForDisk(rich);

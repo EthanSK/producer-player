@@ -709,8 +709,11 @@ export interface PerVersionAiRecommendations {
 }
 
 /**
- * Unified user state — a single file that holds ALL user-authored data.
- * Layout/UI preferences (panel order, expanded states) stay in localStorage.
+ * Unified user state — a single file that holds ALL user-authored data and
+ * the small set of UI preferences Ethan expects to survive full app restarts.
+ * Most purely cosmetic layout choices can still live in localStorage, but
+ * anything that changes the day-to-day workflow belongs here once it becomes a
+ * user-facing promise.
  */
 export interface ProducerPlayerUserState {
   schemaVersion: number; // Start at 1
@@ -791,6 +794,10 @@ export interface ProducerPlayerUserState {
   // tag that new checklist items will be auto-stamped with until cleared.
   listeningDevices: ListeningDevice[];
   activeListeningDeviceId: string | null;
+  // The checklist listening-device strip is deliberately global UI state, not
+  // per-song metadata: Ethan wants to choose "keep this section out of my way"
+  // once and have that choice survive relaunches across every checklist.
+  checklistListeningStripCollapsed: boolean;
 
   // Preferences
   playbackVolume: number;

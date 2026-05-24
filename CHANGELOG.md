@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.256] - 2026-05-24
+
+### Bug fixes
+- App no longer enters an infinite EPIPE log-storm on startup when stdio is broken (Ethan voice 3956, "Producer player just crashed. What the fuck just happened?"). Symptom: PP launched, hit `error.uncaught.main: write EPIPE` at session-start with a stack pointing at `console.info` → `transport.writeFn` (electron-log console transport), then flooded `~/Library/Logs/Producer Player/main.log` with hundreds of duplicate `Unhandled Error: write EPIPE` entries per second until the disk filled and the UI froze. Root cause: electron-log's default console transport calls `console.info(...)` / `console.error(...)` synchronously inside `writeFn`. If the process's stdout/stderr pipe was broken (parent terminal exited, launchd reaped, app spawned from a Claude Code subagent terminal that died), every console.* call threw a synchronous EPIPE. That EPIPE was then caught by electron-log's own `errorHandler.startCatching` handler, which re-routed it to `log.error(...)` — which hit the same broken console transport again — which threw another EPIPE — which was caught again — infinite re-entry, until the user hard-killed the app or the disk ran out. v3.256 adds three defence-in-depth layers in `apps/electron/src/main.ts`: (1) wraps the console transport's `writeFn` to silently swallow EPIPE / EBADF / ENOTCONN (the "parent stdio gone" set) while preserving all other errors, (2) disables the console transport entirely when neither stdout nor stderr is a TTY (the production Finder / Dock / Spotlight launch case where there's no terminal to print to anyway), and (3) replaces the recursive `errorHandler.startCatching` onError callback with one that writes ONLY to the file transport directly via `log.transports.file(...)`, NOT via the public `log.error` API that fans out to all transports including the broken console one. Layer 3 breaks the re-entry loop even if layers 1 and 2 somehow fail.
+
 ## [3.251] - 2026-05-23
 
 ### Bug fixes

@@ -398,10 +398,98 @@ app.setName('Producer Player');
 log.transports.file.maxSize = 5 * 1024 * 1024; // 5 MB per file
 log.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}]{scope} {text}';
 log.transports.console.format = '[{h}:{i}:{s}.{ms}] [{level}]{scope} {text}';
+
+// ---------------------------------------------------------------------------
+// v3.256 CRASH FIX — EPIPE log-storm prevention (2026-05-24)
+//
+// SYMPTOM (Ethan's "PP just crashed" report, voice 3956): app session
+// started, immediately hit `error.uncaught.main: write EPIPE` with a
+// stack pointing at `console.info` → `transport.writeFn`
+// (electron-log's console transport at
+// node_modules/electron-log/src/node/transports/console.js:60). The
+// app then flooded `~/Library/Logs/Producer Player/main.log` with
+// hundreds of identical "Unhandled Error: write EPIPE" entries per
+// second, filling disk and freezing the UI.
+//
+// ROOT CAUSE: electron-log's default console transport calls
+// `console.info(...)` / `console.error(...)` directly inside `writeFn`.
+// If the process's stdout/stderr pipe is broken (parent terminal
+// exited, launchd reaped, app spawned from a Claude Code subagent
+// terminal that died), every console.* call throws a synchronous
+// EPIPE. That EPIPE is then caught by electron-log's own
+// `errorHandler.startCatching` handler, which re-routes it to
+// `log.error(...)` — which hits the same broken console transport
+// again — which throws another EPIPE — which is caught again —
+// infinite re-entry loop, until the disk fills or the user hard-kills
+// the app. The original error handler also called `log.error` itself
+// (one of `log.error`'s targets is the console transport that just
+// failed), guaranteeing the recursive blow-up.
+//
+// FIX (three layers, defence in depth):
+//   1. Wrap the console transport's `writeFn` to swallow EPIPE / EBADF
+//      / ENOTCONN errors silently — these are "parent stdio gone"
+//      conditions and there's nothing useful we can do. File transport
+//      still gets the message, so we don't lose any log content.
+//   2. Disable the console transport entirely when stdio isn't a TTY
+//      (i.e. in packaged builds launched from Finder / Dock / Spotlight
+//      / `open`, where there's no terminal to print to anyway). This
+//      removes the failure mode at the source for the production case.
+//   3. Replace the broken `errorHandler.startCatching` onError callback
+//      with one that writes ONLY to the file transport directly via
+//      `log.transports.file.writeFn`, NOT via the public `log.error`
+//      API that fans out to all transports including the broken
+//      console one. This breaks the re-entry loop even if layer 1/2
+//      somehow fail.
+// ---------------------------------------------------------------------------
+
+// Layer 1: EPIPE-safe console writeFn wrapper. We keep the original
+// writeFn around so behaviour is unchanged when stdio is healthy.
+{
+  const originalConsoleWriteFn = log.transports.console.writeFn;
+  log.transports.console.writeFn = function safeConsoleWriteFn(...args: Parameters<typeof originalConsoleWriteFn>): void {
+    try {
+      originalConsoleWriteFn.apply(this, args);
+    } catch (writeError) {
+      // EPIPE = parent pipe closed (terminal exited). EBADF = fd
+      // already closed. ENOTCONN = socket-backed stdio disconnected.
+      // All three mean "console output is gone" — silently drop.
+      // Anything else, re-throw so genuine bugs aren't masked.
+      const code = (writeError as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'EPIPE' || code === 'EBADF' || code === 'ENOTCONN') return;
+      throw writeError;
+    }
+  };
+}
+
+// Layer 2: silence the console transport entirely in packaged Finder /
+// Dock / Spotlight launches where there is no real terminal. `false`
+// disables the transport per electron-log's documented API.
+if (!process.stdout.isTTY && !process.stderr.isTTY) {
+  log.transports.console.level = false;
+}
+
+// Layer 3: replace the recursive onError with a file-only writer. We
+// pull the file transport's writeFn directly so this path NEVER touches
+// the console transport — guaranteeing no EPIPE re-entry no matter
+// what other code does.
 log.errorHandler.startCatching({
   showDialog: false,
   onError({ error, errorName }) {
-    log.error(`[${errorName}]`, error);
+    // Best-effort write straight to the file transport. Build the
+    // minimum message shape electron-log expects.
+    try {
+      const fileTransport = log.transports.file;
+      fileTransport({
+        date: new Date(),
+        level: 'error',
+        data: [`[${errorName}]`, error],
+        variables: { processType: 'main' },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+    } catch {
+      // If even file logging fails, swallow — better than infinite
+      // recursion via the console transport.
+    }
   },
 });
 

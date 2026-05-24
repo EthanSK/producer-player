@@ -2685,12 +2685,31 @@ body.floating-switcher-panel-dragging * {
 .main-list {
   overflow: auto;
   padding: 6px 8px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
   min-height: 0;
   flex: 1;
-  align-content: start;
-  grid-auto-rows: min-content;
+}
+
+/* v3.261 — Bottom-of-track-list checklist total. The main list is a flex column
+   so this footer can use margin-top:auto to sit in the otherwise-empty gap when
+   the album has fewer rows than the scroll area, while still scrolling naturally
+   after the rows when the list is long. It intentionally says exactly "Total
+   number: N" per Ethan's voice note; title/aria carry the fuller explanation. */
+.main-list-checklist-total {
+  margin-top: auto;
+  padding: 10px 8px 2px 42px;
+  min-height: 34px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  list-style: none;
 }
 
 .main-list.drag-active .main-list-row {

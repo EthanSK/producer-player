@@ -1547,6 +1547,27 @@ function cloneSongChecklistsState(
   );
 }
 
+function isSongChecklistTodo(item: SongChecklistItem): boolean {
+  // Notes are durable reference rows, not actionable work. Every summary/count
+  // that says "todo", "remaining", or "total number" should exclude them so
+  // the track list reflects only checklist items Ethan can still resolve.
+  return item.isNote !== true;
+}
+
+function isSongChecklistTodoRemaining(item: SongChecklistItem): boolean {
+  // Won't Fix resolves an item without deleting it; count it the same as a
+  // checked item so the global total matches the per-track checklist badges.
+  return isSongChecklistTodo(item) && !(item.completed || item.wontFix === true);
+}
+
+function countSongChecklistTodos(items: readonly SongChecklistItem[]): number {
+  return items.filter(isSongChecklistTodo).length;
+}
+
+function countRemainingSongChecklistTodos(items: readonly SongChecklistItem[]): number {
+  return items.filter(isSongChecklistTodoRemaining).length;
+}
+
 function isTextEntryElement(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) {
     return false;
@@ -7311,15 +7332,22 @@ export function App(): JSX.Element {
       computeChecklistOpacitiesByRemainingTodoCount(
         songs.map((song) => ({
           id: song.id,
-          // v3.244.0 — Won't Fix counts as resolved (same as `completed`)
-          // so it no longer contributes to a song's "remaining todos"
-          // opacity weighting.
-          remainingTodoCount: (songChecklists[song.id] ?? []).filter(
-            (item) => !(item.completed || item.wontFix === true)
-          ).length,
+          // v3.261 — Use the same todo/remaining helper as the row badges and
+          // bottom total so note rows never make the track-list colour weighting
+          // look like unresolved work.
+          remainingTodoCount: countRemainingSongChecklistTodos(songChecklists[song.id] ?? []),
         }))
       ),
     [songChecklists, songs]
+  );
+
+  const totalRemainingSongChecklistTodoCount = useMemo(
+    () =>
+      albumSongs.reduce(
+        (total, song) => total + countRemainingSongChecklistTodos(songChecklists[song.id] ?? []),
+        0
+      ),
+    [albumSongs, songChecklists]
   );
 
   useEffect(() => {
@@ -18183,19 +18211,12 @@ export function App(): JSX.Element {
                     : 'No LUFS';
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
             const songChecklistItems = songChecklists[song.id] ?? [];
-            // v3.183.0 — Notes (isNote === true) are not todos. The
-            // song-row checklist badge tracks only todos so a row full
-            // of permanent notes doesn't look like outstanding work.
-            const songChecklistTodoItems = songChecklistItems.filter(
-              (item) => item.isNote !== true
-            );
-            const songChecklistCount = songChecklistTodoItems.length;
-            // v3.244.0 — "Remaining" excludes both `completed` and
-            // `wontFix` items so the row badge reflects Won't Fix as
-            // resolved work, matching the modal's completion math.
-            const songChecklistRemainingTodoCount = songChecklistTodoItems.filter(
-              (item) => !(item.completed || item.wontFix === true)
-            ).length;
+            // Row badge math shares helpers with the bottom-of-list total so
+            // every track-list checklist number follows one rule: notes excluded,
+            // completed + Won't Fix resolved.
+            const songChecklistCount = countSongChecklistTodos(songChecklistItems);
+            const songChecklistRemainingTodoCount =
+              countRemainingSongChecklistTodos(songChecklistItems);
             const songChecklistOpacity =
               songChecklistOpacityBySongId.get(song.id) ?? CHECKLIST_TODO_OPACITY_RANGE.zeroTodos;
             const songProjectFilePath = songProjectFilePaths[song.id] ?? null;
@@ -18507,6 +18528,15 @@ export function App(): JSX.Element {
               ) : null}
             </li>
           )}
+          {albumSongs.length > 0 ? (
+            <li
+              className="main-list-checklist-total"
+              data-testid="main-list-checklist-total"
+              aria-label={`${totalRemainingSongChecklistTodoCount} checklist item${totalRemainingSongChecklistTodoCount === 1 ? '' : 's'} remaining across all tracks`}
+            >
+              Total number: {totalRemainingSongChecklistTodoCount}
+            </li>
+          ) : null}
         </ul>
 
         {selectedPlaybackVersion && (

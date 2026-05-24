@@ -187,6 +187,68 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('main track list shows the total remaining checklist items across all tracks', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-main-list-checklist-total'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      frequencyHz: 330,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
+      frequencyHz: 660,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+      await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
+        'Total number: 0'
+      );
+
+      await page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Track A' })
+        .getByTestId('song-checklist-button')
+        .click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await page.getByTestId('song-checklist-input').fill('Track A remaining item');
+      await page.getByTestId('song-checklist-add').click();
+      await page.getByTestId('song-checklist-done-header').click();
+      await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
+        'Total number: 1'
+      );
+
+      await page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Track B' })
+        .getByTestId('song-checklist-button')
+        .click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await page.getByTestId('song-checklist-input').fill('Track B remaining item');
+      await page.getByTestId('song-checklist-add').click();
+      await page.getByTestId('song-checklist-input').fill('Track B resolved item');
+      await page.getByTestId('song-checklist-add').click();
+
+      // Completed items should drop out of the footer total just like they drop
+      // out of each per-track "remaining/total" checklist badge.
+      await page
+        .getByTestId('song-checklist-item-row')
+        .filter({ hasText: 'Track B resolved item' })
+        .locator('input[type="checkbox"]')
+        .check();
+      await page.getByTestId('song-checklist-done-header').click();
+
+      await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
+        'Total number: 2'
+      );
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('checklist scroll stays free over timestamp badges while playback is running', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-scroll-free-while-playing'

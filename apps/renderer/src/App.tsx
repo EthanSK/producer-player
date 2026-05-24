@@ -2939,14 +2939,15 @@ function getAutoplayNextTooltip(enabled: boolean): string {
 }
 
 function AutoplayNextIcon(): JSX.Element {
-  // Material Symbols exposes an "autoplay" icon; this inline version keeps the
-  // same familiar play-triangle-plus-loop idea without adding a new icon
-  // dependency to a screen that already uses local SVG controls.
+  // Autoplay advances to the next song, so this must read as a forward handoff
+  // rather than a repeat/rewind loop. Keep it inline so the three dense
+  // transport rows do not take on a new icon dependency for one control.
   return (
     <svg className="autoplay-next-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path className="autoplay-next-loop" d="M5.5 14.5A6.5 6.5 0 1 0 6.8 6.8" />
-      <path className="autoplay-next-arrow" d="M6.7 3.9v3h-3" />
-      <path className="autoplay-next-play" d="M10 8.2v7.6l6-3.8-6-3.8z" />
+      <path className="autoplay-next-play" d="M5.8 6.4v11.2l8.4-5.6-8.4-5.6z" />
+      <path className="autoplay-next-forward" d="M13.2 12h5.4" />
+      <path className="autoplay-next-forward" d="M16.2 8.8 19.4 12l-3.2 3.2" />
+      <path className="autoplay-next-next-bar" d="M20.7 7.2v9.6" />
     </svg>
   );
 }

@@ -3501,8 +3501,8 @@ button.autoplay-next-button:focus-visible::after {
   display: block;
 }
 
-.autoplay-next-loop,
-.autoplay-next-arrow {
+.autoplay-next-forward,
+.autoplay-next-next-bar {
   fill: none;
   stroke: currentColor;
   stroke-width: 2;

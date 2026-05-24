@@ -3133,6 +3133,26 @@ body.floating-switcher-panel-dragging * {
   color: #d9e8fb;
 }
 
+/* v3.260 — Album Checklist header button. Mirrors the per-track Checklist
+   button's badge layout (voice 3986: "follow the same convention as the
+   other ones"). Inline-flex with a small gap so the "Checklist" label sits
+   left of the "remaining/total" pill (reusing .song-checklist-count for
+   identical visual treatment). `has-items` modifier mirrors the per-track
+   `.song-checklist-button.has-items` highlight so an album with outstanding
+   work pops in the header. The .action-button.secondary base already gives
+   the success/green outline; we just nudge it stronger when items remain
+   to differentiate "open checklist" from "you have unchecked work". */
+button.album-checklist-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+button.album-checklist-button.has-items {
+  border-color: rgba(95, 210, 143, 0.85);
+  background: rgba(95, 210, 143, 0.22);
+}
+
 .song-rating-control {
   display: grid;
   align-content: center;

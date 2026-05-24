@@ -17957,14 +17957,51 @@ export function App(): JSX.Element {
                 ? `Saving copy ${bulkSaveCopyProgress.current} of ${bulkSaveCopyProgress.total}…`
                 : 'Save Copy on All'}
             </button>
+            {/* v3.260 — Album Checklist button now shows a "remaining/total"
+                completion badge to match the per-track Checklist convention
+                (voice 3986: "it doesn't have a number of complete out of total
+                like the rest of them do… follow the same convention as the
+                other ones, like 5 out of 10 or whatever").
+
+                Data source: `albumChecklistTodoItems` (notes excluded — note
+                items aren't todos, mirroring v3.183.0 song-row behavior) and
+                `albumChecklistCompletedCount` (counts BOTH `completed` and
+                `wontFix` as resolved per v3.244.0 — Ethan: "counts it like
+                everything else is as if it's checked"). Both are already
+                derived ~lines 15698-15708 above as the top-level scope vars
+                feeding the album-checklist modal header — we just surface them
+                here too. Remaining = total - completed.
+
+                Mirrors the per-track Checklist button pattern at
+                apps/renderer/src/App.tsx ~line 18402: same `has-items` modifier
+                class when remaining > 0, same trailing count span (re-using the
+                `song-checklist-count` pill style so the visual badge looks
+                identical to the row-level one), same "remaining/total" title
+                copy. We also bump button to inline-flex via a sibling class
+                `album-checklist-button` (defined in styles.css) so the badge
+                aligns nicely next to the "Checklist" label without nudging
+                neighboring header buttons. */}
             <button
               type="button"
-              className="action-button secondary"
+              className={`action-button secondary album-checklist-button${
+                albumChecklistTodoItems.length - albumChecklistCompletedCount > 0
+                  ? ' has-items'
+                  : ''
+              }`}
               onClick={handleOpenAlbumChecklist}
               data-testid="album-checklist-button"
-              title="Album Checklist — high-level to-do items for the whole album/project."
+              title={
+                albumChecklistTodoItems.length > 0
+                  ? `${albumChecklistTodoItems.length - albumChecklistCompletedCount}/${albumChecklistTodoItems.length} album checklist item(s) remaining`
+                  : 'Album Checklist — high-level to-do items for the whole album/project.'
+              }
             >
-              Checklist
+              <span>Checklist</span>
+              {albumChecklistTodoItems.length > 0 ? (
+                <span className="song-checklist-count" data-testid="album-checklist-count">
+                  {`${albumChecklistTodoItems.length - albumChecklistCompletedCount}/${albumChecklistTodoItems.length}`}
+                </span>
+              ) : null}
             </button>
             <button
               type="button"

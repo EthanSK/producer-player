@@ -848,17 +848,16 @@ const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
 const PLAYBACK_OUTPUT_RECOVERY_DELAY_MS = 80;
 const PLAYBACK_OUTPUT_RECOVERY_MIN_INTERVAL_MS = 750;
 const PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS = 0.025;
-// v3.237 — Defer non-critical analysis warmup jobs (preview WebAudio decode,
-// measured ffmpeg) for this many ms after the user-selected version effect
-// fires. The audio engine's decoder cold start and the user's play click can
-// both land in the first ~200ms; queueing heavy ffmpeg/decode work in that
-// same window competes for the renderer's main thread and causes audible
-// playback crackle/lag at the very start of the track. By the time the delay
-// elapses, audio output is settled and the jobs can run without interfering.
-// The delay is cleared if the user selects a different track in the meantime
-// so we never block a fresh selection's analysis on a stale predecessor's
-// timer.
-const PLAYBACK_BACKGROUND_JOB_DELAY_MS = 500;
+// v3.259 — Ethan still heard a small stutter when a new track starts and the
+// renderer queues analysis work in a burst. Keep measured ffmpeg and preview
+// WebAudio decode intentionally staggered after selection/playback changes:
+// measured stats are useful sooner, while preview decode can wait a little
+// longer because waveform/graph UI is less urgent and more likely to touch
+// renderer scheduling. The paired warmup grace below also keeps latest-track
+// background preloads from starting a fresh ffmpeg job during this settle window.
+const PLAYBACK_SELECTED_MEASURED_JOB_DELAY_MS = 900;
+const PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS = 1250;
+const PLAYBACK_BACKGROUND_WARMUP_GRACE_MS = PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS;
 const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
@@ -3540,6 +3539,12 @@ export function App(): JSX.Element {
   const masteringCachePendingVersionIdsRef = useRef<Set<string>>(new Set());
   const latestTrackWarmupKnownActiveVersionKeysRef = useRef<Map<string, string>>(new Map());
   const latestTrackWarmupDetectedVersionIdsRef = useRef<Set<string>>(new Set());
+  // v3.259 — The selected-track effect deliberately waits before enqueueing its
+  // own analysis jobs, so the latest-track warmup needs this separate timestamp
+  // to know that playback is still settling even before USER_SELECTED queue work
+  // exists. Without it, a background ffmpeg preload can start in the exact quiet
+  // window we created to avoid new-track audio stutter.
+  const playbackBackgroundWarmupPausedUntilRef = useRef(0);
   const latestTrackWarmupDebugRef = useRef<{
     runId: number;
     activeVersionId: string | null;
@@ -4214,6 +4219,16 @@ export function App(): JSX.Element {
         ? mixPlaybackSource?.url ?? null
         : null;
 
+    // v3.259 — Mark a short playback-settle window before we touch any queues.
+    // The timers below delay USER_SELECTED jobs, but the startup/latest-track
+    // warmup runner is a separate background path; this timestamp tells it not
+    // to start another measured ffmpeg preload while the audio element is doing
+    // its first decode/schedule work for the newly selected track.
+    playbackBackgroundWarmupPausedUntilRef.current = Math.max(
+      playbackBackgroundWarmupPausedUntilRef.current,
+      Date.now() + PLAYBACK_BACKGROUND_WARMUP_GRACE_MS
+    );
+
     let cancelled = false;
 
     setAnalysis(cached.previewAnalysis);
@@ -4253,15 +4268,14 @@ export function App(): JSX.Element {
       promotePreviewAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
     }
 
-    // v3.237 — Defer the heavy analysis kick-offs by
-    // PLAYBACK_BACKGROUND_JOB_DELAY_MS so we don't queue ffmpeg + WebAudio
-    // decode work in the same ~200ms window the audio engine is doing its
-    // decoder cold start + first-frame schedule. Both jobs are eventually
-    // consistent (the UI shows a 'loading' state for measured stats / waveform
-    // until they land), and the queue still de-dupes when a follow-up effect
-    // run requests the same cache key — so this delay only suppresses the
-    // CPU-spike window at playback start. The timer is cleared if the effect
-    // tears down for a new selection.
+    // v3.237/v3.259 — Defer and stagger the heavy analysis kick-offs so we
+    // don't queue ffmpeg + WebAudio decode work in the same window the audio
+    // engine is doing its decoder cold start + first-frame schedule. Both jobs
+    // are eventually consistent (the UI shows a 'loading' state for measured
+    // stats / waveform until they land), and the queue still de-dupes when a
+    // follow-up effect run requests the same cache key — so these delays only
+    // suppress the CPU-spike window at playback start. The timers are cleared if
+    // the effect tears down for a new selection.
     const deferredJobTimers: ReturnType<typeof setTimeout>[] = [];
 
     if (!cached.previewAnalysis && selectedPlaybackSourceUrl) {
@@ -4315,7 +4329,7 @@ export function App(): JSX.Element {
                 : 'Could not analyse this track preview.'
             );
           });
-      }, PLAYBACK_BACKGROUND_JOB_DELAY_MS);
+      }, PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS);
       deferredJobTimers.push(previewTimer);
     }
 
@@ -4392,7 +4406,7 @@ export function App(): JSX.Element {
                   : 'Could not analyse this track yet.'
             );
           });
-      }, PLAYBACK_BACKGROUND_JOB_DELAY_MS);
+      }, PLAYBACK_SELECTED_MEASURED_JOB_DELAY_MS);
       deferredJobTimers.push(measuredTimer);
     }
 
@@ -7840,10 +7854,17 @@ export function App(): JSX.Element {
     const hasUrgentAnalysisWork = (): boolean => {
       const measured = MEASURED_ANALYSIS_QUEUE.dump();
 
+      // v3.259 — The selected-track jobs are intentionally delayed so they do
+      // not hit the renderer exactly as playback starts. During that same delay,
+      // treat the playback-settle grace window as urgent work so background
+      // latest-track warmup does not sneak in and start a new ffmpeg job first.
+      const playbackSettling = Date.now() < playbackBackgroundWarmupPausedUntilRef.current;
+
       // v3.141 — only measured user-selected jobs can pause startup measured
       // warmup. Preview decode is graph/UI work; letting it pause LUFS/stat
       // warmup would reintroduce the exact coupling Ethan rejected.
       return (
+        playbackSettling ||
         measured.activeByPriority.user > 0 ||
         measured.userBypassActive > 0 ||
         measured.pendingByPriority.user > 0

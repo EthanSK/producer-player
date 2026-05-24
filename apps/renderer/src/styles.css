@@ -4190,7 +4190,7 @@ body.is-dragging-checklist-timestamp * {
 /* Sort button while collapsed: drop the default `margin-left: auto` from
  * `.listening-device-secondary-button` (the toggle already absorbs the free
  * horizontal space via flex: 1) and pin it tight to the right of the row. */
-.checklist-sort-completed-button--collapsed {
+.checklist-sort-outstanding-button--collapsed {
   margin-left: 0;
   flex-shrink: 0;
 }
@@ -4517,8 +4517,8 @@ body.is-dragging-checklist-timestamp * {
   font-style: italic;
 }
 
-/* v3.245.0 — column-flex wrapper that occupies col-2 of the listening-device
- * strip grid. Stacks the chip-row above the "Sort: completed to bottom"
+/* v3.255.0 — column-flex wrapper that occupies col-2 of the listening-device
+ * strip grid. Stacks the chip-row above the "Sort: outstanding to bottom"
  * button so the button uses the previously-empty vertical space beneath the
  * capsules (Ethan voice 3661 — "in the right-hand area under the listening
  * device capsules"). Right-aligns its children so the button sits flush to
@@ -4552,22 +4552,21 @@ body.is-dragging-checklist-timestamp * {
   padding-bottom: 2px;
 }
 
-/* v3.245.0 — "Sort: completed to bottom" pill. Inherits the visual style
+/* v3.255.0 — "Sort: outstanding to bottom" pill. Inherits the visual style
  * from .listening-device-secondary-button (slim border, rounded, subtle
  * hover); only the sort-specific spacing lives here. */
-.checklist-sort-completed-button {
+.checklist-sort-outstanding-button {
   /* Slightly tighter top margin since the chip row already has its own
    * padding-bottom, so the visual gap reads ~6-8px without doubling up. */
   margin-top: 0;
   white-space: nowrap;
 }
 
-/* v3.249.0 — second sort button "Sort completed by time" stacks
- * immediately under the v3.245 button (Ethan voice 3774 — "another sort
- * button just underneath"). The aside container is already
- * `flex-direction: column` so it naturally falls below; this rule just
- * keeps any future vertical spacing tweak local to the new pill. */
-.checklist-sort-completed-by-time-button {
+/* v3.255.0 — second sort button "Sort outstanding by time" stacks immediately
+ * under the partition button. The aside container is already
+ * `flex-direction: column` so it naturally falls below; this rule just keeps
+ * any future vertical spacing tweak local to the time-sort pill. */
+.checklist-sort-outstanding-by-time-button {
   margin-top: 0;
 }
 

@@ -125,6 +125,125 @@ test.describe('Checklist and export UX improvements', () => {
     }
   });
 
+  test('checklist sort keeps outstanding work at the bottom and sorts it by song time', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-outstanding-sort'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.evaluate(() => {
+        const row = document.querySelector<HTMLElement>('[data-song-id]');
+        const songId = row?.getAttribute('data-song-id');
+        if (!songId) {
+          throw new Error('Could not find linked song id for checklist sort test.');
+        }
+
+        /*
+         * Storage is newest-first while the modal renders oldest->newest. This
+         * seed deliberately starts with active work split around completed/note
+         * rows, and with outstanding timestamps out of order, so the two
+         * buttons have to prove both halves of Ethan's regression request:
+         * active todos move to the bottom, then only active todos sort by song
+         * timestamp with the latest point at the bottom.
+         */
+        const storedNewestFirst = [
+          {
+            id: 'context-note',
+            text: 'Context note',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: 1,
+            listeningDeviceId: null,
+            isNote: true,
+          },
+          {
+            id: 'todo-early',
+            text: 'Fix early transient',
+            completed: false,
+            timestampSeconds: 30,
+            versionNumber: 1,
+            listeningDeviceId: null,
+          },
+          {
+            id: 'done-middle',
+            text: 'Already checked',
+            completed: true,
+            timestampSeconds: 90,
+            versionNumber: 1,
+            listeningDeviceId: null,
+            completedAt: 1_779_500_000_000,
+          },
+          {
+            id: 'todo-late',
+            text: 'Fix late chorus',
+            completed: false,
+            timestampSeconds: 210,
+            versionNumber: 1,
+            listeningDeviceId: null,
+          },
+        ];
+
+        window.localStorage.setItem(
+          'producer-player.song-checklists.v1',
+          JSON.stringify({ [songId]: storedNewestFirst }),
+        );
+      });
+
+      await page.reload();
+      await page.waitForSelector('[data-testid="app-shell"]');
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const rows = page.getByTestId('song-checklist-item-row');
+      const readOrder = async (): Promise<string[]> =>
+        rows.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute('data-item-id') ?? ''),
+        );
+
+      expect(await readOrder()).toEqual([
+        'todo-late',
+        'done-middle',
+        'todo-early',
+        'context-note',
+      ]);
+
+      await expect(page.getByTestId('checklist-sort-outstanding-to-bottom-collapsed')).toHaveText(
+        'Sort: outstanding to bottom'
+      );
+      await page.getByTestId('checklist-sort-outstanding-to-bottom-collapsed').click();
+
+      await expect
+        .poll(async () => readOrder(), { timeout: 5_000, intervals: [100] })
+        .toEqual(['done-middle', 'context-note', 'todo-late', 'todo-early']);
+
+      await page.getByTestId('listening-device-strip-collapsed-toggle').click();
+      await expect(page.getByTestId('checklist-sort-outstanding-by-time')).toHaveText(
+        'Sort outstanding by time'
+      );
+      await page.getByTestId('checklist-sort-outstanding-by-time').click();
+
+      await expect
+        .poll(async () => readOrder(), { timeout: 5_000, intervals: [100] })
+        .toEqual(['done-middle', 'context-note', 'todo-early', 'todo-late']);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('clear completed checklist asks for confirmation and respects cancel/confirm', async () => {
     const directories = await createE2ETestDirectories('producer-player-checklist-clear-confirm');
 

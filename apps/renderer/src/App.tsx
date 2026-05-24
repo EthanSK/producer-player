@@ -119,8 +119,9 @@ import {
   sanitizeSongRatings,
 } from './sharedUserState';
 import {
-  sortChecklistMoveCompletedToBottom as sortChecklistMoveCompletedToBottomPure,
-  sortChecklistCompletedByTime as sortChecklistCompletedByTimePure,
+  isChecklistOutstanding,
+  sortChecklistMoveOutstandingToBottom as sortChecklistMoveOutstandingToBottomPure,
+  sortChecklistOutstandingByTimestamp as sortChecklistOutstandingByTimestampPure,
 } from './checklistSort';
 import {
   computeSongDateOpacitiesByAge,
@@ -14789,28 +14790,27 @@ export function App(): JSX.Element {
     });
   }
 
-  // v3.245.0 — "Sort: completed to bottom" stable partition (voice 3661).
-  // Operates on the rendered (chronological) order: items classified as
-  // "done" sink to the bottom, items classified as "open" stay on top,
-  // and within each group the original relative order is preserved.
+  // v3.255.0 — "Sort: outstanding to bottom" stable partition (voice
+  // 33568/f50a/13842). Operates on the rendered (chronological) order: active
+  // unfinished todos sink to the bottom working edge, while completed / Won't
+  // Fix rows and note rows stay above them. Within each group the original
+  // relative order is preserved.
   //
   // Classification rules:
-  //   - DONE = (completed === true OR wontFix === true) AND NOT a note.
-  //   - OPEN = everything else (open todos, notes, mastering-promoted
-  //            findings, listening-device-tagged rows). Notes (isNote)
-  //            never sink because they're permanent context — not work
-  //            you're trying to push aside.
+  //   - OUTSTANDING = active todo rows that are not notes, not completed, and
+  //     not Won't Fix. Notes are context, not undone work, so they do not get
+  //     pulled into the bottom group.
   //
-  // Interpretation note: Ethan's verbatim ask was "moves all the incomplete
-  // checklist items to the bottom", but the surrounding context allowed
-  // judgement-call on which group sinks. Conventional checklist UX puts
-  // completed at the bottom so open work stays in view; that's what this
-  // implements (see commit message for the full rationale).
-  function sortChecklistMoveCompletedToBottom(
+  // Regression note: the old completed-to-bottom behavior matched its label
+  // but fought Ethan's actual workflow: the bottom of this modal is where the
+  // newest / currently-actionable rows and composer live. This keeps the rows
+  // he still needs to address at that edge instead of burying them above old
+  // resolved work.
+  function sortChecklistMoveOutstandingToBottom(
     songId: string,
   ): void {
     updateSongChecklistItems(songId, (storedItems) => {
-      const next = sortChecklistMoveCompletedToBottomPure(storedItems);
+      const next = sortChecklistMoveOutstandingToBottomPure(storedItems);
       // The pure helper returns the SAME reference when it's a no-op so
       // updateSongChecklistItems skips the undo snapshot + re-render in
       // that case.
@@ -14818,26 +14818,25 @@ export function App(): JSX.Element {
     });
   }
 
-  function handleSortChecklistMoveCompletedToBottom(songId: string): void {
-    logAction('checklist.sort.completed-to-bottom', { songId });
-    sortChecklistMoveCompletedToBottom(songId);
+  function handleSortChecklistMoveOutstandingToBottom(songId: string): void {
+    logAction('checklist.sort.outstanding-to-bottom', { songId });
+    sortChecklistMoveOutstandingToBottom(songId);
   }
 
-  // v3.249.0 — "Sort completed by time" (Ethan voice 3774). A SECOND sort
-  // button below the existing "Sort: completed to bottom" that sorts the
-  // COMPLETED items by their completion timestamp. Pure logic lives in
-  // ./checklistSort.ts so it's unit-testable; this wrapper just plumbs
-  // through `updateSongChecklistItems`.
-  function sortChecklistCompletedByTime(songId: string): void {
+  // v3.255.0 — "Sort outstanding by time". Sorts only active, not-completed
+  // todos by their song timestamp; completed rows, Won't Fix rows, and notes
+  // stay above the active work group. Pure logic lives in ./checklistSort.ts
+  // so this wrapper only plumbs through `updateSongChecklistItems`.
+  function sortChecklistOutstandingByTimestamp(songId: string): void {
     updateSongChecklistItems(songId, (storedItems) => {
-      const next = sortChecklistCompletedByTimePure(storedItems);
+      const next = sortChecklistOutstandingByTimestampPure(storedItems);
       return next as SongChecklistItem[];
     });
   }
 
-  function handleSortChecklistCompletedByTime(songId: string): void {
-    logAction('checklist.sort.completed-by-time', { songId });
-    sortChecklistCompletedByTime(songId);
+  function handleSortChecklistOutstandingByTimestamp(songId: string): void {
+    logAction('checklist.sort.outstanding-by-timestamp', { songId });
+    sortChecklistOutstandingByTimestamp(songId);
   }
 
   function handleSubmitListeningDevice(): void {
@@ -15191,10 +15190,10 @@ export function App(): JSX.Element {
         // v3.244.0 — ticking the blue check always clears wontFix. The
         // two completion states are mutually exclusive.
         const { wontFix: _wontFix, completedAt: _prevCompletedAt, ...rest } = item;
-        // v3.249.0 — stamp / clear completedAt so the new "Sort completed
-        // by time" button has a real signal. New tick → stamp now;
-        // untick → drop the stamp so a re-tick later records a fresh
-        // time.
+        // v3.249.0 — stamp / clear completedAt as durable history of when a
+        // row was resolved. v3.255 no longer sorts the UI by this value, but
+        // keeping the timestamp preserves older saved-state semantics and
+        // leaves a useful audit trail for future completed-work views.
         if (completed) {
           return { ...rest, completed, completedAt: Date.now() };
         }
@@ -15216,9 +15215,9 @@ export function App(): JSX.Element {
         if (item.id !== itemId) return item;
         const nextWontFix = !(item.wontFix === true);
         if (nextWontFix) {
-          // v3.249.0 — record completion timestamp on transition to
-          // Won't Fix. Sort-by-time treats Won't Fix identically to a
-          // blue-tick completion.
+          // v3.249.0 — record completion timestamp on transition to Won't Fix.
+          // v3.255 moved the visible time sort to outstanding song timestamps,
+          // but this remains useful saved-state history for resolved rows.
           return { ...item, wontFix: true, completed: false, completedAt: Date.now() };
         }
         // Returning to "open" — strip the wontFix key entirely and drop
@@ -15244,10 +15243,9 @@ export function App(): JSX.Element {
           // true` never leaks into a todo count if it later flips back.
           // v3.244.0 — notes ignore completion math entirely so also
           // strip any wontFix flag.
-          // v3.249.0 — also drop the completedAt timestamp so a stale
-          // value can't survive the note round-trip and pollute the
-          // "Sort completed by time" ordering if the item is later
-          // converted back to a todo and re-ticked.
+          // v3.249.0 — also drop the completedAt timestamp so a stale value
+          // can't survive the note round-trip if the item is later converted
+          // back to a todo and re-ticked.
           const { wontFix: _wontFix, completedAt: _completedAt, ...rest } = item;
           return { ...rest, isNote: true, completed: false };
         }
@@ -19043,8 +19041,8 @@ export function App(): JSX.Element {
               {/*
                 v3.247 (Ethan voice 3677) — collapsed-mode thin row. Shows
                 the current listening device name + an expand chevron. The
-                v3.245 "Sort: completed to bottom" button is rendered on
-                the right so it stays clickable without expanding the
+                v3.255 "Sort: outstanding to bottom" button is rendered on
+                the right so active-work sorting stays clickable without expanding the
                 strip. Clicking anywhere on the chevron / label toggles
                 back to the full capsule layout. Persisted via
                 `CHECKLIST_LISTENING_STRIP_COLLAPSED_KEY`.
@@ -19101,61 +19099,51 @@ export function App(): JSX.Element {
                     </span>
                   </button>
                   {/*
-                    v3.247 — keep the v3.245 Sort button reachable while
-                    collapsed. Identical logic + disabled-state heuristic
-                    to the expanded copy below, just rendered here so
-                    Ethan never has to expand the strip just to sort.
+                    v3.255 — keep the outstanding-to-bottom Sort button
+                    reachable while collapsed. Identical logic + disabled-state
+                    heuristic to the expanded copy below, just rendered here so
+                    Ethan never has to expand the strip just to put active work
+                    near the bottom/composer edge.
                   */}
                   {(() => {
                     const items = checklistModalItemsChronological;
-                    const hasDone = items.some(
-                      (it) =>
-                        it.isNote !== true &&
-                        (it.completed === true || it.wontFix === true),
-                    );
-                    const hasOpen = items.some(
-                      (it) =>
-                        it.isNote === true ||
-                        !(it.completed === true || it.wontFix === true),
-                    );
+                    const hasOutstanding = items.some(isChecklistOutstanding);
+                    const hasContext = items.some((it) => !isChecklistOutstanding(it));
                     let alreadyPartitioned = true;
-                    let seenDone = false;
+                    let seenOutstanding = false;
                     for (const it of items) {
-                      const isDone =
-                        it.isNote !== true &&
-                        (it.completed === true || it.wontFix === true);
-                      if (isDone) {
-                        seenDone = true;
-                      } else if (seenDone) {
+                      if (isChecklistOutstanding(it)) {
+                        seenOutstanding = true;
+                      } else if (seenOutstanding) {
                         alreadyPartitioned = false;
                         break;
                       }
                     }
-                    const canSort = hasDone && hasOpen && !alreadyPartitioned;
+                    const canSort = hasOutstanding && hasContext && !alreadyPartitioned;
                     const tooltipText = canSort
-                      ? 'Move completed items to the bottom. Notes and open todos stay on top in their current order. Won’t Fix items count as completed.'
+                      ? 'Move outstanding todos to the bottom. Completed, Won’t Fix, and note rows stay above so open work stays near the composer.'
                       : items.length === 0
                         ? 'No items to sort.'
-                        : !hasDone
-                          ? 'No completed items to move — the list is already organised.'
-                          : !hasOpen
-                            ? 'All items are completed — nothing to keep on top.'
-                            : 'Already sorted — completed items are at the bottom.';
+                        : !hasOutstanding
+                          ? 'No outstanding todos to move — the list is already organised.'
+                          : !hasContext
+                            ? 'All todo items are outstanding — nothing to move above them.'
+                            : 'Already sorted — outstanding todos are at the bottom.';
                     return (
                       <button
                         type="button"
-                        className="listening-device-secondary-button checklist-sort-completed-button checklist-sort-completed-button--collapsed"
+                        className="listening-device-secondary-button checklist-sort-outstanding-button checklist-sort-outstanding-button--collapsed"
                         onClick={() =>
-                          handleSortChecklistMoveCompletedToBottom(
+                          handleSortChecklistMoveOutstandingToBottom(
                             checklistModalSong.id,
                           )
                         }
                         disabled={!canSort}
-                        data-testid="checklist-sort-completed-to-bottom-collapsed"
+                        data-testid="checklist-sort-outstanding-to-bottom-collapsed"
                         title={tooltipText}
-                        aria-label="Sort checklist: move completed items to the bottom"
+                        aria-label="Sort checklist: move outstanding items to the bottom"
                       >
-                        Sort: completed to bottom
+                        Sort: outstanding to bottom
                       </button>
                     );
                   })()}
@@ -19465,7 +19453,7 @@ export function App(): JSX.Element {
                 </div>
               </div>
               {/*
-                v3.245.0 — Wrap the chip row + the new "Sort: completed to
+                v3.255.0 — Wrap the chip row + the "Sort: outstanding to
                 bottom" button in a column-flex container so the button
                 sits in the empty vertical space UNDER the chip capsules
                 (Ethan voice 3661 — "in the right-hand area under the
@@ -19520,113 +19508,100 @@ export function App(): JSX.Element {
                   )}
                 </div>
                 {/*
-                  v3.245.0 — "Sort: completed to bottom" button (Ethan voice
-                  3661). Stable partition over the rendered chronological
-                  order: items with `completed === true || wontFix === true`
-                  (and NOT notes) sink to the bottom, everything else keeps
-                  its existing relative order at the top. Idempotent — a
-                  second click on an already-sorted list is a no-op (no
+                  v3.255.0 — "Sort: outstanding to bottom" button (Ethan voice
+                  33568/f50a/13842). Stable partition over the rendered
+                  chronological order: active unfinished todos sink to the
+                  bottom/composer edge, while completed, Won't Fix, and note
+                  rows keep their existing relative order above. Idempotent —
+                  a second click on an already-sorted list is a no-op (no
                   undo-stack churn). Disabled when there's nothing to do
                   (empty list, or all items are in one group already).
                 */}
                 {(() => {
                   const items = checklistModalItemsChronological;
-                  const hasDone = items.some(
-                    (it) =>
-                      it.isNote !== true && (it.completed === true || it.wontFix === true),
-                  );
-                  const hasOpen = items.some(
-                    (it) =>
-                      it.isNote === true || !(it.completed === true || it.wontFix === true),
-                  );
+                  const hasOutstanding = items.some(isChecklistOutstanding);
+                  const hasContext = items.some((it) => !isChecklistOutstanding(it));
                   // Detect "already partitioned" so the button can grey out
                   // when clicking it would be a no-op anyway.
                   let alreadyPartitioned = true;
-                  let seenDone = false;
+                  let seenOutstanding = false;
                   for (const it of items) {
-                    const isDone =
-                      it.isNote !== true && (it.completed === true || it.wontFix === true);
-                    if (isDone) {
-                      seenDone = true;
-                    } else if (seenDone) {
+                    if (isChecklistOutstanding(it)) {
+                      seenOutstanding = true;
+                    } else if (seenOutstanding) {
                       alreadyPartitioned = false;
                       break;
                     }
                   }
-                  const canSort = hasDone && hasOpen && !alreadyPartitioned;
+                  const canSort = hasOutstanding && hasContext && !alreadyPartitioned;
                   const tooltipText = canSort
-                    ? 'Move completed items to the bottom. Notes and open todos stay on top in their current order. Won’t Fix items count as completed.'
+                    ? 'Move outstanding todos to the bottom. Completed, Won’t Fix, and note rows stay above so open work stays near the composer.'
                     : items.length === 0
                       ? 'No items to sort.'
-                      : !hasDone
-                        ? 'No completed items to move — the list is already organised.'
-                        : !hasOpen
-                          ? 'All items are completed — nothing to keep on top.'
-                          : 'Already sorted — completed items are at the bottom.';
+                      : !hasOutstanding
+                        ? 'No outstanding todos to move — the list is already organised.'
+                        : !hasContext
+                          ? 'All todo items are outstanding — nothing to move above them.'
+                          : 'Already sorted — outstanding todos are at the bottom.';
                   return (
                     <button
                       type="button"
-                      className="listening-device-secondary-button checklist-sort-completed-button"
+                      className="listening-device-secondary-button checklist-sort-outstanding-button"
                       onClick={() =>
-                        handleSortChecklistMoveCompletedToBottom(checklistModalSong.id)
+                        handleSortChecklistMoveOutstandingToBottom(checklistModalSong.id)
                       }
                       disabled={!canSort}
-                      data-testid="checklist-sort-completed-to-bottom"
+                      data-testid="checklist-sort-outstanding-to-bottom"
                       title={tooltipText}
-                      aria-label="Sort checklist: move completed items to the bottom"
+                      aria-label="Sort checklist: move outstanding items to the bottom"
                     >
-                      Sort: completed to bottom
+                      Sort: outstanding to bottom
                     </button>
                   );
                 })()}
                 {/*
-                  v3.252.0 — "Sort completed by time" (Ethan voice 3774,
-                  corrected by voice 3884). Second sort button right under
-                  the v3.245 button. Sorts completed (incl. Won't Fix) items
-                  by completedAt newest-first because the rendered list reads
-                  top → bottom; oldest-first made the newest completed item
-                  sink to the bottom, which is the regression Ethan noticed.
-                  Open todos + notes are untouched.
+                  v3.255.0 — "Sort outstanding by time" (Ethan voice
+                  33568/f50a/13842). Second sort button right under the
+                  partition button. It sorts ONLY active not-completed todos by
+                  their song timestamp, oldest → newest, so the latest point in
+                  the song lands at the bottom working edge. Completed, Won't
+                  Fix, and notes stay above the active work group.
                 */}
                 {(() => {
                   const items = checklistModalItemsChronological;
-                  // v3.249 — enablement check mirrors the pure helper's
+                  // v3.255 — enablement check mirrors the pure helper's
                   // own no-op detection so the disabled state never lies
-                  // (Codex feedback: the previous "count timed-completed
-                  // items" heuristic disabled the button on lists like
-                  // `[legacyDone, timed100, timed200]` even though the
-                  // sort WOULD move legacyDone to the very bottom of the
-                  // completed group). We run the pure helper on a probe
+                  // (the helper also moves active work below context rows and
+                  // handles untimed todos). We run the pure helper on a probe
                   // copy and compare references — exactly what
                   // `updateSongChecklistItems` will see at click time.
                   const storage = [...items].reverse();
-                  const probeResult = sortChecklistCompletedByTimePure(storage);
+                  const probeResult = sortChecklistOutstandingByTimestampPure(storage);
                   const canSortByTime = probeResult !== storage;
-                  const doneWithTime = items.filter(
+                  const outstandingWithTime = items.filter(
                     (it) =>
-                      it.isNote !== true &&
-                      (it.completed === true || it.wontFix === true) &&
-                      typeof it.completedAt === 'number',
+                      isChecklistOutstanding(it) &&
+                      typeof it.timestampSeconds === 'number',
                   );
-                  const hasEnoughTimed = doneWithTime.length >= 2;
+                  const hasEnoughTimed = outstandingWithTime.length >= 2;
                   const tooltipText = canSortByTime
-                    ? 'Sort completed items by when they were ticked off — newest first, oldest last. Open todos and notes stay where they are. Items ticked before v3.249 (no recorded time) stay below timestamped completed items.'
+                    ? 'Sort outstanding todos by their song timestamp — earliest first, latest at the bottom. Completed, Won’t Fix, and notes stay above the active work. Untimed outstanding todos stay below timestamped ones.'
                     : !hasEnoughTimed
-                      ? 'Need at least two items completed since v3.249 to sort by time. (Items ticked before v3.249 don\'t have a recorded completion time.)'
-                      : 'Already sorted by completion time.';
+                      ? 'Need at least two outstanding todos with song timestamps to sort by time.'
+                      : 'Already sorted by outstanding timestamp.';
                   return (
                     <button
                       type="button"
-                      className="listening-device-secondary-button checklist-sort-completed-button checklist-sort-completed-by-time-button"
+                      className="listening-device-secondary-button checklist-sort-outstanding-button checklist-sort-outstanding-by-time-button"
                       onClick={() =>
-                        handleSortChecklistCompletedByTime(checklistModalSong.id)
+                        handleSortChecklistOutstandingByTimestamp(checklistModalSong.id)
                       }
                       disabled={!canSortByTime}
-                      data-testid="checklist-sort-completed-by-time"
+                      data-testid="checklist-sort-outstanding-by-time"
                       title={tooltipText}
-                      aria-label="Sort completed checklist items by completion time"
+                      aria-label="Sort outstanding checklist items by song timestamp"
                     >
-                      Sort completed by time
+                      Sort outstanding by time
                     </button>
                   );
                 })()}

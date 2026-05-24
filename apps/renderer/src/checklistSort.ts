@@ -12,16 +12,25 @@
 //   - "chronological order" = oldest at index 0, newest at the end (i.e.
 //     the rendered order on screen, top → bottom).
 //
-// `isDone` rule (shared across both sorts):
+// `isDone` / `isOutstanding` rules (shared across both sorts):
 //   - notes (isNote === true) are NEVER considered done.
 //   - any item with `completed === true` is done.
 //   - any item with `wontFix === true` is done (v3.244+ Won't Fix state).
+//   - outstanding means an actionable open todo: not a note, not completed,
+//     not Won't Fix.
 
 import type { SongChecklistItem } from '@producer-player/contracts';
 
 function isItemDone(item: SongChecklistItem): boolean {
   if (item.isNote === true) return false;
   return item.completed === true || item.wontFix === true;
+}
+
+export function isChecklistOutstanding(item: SongChecklistItem): boolean {
+  // Notes are context, not unfinished work. Keeping that distinction here
+  // prevents the "outstanding to bottom" actions from dragging permanent notes
+  // into the active todo group Ethan is trying to work through.
+  return item.isNote !== true && !isItemDone(item);
 }
 
 function arraysIdentical<T>(a: readonly T[], b: readonly T[]): boolean {
@@ -33,10 +42,10 @@ function arraysIdentical<T>(a: readonly T[], b: readonly T[]): boolean {
 }
 
 /**
- * Sort: stable partition that moves all DONE items (completed === true OR
- * wontFix === true) to the BOTTOM of the chronological list, while OPEN
- * items (and notes) stay at the top. Within each group the existing
- * relative order is preserved.
+ * Sort: stable partition that moves actionable OUTSTANDING todos to the
+ * BOTTOM of the chronological list, while completed / Won't Fix rows and
+ * permanent notes stay above them. Within each group the existing relative
+ * order is preserved.
  *
  * v3.245 introduced this sort; v3.249 re-homed it to a pure function so
  * we could ship a unit test after Ethan voice 3774 reported the result
@@ -45,8 +54,14 @@ function arraysIdentical<T>(a: readonly T[], b: readonly T[]): boolean {
  * `checklistSort.test.ts` exercises the storage→render round-trip across
  * mixed Won't Fix / completed / open / note inputs and pins the
  * expected visual layout, so any future regression will be caught.
+ *
+ * v3.255 correction: Ethan clarified the actual workflow is "active work at
+ * the bottom" because the composer/newest-item area is at the bottom of the
+ * modal. This function intentionally supersedes the old completed-to-bottom
+ * behavior; the bug was treating finished work as the bottom group and pushing
+ * the rows he still needs to address away from the working edge.
  */
-export function sortChecklistMoveCompletedToBottom(
+export function sortChecklistMoveOutstandingToBottom(
   storedItems: readonly SongChecklistItem[],
 ): SongChecklistItem[] | readonly SongChecklistItem[] {
   if (storedItems.length < 2) return storedItems;
@@ -54,7 +69,7 @@ export function sortChecklistMoveCompletedToBottom(
   const top: SongChecklistItem[] = [];
   const bottom: SongChecklistItem[] = [];
   for (const item of chronological) {
-    if (isItemDone(item)) bottom.push(item);
+    if (isChecklistOutstanding(item)) bottom.push(item);
     else top.push(item);
   }
   if (top.length === 0 || bottom.length === 0) return storedItems;
@@ -64,45 +79,54 @@ export function sortChecklistMoveCompletedToBottom(
 }
 
 /**
- * v3.252.0 — Sort: order the COMPLETED items by their completion
- * timestamp (newest first → oldest last). Open todos and notes are
- * untouched and stay at the top of the list in their existing order.
- * Items without a completedAt (any pre-v3.249 ticks) stay after the
- * timestamped completed items in their existing relative order — we
- * don't invent a fake timestamp for them.
+ * v3.255.0 — Sort: order only the OUTSTANDING todos by their song timestamp.
+ * Completed / Won't Fix rows and notes stay above the active work group in
+ * their existing order. Timestamped outstanding todos sort oldest → newest so
+ * the latest point in the song lands at the bottom, matching the modal's
+ * bottom-is-newest mental model. Untimed outstanding todos stay after the
+ * timestamped ones in their existing relative order because there is no safe
+ * timeline position to invent for them.
  *
- * Caller contract identical to `sortChecklistMoveCompletedToBottom`:
+ * Caller contract identical to `sortChecklistMoveOutstandingToBottom`:
  * pass STORAGE order in, get STORAGE order back (or the same reference
  * if it's a no-op).
  */
-export function sortChecklistCompletedByTime(
+export function sortChecklistOutstandingByTimestamp(
   storedItems: readonly SongChecklistItem[],
 ): SongChecklistItem[] | readonly SongChecklistItem[] {
   if (storedItems.length < 2) return storedItems;
   const chronological = [...storedItems].reverse();
-  const opens: SongChecklistItem[] = [];
-  const doneWithTime: SongChecklistItem[] = [];
-  const doneWithoutTime: SongChecklistItem[] = [];
+  const top: SongChecklistItem[] = [];
+  const outstandingWithTime: SongChecklistItem[] = [];
+  const outstandingWithoutTime: SongChecklistItem[] = [];
   for (const item of chronological) {
-    if (!isItemDone(item)) {
-      opens.push(item);
-    } else if (typeof item.completedAt === 'number') {
-      doneWithTime.push(item);
+    if (!isChecklistOutstanding(item)) {
+      top.push(item);
+    } else if (
+      typeof item.timestampSeconds === 'number' &&
+      Number.isFinite(item.timestampSeconds)
+    ) {
+      outstandingWithTime.push(item);
     } else {
-      doneWithoutTime.push(item);
+      outstandingWithoutTime.push(item);
     }
   }
-  // Regression guard: the rendered list is top → bottom, so completedAt
-  // must be DESCENDING here. Ascending order made newly completed items
-  // sink below older completed work, which is exactly the bug Ethan
-  // reported in the completed-to-bottom/time sort flow.
+  // Regression guard for voice 33568/f50a/13842: the rendered list is top →
+  // bottom, and Ethan wants the newest/latest outstanding point at the bottom.
+  // Sorting ascending by the checklist item's song timestamp gives an audible
+  // walkthrough order: earliest issue first, latest issue closest to the
+  // composer/working edge.
   //
   // Array.prototype.sort is guaranteed stable since ES2019 — items with
   // identical timestamps therefore retain their incoming relative order.
-  doneWithTime.sort(
-    (a, b) => (b.completedAt as number) - (a.completedAt as number),
+  outstandingWithTime.sort(
+    (a, b) => (a.timestampSeconds as number) - (b.timestampSeconds as number),
   );
-  const sortedChronological = [...opens, ...doneWithTime, ...doneWithoutTime];
+  const sortedChronological = [
+    ...top,
+    ...outstandingWithTime,
+    ...outstandingWithoutTime,
+  ];
   if (arraysIdentical(sortedChronological, chronological)) return storedItems;
   return [...sortedChronological].reverse();
 }

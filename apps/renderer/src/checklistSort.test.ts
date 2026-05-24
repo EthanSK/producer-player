@@ -1,6 +1,8 @@
-// v3.249.0 — pins the behaviour of the two checklist sort helpers
+// v3.255.0 — pins the behaviour of the two checklist sort helpers
 // (Ethan voice 3774 — "I just did sort completed to bottom, and I
-// actually put them all at the top. So that's fucked.").
+// actually put them all at the top. So that's fucked."; then voice
+// 33568/f50a/13842 clarified the useful state is outstanding work at the
+// bottom, with the active todos sorted by song time).
 //
 // Storage convention (recap): items[0] is NEWEST. Rendered chronological
 // order is `[...items].reverse()` (oldest at index 0 → newest at the end,
@@ -9,8 +11,8 @@
 import { describe, expect, it } from 'vitest';
 import type { SongChecklistItem } from '@producer-player/contracts';
 import {
-  sortChecklistMoveCompletedToBottom,
-  sortChecklistCompletedByTime,
+  sortChecklistMoveOutstandingToBottom,
+  sortChecklistOutstandingByTimestamp,
 } from './checklistSort';
 
 function makeItem(
@@ -39,15 +41,15 @@ function renderedOf(storage: readonly SongChecklistItem[]): SongChecklistItem[] 
   return [...storage].reverse();
 }
 
-describe('sortChecklistMoveCompletedToBottom', () => {
+describe('sortChecklistMoveOutstandingToBottom', () => {
   it('returns the same reference for empty / single-item lists (no-op)', () => {
     const empty: SongChecklistItem[] = [];
-    expect(sortChecklistMoveCompletedToBottom(empty)).toBe(empty);
+    expect(sortChecklistMoveOutstandingToBottom(empty)).toBe(empty);
     const one = [makeItem('a')];
-    expect(sortChecklistMoveCompletedToBottom(one)).toBe(one);
+    expect(sortChecklistMoveOutstandingToBottom(one)).toBe(one);
   });
 
-  it('moves Won\'t Fix items to the BOTTOM (not the top) — pins the v3.245 sort against the Ethan voice 3774 inversion report', () => {
+  it('moves outstanding todos to the BOTTOM and leaves Won\'t Fix rows above them', () => {
     // Rendered top → bottom: [W1, O2, W3, O4]
     const storage = rendered(
       makeItem('w1', { wontFix: true }),
@@ -55,156 +57,166 @@ describe('sortChecklistMoveCompletedToBottom', () => {
       makeItem('w3', { wontFix: true }),
       makeItem('o4'),
     );
-    const out = sortChecklistMoveCompletedToBottom(storage);
+    const out = sortChecklistMoveOutstandingToBottom(storage);
     const renderedOut = renderedOf(out);
-    expect(renderedOut.map((it) => it.id)).toEqual(['o2', 'o4', 'w1', 'w3']);
+    expect(renderedOut.map((it) => it.id)).toEqual(['w1', 'w3', 'o2', 'o4']);
   });
 
-  it('moves blue-tick completed items to the BOTTOM', () => {
+  it('moves outstanding todos below blue-tick completed items', () => {
     const storage = rendered(
       makeItem('c1', { completed: true }),
       makeItem('o2'),
       makeItem('c3', { completed: true }),
       makeItem('o4'),
     );
-    const out = sortChecklistMoveCompletedToBottom(storage);
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['o2', 'o4', 'c1', 'c3']);
+    const out = sortChecklistMoveOutstandingToBottom(storage);
+    expect(renderedOf(out).map((it) => it.id)).toEqual(['c1', 'c3', 'o2', 'o4']);
   });
 
-  it('treats both completed and Won\'t Fix as done in the same partition', () => {
+  it('treats both completed and Won\'t Fix as resolved context above outstanding work', () => {
     const storage = rendered(
       makeItem('c1', { completed: true }),
       makeItem('o2'),
       makeItem('w3', { wontFix: true }),
       makeItem('o4'),
     );
-    const out = sortChecklistMoveCompletedToBottom(storage);
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['o2', 'o4', 'c1', 'w3']);
+    const out = sortChecklistMoveOutstandingToBottom(storage);
+    expect(renderedOf(out).map((it) => it.id)).toEqual(['c1', 'w3', 'o2', 'o4']);
   });
 
-  it('keeps notes at the top alongside open todos (notes never sink)', () => {
+  it('keeps notes above outstanding todos because notes are context, not unfinished work', () => {
     const storage = rendered(
       makeItem('w1', { wontFix: true }),
       makeItem('n2', { isNote: true }),
       makeItem('c3', { completed: true }),
       makeItem('o4'),
     );
-    const out = sortChecklistMoveCompletedToBottom(storage);
-    // n2 + o4 are "not done", stay on top; w1 + c3 sink
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['n2', 'o4', 'w1', 'c3']);
+    const out = sortChecklistMoveOutstandingToBottom(storage);
+    // w1 + n2 + c3 are resolved/context rows; o4 is the only active todo and
+    // therefore moves to the working edge at the bottom.
+    expect(renderedOf(out).map((it) => it.id)).toEqual(['w1', 'n2', 'c3', 'o4']);
   });
 
   it('is idempotent — second call on a sorted list returns the same reference', () => {
     const storage = rendered(
-      makeItem('o1'),
-      makeItem('o2'),
       makeItem('c3', { completed: true }),
       makeItem('w4', { wontFix: true }),
+      makeItem('o1'),
+      makeItem('o2'),
     );
-    const first = sortChecklistMoveCompletedToBottom(storage);
-    // Already partitioned (opens first, dones last) — should be a no-op
+    const first = sortChecklistMoveOutstandingToBottom(storage);
+    // Already partitioned (resolved/context rows first, outstanding last) —
+    // should be a no-op.
     expect(first).toBe(storage);
-    const second = sortChecklistMoveCompletedToBottom(first as SongChecklistItem[]);
+    const second = sortChecklistMoveOutstandingToBottom(first as SongChecklistItem[]);
     expect(second).toBe(storage);
   });
 
-  it('returns the same reference when there are no open items (nothing to keep on top)', () => {
+  it('returns the same reference when there are no outstanding todos', () => {
     const storage = rendered(
       makeItem('c1', { completed: true }),
       makeItem('w2', { wontFix: true }),
     );
-    expect(sortChecklistMoveCompletedToBottom(storage)).toBe(storage);
+    expect(sortChecklistMoveOutstandingToBottom(storage)).toBe(storage);
   });
 
-  it('returns the same reference when there are no done items', () => {
+  it('returns the same reference when every todo is outstanding already', () => {
     const storage = rendered(makeItem('o1'), makeItem('o2'));
-    expect(sortChecklistMoveCompletedToBottom(storage)).toBe(storage);
+    expect(sortChecklistMoveOutstandingToBottom(storage)).toBe(storage);
   });
 });
 
-describe('sortChecklistCompletedByTime', () => {
+describe('sortChecklistOutstandingByTimestamp', () => {
   it('returns the same reference for empty / single-item lists', () => {
     const empty: SongChecklistItem[] = [];
-    expect(sortChecklistCompletedByTime(empty)).toBe(empty);
-    const one = [makeItem('a', { completed: true, completedAt: 100 })];
-    expect(sortChecklistCompletedByTime(one)).toBe(one);
+    expect(sortChecklistOutstandingByTimestamp(empty)).toBe(empty);
+    const one = [makeItem('a', { timestampSeconds: 100 })];
+    expect(sortChecklistOutstandingByTimestamp(one)).toBe(one);
   });
 
-  it('sorts completed items by completedAt (newest first)', () => {
+  it('sorts only outstanding todos by song timestamp (latest at the bottom)', () => {
     const storage = rendered(
-      makeItem('o1'),
-      makeItem('c2', { completed: true, completedAt: 3000 }),
-      makeItem('c3', { completed: true, completedAt: 1000 }),
-      makeItem('c4', { completed: true, completedAt: 2000 }),
+      makeItem('done', { completed: true, completedAt: 3000 }),
+      makeItem('late', { timestampSeconds: 180 }),
+      makeItem('early', { timestampSeconds: 20 }),
+      makeItem('middle', { timestampSeconds: 90 }),
     );
-    const out = sortChecklistCompletedByTime(storage);
-    // Regression guard for Ethan voice 3884: the UI renders top -> bottom,
-    // so the newest completion timestamp must be FIRST inside the completed
-    // group. Ascending order made the newest ticked-off item sink to the
-    // bottom, which made "sort completed by time" feel backwards.
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['o1', 'c2', 'c4', 'c3']);
-  });
-
-  it('sorts Won\'t Fix items by completedAt alongside blue-tick completed items', () => {
-    const storage = rendered(
-      makeItem('w1', { wontFix: true, completedAt: 5000 }),
-      makeItem('c2', { completed: true, completedAt: 2000 }),
-      makeItem('w3', { wontFix: true, completedAt: 1000 }),
-      makeItem('o4'),
-    );
-    const out = sortChecklistCompletedByTime(storage);
-    // Opens first (o4), then done sorted newest-first by time:
-    // w1=5000, c2=2000, w3=1000.
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['o4', 'w1', 'c2', 'w3']);
-  });
-
-  it('puts done items WITHOUT a completedAt at the very bottom in their existing relative order (legacy ticks)', () => {
-    const storage = rendered(
-      makeItem('legacy1', { completed: true }),
-      makeItem('c2', { completed: true, completedAt: 2000 }),
-      makeItem('legacy3', { completed: true }),
-      makeItem('c4', { completed: true, completedAt: 1000 }),
-      makeItem('o5'),
-    );
-    const out = sortChecklistCompletedByTime(storage);
-    // o5 (open) on top, then timed newest-first: c2=2000, c4=1000,
-    // then legacy entries in their existing chronological relative order:
-    // legacy1, legacy3
+    const out = sortChecklistOutstandingByTimestamp(storage);
+    // Regression guard for Ethan voice 33568/f50a/13842: the UI renders top
+    // -> bottom, and the bottom is the working/newest edge. Sorting ascending
+    // by playback timestamp puts the latest outstanding point last.
     expect(renderedOf(out).map((it) => it.id)).toEqual([
-      'o5',
-      'c2',
-      'c4',
-      'legacy1',
-      'legacy3',
+      'done',
+      'early',
+      'middle',
+      'late',
     ]);
   });
 
-  it('keeps notes at the top alongside open todos — notes are never reordered into the done group', () => {
+  it('does not reorder completed or Won\'t Fix rows while sorting outstanding todos', () => {
+    const storage = rendered(
+      makeItem('w1', { wontFix: true, completedAt: 5000 }),
+      makeItem('late', { timestampSeconds: 120 }),
+      makeItem('c2', { completed: true, completedAt: 2000 }),
+      makeItem('early', { timestampSeconds: 10 }),
+    );
+    const out = sortChecklistOutstandingByTimestamp(storage);
+    // w1 and c2 keep their top/context relative order; only the active todos
+    // are sorted into playback order below them.
+    expect(renderedOf(out).map((it) => it.id)).toEqual([
+      'w1',
+      'c2',
+      'early',
+      'late',
+    ]);
+  });
+
+  it('puts outstanding todos without a song timestamp below timestamped outstanding todos', () => {
+    const storage = rendered(
+      makeItem('untimed1'),
+      makeItem('late', { timestampSeconds: 200 }),
+      makeItem('untimed2'),
+      makeItem('early', { timestampSeconds: 40 }),
+      makeItem('done', { completed: true }),
+    );
+    const out = sortChecklistOutstandingByTimestamp(storage);
+    // done/context on top, then timestamped outstanding todos in song order,
+    // then untimed active todos in their existing chronological relative order.
+    expect(renderedOf(out).map((it) => it.id)).toEqual([
+      'done',
+      'early',
+      'late',
+      'untimed1',
+      'untimed2',
+    ]);
+  });
+
+  it('keeps notes above outstanding todos — notes are never reordered into the active work group', () => {
     const storage = rendered(
       makeItem('n1', { isNote: true }),
-      makeItem('c2', { completed: true, completedAt: 1000 }),
-      makeItem('o3'),
+      makeItem('late', { timestampSeconds: 1000 }),
+      makeItem('early', { timestampSeconds: 10 }),
     );
-    const out = sortChecklistCompletedByTime(storage);
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['n1', 'o3', 'c2']);
+    const out = sortChecklistOutstandingByTimestamp(storage);
+    expect(renderedOf(out).map((it) => it.id)).toEqual(['n1', 'early', 'late']);
   });
 
   it('is idempotent on an already-sorted list (returns the same reference)', () => {
     const storage = rendered(
-      makeItem('o1'),
-      makeItem('c3', { completed: true, completedAt: 2000 }),
-      makeItem('c2', { completed: true, completedAt: 1000 }),
+      makeItem('done', { completed: true }),
+      makeItem('early', { timestampSeconds: 20 }),
+      makeItem('late', { timestampSeconds: 200 }),
     );
-    expect(sortChecklistCompletedByTime(storage)).toBe(storage);
+    expect(sortChecklistOutstandingByTimestamp(storage)).toBe(storage);
   });
 
-  it('is stable: items with the same completedAt keep their existing relative order', () => {
+  it('is stable: outstanding items with the same timestamp keep their existing relative order', () => {
     const storage = rendered(
-      makeItem('c', { completed: true, completedAt: 500 }),
-      makeItem('a', { completed: true, completedAt: 1000 }),
-      makeItem('b', { completed: true, completedAt: 1000 }),
+      makeItem('c', { timestampSeconds: 500 }),
+      makeItem('a', { timestampSeconds: 1000 }),
+      makeItem('b', { timestampSeconds: 1000 }),
     );
-    const out = sortChecklistCompletedByTime(storage);
-    expect(renderedOf(out).map((it) => it.id)).toEqual(['a', 'b', 'c']);
+    const out = sortChecklistOutstandingByTimestamp(storage);
+    expect(renderedOf(out).map((it) => it.id)).toEqual(['c', 'a', 'b']);
   });
 });

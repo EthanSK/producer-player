@@ -204,7 +204,7 @@ test.describe('checklist playback workflow', () => {
       await linkFixtureFolder(page, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        'Total number: 0'
+        'Total checklist items remaining: 0'
       );
 
       await page
@@ -217,7 +217,7 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('song-checklist-add').click();
       await page.getByTestId('song-checklist-done-header').click();
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        'Total number: 1'
+        'Total checklist items remaining: 1'
       );
 
       await page
@@ -241,7 +241,7 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('song-checklist-done-header').click();
 
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        'Total number: 2'
+        'Total checklist items remaining: 2'
       );
     } finally {
       await electronApp.close();

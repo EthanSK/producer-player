@@ -56,6 +56,14 @@ interface QueuedTask<T> {
   label: string | null;
   insertionOrder: number;
   /**
+   * v3.263 — optional delay applied AFTER the scheduler has admitted the job
+   * into a real slot. This is deliberately different from delaying the
+   * enqueue call: USER_SELECTED work becomes visible to the queue immediately,
+   * so lower-priority warmup can be interrupted/paused right away, while the
+   * heavy ffmpeg/decode body can still wait for playback start to settle.
+   */
+  startDelayMs: number;
+  /**
    * v3.195 — task receives an AbortSignal so callers that support cancellation
    * (notably ffmpeg measured analysis and preview fetch/decode) can react to
    * a USER preemption. Tasks that ignore the signal may keep working until
@@ -270,6 +278,13 @@ export interface EnqueueOptions {
    * its AudioContext).
    */
   cancellable?: boolean;
+  /**
+   * v3.263 — delay the task body after the job has acquired its queue slot.
+   * Use this for user-selected playback analysis when we need the scheduler to
+   * reserve priority immediately but want the actual CPU-heavy work to start a
+   * few hundred milliseconds later so audio startup stays smooth.
+   */
+  startDelayMs?: number;
 }
 
 export class AnalysisQueue {
@@ -395,6 +410,11 @@ export class AnalysisQueue {
     const key = options.key ?? null;
     const label = sanitizeJobLabel(options.label);
     const cancellable = options.cancellable === true;
+    const rawStartDelayMs = options.startDelayMs ?? 0;
+    const startDelayMs =
+      Number.isFinite(rawStartDelayMs) && rawStartDelayMs > 0
+        ? Math.floor(rawStartDelayMs)
+        : 0;
 
     if (key !== null) {
       const existing = this.inflightByKey.get(key);
@@ -423,6 +443,7 @@ export class AnalysisQueue {
         priority,
         label,
         insertionOrder: this.nextInsertionOrder++,
+        startDelayMs,
         // Wrap legacy 0-arg tasks so they ignore the signal silently.
         task: task as (signal: AbortSignal) => Promise<T>,
         resolve,
@@ -784,6 +805,38 @@ export class AnalysisQueue {
     // cancellable tasks may ignore it.
     next.abortController = new AbortController();
     const abortSignal = next.abortController.signal;
+    const waitForStartDelay = (): Promise<void> => {
+      if (next.startDelayMs <= 0) {
+        return Promise.resolve();
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+        const cleanup = (): void => {
+          if (timeoutHandle !== null) {
+            clearTimeout(timeoutHandle);
+            timeoutHandle = null;
+          }
+          abortSignal.removeEventListener('abort', handleAbort);
+        };
+        const handleAbort = (): void => {
+          cleanup();
+          reject(new AnalysisTaskPreemptedError(next.key));
+        };
+
+        if (abortSignal.aborted) {
+          handleAbort();
+          return;
+        }
+
+        abortSignal.addEventListener('abort', handleAbort, { once: true });
+        timeoutHandle = setTimeout(() => {
+          cleanup();
+          resolve();
+        }, next.startDelayMs);
+      });
+    };
 
     // v3.120 — track-once-and-settle. The timeout path and the natural
     // settle path can race; whichever fires first wins, the other is a
@@ -885,8 +938,21 @@ export class AnalysisQueue {
       return true;
     };
 
+    const runTaskAfterOptionalDelay = async (): Promise<unknown> => {
+      if (next.startDelayMs > 0) {
+        await waitForStartDelay();
+        // The timeout path may have rejected the caller while a delayed USER
+        // job was still waiting to start. Never run the heavy task body after
+        // the queue has already freed its slot.
+        if (settled) {
+          throw new AnalysisTaskPreemptedError(next.key);
+        }
+      }
+      return next.task(abortSignal);
+    };
+
     Promise.resolve()
-      .then(() => next.task(abortSignal))
+      .then(() => runTaskAfterOptionalDelay())
       .then(
         (value) => {
           if (timeoutHandle !== null) {

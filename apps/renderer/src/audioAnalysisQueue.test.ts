@@ -1296,6 +1296,82 @@ describe('AnalysisQueue', () => {
       await expect(userPromise).resolves.toBe('user-now');
     });
 
+    it('reserves a USER slot immediately even when the task body is delayed', async () => {
+      // v3.263 regression pin: Producer Player delays heavy selected-track
+      // ffmpeg/WebAudio bodies briefly so playback startup stays smooth. The
+      // delay must happen AFTER queue admission, not before enqueue, otherwise
+      // lower-priority warmup keeps occupying the queue while the selected
+      // track sits in a visible Loading state.
+      vi.useFakeTimers();
+      try {
+        const queue = new AnalysisQueue({
+          concurrency: 1,
+          maxUserBypassSlots: 0,
+          taskTimeoutMs: 0,
+        });
+
+        let backgroundRuns = 0;
+        let backgroundAborted = false;
+        const backgroundPromise = queue.enqueue(
+          async (signal): Promise<string> => {
+            backgroundRuns += 1;
+            if (backgroundRuns === 1) {
+              return new Promise<string>((_, reject) => {
+                signal.addEventListener('abort', () => {
+                  backgroundAborted = true;
+                  reject(new Error('background aborted'));
+                });
+              });
+            }
+            return 'background-final';
+          },
+          {
+            priority: ANALYSIS_PRIORITY_NEIGHBOR,
+            key: 'warmup-track',
+            cancellable: true,
+          }
+        );
+
+        await flushMicrotasks();
+        expect(backgroundRuns).toBe(1);
+        expect(queue.dump().activeByPriority.neighbor).toBe(1);
+
+        let userRuns = 0;
+        const userPromise = queue.enqueue(
+          async () => {
+            userRuns += 1;
+            return 'selected-ready';
+          },
+          {
+            priority: ANALYSIS_PRIORITY_USER_SELECTED,
+            key: 'selected-track',
+            cancellable: true,
+            startDelayMs: 1000,
+          }
+        );
+
+        await flushMicrotasks();
+        expect(backgroundAborted).toBe(true);
+        expect(queue.dump().activeByPriority.user).toBe(1);
+        expect(userRuns).toBe(0);
+
+        await vi.advanceTimersByTimeAsync(999);
+        await flushMicrotasks();
+        expect(userRuns).toBe(0);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await flushMicrotasks();
+        await expect(userPromise).resolves.toBe('selected-ready');
+        expect(userRuns).toBe(1);
+
+        await flushMicrotasks();
+        await expect(backgroundPromise).resolves.toBe('background-final');
+        expect(backgroundRuns).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('does not restart lower-priority retries while a USER task is still running', async () => {
       const queue = new AnalysisQueue({
         concurrency: 2,

@@ -1232,6 +1232,12 @@ interface RunMeasuredAnalysisOptions {
   cacheKey?: string;
   /** Human-readable label shown in the Status jobs popover while running. */
   label?: string;
+  /**
+   * Delay applied after the queue has reserved a slot. Selected-track analysis
+   * uses this so USER priority pauses warmup immediately, while ffmpeg waits
+   * a beat for playback startup to settle before doing CPU-heavy work.
+   */
+  startDelayMs?: number;
 }
 
 function getFileNameFromPath(filePath: string): string {
@@ -1332,6 +1338,7 @@ function runMeasuredAnalysis(
       priority: options.priority ?? ANALYSIS_PRIORITY_BACKGROUND,
       key: options.cacheKey,
       label: options.label ?? getFileNameFromPath(filePath),
+      startDelayMs: options.startDelayMs,
       // v3.195 — Mark as cancellable so the queue may abort+requeue this
       // task when a USER-priority click arrives during cold-launch warmup.
       cancellable: true,
@@ -1549,8 +1556,8 @@ function cloneSongChecklistsState(
 
 function isSongChecklistTodo(item: SongChecklistItem): boolean {
   // Notes are durable reference rows, not actionable work. Every summary/count
-  // that says "todo", "remaining", or "total number" should exclude them so
-  // the track list reflects only checklist items Ethan can still resolve.
+  // that says "todo" or "remaining" should exclude them so the track list
+  // reflects only checklist items Ethan can still resolve.
   return item.isNote !== true;
 }
 
@@ -4241,11 +4248,11 @@ export function App(): JSX.Element {
         ? mixPlaybackSource?.url ?? null
         : null;
 
-    // v3.259 — Mark a short playback-settle window before we touch any queues.
-    // The timers below delay USER_SELECTED jobs, but the startup/latest-track
-    // warmup runner is a separate background path; this timestamp tells it not
-    // to start another measured ffmpeg preload while the audio element is doing
-    // its first decode/schedule work for the newly selected track.
+    // v3.259/v3.263 — Mark a short playback-settle window before USER work's
+    // delayed body actually starts. The startup/latest-track warmup runner is
+    // a separate background path, so this timestamp tells it not to admit
+    // another measured ffmpeg preload while the audio element is doing its
+    // first decode/schedule work for the newly selected track.
     playbackBackgroundWarmupPausedUntilRef.current = Math.max(
       playbackBackgroundWarmupPausedUntilRef.current,
       Date.now() + PLAYBACK_BACKGROUND_WARMUP_GRACE_MS
@@ -4290,69 +4297,61 @@ export function App(): JSX.Element {
       promotePreviewAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
     }
 
-    // v3.237/v3.259 — Defer and stagger the heavy analysis kick-offs so we
-    // don't queue ffmpeg + WebAudio decode work in the same window the audio
-    // engine is doing its decoder cold start + first-frame schedule. Both jobs
-    // are eventually consistent (the UI shows a 'loading' state for measured
-    // stats / waveform until they land), and the queue still de-dupes when a
-    // follow-up effect run requests the same cache key — so these delays only
-    // suppress the CPU-spike window at playback start. The timers are cleared if
-    // the effect tears down for a new selection.
-    const deferredJobTimers: ReturnType<typeof setTimeout>[] = [];
+    // v3.263 — Enqueue USER_SELECTED analysis immediately, but delay the heavy
+    // task body inside the queue slot. Delaying the enqueue itself was the
+    // failed shape: warmup could keep showing 2 active / dozens queued while the
+    // newly selected track was only "going to ask later." Reserving the USER
+    // slot now makes the scheduler abort/pause lower-priority work immediately;
+    // startDelayMs still keeps ffmpeg/WebAudio off the playback-start hot path.
 
     if (!cached.previewAnalysis && selectedPlaybackSourceUrl) {
       const previewSourceUrl = selectedPlaybackSourceUrl;
       const previewKey = analysisCacheKey;
       const previewLabel = selectedVersion.fileName;
       const previewCachedFallback = cached.previewAnalysis;
-      const previewTimer = setTimeout(() => {
-        if (cancelled) {
-          return;
-        }
-        void analyzeTrackFromUrl(previewSourceUrl, undefined, {
-          priority: ANALYSIS_PRIORITY_USER_SELECTED,
-          key: previewKey,
-          label: previewLabel,
+      void analyzeTrackFromUrl(previewSourceUrl, undefined, {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+        key: previewKey,
+        label: previewLabel,
+        startDelayMs: PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS,
+      })
+        .then((previewResult) => {
+          cacheMasteringAnalysisValue(
+            previewAnalysisCacheRef.current,
+            previewKey,
+            previewResult
+          );
+
+          if (cancelled) {
+            return;
+          }
+
+          setAnalysis(previewResult);
+          setAnalysisStatus('ready');
+          setAnalysisError(null);
         })
-          .then((previewResult) => {
-            cacheMasteringAnalysisValue(
-              previewAnalysisCacheRef.current,
-              previewKey,
-              previewResult
-            );
+        .catch((analysisIssue: unknown) => {
+          if (cancelled) {
+            return;
+          }
 
-            if (cancelled) {
-              return;
-            }
+          // v3.198 — Defensive: cancellation from a preempt path should
+          // not flip the preview status to 'error'. Leave existing state
+          // intact so the requeued task can complete it; previously a
+          // preempted preview could surface a misleading "Analysis was
+          // interrupted" message in the UI.
+          if (isAnalysisAbortError(analysisIssue)) {
+            return;
+          }
 
-            setAnalysis(previewResult);
-            setAnalysisStatus('ready');
-            setAnalysisError(null);
-          })
-          .catch((analysisIssue: unknown) => {
-            if (cancelled) {
-              return;
-            }
-
-            // v3.198 — Defensive: cancellation from a preempt path should
-            // not flip the preview status to 'error'. Leave existing state
-            // intact so the requeued task can complete it; previously a
-            // preempted preview could surface a misleading "Analysis was
-            // interrupted" message in the UI.
-            if (isAnalysisAbortError(analysisIssue)) {
-              return;
-            }
-
-            setAnalysis(previewCachedFallback);
-            setAnalysisStatus(previewCachedFallback ? 'ready' : 'error');
-            setAnalysisError(
-              analysisIssue instanceof Error
-                ? analysisIssue.message
-                : 'Could not analyse this track preview.'
-            );
-          });
-      }, PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS);
-      deferredJobTimers.push(previewTimer);
+          setAnalysis(previewCachedFallback);
+          setAnalysisStatus(previewCachedFallback ? 'ready' : 'error');
+          setAnalysisError(
+            analysisIssue instanceof Error
+              ? analysisIssue.message
+              : 'Could not analyse this track preview.'
+          );
+        });
     }
 
     if (!cached.measuredAnalysis) {
@@ -4360,83 +4359,75 @@ export function App(): JSX.Element {
       const measuredKey = analysisCacheKey;
       const measuredLabel = selectedVersion.fileName;
       const measuredCachedFallback = cached.measuredAnalysis;
-      const measuredTimer = setTimeout(() => {
-        if (cancelled) {
-          return;
-        }
-        void runMeasuredAnalysis(measuredFilePath, {
-          priority: ANALYSIS_PRIORITY_USER_SELECTED,
-          cacheKey: measuredKey,
-          label: measuredLabel,
+      void runMeasuredAnalysis(measuredFilePath, {
+        priority: ANALYSIS_PRIORITY_USER_SELECTED,
+        cacheKey: measuredKey,
+        label: measuredLabel,
+        startDelayMs: PLAYBACK_SELECTED_MEASURED_JOB_DELAY_MS,
+      })
+        .then((measuredResult) => {
+          // Always populate the measured session cache and mastering entry,
+          // even if this effect run was superseded before ffmpeg returned.
+          // The entry is keyed by schema + file path + size + mtime, so it
+          // is idempotent and lets the next selection/effect hit the
+          // completed shared cache instead of queueing duplicate measured
+          // analysis.
+          cacheMasteringAnalysisValue(
+            measuredAnalysisCacheRef.current,
+            measuredKey,
+            measuredResult
+          );
+
+          const selectedVersionSong =
+            snapshot.songs.find((song) => song.id === selectedVersion.songId) ?? null;
+
+          if (selectedVersionSong) {
+            upsertMasteringCacheEntry(
+              createMasteringCacheEntry({
+                source: 'selected-track',
+                version: selectedVersion,
+                song: selectedVersionSong,
+                measured: measuredResult,
+              })
+            );
+          }
+
+          if (cancelled) {
+            return;
+          }
+
+          setMeasuredAnalysis(measuredResult);
+          setMeasuredAnalysisStatus('ready');
+          setMeasuredAnalysisError(null);
         })
-          .then((measuredResult) => {
-            // Always populate the measured session cache and mastering entry,
-            // even if this effect run was superseded before ffmpeg returned.
-            // The entry is keyed by schema + file path + size + mtime, so it
-            // is idempotent and lets the next selection/effect hit the
-            // completed shared cache instead of queueing duplicate measured
-            // analysis.
-            cacheMasteringAnalysisValue(
-              measuredAnalysisCacheRef.current,
-              measuredKey,
-              measuredResult
-            );
+        .catch((analysisIssue: unknown) => {
+          if (cancelled) {
+            return;
+          }
 
-            const selectedVersionSong =
-              snapshot.songs.find((song) => song.id === selectedVersion.songId) ?? null;
+          // v3.198 — Defensive: cancellation from v3.195's USER preempt
+          // pathway should never flip the selected-track status to 'error'.
+          // The queue silently requeues preempted tasks, but if the
+          // AbortError reaches this catch for any reason (direct cancel,
+          // future edge case), leave the existing state intact.
+          if (isAnalysisAbortError(analysisIssue)) {
+            return;
+          }
 
-            if (selectedVersionSong) {
-              upsertMasteringCacheEntry(
-                createMasteringCacheEntry({
-                  source: 'selected-track',
-                  version: selectedVersion,
-                  song: selectedVersionSong,
-                  measured: measuredResult,
-                })
-              );
-            }
-
-            if (cancelled) {
-              return;
-            }
-
-            setMeasuredAnalysis(measuredResult);
-            setMeasuredAnalysisStatus('ready');
-            setMeasuredAnalysisError(null);
-          })
-          .catch((analysisIssue: unknown) => {
-            if (cancelled) {
-              return;
-            }
-
-            // v3.198 — Defensive: cancellation from v3.195's USER preempt
-            // pathway should never flip the selected-track status to 'error'.
-            // The queue silently requeues preempted tasks, but if the
-            // AbortError reaches this catch for any reason (direct cancel,
-            // future edge case), leave the existing state intact.
-            if (isAnalysisAbortError(analysisIssue)) {
-              return;
-            }
-
-            setMeasuredAnalysis(measuredCachedFallback);
-            setMeasuredAnalysisStatus(measuredCachedFallback ? 'ready' : 'error');
-            setMeasuredAnalysisError(
-              analysisIssue instanceof AnalysisTaskTimeoutError
-                ? 'Measured analysis timed out. Try selecting this track again.'
-                : analysisIssue instanceof Error
-                  ? analysisIssue.message
-                  : 'Could not analyse this track yet.'
-            );
-          });
-      }, PLAYBACK_SELECTED_MEASURED_JOB_DELAY_MS);
-      deferredJobTimers.push(measuredTimer);
+          setMeasuredAnalysis(measuredCachedFallback);
+          setMeasuredAnalysisStatus(measuredCachedFallback ? 'ready' : 'error');
+          setMeasuredAnalysisError(
+            analysisIssue instanceof AnalysisTaskTimeoutError
+              ? 'Measured analysis timed out. Try selecting this track again.'
+              : analysisIssue instanceof Error
+                ? analysisIssue.message
+                : 'Could not analyse this track yet.'
+          );
+        });
     }
 
     return () => {
       cancelled = true;
-      for (const timer of deferredJobTimers) {
-        clearTimeout(timer);
-      }
     };
   }, [
     createMasteringCacheEntry,
@@ -18535,7 +18526,7 @@ export function App(): JSX.Element {
               data-testid="main-list-checklist-total"
               aria-label={`${totalRemainingSongChecklistTodoCount} checklist item${totalRemainingSongChecklistTodoCount === 1 ? '' : 's'} remaining across all tracks`}
             >
-              Total number: {totalRemainingSongChecklistTodoCount}
+              Total checklist items remaining: {totalRemainingSongChecklistTodoCount}
             </li>
           ) : null}
         </ul>

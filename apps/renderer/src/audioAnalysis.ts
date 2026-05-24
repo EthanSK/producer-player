@@ -107,7 +107,12 @@ function amplitudeToDbfs(value: number): number {
 // Internal: enqueue a preview-analysis task with the shared priority queue.
 function runPreviewAnalysis<T>(
   task: (signal: AbortSignal) => Promise<T>,
-  options: { priority?: AnalysisPriority; key?: string; label?: string } = {}
+  options: {
+    priority?: AnalysisPriority;
+    key?: string;
+    label?: string;
+    startDelayMs?: number;
+  } = {}
 ): Promise<T> {
   return previewAnalysisQueue.enqueue(task, {
     ...options,
@@ -167,7 +172,12 @@ export function dumpPreviewAnalysisQueue(): ReturnType<AnalysisQueue['dump']> {
 export async function analyzeTrackFromUrl(
   url: string,
   signal?: AbortSignal,
-  options: { priority?: AnalysisPriority; key?: string; label?: string } = {}
+  options: {
+    priority?: AnalysisPriority;
+    key?: string;
+    label?: string;
+    startDelayMs?: number;
+  } = {}
 ): Promise<TrackAnalysisResult> {
   return runPreviewAnalysis(async (queueSignal) => {
     const composite = createCompositeAbortSignal([signal, queueSignal]);

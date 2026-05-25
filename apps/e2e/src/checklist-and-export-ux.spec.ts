@@ -205,7 +205,7 @@ test.describe('Checklist and export UX improvements', () => {
     }
   });
 
-  test('checklist sort keeps outstanding work at the bottom and sorts it by song time', async () => {
+  test('collapsed checklist sort moves outstanding work to the bottom and sorts it by song time', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-outstanding-sort'
     );
@@ -232,10 +232,10 @@ test.describe('Checklist and export UX improvements', () => {
         /*
          * Storage is newest-first while the modal renders oldest->newest. This
          * seed deliberately starts with active work split around completed/note
-         * rows, and with outstanding timestamps out of order, so the two
-         * buttons have to prove both halves of Ethan's regression request:
-         * active todos move to the bottom, then only active todos sort by song
-         * timestamp with the latest point at the bottom.
+         * rows, and with outstanding timestamps out of order, so the collapsed
+         * single-button sort has to prove both halves of Ethan's regression
+         * request: active todos move to the bottom AND those active todos sort
+         * by song timestamp with the latest point at the bottom.
          */
         const storedNewestFirst = [
           {
@@ -300,20 +300,10 @@ test.describe('Checklist and export UX improvements', () => {
         'context-note',
       ]);
 
-      await expect(page.getByTestId('checklist-sort-outstanding-to-bottom-collapsed')).toHaveText(
-        'Sort: outstanding to bottom'
+      await expect(page.getByTestId('checklist-sort-outstanding-collapsed')).toHaveText(
+        'Sort outstanding'
       );
-      await page.getByTestId('checklist-sort-outstanding-to-bottom-collapsed').click();
-
-      await expect
-        .poll(async () => readOrder(), { timeout: 5_000, intervals: [100] })
-        .toEqual(['done-middle', 'context-note', 'todo-late', 'todo-early']);
-
-      await page.getByTestId('listening-device-strip-collapsed-toggle').click();
-      await expect(page.getByTestId('checklist-sort-outstanding-by-time')).toHaveText(
-        'Sort outstanding by time'
-      );
-      await page.getByTestId('checklist-sort-outstanding-by-time').click();
+      await page.getByTestId('checklist-sort-outstanding-collapsed').click();
 
       await expect
         .poll(async () => readOrder(), { timeout: 5_000, intervals: [100] })

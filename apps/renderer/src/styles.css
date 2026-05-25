@@ -4648,7 +4648,7 @@ body.is-dragging-checklist-timestamp * {
 }
 
 /* v3.255.0 — column-flex wrapper that occupies col-2 of the listening-device
- * strip grid. Stacks the chip-row above the "Sort: outstanding to bottom"
+ * strip grid. Stacks the chip-row above the "Sort outstanding"
  * button so the button uses the previously-empty vertical space beneath the
  * capsules (Ethan voice 3661 — "in the right-hand area under the listening
  * device capsules"). Right-aligns its children so the button sits flush to
@@ -4682,7 +4682,7 @@ body.is-dragging-checklist-timestamp * {
   padding-bottom: 2px;
 }
 
-/* v3.255.0 — "Sort: outstanding to bottom" pill. Inherits the visual style
+/* v3.255.0 — "Sort outstanding" pill. Inherits the visual style
  * from .listening-device-secondary-button (slim border, rounded, subtle
  * hover); only the sort-specific spacing lives here. */
 .checklist-sort-outstanding-button {

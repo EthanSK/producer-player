@@ -19343,8 +19343,8 @@ export function App(): JSX.Element {
               {/*
                 v3.247 (Ethan voice 3677) — collapsed-mode thin row. Shows
                 the current listening device name + an expand chevron. The
-                v3.255 "Sort: outstanding to bottom" button is rendered on
-                the right so active-work sorting stays clickable without expanding the
+                v3.264 "Sort outstanding" button is rendered on the right so
+                active-work sorting stays clickable without expanding the
                 strip. Clicking anywhere on the chevron / label toggles
                 back to the full capsule layout; the click writes both the
                 immediate localStorage mirror and the debounced unified state.
@@ -19392,51 +19392,51 @@ export function App(): JSX.Element {
                     </span>
                   </button>
                   {/*
-                    v3.255 — keep the outstanding-to-bottom Sort button
-                    reachable while collapsed. Identical logic + disabled-state
-                    heuristic to the expanded copy below, just rendered here so
-                    Ethan never has to expand the strip just to put active work
-                    near the bottom/composer edge.
+                    v3.264 — collapsed mode intentionally uses ONE combined
+                    "Sort outstanding" action. Ethan called out that the
+                    collapsed affordance should not expose only the partition
+                    half ("outstanding to bottom"); when space is tight, the
+                    single button should both move active todos to the working
+                    edge and sort timestamped active todos by song time.
                   */}
                   {(() => {
                     const items = checklistModalItemsChronological;
-                    const hasOutstanding = items.some(isChecklistOutstanding);
-                    const hasContext = items.some((it) => !isChecklistOutstanding(it));
-                    let alreadyPartitioned = true;
-                    let seenOutstanding = false;
-                    for (const it of items) {
-                      if (isChecklistOutstanding(it)) {
-                        seenOutstanding = true;
-                      } else if (seenOutstanding) {
-                        alreadyPartitioned = false;
-                        break;
-                      }
-                    }
-                    const canSort = hasOutstanding && hasContext && !alreadyPartitioned;
+                    // Probe the exact pure helper the click uses. That keeps
+                    // the collapsed button enabled when either half of the
+                    // combined action still has work to do: partitioning
+                    // outstanding rows to the bottom OR sorting timestamped
+                    // outstanding rows by playback time.
+                    const storage = [...items].reverse();
+                    const probeResult = sortChecklistOutstandingByTimestampPure(storage);
+                    const canSort = probeResult !== storage;
+                    const outstandingWithTime = items.filter(
+                      (it) =>
+                        isChecklistOutstanding(it) &&
+                        typeof it.timestampSeconds === 'number',
+                    );
+                    const hasEnoughTimed = outstandingWithTime.length >= 2;
                     const tooltipText = canSort
-                      ? 'Move outstanding todos to the bottom. Completed, Won’t Fix, and note rows stay above so open work stays near the composer.'
+                      ? 'Move outstanding todos to the bottom and sort timestamped outstanding todos by song time. Completed, Won’t Fix, and notes stay above the active work.'
                       : items.length === 0
                         ? 'No items to sort.'
-                        : !hasOutstanding
-                          ? 'No outstanding todos to move — the list is already organised.'
-                          : !hasContext
-                            ? 'All todo items are outstanding — nothing to move above them.'
-                            : 'Already sorted — outstanding todos are at the bottom.';
+                        : !hasEnoughTimed
+                          ? 'Already sorted — no outstanding rows need moving, and fewer than two outstanding todos have song timestamps.'
+                          : 'Already sorted by outstanding timestamp.';
                     return (
                       <button
                         type="button"
                         className="listening-device-secondary-button checklist-sort-outstanding-button checklist-sort-outstanding-button--collapsed"
                         onClick={() =>
-                          handleSortChecklistMoveOutstandingToBottom(
+                          handleSortChecklistOutstandingByTimestamp(
                             checklistModalSong.id,
                           )
                         }
                         disabled={!canSort}
-                        data-testid="checklist-sort-outstanding-to-bottom-collapsed"
+                        data-testid="checklist-sort-outstanding-collapsed"
                         title={tooltipText}
-                        aria-label="Sort checklist: move outstanding items to the bottom"
+                        aria-label="Sort checklist outstanding items"
                       >
-                        Sort: outstanding to bottom
+                        Sort outstanding
                       </button>
                     );
                   })()}

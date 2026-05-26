@@ -365,6 +365,51 @@ button.technical-info-trigger:hover {
   border-color: rgba(156, 175, 196, 0.4);
 }
 
+.floating-tooltip-anchor {
+  display: none;
+}
+
+/* v3.266 — shared hover/focus tooltip surface for controls mounted inside
+ * scrollable/clipped panes. These tooltips are portalled to document.body by
+ * FloatingTooltip.tsx; keeping the visual CSS here makes each caller inherit
+ * one high-z, viewport-clamped behavior instead of fighting local overflow. */
+.floating-tooltip-popover {
+  position: fixed;
+  z-index: 10050;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(20, 24, 30, 0.98);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.42);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.floating-tooltip-popover-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.floating-tooltip-popover-body {
+  color: var(--text-main);
+}
+
 .technical-info-trigger-icon {
   display: block;
   width: 9px;

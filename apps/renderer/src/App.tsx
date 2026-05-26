@@ -166,6 +166,7 @@ import {
   writeInterleavedStereoSamples,
 } from './pluginAudioPipeline';
 import { EqGainSliders, EQ_GAIN_DEFAULT_DB } from './EqGainSliders';
+import { FloatingTooltip } from './FloatingTooltip';
 import { MicTranscribeButton } from './lib/MicTranscribeButton';
 import { HelpTooltip } from './HelpTooltip';
 import { TechnicalInfoPopover } from './TechnicalInfoPopover';
@@ -19115,16 +19116,12 @@ export function App(): JSX.Element {
                       aria-describedby={`inspector-version-cue-popover-${version.id}`}
                     >
                       Cue
-                      <span
+                      <FloatingTooltip
                         id={`inspector-version-cue-popover-${version.id}`}
-                        className="main-list-row-metadata-popover inspector-version-action-popover"
-                        role="tooltip"
+                        label="Cue version"
                       >
-                        <span className="main-list-row-metadata-popover-label">Cue version</span>
-                        <span className="inspector-version-action-popover-body">
-                          Cue this version into the player.
-                        </span>
-                      </span>
+                        Cue this version into the player.
+                      </FloatingTooltip>
                     </button>
                     <button
                       type="button"
@@ -19136,19 +19133,13 @@ export function App(): JSX.Element {
                       aria-describedby={`inspector-version-use-as-reference-popover-${version.id}`}
                     >
                       Use as reference
-                      <span
+                      <FloatingTooltip
                         id={`inspector-version-use-as-reference-popover-${version.id}`}
-                        className="main-list-row-metadata-popover inspector-version-action-popover"
-                        role="tooltip"
+                        label="Use as reference"
                       >
-                        <span className="main-list-row-metadata-popover-label">
-                          Use as reference
-                        </span>
-                        <span className="inspector-version-action-popover-body">
-                          Load this version as the Reference track so you can A/B it against the
-                          current mix (toggle with Cmd+R).
-                        </span>
-                      </span>
+                        Load this version as the Reference track so you can A/B it against the
+                        current mix (toggle with Cmd+R).
+                      </FloatingTooltip>
                     </button>
                     <button
                       type="button"
@@ -19160,18 +19151,12 @@ export function App(): JSX.Element {
                       aria-describedby={`inspector-version-reveal-popover-${version.id}`}
                     >
                       {`Open in ${fileManagerLabel(environment.platform)}`}
-                      <span
+                      <FloatingTooltip
                         id={`inspector-version-reveal-popover-${version.id}`}
-                        className="main-list-row-metadata-popover inspector-version-action-popover"
-                        role="tooltip"
+                        label={`Open in ${fileManagerLabel(environment.platform)}`}
                       >
-                        <span className="main-list-row-metadata-popover-label">
-                          {`Open in ${fileManagerLabel(environment.platform)}`}
-                        </span>
-                        <span className="inspector-version-action-popover-body">
-                          {`Reveal this version's file in ${fileManagerLabel(environment.platform)}.`}
-                        </span>
-                      </span>
+                        {`Reveal this version's file in ${fileManagerLabel(environment.platform)}.`}
+                      </FloatingTooltip>
                     </button>
                   </div>
                 </li>

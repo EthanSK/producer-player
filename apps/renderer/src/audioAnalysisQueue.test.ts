@@ -1454,6 +1454,84 @@ describe('AnalysisQueue', () => {
       }
     });
 
+    it('keeps the selected-track delay when App.tsx promotes before duplicate enqueue', async () => {
+      // v3.266 review pin: production selection does two things in order for
+      // an already-warmup-enqueued track: promote(cacheKey, USER), then
+      // runMeasuredAnalysis(...same cacheKey, startDelayMs). The duplicate
+      // enqueue must patch that delay onto the just-restarted USER task before
+      // its microtask starts; otherwise the heavy analysis body can run
+      // immediately and steal CPU from playback startup.
+      vi.useFakeTimers();
+      try {
+        const queue = new AnalysisQueue({
+          concurrency: 1,
+          maxUserBypassSlots: 0,
+          taskTimeoutMs: 0,
+        });
+
+        let runs = 0;
+        let aborts = 0;
+        const warmupPromise = queue.enqueue(
+          async (signal): Promise<string> => {
+            runs += 1;
+            const runNumber = runs;
+            return new Promise<string>((resolve, reject) => {
+              signal.addEventListener(
+                'abort',
+                () => {
+                  aborts += 1;
+                  reject(new Error(`run ${runNumber} aborted`));
+                },
+                { once: true }
+              );
+              if (runNumber === 2) {
+                setTimeout(() => resolve('selected-after-delay'), 10);
+              }
+            });
+          },
+          {
+            priority: ANALYSIS_PRIORITY_NEIGHBOR,
+            key: 'promote-then-enqueue-cache-key',
+            cancellable: true,
+          }
+        );
+
+        await flushMicrotasks();
+        expect(runs).toBe(1);
+        expect(queue.dump().activeByPriority.neighbor).toBe(1);
+
+        queue.promote('promote-then-enqueue-cache-key', ANALYSIS_PRIORITY_USER_SELECTED);
+        const selectedPromise = queue.enqueue(
+          async () => 'duplicate-body-should-not-run',
+          {
+            priority: ANALYSIS_PRIORITY_USER_SELECTED,
+            key: 'promote-then-enqueue-cache-key',
+            cancellable: true,
+            startDelayMs: 250,
+          }
+        );
+
+        await flushMicrotasks();
+        expect(aborts).toBe(1);
+        expect(queue.dump().activeByPriority.user).toBe(1);
+        expect(runs).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(249);
+        await flushMicrotasks();
+        expect(runs).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await flushMicrotasks();
+        expect(runs).toBe(2);
+
+        await vi.advanceTimersByTimeAsync(10);
+        await expect(selectedPromise).resolves.toBe('selected-after-delay');
+        await expect(warmupPromise).resolves.toBe('selected-after-delay');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('does not restart lower-priority retries while a USER task is still running', async () => {
       const queue = new AnalysisQueue({
         concurrency: 2,

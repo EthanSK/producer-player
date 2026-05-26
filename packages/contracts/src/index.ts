@@ -258,6 +258,7 @@ export const IPC_CHANNELS = {
   OPEN_UPDATE_DOWNLOAD: 'producer-player:open-update-download',
   AUTO_UPDATE_CHECK: 'producer-player:auto-update-check',
   AUTO_UPDATE_DOWNLOAD: 'producer-player:auto-update-download',
+  AUTO_UPDATE_DOWNGRADE: 'producer-player:auto-update-downgrade',
   AUTO_UPDATE_RECHECK: 'producer-player:auto-update-recheck',
   AUTO_UPDATE_INSTALL: 'producer-player:auto-update-install',
   AUTO_UPDATE_SET_ENABLED: 'producer-player:auto-update-set-enabled',
@@ -1041,6 +1042,38 @@ export type AutoUpdateRecheckResult =
   | { status: 'no-update'; version: string | null }
   | { status: 'error'; message: string };
 
+export type AutoUpdateDowngradeResult =
+  | {
+      status: 'downloading';
+      currentVersion: string;
+      previousVersion: string;
+      previousTag: string;
+      releaseUrl: string;
+    }
+  | {
+      status: 'no-previous-version';
+      currentVersion: string;
+      message: string;
+    }
+  | { status: 'error'; message: string };
+
+export type AutoUpdateInstallVersionResult =
+  | {
+      status: 'downloading';
+      direction: 'upgrade' | 'downgrade';
+      currentVersion: string;
+      targetVersion: string;
+      targetTag: string;
+      releaseUrl: string;
+    }
+  | {
+      status: 'no-target-version';
+      requestedVersion: string;
+      currentVersion: string;
+      message: string;
+    }
+  | { status: 'error'; message: string };
+
 export type AutoUpdateStateListener = (state: AutoUpdateState) => void;
 
 export type AgentProviderId = 'claude' | 'codex';
@@ -1511,6 +1544,7 @@ export interface ProducerPlayerBridge {
   openUpdateDownload(url?: string | null): Promise<void>;
   autoUpdateCheck(): Promise<void>;
   autoUpdateDownload(): Promise<void>;
+  autoUpdateDowngrade(): Promise<AutoUpdateDowngradeResult>;
   autoUpdateRecheck(): Promise<AutoUpdateRecheckResult>;
   autoUpdateInstall(): Promise<void>;
   setAutoUpdateEnabled(enabled: boolean): Promise<void>;

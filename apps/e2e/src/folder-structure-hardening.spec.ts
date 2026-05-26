@@ -24,6 +24,19 @@ async function setAutoOrganize(page: Page, enabled: boolean): Promise<void> {
   await expect(checkbox).not.toBeChecked();
 }
 
+async function linkFixtureFolder(page: Page, fixtureDirectory: string): Promise<void> {
+  // The production sidebar now only exposes the native Add Folder dialog.
+  // E2E tests keep using the preload API directly so they can link temporary
+  // fixture directories without opening an OS file chooser.
+  await page.evaluate(async (folderPath) => {
+    await (
+      window as typeof window & {
+        producerPlayer: { linkFolder: (p: string) => Promise<unknown> };
+      }
+    ).producerPlayer.linkFolder(folderPath);
+  }, fixtureDirectory);
+}
+
 async function reorderSongsByTitle(page: Page, orderedTitles: string[]): Promise<void> {
   const rowData = await page.getByTestId('main-list-row').evaluateAll((elements) =>
     elements
@@ -79,8 +92,7 @@ test.describe('folder structure hardening', () => {
     try {
       await setAutoOrganize(page, false);
 
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(
@@ -113,14 +125,16 @@ test.describe('folder structure hardening', () => {
     try {
       await setAutoOrganize(page, false);
 
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 
       const row = page.getByTestId('main-list-row').first();
       await expect(row.getByTestId('main-list-row-title')).toHaveText('iLoVeNYDemoMix');
-      await expect(row.getByTestId('main-list-row-metadata')).toHaveText('v7 · WAV');
+      // The metadata pill owns a hover popover whose hidden text is still in
+      // the accessibility tree. Assert the visible tag contract without
+      // depending on the popover implementation detail.
+      await expect(row.getByTestId('main-list-row-metadata')).toContainText('v7 · WAV');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
@@ -154,8 +168,7 @@ test.describe('folder structure hardening', () => {
     try {
       await setAutoOrganize(page, false);
 
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await expect(page.getByTestId('main-list-row').filter({ hasText: 'Bend the Knees' })).toHaveCount(1);
@@ -205,8 +218,7 @@ test.describe('folder structure hardening', () => {
     try {
       await setAutoOrganize(page, false);
 
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(page.getByTestId('main-list-row').first()).toContainText('Beta');
@@ -245,8 +257,7 @@ test.describe('folder structure hardening', () => {
       await expect(page.getByTestId('linked-folder-item')).toHaveCount(0);
       await expect(page.getByTestId('main-list-row')).toHaveCount(0);
 
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(page.getByTestId('main-list-row').first()).toContainText('Alpha');

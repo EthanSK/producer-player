@@ -1372,6 +1372,88 @@ describe('AnalysisQueue', () => {
       }
     });
 
+    it('restarts an already-running warmup duplicate when the selected track claims it', async () => {
+      // v3.265 regression pin: a selected track can attach to the same cache
+      // key that startup warmup is already analysing. Returning that aging
+      // warmup promise in-place preserved its old timeout deadline, so the UI
+      // could show "Measured analysis timed out" almost immediately after the
+      // user selected the track. The duplicate USER enqueue must abort/requeue
+      // the lower-priority run and give the shared promise a fresh USER window.
+      vi.useFakeTimers();
+      try {
+        const queue = new AnalysisQueue({
+          concurrency: 1,
+          maxUserBypassSlots: 0,
+          taskTimeoutMs: 1000,
+          coldStartTimeoutMs: 1000,
+        });
+
+        let runs = 0;
+        let aborts = 0;
+        const warmupPromise = queue.enqueue(
+          async (signal): Promise<string> => {
+            runs += 1;
+            const runNumber = runs;
+            return new Promise<string>((resolve, reject) => {
+              signal.addEventListener(
+                'abort',
+                () => {
+                  aborts += 1;
+                  reject(new Error(`run ${runNumber} aborted`));
+                },
+                { once: true }
+              );
+              if (runNumber === 2) {
+                setTimeout(() => resolve('selected-ready'), 100);
+              }
+            });
+          },
+          {
+            priority: ANALYSIS_PRIORITY_NEIGHBOR,
+            key: 'same-track-cache-key',
+            cancellable: true,
+          }
+        );
+
+        await flushMicrotasks();
+        expect(runs).toBe(1);
+        expect(queue.dump().activeByPriority.neighbor).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(900);
+        await flushMicrotasks();
+
+        const selectedPromise = queue.enqueue(
+          async () => 'should-not-create-a-second-task-body',
+          {
+            priority: ANALYSIS_PRIORITY_USER_SELECTED,
+            key: 'same-track-cache-key',
+            cancellable: true,
+            startDelayMs: 200,
+          }
+        );
+
+        await flushMicrotasks();
+        expect(selectedPromise).not.toBe(warmupPromise);
+        expect(aborts).toBe(1);
+        expect(queue.dump().activeByPriority.user).toBe(1);
+        expect(runs).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(199);
+        await flushMicrotasks();
+        expect(runs).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await flushMicrotasks();
+        expect(runs).toBe(2);
+
+        await vi.advanceTimersByTimeAsync(100);
+        await expect(selectedPromise).resolves.toBe('selected-ready');
+        await expect(warmupPromise).resolves.toBe('selected-ready');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('does not restart lower-priority retries while a USER task is still running', async () => {
       const queue = new AnalysisQueue({
         concurrency: 2,

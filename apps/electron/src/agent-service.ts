@@ -53,6 +53,42 @@ Cross-track / album / version comparisons:
 - If a track's cacheStatus is "missing", "stale", "pending", or "error" instead of "fresh", say so and ask the user to open that song/version in the app so it gets analyzed — do not try to analyze it yourself.
 - File-system tools (Read/Bash/etc.) are still fair game for the Producer Player source tree when the user asks app/debugging questions; just keep them off the user's audio files.`;
 
+const HOST_POLICY_START = '<producer-player-host-policy>';
+const HOST_POLICY_END = '</producer-player-host-policy>';
+
+/**
+ * Non-overridable policy that the desktop host prepends to every embedded chat
+ * session, including sessions where the user has customized the editable
+ * mastering prompt. This keeps two things locked at the service boundary:
+ *
+ *   1. The in-app agent knows how to drive the existing UI-control primitives.
+ *   2. The same agent cannot use those primitives, shell tools, or source edits
+ *      as an in-app updater/downgrader/installer.
+ *
+ * The app may later expose these primitives through MCP/HTTP too; this prompt
+ * deliberately names the stable primitive names/schemas so Claude/Codex can use
+ * the same contract from inside the app chat when the host makes the tools
+ * available.
+ */
+const AGENT_HOST_POLICY_PROMPT = `${HOST_POLICY_START}
+Host policy: in-app UI control is allowed; app lifecycle mutation is not.
+
+UI-control primitives available to the embedded Producer Player agent:
+- pp_dom_snapshot({ rootSelector?: string, maxNodes?: number }): inspect the current renderer DOM as structured visible controls. Use this before guessing labels/selectors.
+- pp_screenshot({ region?: "window" | "visible" }): capture the current Producer Player window when visual layout matters.
+- pp_run_js({ code: string, timeoutMs?: number }): run JavaScript in the renderer to inspect or control the UI. Prefer small async IIFEs, use existing buttons/inputs/DOM events where possible, and summarize large results before returning them.
+
+Allowed pp_run_js use:
+- Read and change UI state for the current Producer Player window, such as opening panels, clicking controls, filling inputs, toggling mastering/checklist/playback controls, or reading window.producerPlayer state needed to answer the user.
+- Use DOM selectors, data-testid attributes, and window.producerPlayer renderer APIs that affect ordinary in-app workflow state.
+
+Forbidden from inside the embedded app chat:
+- Do not update, downgrade, install, reinstall, restart, quit-and-install, or replace Producer Player.
+- Do not invoke or script auto-update operations such as checkForUpdates, autoUpdateCheck, autoUpdateDownload, autoUpdateDowngrade, autoUpdateInstall, autoUpdateRecheck, setAutoUpdateEnabled, or quitAndInstall.
+- Do not edit package versions, release metadata, updater feeds, app bundles, /Applications, installer assets, or package-manager state to simulate an app update/downgrade/install.
+- If the user asks for update/downgrade/install control, refuse from inside the app chat and say that an external MCP/HTTP controller or outside host agent must perform that operation.
+${HOST_POLICY_END}`;
+
 type AgentHistoryEntry = {
   role: 'user' | 'assistant';
   content: string;
@@ -239,6 +275,39 @@ function buildConversationHistory(history: AgentSessionState['history']): string
   return history
     .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
     .join('\n\n');
+}
+
+function stripEmbeddedHostPolicy(prompt: string): string {
+  // The renderer's editable default prompt may already include an older copy of
+  // this block. Strip any embedded copy and prepend the current service-owned
+  // policy below so the immutable safety/tool contract is always canonical.
+  const start = prompt.indexOf(HOST_POLICY_START);
+  if (start === -1) {
+    return prompt.trim();
+  }
+
+  const end = prompt.indexOf(HOST_POLICY_END, start);
+  if (end === -1) {
+    return prompt.trim();
+  }
+
+  const before = prompt.slice(0, start).trim();
+  const after = prompt.slice(end + HOST_POLICY_END.length).trim();
+  return [before, after].filter((section) => section.length > 0).join('\n\n').trim();
+}
+
+function buildEffectiveSystemPrompt(systemPrompt?: string): string {
+  const userPrompt = typeof systemPrompt === 'string' && systemPrompt.trim().length > 0
+    ? systemPrompt.trim()
+    : MASTERING_SYSTEM_PROMPT;
+  const cleanedUserPrompt = stripEmbeddedHostPolicy(userPrompt);
+
+  return [
+    AGENT_HOST_POLICY_PROMPT,
+    '<producer-player-user-configurable-prompt>',
+    cleanedUserPrompt,
+    '</producer-player-user-configurable-prompt>',
+  ].join('\n\n');
 }
 
 function formatAttachmentSize(bytes: number): string {
@@ -734,7 +803,7 @@ export function startSession(
     model: normalizeModel(provider, model),
     thinking: normalizeThinking(provider, thinking),
     process: null,
-    systemPrompt: systemPrompt || MASTERING_SYSTEM_PROMPT,
+    systemPrompt: buildEffectiveSystemPrompt(systemPrompt),
     alive: true,
     history: normalizeSeedHistory(history),
     activeTurn: null,
@@ -1041,7 +1110,7 @@ export const __testing__ = {
       model: '' as AgentModelId,
       thinking: 'high' as AgentThinkingEffort,
       process: null,
-      systemPrompt: session.systemPrompt,
+      systemPrompt: buildEffectiveSystemPrompt(session.systemPrompt),
       alive: true,
       history: session.history,
       activeTurn: null,
@@ -1108,7 +1177,7 @@ export const __testing__ = {
       model: normalizeModel(input.provider, input.model),
       thinking: normalizeThinking(input.provider, input.thinking),
       process: null,
-      systemPrompt: input.systemPrompt ?? MASTERING_SYSTEM_PROMPT,
+      systemPrompt: buildEffectiveSystemPrompt(input.systemPrompt),
       alive: true,
       history: [],
       activeTurn: null,
@@ -1116,4 +1185,6 @@ export const __testing__ = {
     };
     return getSpawnArgs(fakeSession);
   },
+  buildEffectiveSystemPrompt,
+  AGENT_HOST_POLICY_PROMPT,
 };

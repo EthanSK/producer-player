@@ -177,8 +177,12 @@ test('v3.23 — Using-Reference indicators + Cmd+R no longer reloads', async () 
     await expect(
       checklistPanel.locator('.reference-text').filter({ hasText: 'Using Reference' }),
     ).toBeVisible();
-    // At least the LUFS + True Peak rows should render.
-    await expect(checklistPanel.locator('.mastering-checklist-row')).toHaveCount(4);
+    // The checklist has grown beyond the original four LUFS/peak rows; keep
+    // the regression focused on "reference mode still renders rows" instead
+    // of pinning the historical Phase 1 count.
+    await expect
+      .poll(async () => checklistPanel.locator('.mastering-checklist-row').count())
+      .toBeGreaterThanOrEqual(4);
 
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('analysis-modal')).toHaveCount(0);

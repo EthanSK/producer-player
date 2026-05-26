@@ -99,7 +99,7 @@ async function waitForPlaybackSeconds(
 }
 
 test.describe('checklist playback workflow', () => {
-  test('typing freezes the preview timestamp and rewinds playback by roughly three seconds', async () => {
+  test('typing freezes the preview timestamp with lookback without rewinding playback', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-typing-freeze'
     );
@@ -133,7 +133,7 @@ test.describe('checklist playback workflow', () => {
 
       await expect
         .poll(async () => Number(await scrubber.inputValue()))
-        .toBeLessThanOrEqual(expectedSeconds + 0.2);
+        .toBeGreaterThanOrEqual(pausedSeconds - 0.2);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
@@ -809,12 +809,18 @@ test.describe('checklist playback workflow', () => {
         .getByTestId('analysis-overlay-spectrum-heading')
         .locator('.help-tooltip-trigger')
         .click();
-      await expect(page.getByText('AI-ranked tutorials:')).toBeVisible();
-      const rankedTutorialLinks = page.locator('a[title^="AI-ranked #"]');
-      await expect(rankedTutorialLinks).toHaveCount(9);
-      await expect(page.locator('a[title^="AI-ranked #9:"]')).toBeVisible();
+      const tutorialDialog = page
+        .getByRole('dialog')
+        .filter({ hasText: /Video Tutorials \(order ranked by AI\)/i });
+      await expect(tutorialDialog).toBeVisible();
+      // Current tooltip UI renders clickable thumbnail cards instead of the
+      // old text-only anchor list; keep proving the same ranked nine-link
+      // contract while matching the production presentation.
+      const rankedTutorialCards = tutorialDialog.locator('[title^="#"]');
+      await expect(rankedTutorialCards).toHaveCount(9);
+      await expect(tutorialDialog.locator('[title^="#9:"]')).toBeVisible();
       await page.locator('button[aria-label="Close"]').first().click();
-      await expect(page.getByText('AI-ranked tutorials:')).toHaveCount(0);
+      await expect(tutorialDialog).toHaveCount(0);
       await expect(page.getByTestId('analysis-overlay-loudness-peaks')).toContainText(
         'Using Reference'
       );

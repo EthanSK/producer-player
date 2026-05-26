@@ -1,9 +1,40 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { __testing__, openFileWithDetachedSystemHandler } = require('../dist/file-open.test.cjs');
+const {
+  __testing__,
+  isDetachedSystemOpenablePath,
+  openFileWithDetachedSystemHandler,
+} = require('../dist/file-open.test.cjs');
 
 const { buildDetachedSystemOpenRequest } = __testing__;
+
+test('treats regular files and DAW package directories as OS-openable project paths', () => {
+  assert.equal(
+    isDetachedSystemOpenablePath({
+      isFile: () => true,
+      isDirectory: () => false,
+    }),
+    true
+  );
+  assert.equal(
+    isDetachedSystemOpenablePath({
+      isFile: () => false,
+      isDirectory: () => true,
+    }),
+    true
+  );
+});
+
+test('rejects filesystem entries that the OS file opener should not receive', () => {
+  assert.equal(
+    isDetachedSystemOpenablePath({
+      isFile: () => false,
+      isDirectory: () => false,
+    }),
+    false
+  );
+});
 
 test('uses macOS open command for detached OS file handoff', () => {
   const request = buildDetachedSystemOpenRequest('/tmp/Ableton Session.als', 'darwin');

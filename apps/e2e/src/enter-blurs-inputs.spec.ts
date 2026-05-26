@@ -234,6 +234,16 @@ test.describe('Enter blurs text and number inputs (textareas excluded)', () => {
       await page.getByTestId('song-checklist-button').click();
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 
+      const collapsedListeningDeviceToggle = page.getByTestId(
+        'listening-device-strip-collapsed-toggle'
+      );
+      if (await collapsedListeningDeviceToggle.isVisible().catch(() => false)) {
+        // The checklist remembers a compact listening-device strip by
+        // default. This test specifically covers the input's Enter handler,
+        // so expand the strip before asserting on the input.
+        await collapsedListeningDeviceToggle.click();
+      }
+
       const listeningDeviceInput = page.getByTestId('listening-device-input');
       await expect(listeningDeviceInput).toBeVisible();
       await listeningDeviceInput.focus();

@@ -180,6 +180,7 @@ function HelpModal({
   return createPortal(
     <div
       style={overlayStyle}
+      data-help-tooltip-modal="true"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

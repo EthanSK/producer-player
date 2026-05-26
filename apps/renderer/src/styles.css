@@ -942,6 +942,11 @@ input[type='range'] {
   min-height: 16px;
 }
 
+.analysis-loading-line--placeholder {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .analysis-stat-grid,
 .analysis-detail-grid {
   display: grid;
@@ -4134,8 +4139,6 @@ button.autoplay-next-button:focus-visible::after {
 
 .checklist-composer-text {
   min-height: 33px;
-  padding: 6px 9px;
-  line-height: 1.35;
 }
 
 .checklist-item-text {
@@ -4690,6 +4693,48 @@ body.is-dragging-checklist-timestamp * {
    * padding-bottom, so the visual gap reads ~6-8px without doubling up. */
   margin-top: 0;
   white-space: nowrap;
+}
+
+/* v3.265 - visible checklist-sort tooltip anchor. The old native title was
+ * easy to miss and unreliable on disabled buttons, so the button now carries
+ * the same instant in-app popover pattern used by the V.WAV / Won't Fix pills.
+ * The wrapper owns positioning while the button keeps the existing slim-pill
+ * styling and test id. */
+.checklist-sort-button-tooltip-anchor {
+  position: relative;
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-self: flex-end;
+}
+
+.checklist-sort-button-tooltip-anchor--collapsed {
+  flex-shrink: 0;
+}
+
+.checklist-sort-button-tooltip-anchor .checklist-sort-outstanding-button {
+  margin-left: 0;
+}
+
+.checklist-sort-button-popover {
+  right: 0;
+  left: auto;
+  width: min(360px, calc(100vw - 24px));
+  max-width: min(360px, calc(100vw - 24px));
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.checklist-sort-button-tooltip-anchor:hover .checklist-sort-button-popover,
+.checklist-sort-button-tooltip-anchor:focus-within .checklist-sort-button-popover {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.checklist-sort-button-popover-body {
+  color: var(--text-main);
+  font-weight: 500;
+  white-space: normal;
 }
 
 /* v3.255.0 — second sort button "Sort outstanding by time" stacks immediately
@@ -5393,6 +5438,17 @@ button.checklist-play-toggle[data-playing='true'] {
 .support-feedback-links {
   display: grid;
   gap: 8px;
+}
+
+.support-update-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.support-update-actions button {
+  width: 100%;
 }
 
 .inspector-card {

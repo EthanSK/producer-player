@@ -300,10 +300,33 @@ test.describe('Checklist and export UX improvements', () => {
         'context-note',
       ]);
 
-      await expect(page.getByTestId('checklist-sort-outstanding-collapsed')).toHaveText(
-        'Sort outstanding'
+      const collapsedSortButton = page.getByTestId('checklist-sort-outstanding-collapsed');
+      const collapsedSortTooltip = page.getByTestId(
+        'checklist-sort-outstanding-collapsed-tooltip'
       );
-      await page.getByTestId('checklist-sort-outstanding-collapsed').click();
+
+      await expect(collapsedSortButton).toHaveText('Sort outstanding');
+      await expect(collapsedSortButton).toHaveAttribute(
+        'aria-describedby',
+        'checklist-sort-outstanding-collapsed-tooltip'
+      );
+
+      /*
+       * Regression guard for Ethan voice 397e: native title text is not enough
+       * for this control. The in-app popover must actually become visible on
+       * both mouse hover and keyboard focus, otherwise the compact checklist
+       * affordance is still effectively unexplained.
+       */
+      await collapsedSortButton.hover();
+      await expect(collapsedSortTooltip).toContainText(
+        'Move outstanding todos to the bottom and sort timestamped outstanding todos by song time'
+      );
+      await expect(collapsedSortTooltip).toHaveCSS('opacity', '1');
+
+      await collapsedSortButton.focus();
+      await expect(collapsedSortTooltip).toHaveCSS('opacity', '1');
+
+      await collapsedSortButton.click();
 
       await expect
         .poll(async () => readOrder(), { timeout: 5_000, intervals: [100] })

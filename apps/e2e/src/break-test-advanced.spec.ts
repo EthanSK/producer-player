@@ -38,21 +38,54 @@ function writeMinimalWav(filePath: string): Promise<void> {
   return fs.writeFile(filePath, buffer);
 }
 
+async function writeMinimalWavFixtures(rootDirectory: string, relativePaths: string[]): Promise<void> {
+  for (const relativePath of relativePaths) {
+    await writeMinimalWav(path.join(rootDirectory, relativePath));
+  }
+}
+
+async function linkFolderPath(
+  page: Awaited<ReturnType<typeof launchProducerPlayer>>['page'],
+  folderPath: string
+): Promise<void> {
+  await page.evaluate(async (pathToLink) => {
+    await (window as any).producerPlayer.linkFolder(pathToLink);
+  }, folderPath);
+}
+
+async function tryLinkFolderPath(
+  page: Awaited<ReturnType<typeof launchProducerPlayer>>['page'],
+  folderPath: string
+): Promise<void> {
+  await page.evaluate(async (pathToLink) => {
+    try {
+      await (window as any).producerPlayer.linkFolder(pathToLink);
+    } catch {
+      // Break tests intentionally feed invalid paths. Swallow the expected
+      // rejection here so the assertion can stay focused on app stability.
+    }
+  }, folderPath);
+}
+
 test.describe('Producer Player advanced break tests', () => {
   test('files without version suffix are ignored from the track list', async () => {
     const dirs = await createE2ETestDirectories('break-nosuffix');
 
     await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'NoSuffix.wav', contents: 'RIFF stub' },
       { relativePath: 'NoSuffixEither.mp3', contents: 'stub' },
-      { relativePath: 'WithSuffix v1.wav', contents: 'RIFF stub' },
+    ]);
+    // Current scanning/analysis is stricter about WAV validity than the first
+    // break-test draft was. Use real tiny WAVs so a timeout here means the
+    // naming rule regressed, not that the decoder rejected fake bytes.
+    await writeMinimalWavFixtures(dirs.fixtureDirectory, [
+      'NoSuffix.wav',
+      'WithSuffix v1.wav',
     ]);
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await expect(page.getByTestId('app-shell')).toBeVisible();
@@ -77,15 +110,12 @@ test.describe('Producer Player advanced break tests', () => {
     // Edge case: filename is just "v1.wav" — the stem is "v1", normalized = "" or "v1"
     const dirs = await createE2ETestDirectories('break-onlysuffix');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'v1.wav', contents: 'RIFF stub' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('app-shell')).toBeVisible();
       // May show 0 or 1 row — just shouldn't crash
@@ -99,18 +129,15 @@ test.describe('Producer Player advanced break tests', () => {
 
   test('100 stub files in same folder do not crash or hang', async () => {
     const dirs = await createE2ETestDirectories('break-100files');
-    const files = Array.from({ length: 100 }, (_, i) => ({
-      relativePath: `Track ${i + 1} v1.wav`,
-      contents: 'RIFF stub data',
-    }));
-
-    await writeFixtureFiles(dirs.fixtureDirectory, files);
+    await writeMinimalWavFixtures(
+      dirs.fixtureDirectory,
+      Array.from({ length: 100 }, (_, i) => `Track ${i + 1} v1.wav`)
+    );
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(100, { timeout: 30_000 });
       await expect(page.getByTestId('app-shell')).toBeVisible();
@@ -122,19 +149,17 @@ test.describe('Producer Player advanced break tests', () => {
 
   test('same song with 20 versions groups into a single row', async () => {
     const dirs = await createE2ETestDirectories('break-manyversions');
-    const files = Array.from({ length: 20 }, (_, i) => ({
-      relativePath: `Massive Hit v${i + 1}.wav`,
-      contents: 'RIFF stub data',
-      modifiedAtMs: Date.parse('2026-01-01T00:00:00.000Z') + i * 1000,
-    }));
-
-    await writeFixtureFiles(dirs.fixtureDirectory, files);
+    for (let i = 0; i < 20; i += 1) {
+      const filePath = path.join(dirs.fixtureDirectory, `Massive Hit v${i + 1}.wav`);
+      await writeMinimalWav(filePath);
+      const timestamp = new Date(Date.parse('2026-01-01T00:00:00.000Z') + i * 1000);
+      await fs.utimes(filePath, timestamp, timestamp);
+    }
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       // All versions should group into a single logical song row
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
@@ -154,15 +179,12 @@ test.describe('Producer Player advanced break tests', () => {
   test('volume slider edge cases: 0% and 100%', async () => {
     const dirs = await createE2ETestDirectories('break-volume');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Test Song v1.wav', contents: 'RIFF stub data' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Test Song v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await page.getByTestId('main-list-row').first().click();
       await expect(page.getByTestId('player-dock')).toBeVisible();
@@ -187,15 +209,12 @@ test.describe('Producer Player advanced break tests', () => {
     // Tests that the keyboard shortcut is wired up and doesn't crash
     const dirs = await createE2ETestDirectories('break-spacebar');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Spacebar Test v1.wav', contents: 'RIFF stub data' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Spacebar Test v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await page.getByTestId('main-list-row').first().click();
       await expect(page.getByTestId('player-dock')).toBeVisible();
@@ -213,15 +232,12 @@ test.describe('Producer Player advanced break tests', () => {
   test('rapid play/pause clicks do not crash', async () => {
     const dirs = await createE2ETestDirectories('break-rapid-playpause');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Rapid Test v1.wav', contents: 'RIFF stub data' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Rapid Test v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await page.getByTestId('main-list-row').first().click();
       await expect(page.getByTestId('player-dock')).toBeVisible();
@@ -241,15 +257,12 @@ test.describe('Producer Player advanced break tests', () => {
   test('prev/next navigation when only one track does not crash', async () => {
     const dirs = await createE2ETestDirectories('break-prevnext-single');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Solo Track v1.wav', contents: 'RIFF stub data' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Solo Track v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await page.getByTestId('main-list-row').first().click();
       await expect(page.getByTestId('player-dock')).toBeVisible();
@@ -277,8 +290,7 @@ test.describe('Producer Player advanced break tests', () => {
 
     try {
       // Fill in a FILE path instead of a directory path
-      await page.getByTestId('link-folder-path-input').fill(filePath);
-      await page.getByTestId('link-folder-path-button').click();
+      await tryLinkFolderPath(page, filePath);
 
       // App should handle the error gracefully
       await expect(page.getByTestId('app-shell')).toBeVisible();
@@ -291,15 +303,12 @@ test.describe('Producer Player advanced break tests', () => {
   test('unlink folder while song is selected clears inspector cleanly', async () => {
     const dirs = await createE2ETestDirectories('break-unlink-while-selected');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Alpha v1.wav', contents: 'RIFF stub' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Alpha v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await page.getByTestId('main-list-row').first().click();
       await expect(page.getByTestId('inspector-song-title')).toBeVisible();
@@ -323,18 +332,20 @@ test.describe('Producer Player advanced break tests', () => {
   test('organize with auto-organize OFF does not auto-move files', async () => {
     const dirs = await createE2ETestDirectories('break-organize-off');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      {
-        relativePath: 'Echo v1.wav',
-        contents: 'RIFF stub',
-        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
-      },
-      {
-        relativePath: 'Echo v2.wav',
-        contents: 'RIFF stub',
-        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
-      },
-    ]);
+    const echoV1Path = path.join(dirs.fixtureDirectory, 'Echo v1.wav');
+    const echoV2Path = path.join(dirs.fixtureDirectory, 'Echo v2.wav');
+    await writeMinimalWav(echoV1Path);
+    await writeMinimalWav(echoV2Path);
+    await fs.utimes(
+      echoV1Path,
+      new Date('2026-01-01T00:00:01.000Z'),
+      new Date('2026-01-01T00:00:01.000Z')
+    );
+    await fs.utimes(
+      echoV2Path,
+      new Date('2026-01-01T00:00:02.000Z'),
+      new Date('2026-01-01T00:00:02.000Z')
+    );
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
@@ -344,8 +355,7 @@ test.describe('Producer Player advanced break tests', () => {
         await (window as any).producerPlayer.setAutoMoveOld(false);
       });
 
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 
@@ -368,8 +378,7 @@ test.describe('Producer Player advanced break tests', () => {
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await page.getByTestId('main-list-row').first().click();
       await expect(page.getByTestId('player-dock')).toBeVisible();
@@ -401,35 +410,32 @@ test.describe('Producer Player advanced break tests', () => {
   test('repeat cycle goes through all three modes and wraps back to Off', async () => {
     const dirs = await createE2ETestDirectories('break-repeat-cycle');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Looper v1.wav', contents: 'RIFF stub' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Looper v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await page.getByTestId('main-list-row').first().click();
       await expect(page.getByTestId('player-dock')).toBeVisible();
 
       const repeatBtn = page.getByTestId('player-repeat');
-      await expect(repeatBtn).toContainText('Repeat: Off');
+      await expect(repeatBtn).toHaveAttribute('aria-label', 'Repeat Off');
 
       // Click through all modes
       await repeatBtn.click();
-      await expect(repeatBtn).toContainText('Repeat: One');
+      await expect(repeatBtn).toHaveAttribute('aria-label', 'Repeat One');
       await repeatBtn.click();
-      await expect(repeatBtn).toContainText('Repeat: All');
+      await expect(repeatBtn).toHaveAttribute('aria-label', 'Repeat All');
       await repeatBtn.click();
-      await expect(repeatBtn).toContainText('Repeat: Off');
+      await expect(repeatBtn).toHaveAttribute('aria-label', 'Repeat Off');
 
       // Extra clicks to ensure it doesn't get stuck
       await repeatBtn.click();
       await repeatBtn.click();
       await repeatBtn.click();
-      await expect(repeatBtn).toContainText('Repeat: Off');
+      await expect(repeatBtn).toHaveAttribute('aria-label', 'Repeat Off');
 
       await expect(page.getByTestId('app-shell')).toBeVisible();
     } finally {
@@ -445,8 +451,7 @@ test.describe('Producer Player advanced break tests', () => {
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill('/');
-      await page.getByTestId('link-folder-path-button').click();
+      await tryLinkFolderPath(page, '/');
 
       // App should handle the error gracefully without hanging
       await expect(page.getByTestId('app-shell')).toBeVisible();

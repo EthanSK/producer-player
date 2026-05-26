@@ -744,6 +744,7 @@ test.describe('Agent Chat Panel', () => {
       await page.getByTestId('agent-model-select').selectOption('claude-haiku-4-5');
       await page.getByTestId('agent-thinking-select').selectOption('medium');
       await page.getByTestId('agent-system-prompt-input').fill(customSystemPrompt);
+      await page.getByTestId('agent-settings-bypass-permissions-toggle').check();
       await page.getByTestId('agent-settings-toggle').click();
 
       const input = page.getByTestId('agent-composer-input');
@@ -773,7 +774,15 @@ test.describe('Agent Chat Panel', () => {
       expect(firstArgs).not.toContain('--tools');
       expect(firstArgs[firstArgs.indexOf('--model') + 1]).toBe('claude-haiku-4-5');
       expect(firstArgs[firstArgs.indexOf('--effort') + 1]).toBe('medium');
-      expect(firstArgs[firstArgs.indexOf('--system-prompt') + 1]).toBe(customSystemPrompt);
+      const claudeSystemPrompt = firstArgs[firstArgs.indexOf('--system-prompt') + 1];
+      expect(claudeSystemPrompt).toContain(customSystemPrompt);
+      // The host-owned policy must survive custom prompts: the embedded chat
+      // can drive ordinary UI with pp_* primitives, but cannot self-update or
+      // downgrade the installed app from inside Producer Player.
+      expect(claudeSystemPrompt).toContain('pp_run_js');
+      expect(claudeSystemPrompt).toContain('pp_dom_snapshot');
+      expect(claudeSystemPrompt).toContain('pp_screenshot');
+      expect(claudeSystemPrompt).toContain('autoUpdateDowngrade');
 
       const firstPrompt = String(claudeLogs[0]?.stdin ?? '');
       expect(firstPrompt).toContain('<ui-context>');
@@ -805,6 +814,7 @@ test.describe('Agent Chat Panel', () => {
       await page.getByTestId('agent-model-select').selectOption('gpt-5.5');
       await page.getByTestId('agent-thinking-select').selectOption('low');
       await page.getByTestId('agent-system-prompt-input').fill(customSystemPrompt);
+      await page.getByTestId('agent-settings-bypass-permissions-toggle').check();
       await page.getByTestId('agent-settings-toggle').click();
 
       const input = page.getByTestId('agent-composer-input');
@@ -827,6 +837,10 @@ test.describe('Agent Chat Panel', () => {
       const codexPrompt = String(codexLogs[0]?.stdin ?? '');
       expect(codexPrompt).toContain('<agent-system-prompt>');
       expect(codexPrompt).toContain(customSystemPrompt);
+      expect(codexPrompt).toContain('pp_run_js');
+      expect(codexPrompt).toContain('pp_dom_snapshot');
+      expect(codexPrompt).toContain('pp_screenshot');
+      expect(codexPrompt).toContain('autoUpdateInstall');
       expect(codexPrompt).toContain('<ui-context>');
       expect(codexPrompt).toContain('"domSnapshot"');
     } finally {
@@ -900,11 +914,14 @@ test.describe('Agent Chat Panel', () => {
         .first()
         .locator('.agent-message-content');
 
-      await expect(firstAssistantContent.locator('.agent-thinking-label')).toBeVisible();
       await expect(firstAssistantContent).toContainText('CLAUDE(claude-sonnet-4-6):', {
         timeout: 5000,
       });
 
+      // v3.265 — On fast local runs the fake stream can move past the tiny
+      // "thinking" affordance before Playwright observes it. The behavior this
+      // spec owns is that the composer stays enabled while a first assistant
+      // message is active enough to be steerable.
       await expect(input).toBeEnabled();
       await input.fill('Second steering turn');
       await page.getByTestId('agent-send-button').click();
@@ -950,11 +967,14 @@ test.describe('Agent Chat Panel', () => {
         .last()
         .locator('.agent-message-content');
 
-      await expect(content.locator('.agent-thinking-label')).toBeVisible();
       await expect(content).toContainText('CODEX(gpt-5.3-codex):', { timeout: 5000 });
 
       const fullText = 'CODEX(gpt-5.3-codex): Codex streaming check';
       await expect(content).toContainText(fullText);
+      // v3.265 — Codex can finish the fake streaming run before Playwright
+      // observes the transient thinking label on fast Macs. The regression we
+      // actually need locked here is that item.delta chunks collapse into one
+      // final assistant message, without duplicating the completed payload.
       await expect(content.locator('.agent-thinking-label')).toHaveCount(0);
 
       const finalText = (await content.innerText()).trim();

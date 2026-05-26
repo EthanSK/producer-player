@@ -419,12 +419,19 @@ export class AnalysisQueue {
     if (key !== null) {
       const existing = this.inflightByKey.get(key);
       if (existing) {
-        // Promote the existing task if the caller asked for a higher priority.
-        // No-op if it's already running.
-        this.promote(key, priority);
-        if (label !== null) {
-          this.updatePendingLabel(key, label);
-        }
+        // v3.265 — A duplicate USER request is usually the selected-track UI
+        // attaching itself to a job that startup warmup/version-history had
+        // already queued. Do not just return the old promise: if that older
+        // cancellable job is already running at lower priority, restart it as
+        // USER so the visible selection gets a fresh timeout window and the
+        // selected-track start delay. This is the regression Ethan hit as an
+        // apparently-immediate "Measured analysis timed out" on first boot.
+        this.promoteExistingTask(key, priority, {
+          label,
+          startDelayMs,
+          restartRunningCancellable:
+            priority === ANALYSIS_PRIORITY_USER_SELECTED && cancellable,
+        });
         return existing as Promise<T>;
       }
     }
@@ -486,31 +493,111 @@ export class AnalysisQueue {
    * cancelled, or never enqueued. Lower priority values run sooner.
    */
   promote(key: string, priority: AnalysisPriority): void {
+    this.promoteExistingTask(key, priority, {
+      restartRunningCancellable: priority === ANALYSIS_PRIORITY_USER_SELECTED,
+    });
+  }
+
+  private promoteExistingTask(
+    key: string,
+    priority: AnalysisPriority,
+    options: {
+      label?: string | null;
+      startDelayMs?: number;
+      restartRunningCancellable?: boolean;
+    } = {}
+  ): void {
     let changed = false;
+    const shouldRestartRunning =
+      options.restartRunningCancellable === true &&
+      priority === ANALYSIS_PRIORITY_USER_SELECTED;
 
-    for (const [runningTask, slot] of this.runningTasks.entries()) {
+    for (const [runningTask, slot] of Array.from(this.runningTasks.entries())) {
       if (runningTask.key !== key) continue;
-      if (priority >= runningTask.priority) continue;
 
-      const wasNonUser = runningTask.priority !== ANALYSIS_PRIORITY_USER_SELECTED;
+      const oldPriority = runningTask.priority;
+      const wasNonUser = oldPriority !== ANALYSIS_PRIORITY_USER_SELECTED;
       const isNowUser = priority === ANALYSIS_PRIORITY_USER_SELECTED;
-      const oldBucket = this.priorityBucket(runningTask.priority);
-      const newBucket = this.priorityBucket(priority);
 
-      runningTask.priority = priority;
-      this.activeByPriority[oldBucket] -= 1;
-      this.activeByPriority[newBucket] += 1;
-
-      if (slot === 'regular' && wasNonUser && isNowUser) {
-        this.nonUserActive -= 1;
+      if (options.label && runningTask.label === null) {
+        runningTask.label = options.label;
+        changed = true;
       }
 
-      changed = true;
+      if (
+        typeof options.startDelayMs === 'number' &&
+        Number.isFinite(options.startDelayMs) &&
+        options.startDelayMs > runningTask.startDelayMs
+      ) {
+        // This can still take effect when startTask has reserved the slot but
+        // the microtask that enters waitForStartDelay() has not run yet. That
+        // is exactly what happens when App.tsx calls promote(), then immediately
+        // calls enqueue() with the selected-track delay in the same effect.
+        runningTask.startDelayMs = Math.floor(options.startDelayMs);
+        changed = true;
+      }
+
+      if (priority < oldPriority) {
+        const oldBucket = this.priorityBucket(oldPriority);
+        const newBucket = this.priorityBucket(priority);
+
+        runningTask.priority = priority;
+        this.activeByPriority[oldBucket] -= 1;
+        this.activeByPriority[newBucket] += 1;
+
+        if (slot === 'regular' && wasNonUser && isNowUser) {
+          this.nonUserActive -= 1;
+        }
+
+        changed = true;
+      }
+
+      if (
+        shouldRestartRunning &&
+        wasNonUser &&
+        runningTask.priority === ANALYSIS_PRIORITY_USER_SELECTED &&
+        runningTask.cancellable
+      ) {
+        // v3.265 — Promoting an already-running warmup job in-place preserved
+        // its original timeout deadline. If the app selected that same track
+        // near the end of a cold-start warmup attempt, the newly visible UI
+        // could inherit a promise that was about to timeout and immediately
+        // show "Measured analysis timed out." Treat the promotion as a true
+        // interrupt: abort the lower-priority run, requeue the same caller
+        // promise at USER priority, and let the restarted run get a fresh
+        // timeout budget.
+        const released = runningTask.releaseForPreemption?.() ?? false;
+        if (released) {
+          try {
+            runningTask.abortController?.abort();
+          } catch {
+            // AbortController.abort() is specified as infallible; keep the
+            // queue robust if a host polyfill ever violates that contract.
+          }
+          changed = true;
+        }
+      }
     }
 
     if (!this.runningKeys.has(key)) {
       for (const task of this.pending) {
-        if (task.key === key && priority < task.priority) {
+        if (task.key !== key) continue;
+
+        if (options.label && task.label === null) {
+          task.label = options.label;
+          changed = true;
+        }
+
+        if (
+          typeof options.startDelayMs === 'number' &&
+          Number.isFinite(options.startDelayMs) &&
+          options.startDelayMs > task.startDelayMs
+        ) {
+          task.startDelayMs = Math.floor(options.startDelayMs);
+          changed = true;
+        }
+
+        if (priority < task.priority) {
           task.priority = priority;
           changed = true;
         }
@@ -518,8 +605,10 @@ export class AnalysisQueue {
     }
 
     if (changed) {
-      // After a promote, a user-priority job may now be eligible to interrupt
-      // lower-priority running work, or to start in a regular/bypass slot.
+      // After a promote/restart, a user-priority job may now be eligible to
+      // interrupt lower-priority running work, or to start in a regular/bypass
+      // slot. Keep this centralized so duplicate enqueue and public promote
+      // have identical scheduling semantics.
       this.maybeStart();
     }
   }

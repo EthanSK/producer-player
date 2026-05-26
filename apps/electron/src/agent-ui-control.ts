@@ -37,6 +37,16 @@ const RUN_JS_MAX_RESULT_BYTES = 100 * 1024; // 100 KB of stringified result
 const SCREENSHOT_MAX_BYTES = 5 * 1024 * 1024; // 5 MB of PNG
 const DOM_SNAPSHOT_DEFAULT_MAX_NODES = 500;
 const DOM_SNAPSHOT_HARD_MAX_NODES = 2_000;
+const FORBIDDEN_APP_LIFECYCLE_METHODS = [
+  'checkForUpdates',
+  'autoUpdateCheck',
+  'autoUpdateDownload',
+  'autoUpdateDowngrade',
+  'autoUpdateInstall',
+  'autoUpdateRecheck',
+  'setAutoUpdateEnabled',
+  'quitAndInstall',
+] as const;
 
 const LOG_TAG = '[pp:agent-ui]';
 
@@ -78,6 +88,68 @@ function safeStringify(value: unknown): string {
   ) ?? 'null';
 }
 
+export function findForbiddenRunJsOperation(code: string): string | null {
+  for (const methodName of FORBIDDEN_APP_LIFECYCLE_METHODS) {
+    // This blocks ordinary dot/bracket access before the code reaches the
+    // renderer. The guarded wrapper below also stubs the same methods at
+    // runtime, so a simple DOM click on an update button cannot invoke them.
+    const pattern = new RegExp("(?:\\\\.|['\\\"])\\\\s*" + methodName + "\\\\b");
+    if (pattern.test(code) || code.includes(methodName)) {
+      return methodName;
+    }
+  }
+  return null;
+}
+
+export function buildGuardedRunJsScript(code: string): string {
+  // Keep expression-style snippets working by evaluating the original source
+  // string rather than pasting it into a function body. eval() is intentional
+  // here: pp_run_js is the explicit renderer-eval primitive, and this wrapper
+  // exists solely to temporarily stub forbidden app-lifecycle methods around it.
+  const methodList = JSON.stringify(FORBIDDEN_APP_LIFECYCLE_METHODS);
+  const encodedCode = JSON.stringify(code);
+  return [
+    '(async () => {',
+    '  const __producerPlayer = globalThis.window && window.producerPlayer;',
+    '  const __blockedMethods = ' + methodList + ';',
+    '  const __originals = new Map();',
+    '  const __blocked = (name) => {',
+    "    throw new Error('The embedded Producer Player agent cannot run update, downgrade, install, or auto-update operations from inside the app chat: ' + name);",
+    '  };',
+    '',
+    "  if (__producerPlayer && (typeof __producerPlayer === 'object' || typeof __producerPlayer === 'function')) {",
+    '    for (const __name of __blockedMethods) {',
+    '      if (__name in __producerPlayer) {',
+    '        const __descriptor = Object.getOwnPropertyDescriptor(__producerPlayer, __name);',
+    '        if (!__descriptor || __descriptor.configurable === true) {',
+    '          __originals.set(__name, __producerPlayer[__name]);',
+    '          Object.defineProperty(__producerPlayer, __name, {',
+    '            configurable: true,',
+    '            writable: true,',
+    '            value: () => __blocked(__name),',
+    '          });',
+    '        }',
+    '      }',
+    '    }',
+    '  }',
+    '',
+    '  try {',
+    '    return await eval(' + encodedCode + ');',
+    '  } finally {',
+    '    if (__producerPlayer) {',
+    '      for (const [__name, __value] of __originals.entries()) {',
+    '        Object.defineProperty(__producerPlayer, __name, {',
+    '          configurable: true,',
+    '          writable: true,',
+    '          value: __value,',
+    '        });',
+    '      }',
+    '    }',
+    '  }',
+    '})()',
+  ].join('\n');
+}
+
 interface RunJsDeps {
   /** mainWindow.webContents.executeJavaScript shape. */
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
@@ -101,6 +173,13 @@ export async function runJs(
       error: `Code exceeds ${RUN_JS_MAX_CODE_BYTES} byte limit.`,
     };
   }
+  const forbiddenOperation = findForbiddenRunJsOperation(code);
+  if (forbiddenOperation) {
+    return {
+      ok: false,
+      error: `pp_run_js cannot run Producer Player update/downgrade/install operations from inside the app chat (blocked: ${forbiddenOperation}). Use an external MCP/HTTP controller or host agent for app lifecycle changes.`,
+    };
+  }
 
   const timeoutMs = clampTimeout(payload?.timeoutMs);
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -108,7 +187,8 @@ export async function runJs(
   try {
     // executeJavaScript only resolves when the renderer JS resolves — wrap in
     // Promise.race against a timer.
-    const evalPromise = (async () => deps.executeJavaScript(code, false))();
+    const guardedCode = buildGuardedRunJsScript(code);
+    const evalPromise = (async () => deps.executeJavaScript(guardedCode, false))();
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         reject(new Error(`pp_run_js timed out after ${timeoutMs}ms`));
@@ -325,6 +405,7 @@ export {
   SCREENSHOT_MAX_BYTES,
   DOM_SNAPSHOT_DEFAULT_MAX_NODES,
   DOM_SNAPSHOT_HARD_MAX_NODES,
+  FORBIDDEN_APP_LIFECYCLE_METHODS,
 };
 
 // Type passthrough — declared in contracts but re-exported for callers that

@@ -25,6 +25,22 @@ export interface DetachedSystemOpenRequest {
   };
 }
 
+export interface DetachedSystemOpenableStats {
+  isFile(): boolean;
+  isDirectory(): boolean;
+}
+
+/**
+ * DAW project paths are not always plain files. Logic .logicx projects are
+ * macOS package directories, and future DAW formats can expose the same shape:
+ * a path the user thinks of as "the project" even though fs.stat() reports a
+ * directory. The Open Project flow should hand both files and directory-backed
+ * packages to the OS opener; only reject odd filesystem entries like sockets.
+ */
+export function isDetachedSystemOpenablePath(stats: DetachedSystemOpenableStats): boolean {
+  return stats.isFile() || stats.isDirectory();
+}
+
 export function buildDetachedSystemOpenRequest(
   filePath: string,
   platform: SupportedFileOpenPlatform = process.platform
@@ -63,10 +79,11 @@ function toErrorMessage(cause: unknown): string {
 }
 
 /**
- * Hands a file to the operating system's file-association opener without
- * letting the target app (Ableton/Logic/etc.) keep Producer Player's main
- * process waiting. This intentionally does not launch any DAW executable
- * directly; it only isolates the OS file-open handoff in a detached process.
+ * Hands a file or DAW package directory to the operating system's
+ * file-association opener without letting the target app (Ableton/Logic/etc.)
+ * keep Producer Player's main process waiting. This intentionally does not
+ * launch any DAW executable directly; it only isolates the OS open handoff in a
+ * detached process.
  */
 export function openFileWithDetachedSystemHandler(filePath: string, deps: FileOpenDeps = {}): void {
   const request = buildDetachedSystemOpenRequest(filePath, deps.platform);

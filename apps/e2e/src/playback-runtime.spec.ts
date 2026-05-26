@@ -834,7 +834,7 @@ test.describe('playback runtime deep dive', () => {
       };
 
       await cueSongVersion('Warm Master', 'Warm Master v1.wav');
-      await expect(page.getByTestId('analysis-panel')).toContainText('Mastering + Reference');
+      await expect(page.getByTestId('analysis-panel')).toContainText('Mastering');
       await expect
         .poll(async () => {
           const status = page.getByTestId('analysis-status');
@@ -852,7 +852,7 @@ test.describe('playback runtime deep dive', () => {
 
       await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading');
       await expect(page.getByTestId('analysis-integrated-stat')).toContainText('LUFS');
-      await expect(page.getByTestId('analysis-true-peak-stat')).toContainText('dBFS');
+      await expect(page.getByTestId('analysis-true-peak-stat')).toContainText('dBTP');
       await expect(page.getByTestId('analysis-reference-summary')).toContainText(
         'No reference'
       );
@@ -901,13 +901,13 @@ test.describe('playback runtime deep dive', () => {
         'true'
       );
       await expect(page.getByTestId('analysis-overlay-normalization-summary')).toContainText(
-        'YouTube selected'
+        'YouTube'
       );
 
       await page.getByTestId('analysis-close-button').click();
       await expect(page.getByTestId('analysis-modal')).toHaveCount(0);
       await expect(page.getByTestId('analysis-platform-youtube')).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByTestId('analysis-normalization-summary')).toContainText('YouTube selected');
+      await expect(page.getByTestId('analysis-normalization-summary')).toContainText('YouTube');
       await expect(page.getByTestId('analysis-normalization-summary')).toContainText('preview on');
     } finally {
       await electronApp.close();
@@ -1045,7 +1045,9 @@ test.describe('playback runtime deep dive', () => {
       await expect(compactQuickPickButtons.nth(1)).toContainText('Overlay Reference.wav');
       await expect(compactQuickPickButtons.nth(2)).toContainText('Reference Alpha v1.wav');
 
-      const alphaSavedQuickPick = compactQuickPickButtons.nth(2);
+      const alphaSavedQuickPick = compactQuickPickButtons
+        .filter({ hasText: 'Reference Alpha v1.wav' })
+        .first();
 
       await alphaSavedQuickPick.click();
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('Reference Alpha v1.wav');
@@ -1127,13 +1129,15 @@ test.describe('playback runtime deep dive', () => {
       await page.getByTestId('analysis-use-current-reference').click();
       await expect(page.getByTestId('analysis-reference-summary')).toContainText('Coverage Mix v1.wav');
       await expect(page.getByTestId('analysis-active-reference-inline')).toContainText(
-        'Loudness difference'
+        'Integrated loudness difference'
       );
 
       await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-status')).toHaveCount(0);
-      await expect(page.getByTestId('analysis-overlay-preview-mode')).toContainText('reference ready');
+      await expect(page.getByTestId('analysis-active-reference')).toContainText(
+        'Coverage Mix v1.wav'
+      );
       await expect(page.getByTestId('analysis-choose-reference-overlay')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-normalization-change')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-normalization-change')).toContainText('Applied');
@@ -1192,11 +1196,13 @@ test.describe('playback runtime deep dive', () => {
 
       await expect
         .poll(async () => ((await page.getByTestId('analysis-status').textContent()) ?? '').trim())
-        .toBe('Analysis failed.');
+        .toBe('Preview graph analysis failed.');
       await expect(page.getByTestId('analysis-error')).toBeVisible();
 
       await page.getByTestId('analysis-expand-button').click();
-      await expect(page.getByTestId('analysis-overlay-status')).toContainText('Analysis failed.');
+      await expect(page.getByTestId('analysis-overlay-status')).toContainText(
+        'Preview graph analysis failed.'
+      );
       await expect(page.getByTestId('analysis-overlay-error')).toBeVisible();
       await page.getByTestId('analysis-close-button').click();
 
@@ -1540,7 +1546,7 @@ test.describe('playback runtime deep dive', () => {
       await page.getByTestId('analysis-platform-youtube').click();
       await expect(page.getByTestId('analysis-platform-youtube')).toHaveAttribute('aria-pressed', 'true');
       await expect(page.getByTestId('analysis-platform-spotify')).toHaveAttribute('aria-pressed', 'false');
-      await expect(page.getByTestId('analysis-normalization-summary')).toContainText('YouTube selected');
+      await expect(page.getByTestId('analysis-normalization-summary')).toContainText('YouTube');
 
       const appliedChangeOnYoutube =
         (
@@ -1561,14 +1567,14 @@ test.describe('playback runtime deep dive', () => {
       await expect(normalizationToggle).toHaveText('Preview Off');
       await expect(page.getByTestId('analysis-normalization-summary')).toContainText('preview off');
       await expect(page.getByTestId('analysis-normalization-change')).toContainText(
-        'Bypassed until Preview On'
+        'Off — tap Preview On'
       );
 
       await normalizationToggle.click();
       await expect(normalizationToggle).toHaveText('Preview On');
       await expect(page.getByTestId('analysis-normalization-summary')).toContainText('preview on');
       await expect(page.getByTestId('analysis-normalization-change')).toContainText(
-        'Active on current playback'
+        'Previewing now'
       );
 
       await page.screenshot({ path: screenshotPath });

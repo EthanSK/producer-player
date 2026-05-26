@@ -257,15 +257,18 @@ test.describe('Producer Player desktop shell', () => {
     );
 
     const projectFilePath = path.join(fixtureDirectory, 'Project Link Session.logicx');
+    const projectOpenRecordPath = path.join(userDataDirectory, 'open-project-record.jsonl');
 
     await writeTestWav(path.join(fixtureDirectory, 'Project Link Song v1.wav'), {
       frequencyHz: 540,
     });
-    await fs.writeFile(projectFilePath, 'dummy project payload', 'utf8');
+    await fs.mkdir(projectFilePath, { recursive: true });
+    await fs.writeFile(path.join(projectFilePath, 'projectData'), 'dummy project payload', 'utf8');
 
     const { electronApp, page } = await launchProducerPlayer(userDataDirectory, {
       env: {
         PRODUCER_PLAYER_E2E_PROJECT_FILE_PICK_PATH: projectFilePath,
+        PRODUCER_PLAYER_E2E_OPEN_FILE_RECORD_PATH: projectOpenRecordPath,
       },
     });
 
@@ -314,6 +317,33 @@ test.describe('Producer Player desktop shell', () => {
         ? (JSON.parse(storedAfterSetRaw) as Record<string, string>)
         : {};
       expect(Object.values(storedAfterSet)).toContain(projectFilePath);
+
+      await firstRow.getByTestId('song-project-open-button').click();
+      await expect
+        .poll(async () => {
+          try {
+            const raw = await fs.readFile(projectOpenRecordPath, 'utf8');
+            return raw.trim().length > 0 ? raw.trim().split('\n').length : 0;
+          } catch {
+            return 0;
+          }
+        })
+        .toBe(1);
+
+      const openRecordRaw = await fs.readFile(projectOpenRecordPath, 'utf8');
+      const openRecord = JSON.parse(openRecordRaw.trim()) as {
+        filePath?: string;
+        isFile?: boolean;
+        isDirectory?: boolean;
+      };
+      // v3.265 — Real Open Project regression proof. Logic project packages are
+      // directories, not files, so this click must reach the main-process open
+      // handoff with isDirectory=true instead of silently dying at fs.stat().
+      expect(openRecord).toMatchObject({
+        filePath: projectFilePath,
+        isFile: false,
+        isDirectory: true,
+      });
 
       await firstRow.getByTestId('song-project-clear-button').click();
 
@@ -756,9 +786,10 @@ test.describe('Producer Player desktop shell', () => {
       await firstLaunch.page.getByTestId('rescan-button').click();
       await expect(firstLaunch.page.getByTestId('main-list-row').first()).toContainText('Beta');
 
-      expectedFirstTrackAfterRestart =
-        (await firstLaunch.page.getByTestId('main-list-row').first().textContent())?.trim() ??
-        expectedFirstTrackAfterRestart;
+      // The row includes measured-analysis text once background analysis
+      // catches up, so only persist the stable ordering signal across
+      // relaunches instead of comparing volatile LUFS/status copy.
+      expectedFirstTrackAfterRestart = 'Beta';
     } finally {
       await firstLaunch?.electronApp.close();
     }

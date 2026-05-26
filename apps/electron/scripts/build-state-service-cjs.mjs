@@ -100,6 +100,34 @@ await build({
   logLevel: 'warning',
 });
 
+// Downgrade targeting is pure release-list/version selection logic. Keep this
+// outside Electron so the safety rules can be tested without touching the real
+// auto-updater or installing an older app.
+await build({
+  entryPoints: [resolve(appDir, 'src/auto-update-downgrade.ts')],
+  outfile: resolve(appDir, 'dist/auto-update-downgrade.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+});
+
+// Local MCP-over-HTTP control server is plain Node HTTP/JSON-RPC logic. Bundle
+// it for unit tests so auth, discovery, protocol routing, and tool dispatch
+// stay covered without launching Electron.
+await build({
+  entryPoints: [resolve(appDir, 'src/mcp-control-server.ts')],
+  outfile: resolve(appDir, 'dist/mcp-control-server.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+});
+
 // Detached OS file-open command construction stays pure/injectable so the
 // Ableton/DAW handoff isolation can be locked without launching real apps.
 await build({
@@ -186,4 +214,4 @@ await build({
   plugins: [shimElectronLog],
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs + dist/actionLog.test.cjs');
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/auto-update-downgrade.test.cjs + dist/mcp-control-server.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs + dist/actionLog.test.cjs');

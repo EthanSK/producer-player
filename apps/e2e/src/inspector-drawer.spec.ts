@@ -14,11 +14,13 @@ import {
 //   4. resizing back to wide width surfaces the inline inspector + hides toggle
 //   5. open-state survives reload
 //
-// The breakpoint is INSPECTOR_DRAWER_BREAKPOINT_PX = 1120 in App.tsx / 1120px
+// The breakpoint is INSPECTOR_DRAWER_BREAKPOINT_PX = 1280 in App.tsx / 1280px
 // @media in styles.css.
 const NARROW_WIDTH = 760;
 const NARROW_HEIGHT = 900;
-const WIDE_WIDTH = 1280;
+// Use a value comfortably above the inclusive max-width breakpoint. At exactly
+// 1280px CSS still applies the compact drawer media query.
+const WIDE_WIDTH = 1400;
 const WIDE_HEIGHT = 900;
 
 async function setWindowContentSize(

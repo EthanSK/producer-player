@@ -79,6 +79,12 @@ type QueueDump = {
   runningJobs: Array<{ key: string | null; priority: 0 | 1 | 2; label: string | null }>;
 };
 
+type WarmupState = Array<{
+  songTitle: string;
+  fileName: string;
+  measuredReady: boolean;
+}>;
+
 async function readMeasuredQueueDump(page: Page): Promise<QueueDump> {
   return page.evaluate(() => {
     const dump = (
@@ -90,6 +96,20 @@ async function readMeasuredQueueDump(page: Page): Promise<QueueDump> {
       throw new Error('Measured queue test hook is unavailable.');
     }
     return dump;
+  });
+}
+
+async function readLibraryWarmupState(page: Page): Promise<WarmupState> {
+  return page.evaluate(() => {
+    const state = (
+      window as typeof window & {
+        __producerPlayerGetLibraryLatestWarmupState?: () => WarmupState;
+      }
+    ).__producerPlayerGetLibraryLatestWarmupState?.();
+    if (!state) {
+      throw new Error('Library warmup test hook is unavailable.');
+    }
+    return state;
   });
 }
 
@@ -180,6 +200,111 @@ test.describe('audio-analysis USER interrupt @smoke', () => {
           timeout: 2_000,
         })
         .toBeGreaterThan(0);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('real tracks survive startup warmup, rapid play selections, and full measured queue drain @smoke', async () => {
+    test.skip(
+      process.platform === 'win32',
+      'Windows CI keeps this deep queue-drain regression in the broader playback-runtime suite.'
+    );
+
+    const directories = await createE2ETestDirectories('producer-player-analysis-queue-drain');
+
+    const tracks = [
+      ['Queue Alpha v1.wav', 196],
+      ['Queue Beta v1.wav', 247],
+      ['Queue Gamma v1.wav', 311],
+      ['Queue Delta v1.wav', 392],
+      ['Queue Epsilon v1.wav', 523],
+      ['Queue Zeta v1.wav', 659],
+      ['Queue Eta v1.wav', 784],
+    ] as const;
+
+    for (const [fileName, frequencyHz] of tracks) {
+      await writeTestWav(path.join(directories.fixtureDirectory, fileName), {
+        frequencyHz,
+        durationMs: 1000,
+      });
+    }
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory, {
+      extraEnv: {
+        // Keep ffmpeg jobs visible long enough for the test to observe real
+        // queue preemption, while still letting the whole latest-track warmup
+        // drain inside Playwright's 60s spec budget.
+        PRODUCER_PLAYER_ANALYSIS_DELAY_MS: '350',
+      },
+    });
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(tracks.length, {
+        timeout: 15_000,
+      });
+
+      await page.waitForFunction(
+        () =>
+          typeof (
+            window as typeof window & { __producerPlayerGetMeasuredQueueDump?: () => unknown }
+          ).__producerPlayerGetMeasuredQueueDump === 'function' &&
+          typeof (
+            window as typeof window & {
+              __producerPlayerGetLibraryLatestWarmupState?: () => unknown;
+            }
+          ).__producerPlayerGetLibraryLatestWarmupState === 'function',
+        null,
+        { timeout: 10_000 }
+      );
+
+      await expect
+        .poll(async () => (await readMeasuredQueueDump(page)).activeByPriority.neighbor, {
+          timeout: 10_000,
+        })
+        .toBeGreaterThan(0);
+
+      for (const title of ['Queue Zeta', 'Queue Beta', 'Queue Eta', 'Queue Gamma']) {
+        await page
+          .getByTestId('main-list-row')
+          .filter({ hasText: title })
+          .first()
+          .dblclick({ force: true });
+      }
+
+      await expect(page.getByTestId('analysis-track-label')).toContainText('Queue Gamma v1.wav', {
+        timeout: 8_000,
+      });
+      await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText('Loading', {
+        timeout: 20_000,
+      });
+      await expect(page.getByTestId('analysis-integrated-stat')).toContainText('LUFS');
+      await expect(page.getByTestId('measured-analysis-error')).toHaveCount(0);
+      await expect(page.getByTestId('measured-analysis-overlay-error')).toHaveCount(0);
+
+      await expect
+        .poll(async () => {
+          const dump = await readMeasuredQueueDump(page);
+          return (
+            dump.activeByPriority.user +
+            dump.activeByPriority.neighbor +
+            dump.activeByPriority.background +
+            dump.pendingByPriority.user +
+            dump.pendingByPriority.neighbor +
+            dump.pendingByPriority.background
+          );
+        }, { timeout: 45_000 })
+        .toBe(0);
+
+      const warmupState = await readLibraryWarmupState(page);
+      expect(warmupState).toHaveLength(tracks.length);
+      expect(
+        warmupState
+          .filter((entry) => !entry.measuredReady)
+          .map((entry) => `${entry.songTitle} / ${entry.fileName}`)
+      ).toEqual([]);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

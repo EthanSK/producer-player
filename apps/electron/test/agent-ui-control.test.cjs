@@ -1,17 +1,21 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   runJs,
   screenshot,
   domSnapshot,
   buildDomSnapshotScript,
+  buildGuardedRunJsScript,
+  findForbiddenRunJsOperation,
   RUN_JS_DEFAULT_TIMEOUT_MS,
   RUN_JS_MAX_CODE_BYTES,
   RUN_JS_MAX_RESULT_BYTES,
   SCREENSHOT_MAX_BYTES,
   DOM_SNAPSHOT_DEFAULT_MAX_NODES,
   DOM_SNAPSHOT_HARD_MAX_NODES,
+  FORBIDDEN_APP_LIFECYCLE_METHODS,
 } = require('../dist/agent-ui-control.test.cjs');
 
 // --- runJs ----------------------------------------------------------------
@@ -93,6 +97,73 @@ test('runJs propagates renderer errors as ok:false', async () => {
   );
   assert.equal(result.ok, false);
   assert.match(result.error, /boom/);
+});
+
+test('runJs sends a guarded wrapper to the renderer', async () => {
+  let executedCode = '';
+  const result = await runJs(
+    { code: '({ ok: true })' },
+    {
+      executeJavaScript: async (code) => {
+        executedCode = code;
+        return { ok: true };
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(executedCode, /__blockedMethods/);
+  assert.match(executedCode, /autoUpdateDowngrade/);
+  assert.match(executedCode, /eval\("\(\{ ok: true \}\)"\)/);
+});
+
+test('runJs rejects direct app update/downgrade/install operations before eval', async () => {
+  let executed = false;
+  const result = await runJs(
+    { code: 'window.producerPlayer.autoUpdateDowngrade()' },
+    {
+      executeJavaScript: async () => {
+        executed = true;
+        return null;
+      },
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(executed, false, 'forbidden lifecycle code must not reach executeJavaScript');
+  assert.match(result.error, /autoUpdateDowngrade/);
+});
+
+test('findForbiddenRunJsOperation catches every blocked lifecycle method', () => {
+  for (const methodName of FORBIDDEN_APP_LIFECYCLE_METHODS) {
+    assert.equal(
+      findForbiddenRunJsOperation('window.producerPlayer.' + methodName + '()'),
+      methodName,
+    );
+  }
+});
+
+test('buildGuardedRunJsScript stubs lifecycle methods during indirect UI actions and restores them', async () => {
+  const calls = [];
+  const context = {
+    window: {
+      producerPlayer: {
+        autoUpdateInstall() {
+          calls.push('install');
+        },
+      },
+    },
+  };
+
+  const original = context.window.producerPlayer.autoUpdateInstall;
+  const guarded = buildGuardedRunJsScript('window.producerPlayer.autoUpdateInstall()');
+
+  await assert.rejects(
+    () => vm.runInNewContext(guarded, context),
+    /cannot run update, downgrade, install, or auto-update operations/,
+  );
+  assert.deepEqual(calls, []);
+  assert.equal(context.window.producerPlayer.autoUpdateInstall, original);
 });
 
 // --- screenshot -----------------------------------------------------------

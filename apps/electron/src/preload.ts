@@ -212,6 +212,10 @@ const bridge: ProducerPlayerBridge = {
     await ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_DOWNLOAD);
   },
 
+  async autoUpdateDowngrade() {
+    return ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_DOWNGRADE);
+  },
+
   async autoUpdateRecheck() {
     return ipcRenderer.invoke(IPC_CHANNELS.AUTO_UPDATE_RECHECK);
   },

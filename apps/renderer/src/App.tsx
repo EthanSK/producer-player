@@ -41,6 +41,7 @@ import type {
   AiRecommendationStatus,
   AlbumChecklistItem,
   AudioFileAnalysis,
+  AutoUpdateDowngradeResult,
   AutoUpdateRecheckResult,
   AutoUpdateState,
   ICloudAvailabilityResult,
@@ -784,6 +785,32 @@ function AiRecommendationWhyButton({ reason }: { reason: string }): ReactNode {
           {reason}
         </span>
       ) : null}
+    </span>
+  );
+}
+
+function ChecklistSortButtonTooltip({
+  id,
+  body,
+}: {
+  id: string;
+  body: string;
+}): JSX.Element {
+  return (
+    <span
+      id={id}
+      className="main-list-row-metadata-popover checklist-sort-button-popover"
+      role="tooltip"
+      data-testid={id}
+    >
+      {/*
+        v3.265 - Ethan asked for a real tooltip on the checklist sort
+        affordance. Keep this as an in-app popover instead of relying on
+        native title, because disabled buttons and automated E2E coverage
+        both need deterministic hover/focus behavior.
+      */}
+      <span className="main-list-row-metadata-popover-label">Sort outstanding</span>
+      <span className="checklist-sort-button-popover-body">{body}</span>
     </span>
   );
 }
@@ -3086,6 +3113,7 @@ export function App(): JSX.Element {
     disabledReason: null,
   });
   const [isRecheckingUpdate, setIsRecheckingUpdate] = useState(false);
+  const [isDowngradingUpdate, setIsDowngradingUpdate] = useState(false);
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(() => {
     const stored = window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY);
     return stored !== 'false'; // default true
@@ -3850,6 +3878,12 @@ export function App(): JSX.Element {
   // the handler races the render and either no-ops (the new <li> doesn't
   // exist yet) or scrolls to the wrong (old) scrollHeight. Fixed 2026-04-18.
   const checklistPendingScrollToBottomRef = useRef<boolean>(false);
+  // Voice 83367 (2026-05-26): when a checklist opens, start at the first
+  // outstanding todo instead of forcing the user to scroll through a long
+  // block of already-resolved context. This one-shot flag is set on modal
+  // song changes and consumed after the rows have mounted.
+  const checklistPendingInitialOutstandingScrollRef = useRef<boolean>(false);
+  const previousChecklistModalSongIdForInitialScrollRef = useRef<string | null>(null);
   const checklistUnderlyingAnalysisPaneRef = useRef<HTMLElement | null>(null);
   const checklistUnderlyingSidePaneScrollRef = useRef<HTMLDivElement | null>(null);
   const checklistComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -6416,6 +6450,14 @@ export function App(): JSX.Element {
       }
 
       if (event.key === 'Escape') {
+        // HelpTooltip is portalled to document.body, so its own Escape handler
+        // can be registered after this checklist capture listener. When a help
+        // dialog is open, let that topmost dialog own Escape instead of
+        // co-closing the underlying checklist modal.
+        if (document.querySelector('[data-help-tooltip-modal="true"]')) {
+          return;
+        }
+
         if (checklistFindOpen) {
           event.preventDefault();
           event.stopPropagation();
@@ -7431,12 +7473,14 @@ export function App(): JSX.Element {
 
     let cancelled = false;
 
-    // v3.140 — selected-song/version-history analysis is intent-driven, not
-    // optional background precompute. When Ethan picks/plays a track while
-    // startup warmup is still walking the library, all versions for THAT
-    // track should jump the queue together so sample-rate/LUFS/platform-
-    // normalization data is ready now; then the sequential latest-track
-    // startup warmup can resume.
+    // v3.140/v3.265 — selected-song/version-history analysis is intent-driven,
+    // not optional background precompute, but it must not occupy the same USER
+    // bucket as the actual selected track. v3.264 let every version-history row
+    // become USER priority; on a cold launch that could make the status popover
+    // look stuck behind "urgent" work and let the visible selected-track panel
+    // dedupe to an aging version-history promise. Keep version-history jobs in
+    // NEIGHBOR: they still jump ordinary latest-track background warmup, while
+    // the selected-track effect remains the single source of USER priority.
     void (async () => {
       const tasks = inspectorVersions.map(async (version) => {
         if (cancelled) {
@@ -7497,7 +7541,7 @@ export function App(): JSX.Element {
 
         try {
           const measured = await runMeasuredAnalysis(version.filePath, {
-            priority: ANALYSIS_PRIORITY_USER_SELECTED,
+            priority: ANALYSIS_PRIORITY_NEIGHBOR,
             cacheKey,
             label: `${version.fileName} — version history`,
           });
@@ -13500,6 +13544,87 @@ export function App(): JSX.Element {
     });
   }
 
+  async function handleDowngradeUpdate(): Promise<void> {
+    if (isDowngradingUpdate || isCheckingForUpdate || isDownloadingUpdate || isInstallingUpdate) {
+      return;
+    }
+
+    setIsDowngradingUpdate(true);
+    setUpdateCheckResult(null);
+
+    try {
+      const result: AutoUpdateDowngradeResult = await window.producerPlayer.autoUpdateDowngrade();
+
+      if (result.status === 'downloading') {
+        // The main process has already pinned electron-updater to a proven
+        // older release feed and started the download. Keep a renderer-side
+        // message too so the status line stays meaningful if the updater emits
+        // a slower state event on a busy machine.
+        setUpdateCheckStatus('update-available');
+        setUpdateCheckResult({
+          status: 'update-available',
+          currentVersion: result.currentVersion,
+          latestVersion: result.previousVersion,
+          latestTag: result.previousTag,
+          releaseUrl: result.releaseUrl,
+          downloadUrl: null,
+          releaseName: null,
+          publishedAt: null,
+          notes: null,
+          message: `Downgrading to v${result.previousVersion}…`,
+        });
+        return;
+      }
+
+      if (result.status === 'no-previous-version') {
+        setUpdateCheckStatus('up-to-date');
+        setUpdateCheckResult({
+          status: 'up-to-date',
+          currentVersion: result.currentVersion,
+          latestVersion: null,
+          latestTag: null,
+          releaseUrl: `${PUBLIC_REPOSITORY_URL}/releases`,
+          downloadUrl: null,
+          releaseName: null,
+          publishedAt: null,
+          notes: null,
+          message: result.message,
+        });
+        return;
+      }
+
+      setUpdateCheckStatus('error');
+      setUpdateCheckResult({
+        status: 'error',
+        currentVersion: 'Unknown',
+        latestVersion: null,
+        latestTag: null,
+        releaseUrl: `${PUBLIC_REPOSITORY_URL}/releases`,
+        downloadUrl: null,
+        releaseName: null,
+        publishedAt: null,
+        notes: null,
+        message: result.message,
+      });
+    } catch (cause: unknown) {
+      setUpdateCheckStatus('error');
+      setUpdateCheckResult({
+        status: 'error',
+        currentVersion: 'Unknown',
+        latestVersion: null,
+        latestTag: null,
+        releaseUrl: `${PUBLIC_REPOSITORY_URL}/releases`,
+        downloadUrl: null,
+        releaseName: null,
+        publishedAt: null,
+        notes: null,
+        message: cause instanceof Error ? cause.message : 'Could not start downgrade.',
+      });
+    } finally {
+      setIsDowngradingUpdate(false);
+    }
+  }
+
   async function handleAutoUpdateInstall(): Promise<void> {
     await runVoidTask(async () => {
       await window.producerPlayer.autoUpdateInstall();
@@ -14807,7 +14932,11 @@ export function App(): JSX.Element {
     }
 
     if (wasEmpty && checklistTimestampMode === 'live') {
-      freezeChecklistTimestampAtCurrentPlayback({ syncPlaybackToCapturedTimestamp: true });
+      // Typing captures the "just heard it" lookback timestamp for the new
+      // note, but it must not seek playback backwards. Ethan uses this while
+      // listening in real time, so the preview freezes independently from the
+      // audible playhead.
+      freezeChecklistTimestampAtCurrentPlayback();
     }
   }
 
@@ -15737,6 +15866,20 @@ export function App(): JSX.Element {
     () => [...checklistModalItems].reverse(),
     [checklistModalItems]
   );
+  const checklistFirstOutstandingItemId = useMemo(
+    () => checklistModalItemsChronological.find(isChecklistOutstanding)?.id ?? null,
+    [checklistModalItemsChronological],
+  );
+  const checklistShouldInitialScrollToOutstanding = useMemo(() => {
+    // Only do the new opening-position adjustment when it actually saves the
+    // user from completed context. If the first rendered row is already
+    // outstanding, scheduling a delayed no-op scroll can still disturb pointer
+    // tests and drag gestures that start immediately after the modal opens.
+    return (
+      checklistFirstOutstandingItemId !== null &&
+      checklistModalItemsChronological[0]?.id !== checklistFirstOutstandingItemId
+    );
+  }, [checklistFirstOutstandingItemId, checklistModalItemsChronological]);
   const checklistFindMatches = useMemo(
     () =>
       buildChecklistFindMatches(
@@ -15899,6 +16042,73 @@ export function App(): JSX.Element {
     },
     [checklistModalItemsChronological, checklistModalSong, clearChecklistDndState],
   );
+
+  // Voice 83367 (2026-05-26): opening a long checklist should land on the
+  // first actionable outstanding todo, not at the historical top of a pile
+  // of completed/ignored context. Treat every modal song change as a fresh
+  // opening, including the mini-player prev/next buttons that swap the
+  // checklist to another track while the modal stays mounted.
+  useEffect(() => {
+    if (checklistModalSongId === null) {
+      previousChecklistModalSongIdForInitialScrollRef.current = null;
+      checklistPendingInitialOutstandingScrollRef.current = false;
+      return;
+    }
+
+    if (previousChecklistModalSongIdForInitialScrollRef.current !== checklistModalSongId) {
+      previousChecklistModalSongIdForInitialScrollRef.current = checklistModalSongId;
+      checklistPendingInitialOutstandingScrollRef.current = true;
+    }
+  }, [checklistModalSongId]);
+
+  // Consume the one-shot initial-open scroll after React has committed row
+  // refs. We adjust the scroll region directly so only the checklist list
+  // moves; native scrollIntoView can bubble to the overlay/page and
+  // reintroduce weird modal jumps.
+  useEffect(() => {
+    if (
+      !checklistPendingInitialOutstandingScrollRef.current ||
+      !checklistModalSongId ||
+      !checklistShouldInitialScrollToOutstanding
+    ) {
+      if (checklistPendingInitialOutstandingScrollRef.current && !checklistShouldInitialScrollToOutstanding) {
+        checklistPendingInitialOutstandingScrollRef.current = false;
+      }
+      return;
+    }
+
+    const scrollRegion = checklistItemScrollRegionRef.current;
+    if (!scrollRegion) {
+      return;
+    }
+
+    checklistPendingInitialOutstandingScrollRef.current = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const currentScrollRegion = checklistItemScrollRegionRef.current;
+        if (!currentScrollRegion) return;
+
+        const targetRow =
+          checklistFirstOutstandingItemId !== null
+            ? checklistFindRowRefs.current.get(checklistFirstOutstandingItemId) ?? null
+            : null;
+
+        if (!targetRow || !targetRow.isConnected) {
+          currentScrollRegion.scrollTop = 0;
+          return;
+        }
+
+        const regionRect = currentScrollRegion.getBoundingClientRect();
+        const rowRect = targetRow.getBoundingClientRect();
+        currentScrollRegion.scrollTop += rowRect.top - regionRect.top;
+      });
+    });
+  }, [
+    checklistFirstOutstandingItemId,
+    checklistModalItemsChronological.length,
+    checklistModalSongId,
+    checklistShouldInitialScrollToOutstanding,
+  ]);
 
   // Scroll-to-bottom after an item is added. Watches the rendered list length
   // rather than running synchronously inside handleAddChecklistItem so the
@@ -17337,7 +17547,16 @@ export function App(): JSX.Element {
                       ? 'Preview graph analysis failed.'
                       : 'Preparing preview graphs…'}
                 </p>
-              ) : null}
+              ) : (
+                // Keep the loading/status line's layout slot after preview
+                // graphs finish so panels below it do not jump upward during
+                // the pending→ready transition. Omit the test id so "ready"
+                // state still behaves as "no active status message" to tests
+                // and assistive tech.
+                <p className="muted analysis-loading-line analysis-loading-line--placeholder" aria-hidden="true">
+                  Preview graph analysis ready.
+                </p>
+              )}
 
               {analysisStatus === 'error' ? (
                 <p className="error" data-testid="analysis-error">
@@ -17505,22 +17724,22 @@ export function App(): JSX.Element {
                         aria-pressed={selectedNormalizationPlatformId === platform.id}
                         style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                       >
-                        <span className="analysis-platform-header-row">
+                        <span className="analysis-platform-title">{platform.label}</span>
+                        <span className="analysis-platform-meta-row">
                           <span
                             className="analysis-platform-icon"
                             style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                           >
                             <PlatformIcon platformId={platform.id} />
                           </span>
-                          <span className="analysis-platform-title">{platform.label}</span>
-                        </span>
-                        <span className="analysis-platform-copy">
-                          <span className="analysis-platform-target">
-                            {platform.targetLufs.toFixed(0)} LUFS target
-                          </span>
-                          <span className="analysis-platform-change">{platformAppliedMainText}</span>
-                          <span className="muted">
-                            {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                          <span className="analysis-platform-copy">
+                            <span className="analysis-platform-target">
+                              {platform.targetLufs.toFixed(0)} LUFS target
+                            </span>
+                            <span className="analysis-platform-change">{platformAppliedMainText}</span>
+                            <span className="muted">
+                              {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                            </span>
                           </span>
                         </span>
                       </button>
@@ -18989,22 +19208,43 @@ export function App(): JSX.Element {
               </button>
             </div>
             {/* --- Update section ------------------------------------------------ */}
-            {/* "Check for Updates" — always visible unless a download/install is
-                already in progress (where it would be redundant). */}
-            {!isDownloadingUpdate && !isInstallingUpdate && !isUpdateDownloaded ? (
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => {
-                  void handleCheckForUpdates();
-                }}
-                data-testid="support-feedback-check-updates"
-                disabled={isCheckingForUpdate}
-                title="Check the update feed without downloading anything."
-              >
-                {isCheckingForUpdate ? 'Checking\u2026' : 'Check for Updates'}
-              </button>
-            ) : null}
+            <div className="support-update-actions" data-testid="support-feedback-update-actions">
+              {/* "Check for Updates" — always visible unless a download/install is
+                  already in progress (where it would be redundant). */}
+              {!isDownloadingUpdate && !isInstallingUpdate && !isUpdateDownloaded ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    void handleCheckForUpdates();
+                  }}
+                  data-testid="support-feedback-check-updates"
+                  disabled={isCheckingForUpdate || isDowngradingUpdate}
+                  title="Check the update feed without downloading anything."
+                >
+                  {isCheckingForUpdate ? 'Checking\u2026' : 'Check for Updates'}
+                </button>
+              ) : null}
+
+              {/* "Downgrade" deliberately resolves the previous compatible
+                  release in main-process code. The renderer never accepts a
+                  user-entered version, which prevents accidental arbitrary
+                  install targets from this safety control. */}
+              {!isDownloadingUpdate && !isInstallingUpdate && !isUpdateDownloaded ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    void handleDowngradeUpdate();
+                  }}
+                  data-testid="support-feedback-downgrade-update"
+                  disabled={isCheckingForUpdate || isDowngradingUpdate}
+                  title="Download and install the previous compatible release."
+                >
+                  {isDowngradingUpdate ? 'Downgrading\u2026' : 'Downgrade'}
+                </button>
+              ) : null}
+            </div>
 
             {/* "Download and Install" — only rendered when an update is actually
                 available. Never shown grayed-out in idle state. */}
@@ -19422,22 +19662,27 @@ export function App(): JSX.Element {
                         : !hasEnoughTimed
                           ? 'Already sorted — no outstanding rows need moving, and fewer than two outstanding todos have song timestamps.'
                           : 'Already sorted by outstanding timestamp.';
+                    const tooltipId = 'checklist-sort-outstanding-collapsed-tooltip';
                     return (
-                      <button
-                        type="button"
-                        className="listening-device-secondary-button checklist-sort-outstanding-button checklist-sort-outstanding-button--collapsed"
-                        onClick={() =>
-                          handleSortChecklistOutstandingByTimestamp(
-                            checklistModalSong.id,
-                          )
-                        }
-                        disabled={!canSort}
-                        data-testid="checklist-sort-outstanding-collapsed"
-                        title={tooltipText}
-                        aria-label="Sort checklist outstanding items"
-                      >
-                        Sort outstanding
-                      </button>
+                      <span className="checklist-sort-button-tooltip-anchor checklist-sort-button-tooltip-anchor--collapsed">
+                        <button
+                          type="button"
+                          className="listening-device-secondary-button checklist-sort-outstanding-button checklist-sort-outstanding-button--collapsed"
+                          onClick={() =>
+                            handleSortChecklistOutstandingByTimestamp(
+                              checklistModalSong.id,
+                            )
+                          }
+                          disabled={!canSort}
+                          data-testid="checklist-sort-outstanding-collapsed"
+                          title={tooltipText}
+                          aria-label="Sort checklist outstanding items"
+                          aria-describedby={tooltipId}
+                        >
+                          Sort outstanding
+                        </button>
+                        <ChecklistSortButtonTooltip id={tooltipId} body={tooltipText} />
+                      </span>
                     );
                   })()}
                   {/*
@@ -19827,20 +20072,25 @@ export function App(): JSX.Element {
                         : !hasContext
                           ? 'All todo items are outstanding — nothing to move above them.'
                           : 'Already sorted — outstanding todos are at the bottom.';
+                  const tooltipId = 'checklist-sort-outstanding-to-bottom-tooltip';
                   return (
-                    <button
-                      type="button"
-                      className="listening-device-secondary-button checklist-sort-outstanding-button"
-                      onClick={() =>
-                        handleSortChecklistMoveOutstandingToBottom(checklistModalSong.id)
-                      }
-                      disabled={!canSort}
-                      data-testid="checklist-sort-outstanding-to-bottom"
-                      title={tooltipText}
-                      aria-label="Sort checklist: move outstanding items to the bottom"
-                    >
-                      Sort: outstanding to bottom
-                    </button>
+                    <span className="checklist-sort-button-tooltip-anchor">
+                      <button
+                        type="button"
+                        className="listening-device-secondary-button checklist-sort-outstanding-button"
+                        onClick={() =>
+                          handleSortChecklistMoveOutstandingToBottom(checklistModalSong.id)
+                        }
+                        disabled={!canSort}
+                        data-testid="checklist-sort-outstanding-to-bottom"
+                        title={tooltipText}
+                        aria-label="Sort checklist: move outstanding items to the bottom"
+                        aria-describedby={tooltipId}
+                      >
+                        Sort: outstanding to bottom
+                      </button>
+                      <ChecklistSortButtonTooltip id={tooltipId} body={tooltipText} />
+                    </span>
                   );
                 })()}
                 {/*
@@ -19873,20 +20123,25 @@ export function App(): JSX.Element {
                     : !hasEnoughTimed
                       ? 'Need at least two outstanding todos with song timestamps to sort by time.'
                       : 'Already sorted by outstanding timestamp.';
+                  const tooltipId = 'checklist-sort-outstanding-by-time-tooltip';
                   return (
-                    <button
-                      type="button"
-                      className="listening-device-secondary-button checklist-sort-outstanding-button checklist-sort-outstanding-by-time-button"
-                      onClick={() =>
-                        handleSortChecklistOutstandingByTimestamp(checklistModalSong.id)
-                      }
-                      disabled={!canSortByTime}
-                      data-testid="checklist-sort-outstanding-by-time"
-                      title={tooltipText}
-                      aria-label="Sort outstanding checklist items by song timestamp"
-                    >
-                      Sort outstanding by time
-                    </button>
+                    <span className="checklist-sort-button-tooltip-anchor">
+                      <button
+                        type="button"
+                        className="listening-device-secondary-button checklist-sort-outstanding-button checklist-sort-outstanding-by-time-button"
+                        onClick={() =>
+                          handleSortChecklistOutstandingByTimestamp(checklistModalSong.id)
+                        }
+                        disabled={!canSortByTime}
+                        data-testid="checklist-sort-outstanding-by-time"
+                        title={tooltipText}
+                        aria-label="Sort outstanding checklist items by song timestamp"
+                        aria-describedby={tooltipId}
+                      >
+                        Sort outstanding by time
+                      </button>
+                      <ChecklistSortButtonTooltip id={tooltipId} body={tooltipText} />
+                    </span>
                   );
                 })()}
               </div>
@@ -21909,7 +22164,16 @@ export function App(): JSX.Element {
                         ? 'Preview graph analysis failed.'
                         : 'Preparing preview graphs…'}
                   </p>
-                ) : null}
+                ) : (
+                  // Preserve the status row's geometry once it turns ready.
+                  // The fullscreen mastering layout-shift test samples the
+                  // panel below this point; removing the row outright makes
+                  // the whole lower overlay move even though the checklist
+                  // skeleton itself is stable.
+                  <p className="muted analysis-loading-line analysis-loading-line--placeholder" aria-hidden="true">
+                    Preview graph analysis ready.
+                  </p>
+                )}
                 {analysisStatus === 'error' ? (
                   <p className="error" data-testid="analysis-overlay-error">
                     {analysisError ?? 'Could not analyse this track preview.'}
@@ -22261,22 +22525,22 @@ export function App(): JSX.Element {
                           style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                         >
                           <span className="analysis-platform-overlay-left">
-                            <span className="analysis-platform-header-row">
+                            <span className="analysis-platform-title">{platform.label}</span>
+                            <span className="analysis-platform-meta-row">
                               <span
                                 className="analysis-platform-icon"
                                 style={{ '--platform-accent': platform.accentColor } as CSSProperties}
                               >
                                 <PlatformIcon platformId={platform.id} />
                               </span>
-                              <span className="analysis-platform-title">{platform.label}</span>
-                            </span>
-                            <span className="analysis-platform-copy">
-                              <span className="analysis-platform-target">
-                                {platform.targetLufs.toFixed(0)} LUFS target
-                              </span>
-                              <span className="analysis-platform-change">{platformAppliedMainText}</span>
-                              <span className="muted">
-                                {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                              <span className="analysis-platform-copy">
+                                <span className="analysis-platform-target">
+                                  {platform.targetLufs.toFixed(0)} LUFS target
+                                </span>
+                                <span className="analysis-platform-change">{platformAppliedMainText}</span>
+                                <span className="muted">
+                                  {platform.truePeakCeilingDbtp.toFixed(0)} dBTP ceiling
+                                </span>
                               </span>
                             </span>
                           </span>
@@ -22777,6 +23041,18 @@ export function App(): JSX.Element {
                             </button>
                           );
                         };
+                        const renderPromotePlaceholder = () => {
+                          if (isRefMode) return null;
+                          return (
+                            <span
+                              aria-hidden="true"
+                              className="mastering-checklist-row-add-button mastering-checklist-row-add-button--placeholder"
+                            >
+                              <span aria-hidden="true" className="mastering-checklist-row-add-icon">+</span>
+                              <span className="mastering-checklist-row-add-label">Add to checklist</span>
+                            </span>
+                          );
+                        };
                         const groups = groupMasteringChecklistRules();
                         return (
                           <>
@@ -22844,7 +23120,17 @@ export function App(): JSX.Element {
                                             ? 'Not measured'
                                             : `${evaluation.value} \u2014 ${evaluation.message}`}
                                         </span>
-                                        {showAddButton ? renderPromoteButton(rule.id) : null}
+                                        {/*
+                                         * Keep unavailable ready rows the same
+                                         * width/height as skeleton rows. Without
+                                         * this placeholder, data that cannot be
+                                         * measured removes the right-hand Add
+                                         * affordance and the fullscreen panel can
+                                         * jump once analysis finishes.
+                                         */}
+                                        {showAddButton
+                                          ? renderPromoteButton(rule.id)
+                                          : renderPromotePlaceholder()}
                                         {renderAiRecommendationCaption(
                                           aiRecommendationsForCurrentTrack?.[rule.id],
                                           {

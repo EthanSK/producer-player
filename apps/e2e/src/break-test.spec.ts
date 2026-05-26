@@ -1,10 +1,65 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import {
   launchProducerPlayer,
   createE2ETestDirectories,
   cleanupE2ETestDirectories,
-  writeFixtureFiles,
 } from './helpers/electron-app';
+
+function writeMinimalWav(filePath: string): Promise<void> {
+  const sampleRate = 44_100;
+  const durationMs = 500;
+  const sampleCount = Math.floor((sampleRate * durationMs) / 1000);
+  const bitsPerSample = 16;
+  const blockAlign = bitsPerSample / 8;
+  const dataSize = sampleCount * blockAlign;
+  const buffer = Buffer.alloc(44 + dataSize);
+  let offset = 0;
+  buffer.write('RIFF', offset); offset += 4;
+  buffer.writeUInt32LE(36 + dataSize, offset); offset += 4;
+  buffer.write('WAVE', offset); offset += 4;
+  buffer.write('fmt ', offset); offset += 4;
+  buffer.writeUInt32LE(16, offset); offset += 4;
+  buffer.writeUInt16LE(1, offset); offset += 2;
+  buffer.writeUInt16LE(1, offset); offset += 2;
+  buffer.writeUInt32LE(sampleRate, offset); offset += 4;
+  buffer.writeUInt32LE(sampleRate * blockAlign, offset); offset += 4;
+  buffer.writeUInt16LE(blockAlign, offset); offset += 2;
+  buffer.writeUInt16LE(bitsPerSample, offset); offset += 2;
+  buffer.write('data', offset); offset += 4;
+  buffer.writeUInt32LE(dataSize, offset); offset += 4;
+  return fs.writeFile(filePath, buffer);
+}
+
+async function writeMinimalWavFixtures(rootDirectory: string, relativePaths: string[]): Promise<void> {
+  for (const relativePath of relativePaths) {
+    await writeMinimalWav(path.join(rootDirectory, relativePath));
+  }
+}
+
+async function linkFolderPath(
+  page: Awaited<ReturnType<typeof launchProducerPlayer>>['page'],
+  folderPath: string
+): Promise<void> {
+  await page.evaluate(async (pathToLink) => {
+    await (window as any).producerPlayer.linkFolder(pathToLink);
+  }, folderPath);
+}
+
+async function tryLinkFolderPath(
+  page: Awaited<ReturnType<typeof launchProducerPlayer>>['page'],
+  folderPath: string
+): Promise<void> {
+  await page.evaluate(async (pathToLink) => {
+    try {
+      await (window as any).producerPlayer.linkFolder(pathToLink);
+    } catch {
+      // These edge cases intentionally feed invalid paths; the app just needs
+      // to stay alive and keep rendering after the expected rejection.
+    }
+  }, folderPath);
+}
 
 test.describe('Producer Player edge cases', () => {
   test('empty folder shows 0 rows gracefully', async () => {
@@ -12,8 +67,7 @@ test.describe('Producer Player edge cases', () => {
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('linked-folder-item')).toHaveCount(1);
       await expect(page.getByTestId('main-list-row')).toHaveCount(0);
@@ -27,20 +81,16 @@ test.describe('Producer Player edge cases', () => {
   test('linking the same folder twice deduplicates or handles gracefully', async () => {
     const dirs = await createE2ETestDirectories('break-dedupe');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Alpha v1.wav', contents: 'RIFF stub data' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Alpha v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('linked-folder-item')).toHaveCount(1);
 
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       // Should not crash and should not duplicate rows beyond what exists
       await expect(page.getByTestId('app-shell')).toBeVisible();
@@ -56,15 +106,12 @@ test.describe('Producer Player edge cases', () => {
     const dirs = await createE2ETestDirectories('break-longname');
     const longName = 'A'.repeat(180) + ' v1.wav';
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: longName, contents: 'RIFF stub data' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, longName));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await expect(page.getByTestId('app-shell')).toBeVisible();
@@ -77,16 +124,15 @@ test.describe('Producer Player edge cases', () => {
   test('unicode filenames appear in list', async () => {
     const dirs = await createE2ETestDirectories('break-unicode');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Ñoño Beat v1.wav', contents: 'RIFF stub data' },
-      { relativePath: 'Café Track v1.wav', contents: 'RIFF stub data' },
+    await writeMinimalWavFixtures(dirs.fixtureDirectory, [
+      'Ñoño Beat v1.wav',
+      'Café Track v1.wav',
     ]);
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(page.getByTestId('app-shell')).toBeVisible();
@@ -99,15 +145,12 @@ test.describe('Producer Player edge cases', () => {
   test('rapid rescan does not crash', async () => {
     const dirs = await createE2ETestDirectories('break-rescan');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Alpha v1.wav', contents: 'RIFF stub data' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Alpha v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 
@@ -128,8 +171,7 @@ test.describe('Producer Player edge cases', () => {
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill('/tmp/does-not-exist-99999');
-      await page.getByTestId('link-folder-path-button').click();
+      await tryLinkFolderPath(page, '/tmp/does-not-exist-99999');
 
       await expect(page.getByTestId('app-shell')).toBeVisible();
     } finally {
@@ -141,15 +183,12 @@ test.describe('Producer Player edge cases', () => {
   test('reorderSongs with empty array does not crash', async () => {
     const dirs = await createE2ETestDirectories('break-reorder-empty');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Alpha v1.wav', contents: 'RIFF stub data' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Alpha v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 
@@ -167,15 +206,12 @@ test.describe('Producer Player edge cases', () => {
   test('reorderSongs with fake IDs does not crash', async () => {
     const dirs = await createE2ETestDirectories('break-reorder-fake');
 
-    await writeFixtureFiles(dirs.fixtureDirectory, [
-      { relativePath: 'Alpha v1.wav', contents: 'RIFF stub data' },
-    ]);
+    await writeMinimalWav(path.join(dirs.fixtureDirectory, 'Alpha v1.wav'));
 
     const { electronApp, page } = await launchProducerPlayer(dirs.userDataDirectory);
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(dirs.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFolderPath(page, dirs.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
 

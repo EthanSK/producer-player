@@ -116,9 +116,9 @@ test.describe('arrow key seek shortcuts', () => {
       await cueSongVersion(page, 'Seek Test', 'Seek Test v1.wav');
 
       // Start playback and let it run briefly so we have a known position
-      await page.getByTestId('transport-play-toggle').click();
+      await page.getByTestId('player-play-toggle').click();
       await waitForPlaybackSeconds(page, 1.0);
-      await page.getByTestId('transport-play-toggle').click();
+      await page.getByTestId('player-play-toggle').click();
 
       const scrubber = page.getByTestId('player-scrubber');
       const beforeSeek = Number(await scrubber.inputValue());
@@ -150,9 +150,9 @@ test.describe('arrow key seek shortcuts', () => {
       await cueSongVersion(page, 'Seek Test', 'Seek Test v1.wav');
 
       // Start playback and let it advance past 6 seconds so we can seek backward
-      await page.getByTestId('transport-play-toggle').click();
+      await page.getByTestId('player-play-toggle').click();
       await waitForPlaybackSeconds(page, 6.5);
-      await page.getByTestId('transport-play-toggle').click();
+      await page.getByTestId('player-play-toggle').click();
 
       const scrubber = page.getByTestId('player-scrubber');
       const beforeSeek = Number(await scrubber.inputValue());
@@ -184,9 +184,9 @@ test.describe('arrow key seek shortcuts', () => {
       await cueSongVersion(page, 'Seek Test', 'Seek Test v1.wav');
 
       // Start playback briefly to set a position
-      await page.getByTestId('transport-play-toggle').click();
+      await page.getByTestId('player-play-toggle').click();
       await waitForPlaybackSeconds(page, 1.0);
-      await page.getByTestId('transport-play-toggle').click();
+      await page.getByTestId('player-play-toggle').click();
 
       // Open checklist modal to get a text input
       await page.getByTestId('transport-checklist-button').click();

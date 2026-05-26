@@ -1,12 +1,24 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   cleanupE2ETestDirectories,
   createE2ETestDirectories,
   launchProducerPlayer,
   writeFixtureFiles,
 } from './helpers/electron-app';
+
+async function linkFixtureFolder(page: Page, fixtureDirectory: string): Promise<void> {
+  // The manual path input was removed from the production sidebar, so tests
+  // call the preload link API directly instead of depending on native dialogs.
+  await page.evaluate(async (folderPath) => {
+    await (
+      window as typeof window & {
+        producerPlayer: { linkFolder: (p: string) => Promise<unknown> };
+      }
+    ).producerPlayer.linkFolder(folderPath);
+  }, fixtureDirectory);
+}
 
 test.describe('Playlist export/import ordering', () => {
   test('exports current album selection + order as JSON and can import it back', async () => {
@@ -28,8 +40,7 @@ test.describe('Playlist export/import ordering', () => {
     });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(3);
 
@@ -150,8 +161,7 @@ test.describe('Playlist export/import ordering', () => {
     });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       await expect(page.getByTestId('main-list-row')).toHaveCount(3);
 
@@ -234,8 +244,7 @@ test.describe('Playlist export/import ordering', () => {
     });
 
     try {
-      await page.getByTestId('link-folder-path-input').fill(directories.fixtureDirectory);
-      await page.getByTestId('link-folder-path-button').click();
+      await linkFixtureFolder(page, directories.fixtureDirectory);
 
       await page.getByTestId('import-playlist-order-button').click();
 

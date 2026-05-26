@@ -62,6 +62,13 @@ import log from 'electron-log/main';
 import { autoUpdater } from 'electron-updater';
 import { shouldVerifyInstallerSignature } from './auto-update-signature';
 import {
+  GITHUB_RELEASES_API_URL,
+  parseGithubReleaseListPayload,
+  resolvePreviousDowngradeRelease,
+  resolveTargetRelease,
+  type DowngradeReleaseCandidate,
+} from './auto-update-downgrade';
+import {
   GITHUB_RELEASES_LATEST_API_URL,
   PUBLIC_RELEASES_URL,
   getStableDownloadUrl,
@@ -80,6 +87,8 @@ import type {
   AgentRespondApprovalPayload,
   AiRecommendation,
   AudioFileAnalysis,
+  AutoUpdateDowngradeResult,
+  AutoUpdateInstallVersionResult,
   AutoUpdateRecheckResult,
   AutoUpdateState,
   MasteringAnalysisCachePayload,
@@ -138,7 +147,17 @@ import {
   startActiveUserHeartbeat,
   stopActiveUserHeartbeat,
 } from './active-user-heartbeat';
-import { openFileWithDetachedSystemHandler } from './file-open';
+import {
+  isDetachedSystemOpenablePath,
+  openFileWithDetachedSystemHandler,
+} from './file-open';
+import {
+  MCP_CONTROL_DISCOVERY_FILE,
+  resolveProducerPlayerMcpControlConfig,
+  startProducerPlayerMcpControlServer,
+  type ProducerPlayerMcpControlServer,
+  type ProducerPlayerMcpTool,
+} from './mcp-control-server';
 import { saveSongProjectCopy } from './song-project-copy';
 import {
   PluginHostService,
@@ -205,6 +224,12 @@ const TEST_REFERENCE_IMPORT_PATH =
   process.env.PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH ?? null;
 const TEST_PROJECT_FILE_PICK_PATH =
   process.env.PRODUCER_PLAYER_E2E_PROJECT_FILE_PICK_PATH ?? null;
+const TEST_DOWNGRADE_RELEASES_JSON =
+  process.env.PRODUCER_PLAYER_E2E_DOWNGRADE_RELEASES_JSON ?? null;
+const TEST_DOWNGRADE_RECORD_PATH =
+  process.env.PRODUCER_PLAYER_E2E_DOWNGRADE_RECORD_PATH ?? null;
+const TEST_OPEN_FILE_RECORD_PATH =
+  process.env.PRODUCER_PLAYER_E2E_OPEN_FILE_RECORD_PATH ?? null;
 const ANALYSIS_DELAY_MS = Number(process.env.PRODUCER_PLAYER_ANALYSIS_DELAY_MS ?? '0');
 const UPDATE_CHECK_TIMEOUT_MS = 12_000;
 // Delay the first update check ~3s after window create so the UI is visible
@@ -583,6 +608,7 @@ async function logMacCodeSigningIdentity(): Promise<void> {
 
 let mainWindow: BrowserWindow | null = null;
 let libraryService: FileLibraryService | null = null;
+let mcpControlServer: ProducerPlayerMcpControlServer | null = null;
 let userStateService: UserStateService | null = null;
 // v3.39 Phase 1a — plugin-host sidecar. Lazy: `.start()` is only called the
 // first time the renderer asks for a plugin scan, so sessions that never
@@ -981,6 +1007,258 @@ async function fetchLatestGithubRelease(): Promise<GithubLatestReleasePayload> {
 
   const payload = (await response.json()) as unknown;
   return parseGithubLatestReleasePayload(payload);
+}
+
+async function fetchGithubReleasesForDowngrade(): Promise<DowngradeReleaseCandidate[]> {
+  if (IS_TEST_MODE && TEST_DOWNGRADE_RELEASES_JSON) {
+    // E2E tests pass a small fixture through env so the downgrade button can
+    // exercise the real IPC/renderer flow without calling GitHub or installing
+    // a historical build on the developer machine.
+    return parseGithubReleaseListPayload(JSON.parse(TEST_DOWNGRADE_RELEASES_JSON) as unknown);
+  }
+
+  const response = await fetch(GITHUB_RELEASES_API_URL, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'Producer-Player-Downgrade-Checker',
+    },
+    signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub releases request failed (${response.status} ${response.statusText}).`);
+  }
+
+  return parseGithubReleaseListPayload((await response.json()) as unknown);
+}
+
+async function writeTestDowngradeRecord(payload: unknown): Promise<void> {
+  if (!IS_TEST_MODE || !TEST_DOWNGRADE_RECORD_PATH) {
+    return;
+  }
+
+  await fs.writeFile(TEST_DOWNGRADE_RECORD_PATH, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+async function installSpecificReleaseVersion(
+  requestedVersion: string,
+): Promise<AutoUpdateInstallVersionResult> {
+  const trimmedVersion = typeof requestedVersion === 'string' ? requestedVersion.trim() : '';
+  if (trimmedVersion.length === 0) {
+    return { status: 'error', message: 'Missing target version.' };
+  }
+
+  const disabledReason = getAutoUpdateDisabledReason();
+  const hasTestDowngradeFixture = IS_TEST_MODE && Boolean(TEST_DOWNGRADE_RELEASES_JSON);
+  if (disabledReason && !hasTestDowngradeFixture) {
+    log.info('[producer-player:auto-update] skipping specific-version install', {
+      disabledReason,
+      requestedVersion: trimmedVersion,
+    });
+    return { status: 'error', message: getAutoUpdateDisabledMessage(disabledReason) };
+  }
+
+  clearAutoUpdateRetry();
+  shouldAutoDownloadOnNextAvailable = false;
+  minimumAutoDownloadVersion = null;
+  recheckPendingDownloadedVersion = null;
+
+  try {
+    const releases = await fetchGithubReleasesForDowngrade();
+    const resolution = resolveTargetRelease({
+      releases,
+      currentVersion: APP_VERSION_INFO,
+      requestedVersion: trimmedVersion,
+      platform: process.platform,
+      arch: process.arch,
+    });
+
+    if (resolution.status === 'no-target-version') {
+      emitAutoUpdateState({
+        status: 'idle',
+        version: null,
+        progress: null,
+        error: null,
+        lastCheckedAt: new Date().toISOString(),
+      });
+      return resolution;
+    }
+
+    log.info('[producer-player:auto-update] specific-version target resolved', {
+      currentVersion: APP_VERSION_INFO.semanticVersion,
+      targetTag: resolution.release.tagName,
+      targetVersion: resolution.displayVersion,
+      direction: resolution.direction,
+      metadataAssetName: resolution.metadataAssetName,
+    });
+
+    await writeTestDowngradeRecord({
+      currentVersion: APP_VERSION_INFO.displayVersion,
+      targetVersion: resolution.displayVersion,
+      targetTag: resolution.release.tagName,
+      direction: resolution.direction,
+      feedUrl: resolution.feedUrl,
+      downloadUrl: resolution.downloadUrl,
+      requestedVersion: trimmedVersion,
+    });
+
+    if (IS_TEST_MODE) {
+      // Test mode proves the MCP/main-process path without downloading or
+      // installing a real app build on the developer machine.
+      emitAutoUpdateState({
+        status: 'downloading',
+        version: resolution.displayVersion,
+        progress: null,
+        error: null,
+        lastCheckedAt: new Date().toISOString(),
+      });
+      return {
+        status: 'downloading',
+        direction: resolution.direction,
+        currentVersion: APP_VERSION_INFO.displayVersion,
+        targetVersion: resolution.displayVersion,
+        targetTag: resolution.release.tagName,
+        releaseUrl: resolution.release.htmlUrl,
+      };
+    }
+
+    configureAutoUpdater();
+    installAfterDownload = true;
+    autoUpdater.allowDowngrade = resolution.direction === 'downgrade';
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: resolution.feedUrl,
+    });
+
+    // The release resolver already proved the requested tag has the expected
+    // updater metadata and a platform asset. The second version comparison
+    // checks the downloaded feed itself so a malformed GitHub asset cannot
+    // trick the app into installing the current version.
+    const checkResult = await autoUpdater.checkForUpdates();
+    const updateVersion = checkResult?.updateInfo?.version ?? null;
+    if (!updateVersion) {
+      throw new Error('Target release metadata did not resolve to an installable version.');
+    }
+
+    const targetComparison = compareUpdateVersions(updateVersion, APP_VERSION_INFO.semanticVersion);
+    if (
+      (resolution.direction === 'downgrade' && targetComparison >= 0) ||
+      (resolution.direction === 'upgrade' && targetComparison <= 0)
+    ) {
+      throw new Error('Target release metadata resolved to the wrong version direction.');
+    }
+
+    emitAutoUpdateState({
+      status: 'downloading',
+      version: resolution.displayVersion,
+      progress: null,
+      error: null,
+    });
+    await autoUpdater.downloadUpdate();
+
+    return {
+      status: 'downloading',
+      direction: resolution.direction,
+      currentVersion: APP_VERSION_INFO.displayVersion,
+      targetVersion: resolution.displayVersion,
+      targetTag: resolution.release.tagName,
+      releaseUrl: resolution.release.htmlUrl,
+    };
+  } catch (error: unknown) {
+    installAfterDownload = false;
+    log.warn('[producer-player:auto-update] specific-version install failed', {
+      requestedVersion: trimmedVersion,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    const message =
+      error instanceof Error && error.message.includes('Target release metadata')
+        ? error.message
+        : friendlyUpdateErrorMessage(error);
+    emitAutoUpdateState({
+      status: 'error',
+      version: currentAutoUpdateState.version,
+      progress: null,
+      error: message,
+      lastCheckedAt: new Date().toISOString(),
+    });
+    return { status: 'error', message };
+  } finally {
+    if (!IS_TEST_MODE) {
+      autoUpdater.allowDowngrade = false;
+      configureAutoUpdater();
+    }
+  }
+}
+
+function readMcpStringArg(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Missing required string argument: ${key}`);
+  }
+  return value.trim();
+}
+
+function readMcpStringArrayArg(args: Record<string, unknown>, key: string): string[] {
+  const value = args[key];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new Error(`Missing required string[] argument: ${key}`);
+  }
+  return value.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+
+function readMcpNumberArg(args: Record<string, unknown>, key: string): number | undefined {
+  const value = args[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function requireMcpMainWindow(): BrowserWindow {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    throw new Error('Producer Player has no active window to control.');
+  }
+  return mainWindow;
+}
+
+async function runMcpAutoUpdateCheck(): Promise<{ status: 'ok'; state: AutoUpdateState } | { status: 'error'; message: string }> {
+  const disabledReason = getAutoUpdateDisabledReason();
+  if (disabledReason) {
+    return { status: 'error', message: getAutoUpdateDisabledMessage(disabledReason) };
+  }
+
+  clearAutoUpdateRetry();
+  configureAutoUpdater();
+  await autoUpdater.checkForUpdates();
+  return { status: 'ok', state: currentAutoUpdateState };
+}
+
+async function runMcpAutoUpdateDownload(): Promise<{ status: 'downloading' | 'skipped'; state: AutoUpdateState; message?: string }> {
+  if (!app.isPackaged || IS_TEST_MODE) {
+    return {
+      status: 'skipped',
+      state: currentAutoUpdateState,
+      message: 'Auto-update downloads only run from packaged non-test builds.',
+    };
+  }
+
+  installAfterDownload = true;
+  emitAutoUpdateState({
+    status: 'downloading',
+    version: currentAutoUpdateState.version,
+    progress: null,
+    error: null,
+  });
+  await autoUpdater.downloadUpdate();
+  return { status: 'downloading', state: currentAutoUpdateState };
+}
+
+function scheduleMcpDownloadedUpdateInstall(): { status: 'installing'; version: string | null } {
+  emitAutoUpdateState({
+    status: 'installing',
+    version: currentAutoUpdateState.version,
+    progress: null,
+    error: null,
+  });
+  setTimeout(() => autoUpdater.quitAndInstall(false, true), 750);
+  return { status: 'installing', version: currentAutoUpdateState.version };
 }
 
 function buildUpdateResultMessage(result: {
@@ -3987,6 +4265,231 @@ function buildEnvironmentInfo(): ProducerPlayerEnvironment {
   };
 }
 
+function createMcpControlTools(service: FileLibraryService): ProducerPlayerMcpTool[] {
+  const objectSchema = (properties: Record<string, unknown> = {}, required: string[] = []) => ({
+    type: 'object',
+    properties,
+    required,
+    additionalProperties: false,
+  });
+
+  return [
+    {
+      name: 'pp_get_environment',
+      description: 'Return Producer Player runtime/environment details, including app version and update state.',
+      inputSchema: objectSchema(),
+      handler: () => ({
+        environment: buildEnvironmentInfo(),
+        autoUpdateState: currentAutoUpdateState,
+        mcp: {
+          enabled: Boolean(mcpControlServer),
+          port: mcpControlServer?.port() ?? null,
+        },
+      }),
+    },
+    {
+      name: 'pp_get_library_snapshot',
+      description: 'Return the current linked folders, songs, versions, matcher settings, and scan status.',
+      inputSchema: objectSchema(),
+      handler: () => service.getSnapshot(),
+    },
+    {
+      name: 'pp_link_folder',
+      description: 'Link a local producer/export folder by absolute path, then restore any saved song order sidecars.',
+      inputSchema: objectSchema(
+        {
+          path: { type: 'string', description: 'Absolute folder path to link.' },
+        },
+        ['path'],
+      ),
+      handler: async (args) => {
+        if (IS_MAC_APP_STORE_SANDBOX) {
+          throw new Error('Manual path linking is disabled in the Mac App Store sandbox build.');
+        }
+        const folderPath = resolve(readMcpStringArg(args, 'path'));
+        let snapshot = await service.linkFolder(folderPath);
+        if (shouldAttemptSidecarOrderRestore) {
+          snapshot = await restoreSongOrderFromSidecars(service, [folderPath]);
+        }
+        return snapshot;
+      },
+    },
+    {
+      name: 'pp_unlink_folder',
+      description: 'Unlink a previously linked folder by folder id.',
+      inputSchema: objectSchema(
+        {
+          folderId: { type: 'string', description: 'Linked folder id from pp_get_library_snapshot.' },
+        },
+        ['folderId'],
+      ),
+      handler: async (args) => {
+        const folderId = readMcpStringArg(args, 'folderId');
+        const folder = service.getSnapshot().linkedFolders.find((entry) => entry.id === folderId);
+        const snapshot = await service.unlinkFolder(folderId);
+        if (folder) {
+          releaseFolderSecurityScope(folder.path);
+          forgetFolderBookmark(folder.path);
+        }
+        return snapshot;
+      },
+    },
+    {
+      name: 'pp_rescan_library',
+      description: 'Rescan linked folders and return the refreshed library snapshot.',
+      inputSchema: objectSchema(),
+      handler: () => service.rescanLibrary(),
+    },
+    {
+      name: 'pp_set_auto_move_old',
+      description: 'Enable or disable automatic movement of old versions into Old Versions folders.',
+      inputSchema: objectSchema(
+        {
+          enabled: { type: 'boolean' },
+        },
+        ['enabled'],
+      ),
+      handler: (args) => service.setAutoMoveOld(Boolean(args.enabled)),
+    },
+    {
+      name: 'pp_reorder_songs',
+      description: 'Persist a complete song-id ordering for the current library.',
+      inputSchema: objectSchema(
+        {
+          songIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Complete ordered list of song ids.',
+          },
+        },
+        ['songIds'],
+      ),
+      handler: (args) => service.reorderSongs(readMcpStringArrayArg(args, 'songIds')),
+    },
+    {
+      name: 'pp_transport_command',
+      description: 'Send a playback transport command to the renderer.',
+      inputSchema: objectSchema(
+        {
+          command: {
+            type: 'string',
+            enum: ['play-pause', 'next-track', 'previous-track', 'seek-forward', 'seek-backward'],
+          },
+        },
+        ['command'],
+      ),
+      handler: (args) => {
+        const command = readMcpStringArg(args, 'command') as TransportCommand;
+        if (
+          !['play-pause', 'next-track', 'previous-track', 'seek-forward', 'seek-backward'].includes(
+            command,
+          )
+        ) {
+          throw new Error(`Unsupported transport command: ${command}`);
+        }
+        emitTransportCommand(command);
+        return { ok: true, command };
+      },
+    },
+    {
+      name: 'pp_dom_snapshot',
+      description: 'Return a structured snapshot of visible Producer Player controls.',
+      inputSchema: objectSchema({
+        rootSelector: { type: 'string', description: 'Optional CSS root selector.' },
+        maxNodes: { type: 'number', description: 'Optional node cap; defaults to the app limit.' },
+      }),
+      handler: async (args) => {
+        const windowForUi = requireMcpMainWindow();
+        const payload: AgentDomSnapshotPayload = {
+          rootSelector:
+            typeof args.rootSelector === 'string' && args.rootSelector.trim().length > 0
+              ? args.rootSelector.trim()
+              : undefined,
+          maxNodes: readMcpNumberArg(args, 'maxNodes'),
+        };
+        const result = await agentUiDomSnapshot(payload, agentUiMakeRunJsDeps(windowForUi));
+        agentUiLogDomSnapshot(result);
+        return result;
+      },
+    },
+    {
+      name: 'pp_screenshot',
+      description: 'Capture the Producer Player window as a PNG data URL.',
+      inputSchema: objectSchema({
+        region: { type: 'string', enum: ['window', 'visible'] },
+      }),
+      handler: async (args) => {
+        const windowForUi = requireMcpMainWindow();
+        const payload: AgentScreenshotPayload = {
+          region: args.region === 'visible' ? 'visible' : 'window',
+        };
+        const result = await agentUiScreenshot(payload, windowForUi);
+        agentUiLogScreenshot(result);
+        return result;
+      },
+    },
+    {
+      name: 'pp_run_js',
+      description: 'Run guarded JavaScript in the Producer Player renderer to inspect or control ordinary UI state.',
+      inputSchema: objectSchema(
+        {
+          code: { type: 'string', description: 'Renderer JavaScript source.' },
+          timeoutMs: { type: 'number', description: 'Optional timeout in milliseconds.' },
+        },
+        ['code'],
+      ),
+      handler: async (args) => {
+        const windowForUi = requireMcpMainWindow();
+        const payload: AgentRunJsPayload = {
+          code: readMcpStringArg(args, 'code'),
+          timeoutMs: readMcpNumberArg(args, 'timeoutMs'),
+        };
+        const result = await agentUiRunJs(payload, agentUiMakeRunJsDeps(windowForUi));
+        agentUiLogRunJs(payload.code, result);
+        return result;
+      },
+    },
+    {
+      name: 'pp_update_state',
+      description: 'Return the current auto-update state without starting a network check.',
+      inputSchema: objectSchema(),
+      handler: () => currentAutoUpdateState,
+    },
+    {
+      name: 'pp_update_check',
+      description: 'Run a Producer Player update check using the normal signed updater feed.',
+      inputSchema: objectSchema(),
+      handler: () => runMcpAutoUpdateCheck(),
+    },
+    {
+      name: 'pp_update_download',
+      description: 'Download the currently available update and arm install-after-download.',
+      inputSchema: objectSchema(),
+      handler: () => runMcpAutoUpdateDownload(),
+    },
+    {
+      name: 'pp_update_install_downloaded',
+      description: 'Quit and install the already-downloaded update after a short UI-visible delay.',
+      inputSchema: objectSchema(),
+      handler: () => scheduleMcpDownloadedUpdateInstall(),
+    },
+    {
+      name: 'pp_install_version',
+      description: 'Upgrade or downgrade to an exact stable Producer Player release version/tag from EthanSK/producer-player.',
+      inputSchema: objectSchema(
+        {
+          version: {
+            type: 'string',
+            description: 'Exact release tag/version, for example v3.264.0 or 3.264.',
+          },
+        },
+        ['version'],
+      ),
+      handler: (args) => installSpecificReleaseVersion(readMcpStringArg(args, 'version')),
+    },
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Main window bounds persistence
 // ---------------------------------------------------------------------------
@@ -5028,8 +5531,34 @@ function registerIpcHandlers(service: FileLibraryService): void {
         return;
       }
 
-      if (!stats.isFile()) {
-        log.warn('[producer-player] OPEN_FILE: path is not a file', { resolvedPath });
+      if (!isDetachedSystemOpenablePath(stats)) {
+        log.warn('[producer-player] OPEN_FILE: path is not an openable file or directory', {
+          resolvedPath,
+        });
+        return;
+      }
+
+      if (IS_TEST_MODE && TEST_OPEN_FILE_RECORD_PATH) {
+        try {
+          // E2E-only recorder for Open Project: it lets Playwright prove the
+          // renderer's real button reached the main-process handoff without
+          // launching Logic/Ableton on the developer or CI machine.
+          await fs.appendFile(
+            TEST_OPEN_FILE_RECORD_PATH,
+            `${JSON.stringify({
+              filePath: resolvedPath,
+              isFile: stats.isFile(),
+              isDirectory: stats.isDirectory(),
+              recordedAt: Date.now(),
+            })}\n`,
+            'utf8'
+          );
+        } catch (cause) {
+          log.warn('[producer-player] OPEN_FILE: test recorder failed', {
+            resolvedPath,
+            cause,
+          });
+        }
         return;
       }
 
@@ -5247,6 +5776,140 @@ function registerIpcHandlers(service: FileLibraryService): void {
       // Re-throw a friendly Error so the renderer's `runVoidTask` doesn't
       // surface electron-updater's raw cert dump / stack trace into the UI.
       throw new Error(friendlyUpdateErrorMessage(error));
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AUTO_UPDATE_DOWNGRADE, async (): Promise<AutoUpdateDowngradeResult> => {
+    const disabledReason = getAutoUpdateDisabledReason();
+    const hasTestDowngradeFixture = IS_TEST_MODE && Boolean(TEST_DOWNGRADE_RELEASES_JSON);
+    if (disabledReason && !hasTestDowngradeFixture) {
+      log.info('[producer-player:auto-update] skipping downgrade', { disabledReason });
+      return { status: 'error', message: getAutoUpdateDisabledMessage(disabledReason) };
+    }
+
+    clearAutoUpdateRetry();
+    shouldAutoDownloadOnNextAvailable = false;
+    minimumAutoDownloadVersion = null;
+    recheckPendingDownloadedVersion = null;
+
+    try {
+      const releases = await fetchGithubReleasesForDowngrade();
+      const resolution = resolvePreviousDowngradeRelease({
+        releases,
+        currentVersion: APP_VERSION_INFO,
+        platform: process.platform,
+        arch: process.arch,
+      });
+
+      if (resolution.status === 'no-previous-version') {
+        // Keep the updater idle and let the renderer show the clear no-op
+        // message. We do not call electron-updater when the resolver cannot
+        // prove there is an older compatible release.
+        emitAutoUpdateState({
+          status: 'idle',
+          version: null,
+          progress: null,
+          error: null,
+          lastCheckedAt: new Date().toISOString(),
+        });
+        return resolution;
+      }
+
+      log.info('[producer-player:auto-update] downgrade target resolved', {
+        currentVersion: APP_VERSION_INFO.semanticVersion,
+        previousTag: resolution.release.tagName,
+        previousVersion: resolution.displayVersion,
+        metadataAssetName: resolution.metadataAssetName,
+      });
+
+      await writeTestDowngradeRecord({
+        currentVersion: APP_VERSION_INFO.displayVersion,
+        previousVersion: resolution.displayVersion,
+        previousTag: resolution.release.tagName,
+        feedUrl: resolution.feedUrl,
+        downloadUrl: resolution.downloadUrl,
+      });
+
+      if (IS_TEST_MODE) {
+        // Test mode must prove the renderer/main downgrade path without ever
+        // downloading or installing an old app build. Emitting the same state
+        // shape as the real path lets Playwright assert the UI transition.
+        emitAutoUpdateState({
+          status: 'downloading',
+          version: resolution.displayVersion,
+          progress: null,
+          error: null,
+          lastCheckedAt: new Date().toISOString(),
+        });
+        return {
+          status: 'downloading',
+          currentVersion: APP_VERSION_INFO.displayVersion,
+          previousVersion: resolution.displayVersion,
+          previousTag: resolution.release.tagName,
+          releaseUrl: resolution.release.htmlUrl,
+        };
+      }
+
+      configureAutoUpdater();
+      installAfterDownload = true;
+      autoUpdater.allowDowngrade = true;
+      autoUpdater.setFeedURL({
+        provider: 'generic',
+        url: resolution.feedUrl,
+      });
+
+      // Pointing electron-updater at a specific release feed is the safety
+      // mechanism: the user cannot type an arbitrary version, and the resolver
+      // above already proved this feed is older than the installed build.
+      const checkResult = await autoUpdater.checkForUpdates();
+      const updateVersion = checkResult?.updateInfo?.version ?? null;
+      if (
+        !updateVersion ||
+        compareUpdateVersions(updateVersion, APP_VERSION_INFO.semanticVersion) >= 0
+      ) {
+        throw new Error('Previous release metadata did not resolve to an older installable version.');
+      }
+
+      emitAutoUpdateState({
+        status: 'downloading',
+        version: resolution.displayVersion,
+        progress: null,
+        error: null,
+      });
+      await autoUpdater.downloadUpdate();
+
+      return {
+        status: 'downloading',
+        currentVersion: APP_VERSION_INFO.displayVersion,
+        previousVersion: resolution.displayVersion,
+        previousTag: resolution.release.tagName,
+        releaseUrl: resolution.release.htmlUrl,
+      };
+    } catch (error: unknown) {
+      installAfterDownload = false;
+      log.warn('[producer-player:auto-update] downgrade failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const message =
+        error instanceof Error && error.message.includes('Previous release metadata')
+          ? error.message
+          : friendlyUpdateErrorMessage(error);
+      emitAutoUpdateState({
+        status: 'error',
+        version: currentAutoUpdateState.version,
+        progress: null,
+        error: message,
+        lastCheckedAt: new Date().toISOString(),
+      });
+      return { status: 'error', message };
+    } finally {
+      if (!IS_TEST_MODE) {
+        autoUpdater.allowDowngrade = false;
+        // Restore the normal GitHub latest feed after the targeted downgrade
+        // check/download attempt so future scheduled checks cannot stay pinned
+        // to an older release.
+        configureAutoUpdater();
+      }
     }
   });
 
@@ -6559,6 +7222,15 @@ app.whenReady().then(async () => {
   registerIpcHandlers(service);
   buildApplicationMenu();
   await createMainWindow();
+  mcpControlServer = await startProducerPlayerMcpControlServer({
+    config: resolveProducerPlayerMcpControlConfig(),
+    tools: createMcpControlTools(service),
+    discoveryFilePath: join(app.getPath('userData'), MCP_CONTROL_DISCOVERY_FILE),
+    logger: {
+      info: (message, meta) => log.info(message, meta ?? {}),
+      warn: (message, meta) => log.warn(message, meta ?? {}),
+    },
+  });
   registerGlobalMediaShortcuts();
   scheduleAutomaticUpdateChecks();
 
@@ -6590,6 +7262,16 @@ app.on('before-quit', () => {
   stopActiveUserHeartbeat();
   releaseAllFolderSecurityScopes();
   agentService.destroySession();
+
+  if (mcpControlServer) {
+    const server = mcpControlServer;
+    mcpControlServer = null;
+    void server.close().catch((error: unknown) => {
+      log.warn('[producer-player:mcp] failed to close HTTP MCP control server', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
 
   if (libraryService) {
     void libraryService.dispose();

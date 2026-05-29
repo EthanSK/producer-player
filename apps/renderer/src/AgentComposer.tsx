@@ -1,11 +1,17 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
   type KeyboardEvent,
 } from 'react';
 import type { AgentAttachment } from '@producer-player/contracts';
+import {
+  appendBlockquoteToComposerText,
+  formatSelectionAsBlockquote,
+} from './agentChatSelection';
 import {
   AGENT_VOICE_SETTINGS_UPDATED_EVENT,
   getAgentMicChannelModeLabel,
@@ -41,6 +47,25 @@ interface AgentComposerProps {
    * pasted files up so the panel can stage them alongside drag-and-drop.
    */
   onPasteFiles?: (files: File[]) => void;
+}
+
+/**
+ * v3.267 — Imperative handle exposed to the parent (`AgentChatPanel`) for the
+ * "Floating selection → Add to chat" feature. Lets the panel push a quoted
+ * reference into the composer input WITHOUT lifting `text` state up (which
+ * would mean re-plumbing the entire composer + its auto-resize / mic / send
+ * flow). The handle is intentionally narrow — only the operations the
+ * selection-tooltip feature needs.
+ */
+export interface AgentComposerHandle {
+  /**
+   * Append the given selection text to the composer input as a Markdown
+   * blockquote, then focus the textarea so the user can immediately type
+   * their question. Idempotent-by-content: each call appends a NEW quote;
+   * we never overwrite existing input (Ethan voice 7199: "each adds another
+   * reference to the input. Don't overwrite.").
+   */
+  appendQuotedSelection: (text: string) => void;
 }
 
 /**
@@ -209,18 +234,22 @@ function RecordingWaveform({
 
 /* ── Main composer ──────────────────────────────────────────── */
 
-export function AgentComposer({
-  onSend,
-  onInterrupt,
-  isStreaming,
-  disabled = false,
-  attachments = [],
-  attachmentError = null,
-  onRemoveAttachment,
-  onClearAttachments,
-  onDismissAttachmentError,
-  onPasteFiles,
-}: AgentComposerProps): JSX.Element {
+export const AgentComposer = forwardRef<AgentComposerHandle, AgentComposerProps>(
+  function AgentComposer(
+    {
+      onSend,
+      onInterrupt,
+      isStreaming,
+      disabled = false,
+      attachments = [],
+      attachmentError = null,
+      onRemoveAttachment,
+      onClearAttachments,
+      onDismissAttachmentError,
+      onPasteFiles,
+    }: AgentComposerProps,
+    forwardedRef,
+  ): JSX.Element {
   const [text, setText] = useState('');
   const [micState, setMicState] = useState<MicState>('idle');
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -259,6 +288,48 @@ export function AgentComposer({
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // v3.267 — Imperative handle for the floating "Add to chat" tooltip. When
+  // the user clicks Add, AgentChatPanel calls `appendQuotedSelection(text)`
+  // here, which:
+  //   1. Formats the selection as a Markdown blockquote (pure helper),
+  //   2. Concatenates onto current input with exactly one blank-line gap,
+  //   3. Focuses the textarea + scrolls the caret to the end so the next
+  //      keystroke continues after the quote.
+  // We use the functional `setText(prev => ...)` form so simultaneous quote
+  // additions (e.g. two fast clicks) don't drop one due to stale closure.
+  // The auto-resize useEffect downstream picks up the new content on the
+  // next render — no manual layout poke required.
+  useImperativeHandle(
+    forwardedRef,
+    () => ({
+      appendQuotedSelection(rawText: string) {
+        const blockquote = formatSelectionAsBlockquote(rawText);
+        if (blockquote.length === 0) return;
+        setText((previous) => appendBlockquoteToComposerText(previous, blockquote));
+        // Defer focus to the next tick so the state update has flushed and
+        // the textarea's auto-grow has applied — focusing earlier can land
+        // the caret in the OLD (smaller) textarea and visually pop.
+        window.requestAnimationFrame(() => {
+          const node = textareaRef.current;
+          if (!node) return;
+          node.focus();
+          // Move caret to the very end so the next keystroke continues below
+          // the quote (the appendBlockquoteToComposerText helper already
+          // leaves two trailing newlines for the caret to land on).
+          const len = node.value.length;
+          try {
+            node.setSelectionRange(len, len);
+          } catch {
+            /* selectionRange isn't supported on all textarea modes; ignore */
+          }
+          // Scroll caret into view for long composer content.
+          node.scrollTop = node.scrollHeight;
+        });
+      },
+    }),
+    [],
+  );
 
   const flashError = useCallback(() => {
     setMicState('error');
@@ -796,4 +867,5 @@ export function AgentComposer({
       ) : null}
     </div>
   );
-}
+  },
+);

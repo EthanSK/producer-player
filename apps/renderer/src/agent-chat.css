@@ -1969,3 +1969,75 @@ body.agent-chat-panel-dragging * {
   line-height: 1;
   padding: 0 4px;
 }
+
+/* v3.267 — Floating "Add to chat" selection tooltip. Portalled under
+   document.body and positioned by JS, so this rule set only handles its
+   own appearance (NOT its position — that's inline). Matches the agent
+   panel's dark glass aesthetic with a thin border + soft shadow so it
+   reads as belonging to the chat panel even when floating over the rest
+   of the app. */
+.agent-chat-selection-tooltip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  background: var(--bg-1, #1a1a1a);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.25);
+  /* Pointer-events ON so the button is clickable; the mousedown handler in
+     the component prevents the click from collapsing the selection. */
+  pointer-events: auto;
+  /* Subtle entrance — fades in over 80ms so it doesn't feel jarring when
+     the user releases mouseup on a fresh highlight. Matches the
+     "feel-quick-but-not-instant" timing the help/settings panels use. */
+  animation: agent-chat-selection-tooltip-in 80ms ease-out;
+}
+
+@keyframes agent-chat-selection-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.agent-chat-selection-tooltip-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text, #f0f0f0);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  /* Lower default contrast so the button doesn't shout when it appears
+     mid-text-read; the hover state below brings it forward on intent. */
+  opacity: 0.92;
+  transition: background-color 100ms ease-out, opacity 100ms ease-out;
+}
+
+.agent-chat-selection-tooltip-button:hover,
+.agent-chat-selection-tooltip-button:focus-visible {
+  background: var(--bg-2, rgba(255, 255, 255, 0.08));
+  opacity: 1;
+  outline: none;
+}
+
+.agent-chat-selection-tooltip-button:focus-visible {
+  /* Visible keyboard focus ring — required for the a11y guardrail in
+     CLAUDE.md ("tooltip button has aria-label, keyboard-navigable"). */
+  box-shadow: 0 0 0 2px var(--accent, #5b8cff);
+}
+
+.agent-chat-selection-tooltip-label {
+  white-space: nowrap;
+}

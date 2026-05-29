@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -15,8 +16,11 @@ import type {
   AgentThinkingEffort,
   AgentTokenUsage,
 } from '@producer-player/contracts';
-import { AgentComposer } from './AgentComposer';
+import { AgentComposer, type AgentComposerHandle } from './AgentComposer';
 import { AgentSettings } from './AgentSettings';
+import { AgentChatSelectionTooltip } from './AgentChatSelectionTooltip';
+import { useChatTextSelection } from './useChatTextSelection';
+import type { SelectionRect } from './agentChatSelection';
 import {
   captureAgentUiContext,
   DEFAULT_AGENT_SYSTEM_PROMPT,
@@ -791,6 +795,12 @@ export function AgentChatPanel({
   const headerRef = useRef<HTMLDivElement | null>(null);
 
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  // v3.267 — Imperative ref to the composer so the floating "Add to chat"
+  // tooltip can push a quoted selection into the composer's input WITHOUT
+  // lifting the composer's text state up here. Keeps the composer's
+  // auto-resize / mic / send flow undisturbed; the parent only nudges via
+  // `appendQuotedSelection(text)`.
+  const composerRef = useRef<AgentComposerHandle | null>(null);
   const userScrolledUpRef = useRef(false);
   const streamingMessageIdRef = useRef<string | null>(null);
   const onboardingScheduledRef = useRef(false);
@@ -1160,6 +1170,83 @@ export function AgentChatPanel({
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     userScrolledUpRef.current = !atBottom;
   }, []);
+
+  // v3.267 — "Floating selection → Add to chat" (Ethan voice 7199,
+  // 2026-05-29). The hook watches `selectionchange` on document and returns
+  // a {text, rect} when the user has highlighted text inside the timeline.
+  // We gate `enabled` on the timeline actually being the visible view —
+  // selections inside settings / history / help / approval modals shouldn't
+  // pop the "Add to chat" tooltip because those contents aren't part of the
+  // conversation transcript.
+  const selectionEnabled = isOpen && !settingsOpen && !historyOpen && !helpDialogOpen;
+  const chatSelection = useChatTextSelection({
+    containerRef: timelineRef,
+    enabled: selectionEnabled,
+  });
+
+  // Track the chat panel's bounding rect so the floating tooltip can clamp
+  // itself horizontally to the panel (otherwise it could drift outside the
+  // panel on selections near its left/right edge). We re-measure on the same
+  // window events that the selection hook listens for, so the rect is fresh.
+  const [containerRectForTooltip, setContainerRectForTooltip] =
+    useState<SelectionRect | null>(null);
+  useEffect(() => {
+    if (!chatSelection) {
+      // Clear the cached rect when there's no selection. Avoids the rect
+      // going stale across long idle periods.
+      setContainerRectForTooltip(null);
+      return;
+    }
+    const node = panelRef.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    setContainerRectForTooltip({
+      top: rect.top,
+      left: rect.left,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    });
+  }, [chatSelection, viewportSize, panelBounds]);
+
+  // Click handler for the "Add to chat" tooltip button. Snapshots the
+  // selection text, hands it to the composer's imperative handle, and
+  // collapses the browser selection so the tooltip naturally hides on the
+  // next `selectionchange` tick.
+  const handleAddSelectionToChat = useCallback((text: string) => {
+    const handle = composerRef.current;
+    if (!handle) return;
+    handle.appendQuotedSelection(text);
+    // Collapse the highlight so the tooltip dismisses. We don't call
+    // `removeAllRanges()` directly because it can briefly throw on certain
+    // shadow-root setups; the try/catch keeps the click handler robust.
+    try {
+      window.getSelection()?.removeAllRanges();
+    } catch {
+      /* ignore — selection will collapse naturally on next user input */
+    }
+  }, []);
+
+  // Tooltip-requested dismiss (Escape key, click-outside). Same collapse
+  // semantics as the Add handler.
+  const handleSelectionTooltipDismiss = useCallback(() => {
+    try {
+      window.getSelection()?.removeAllRanges();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Memoise the selection prop so the tooltip's layout-effect doesn't
+  // re-run on every parent re-render — only when the underlying rect / text
+  // changes. Without this, the parent's frequent renders (streaming deltas,
+  // scroll state, etc.) would re-compute the tooltip position every tick
+  // and cause a visible jitter on the highlight.
+  const tooltipSelection = useMemo(() => {
+    if (!chatSelection) return null;
+    return { text: chatSelection.text, rect: chatSelection.rect };
+  }, [chatSelection]);
 
   useEffect(() => {
     const unsubscribe = window.producerPlayer.onAgentEvent((event: AgentEvent) => {
@@ -2469,6 +2556,7 @@ export function AgentChatPanel({
         </div>
 
         <AgentComposer
+          ref={composerRef}
           onSend={handleSendMessage}
           onInterrupt={handleInterrupt}
           isStreaming={isStreaming}
@@ -2481,6 +2569,17 @@ export function AgentChatPanel({
           onPasteFiles={(files) => {
             void handleFilesAttached(files);
           }}
+        />
+
+        {/* v3.267 — Floating "Add to chat" tooltip. Portalled under
+            document.body so the agent-timeline's overflow clipping doesn't
+            truncate it. Renders only when there's a non-empty selection
+            inside the timeline. */}
+        <AgentChatSelectionTooltip
+          selection={tooltipSelection}
+          containerRect={containerRectForTooltip}
+          onAddToChat={handleAddSelectionToChat}
+          onDismiss={handleSelectionTooltipDismiss}
         />
 
         {/* Resize handles — eight overlay divs (4 sides + 4 corners). The

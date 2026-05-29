@@ -5524,10 +5524,38 @@ button.checklist-play-toggle[data-playing='true'] {
   align-items: center;
 }
 
+/* v3.270 — Inspector version-row left-hand text column. Was previously
+ * unstyled (default block layout inside a flex parent), so when the
+ * sample-rate metadata grew from "48 kHz" to "48 kHz · 24-bit" in v3.269
+ * the middle-dot became a soft wrap point and "24-bit" hopped onto a new
+ * line below "Sample rate: 48 kHz". Ethan voice 7213 (2026-05-29):
+ * "Why isn't it on the same row? ... That container should probably take
+ * up the remaining footer space". Fix: claim the remaining row width with
+ * `flex: 1` + `min-width: 0` (the min-width:0 is load-bearing — without
+ * it the flex item refuses to shrink below its intrinsic content width
+ * and the action column gets pushed out). Per-line `white-space: nowrap`
+ * on the metadata `<p>` keeps "48 kHz · 24-bit" glued together; if the
+ * row is genuinely too narrow we fall back to clean ellipsis truncation
+ * instead of letting the value pop to a second line. */
+.version-row > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.version-row .muted[data-testid="inspector-version-sample-rate"],
+.version-row .muted[data-testid="inspector-version-integrated-lufs"] {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .version-actions {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* Right column hugs its content so the left text column gets the
+   * remaining width (see `.version-row > div:first-child` above). */
+  flex: 0 0 auto;
   /* Buttons sit at the right edge of the row; let any tooltip popovers
      extend leftwards without being clipped. */
   overflow: visible;

@@ -3477,7 +3477,14 @@ async function analyzeAudioFileInternal(
     throw new AnalysisAbortError(requestId ?? '<no-id>');
   }
 
-  const [volumedetectResult, probedSampleRateHz] = await Promise.all([
+  // v3.269 — Probe extended in one pass to also pull bit depth + sample
+  // format so the Inspector version-history row can show "48 kHz · 24-bit"
+  // (Ethan voice 7201, 2026-05-29). ffprobe's JSON output is the cheapest
+  // place to grab all four fields (`sample_rate`, `bits_per_raw_sample`,
+  // `bits_per_sample`, `sample_fmt`) in a single child-process call. The
+  // existing diagnostic-regex fallback for sample rate is preserved for the
+  // ffprobe-failure path.
+  const [volumedetectResult, probedAudioFormat] = await Promise.all([
     runProcessCapture(ffmpegCommand, [
       '-hide_banner',
       '-nostats',
@@ -3497,13 +3504,44 @@ async function analyzeAudioFileInternal(
           '-select_streams',
           'a:0',
           '-show_entries',
-          'stream=sample_rate',
+          'stream=sample_rate,bits_per_raw_sample,bits_per_sample,sample_fmt,codec_name',
           '-of',
-          'default=noprint_wrappers=1:nokey=1',
+          'json',
           resolvedPath,
         ], { requestId });
 
-        return parseInteger(probeResult.stdout.trim());
+        const parsed = JSON.parse(probeResult.stdout) as {
+          streams?: Array<{
+            sample_rate?: unknown;
+            bits_per_raw_sample?: unknown;
+            bits_per_sample?: unknown;
+            sample_fmt?: unknown;
+            codec_name?: unknown;
+          }>;
+        };
+        const stream = Array.isArray(parsed.streams) ? parsed.streams[0] : undefined;
+        if (!stream) {
+          return null;
+        }
+
+        return {
+          sampleRateHz: parseInteger(stream.sample_rate),
+          // Prefer bits_per_raw_sample when present — for lossless PCM
+          // formats it's the true source-bit-depth (e.g. 24 for a 24-bit
+          // WAV stored in an s32 sample format container). bits_per_sample
+          // is the next-best signal (mostly populated for the same family).
+          // For lossy codecs (mp3, AAC) both come back 0/empty, which we
+          // surface as null so the UI can render "—".
+          bitDepth:
+            parseInteger(stream.bits_per_raw_sample) ??
+            parseInteger(stream.bits_per_sample),
+          sampleFormat:
+            typeof stream.sample_fmt === 'string' && stream.sample_fmt.length > 0
+              ? stream.sample_fmt
+              : null,
+          codecName:
+            typeof stream.codec_name === 'string' ? stream.codec_name : null,
+        };
       } catch {
         return null;
       }
@@ -3511,9 +3549,48 @@ async function analyzeAudioFileInternal(
   ]);
 
   const sampleRateHz =
-    probedSampleRateHz ??
+    probedAudioFormat?.sampleRateHz ??
     parseSampleRateHzFromDiagnostics(ebur128Result.stderr) ??
     parseSampleRateHzFromDiagnostics(volumedetectResult.stderr);
+  // v3.269 — Derive a "real" bit depth that handles the float / int /
+  // lossy distinction at the source so the renderer can format it simply.
+  // Rules:
+  //  - If sample_fmt is `flt`/`fltp` → 32 (float headroom — UI labels it as
+  //    "32-bit float").
+  //  - If sample_fmt is `dbl`/`dblp` → 64 (rarely seen but real for some
+  //    masters bounced via JUCE/Reaper).
+  //  - If sample_fmt is `s32` and `bits_per_raw_sample` reports 24 → 24
+  //    (24-bit PCM stored in a 32-bit sample container — common WAV case;
+  //    we already trust `bits_per_raw_sample` first so this is a no-op).
+  //  - For lossy codecs (mp3, aac, opus, vorbis, alac without raw_sample
+  //    set) → null. PCM bit depth doesn't map.
+  const sampleFormatLower =
+    probedAudioFormat?.sampleFormat?.toLowerCase().replace(/p$/, '') ?? null;
+  const codecNameLower = probedAudioFormat?.codecName?.toLowerCase() ?? null;
+  const LOSSY_CODECS = new Set([
+    'mp3',
+    'aac',
+    'opus',
+    'vorbis',
+    'wmav1',
+    'wmav2',
+    'ac3',
+    'eac3',
+  ]);
+  const isLossyCodec = codecNameLower !== null && LOSSY_CODECS.has(codecNameLower);
+  const bitDepth: number | null = (() => {
+    if (isLossyCodec) {
+      return null;
+    }
+    if (sampleFormatLower === 'flt') {
+      return 32;
+    }
+    if (sampleFormatLower === 'dbl') {
+      return 64;
+    }
+    return probedAudioFormat?.bitDepth ?? null;
+  })();
+  const sampleFormat: string | null = probedAudioFormat?.sampleFormat ?? null;
 
   const integratedMatches = Array.from(
     ebur128Result.stderr.matchAll(/\bI:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LUFS/gi)
@@ -3555,6 +3632,10 @@ async function analyzeAudioFileInternal(
     maxShortTermLufs:
       shortTermMatches.length > 0 ? Math.max(...shortTermMatches) : null,
     sampleRateHz,
+    // v3.269 — Bit depth + sample format surfaced for the Inspector
+    // version-history row (Ethan voice 7201).
+    bitDepth,
+    sampleFormat,
   };
 }
 

@@ -59,6 +59,16 @@ export interface AudioFileAnalysis {
   maxMomentaryLufs: number | null;
   maxShortTermLufs: number | null;
   sampleRateHz: number | null;
+  // v3.269 — Bit depth + sample format (Ethan voice 7201, 2026-05-29).
+  // Bit depth tells producers whether a master is 16-bit (CD quality),
+  // 24-bit (typical studio master), 32-bit float (high-headroom master),
+  // etc. Displayed alongside sample rate in the Inspector version-history
+  // row. Optional/nullable because lossy formats (mp3, AAC) do not have a
+  // meaningful PCM bit depth — we surface "—" for those. `sampleFormat` is
+  // the ffprobe `sample_fmt` string (e.g. `s16`, `s32`, `flt`, `dbl`) so the
+  // formatter can render "32-bit float" instead of just "32-bit".
+  bitDepth?: number | null;
+  sampleFormat?: string | null;
 }
 
 export interface ReferenceTrackSelection {
@@ -1236,6 +1246,12 @@ export interface AgentStaticAnalysis {
   maxMomentaryLufs: number | null;
   maxShortTermLufs: number | null;
   sampleRateHz: number | null;
+  // v3.269 — Bit depth + sample format, mirrors AudioFileAnalysis. Same
+  // optional/nullable rules apply (see AudioFileAnalysis). Surfaced to the
+  // Inspector version-history row so producers can spot a 16-bit
+  // sneak-through against 24-bit masters at a glance.
+  bitDepth?: number | null;
+  sampleFormat?: string | null;
 }
 
 export interface AgentWebAudioAnalysis {

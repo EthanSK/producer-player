@@ -1120,6 +1120,12 @@ interface InspectorVersionSampleRateState {
   status: 'idle' | 'loading' | 'ready' | 'error';
   sampleRateHz: number | null;
   integratedLufs: number | null;
+  // v3.269 — Bit depth + sample format flow alongside sample rate so the
+  // Inspector version-history row can render "48 kHz · 24-bit" without a
+  // separate fetch (Ethan voice 7201). Nullable: lossy formats (mp3, AAC)
+  // don't have a PCM bit depth.
+  bitDepth: number | null;
+  sampleFormat: string | null;
   error: string | null;
 }
 
@@ -1133,6 +1139,12 @@ function toAgentStaticAnalysis(measured: AudioFileAnalysis): AgentStaticAnalysis
     maxMomentaryLufs: measured.maxMomentaryLufs,
     maxShortTermLufs: measured.maxShortTermLufs,
     sampleRateHz: measured.sampleRateHz,
+    // v3.269 — Forward bit depth + sample format alongside sample rate so
+    // they live inside the same cached AgentStaticAnalysis blob the
+    // Inspector pulls from. Cuts a separate fetch and keeps the
+    // bit-depth/sample-rate pair semantically together (Ethan voice 7201).
+    bitDepth: measured.bitDepth ?? null,
+    sampleFormat: measured.sampleFormat ?? null,
   };
 }
 
@@ -1787,6 +1799,39 @@ function formatSampleRateHz(sampleRateHz: number | null | undefined): string {
     : roundedKilohertz.toFixed(1);
 
   return `${formattedKilohertz} kHz`;
+}
+
+// v3.269 — Bit-depth formatter (Ethan voice 7201, 2026-05-29).
+// Used in the Inspector version-history row alongside formatSampleRateHz so
+// producers can spot 16-bit vs 24-bit vs 32-bit-float at a glance.
+//
+// Rules:
+//  - null/undefined/non-finite → null (caller decides whether to omit the
+//    segment or render an em-dash). Lossy formats (mp3, AAC) land here.
+//  - sample_fmt of `flt`/`fltp` (32-bit float) → "32-bit float"
+//  - sample_fmt of `dbl`/`dblp` (64-bit double) → "64-bit float"
+//  - everything else PCM-ish → "<N>-bit" (e.g. "16-bit", "24-bit").
+//
+// Returns null (not the em-dash literal) so the caller can choose to drop
+// the segment entirely on mp3/AAC rows instead of cluttering the row with
+// "—-bit".
+function formatBitDepth(
+  bitDepth: number | null | undefined,
+  sampleFormat: string | null | undefined
+): string | null {
+  if (bitDepth === null || bitDepth === undefined || !Number.isFinite(bitDepth)) {
+    return null;
+  }
+
+  const normalizedSampleFormat = sampleFormat?.toLowerCase().replace(/p$/, '') ?? null;
+  if (normalizedSampleFormat === 'flt') {
+    return '32-bit float';
+  }
+  if (normalizedSampleFormat === 'dbl') {
+    return '64-bit float';
+  }
+
+  return `${Math.round(bitDepth)}-bit`;
 }
 
 function buildAnalysisValue(
@@ -7424,6 +7469,11 @@ export function App(): JSX.Element {
         const cachedIntegratedLufs = cachedStaticAnalysis?.integratedLufs ?? null;
         const existing = next[version.id];
 
+        // v3.269 — Bit depth + sample format ride alongside sample rate
+        // through the same cache hydration path (Ethan voice 7201).
+        const cachedBitDepth = cachedStaticAnalysis?.bitDepth ?? null;
+        const cachedSampleFormat = cachedStaticAnalysis?.sampleFormat ?? null;
+
         if (cachedStaticAnalysis) {
           if (
             !existing ||
@@ -7431,6 +7481,8 @@ export function App(): JSX.Element {
             existing.status !== 'ready' ||
             existing.sampleRateHz !== cachedSampleRateHz ||
             existing.integratedLufs !== cachedIntegratedLufs ||
+            existing.bitDepth !== cachedBitDepth ||
+            existing.sampleFormat !== cachedSampleFormat ||
             existing.error !== null
           ) {
             next[version.id] = {
@@ -7444,6 +7496,11 @@ export function App(): JSX.Element {
                 cachedIntegratedLufs !== null && Number.isFinite(cachedIntegratedLufs)
                   ? cachedIntegratedLufs
                   : null,
+              bitDepth:
+                cachedBitDepth !== null && Number.isFinite(cachedBitDepth)
+                  ? cachedBitDepth
+                  : null,
+              sampleFormat: cachedSampleFormat,
               error: null,
             };
             changed = true;
@@ -7457,6 +7514,8 @@ export function App(): JSX.Element {
             status: 'idle',
             sampleRateHz: null,
             integratedLufs: null,
+            bitDepth: null,
+            sampleFormat: null,
             error: null,
           };
           changed = true;
@@ -7521,6 +7580,10 @@ export function App(): JSX.Element {
                 status: 'loading',
                 sampleRateHz: null,
                 integratedLufs: null,
+                // v3.269 — Track bit-depth fields throughout the
+                // loading/ready/error state machine (Ethan voice 7201).
+                bitDepth: null,
+                sampleFormat: null,
                 error: null,
               },
             };
@@ -7575,6 +7638,17 @@ export function App(): JSX.Element {
                   measured.integratedLufs !== null && Number.isFinite(measured.integratedLufs)
                     ? measured.integratedLufs
                     : null,
+                // v3.269 — Bit depth + sample format from the same measured
+                // analysis blob (Ethan voice 7201). Lossy formats (mp3, AAC)
+                // surface null bitDepth, which the row formatter treats as
+                // "skip the segment" rather than "—-bit".
+                bitDepth:
+                  measured.bitDepth !== null &&
+                  measured.bitDepth !== undefined &&
+                  Number.isFinite(measured.bitDepth)
+                    ? measured.bitDepth
+                    : null,
+                sampleFormat: measured.sampleFormat ?? null,
                 error: null,
               },
             };
@@ -7610,6 +7684,10 @@ export function App(): JSX.Element {
                 status: 'error',
                 sampleRateHz: null,
                 integratedLufs: null,
+                // v3.269 — Reset bit-depth fields on error so a previous
+                // success doesn't bleed into a failed re-analysis.
+                bitDepth: null,
+                sampleFormat: null,
                 error:
                   isTimeout
                     ? 'Analysis timed out. Try selecting this version again.'
@@ -16588,22 +16666,46 @@ export function App(): JSX.Element {
       empty: '—',
     }
   );
+  // v3.269 — Inspector version-history row text now combines sample rate +
+  // bit depth (Ethan voice 7201, 2026-05-29). Format: "48 kHz · 24-bit"
+  // when both are known; "48 kHz" alone when bit depth is unknown (e.g.
+  // mp3/AAC sources where PCM bit depth doesn't map). The middle-dot is
+  // the same separator used elsewhere in the UI for related metadata
+  // pairs, so it matches the existing visual idiom without introducing a
+  // new chip/pill pattern.
   const inspectorVersionSampleRateTextByVersionId = useMemo(() => {
     const byVersionId: Record<string, string> = {};
 
+    // Helper to compose "48 kHz · 24-bit" from a sample rate value and an
+    // optional bit-depth segment. If bit depth is unavailable, render the
+    // sample rate alone — no trailing separator or "—-bit".
+    const composeSampleRateLine = (
+      sampleRateText: string,
+      bitDepthText: string | null
+    ): string =>
+      bitDepthText !== null && bitDepthText.length > 0
+        ? `${sampleRateText} · ${bitDepthText}`
+        : sampleRateText;
+
     for (const version of inspectorVersions) {
       const cachedEntry = masteringCacheByVersionId[version.id];
-      const cachedSampleRateHz = isMasteringCacheEntryFresh(cachedEntry, version)
-        ? cachedEntry.staticAnalysis.sampleRateHz
+      const cachedStaticAnalysis = isMasteringCacheEntryFresh(cachedEntry, version)
+        ? cachedEntry.staticAnalysis
         : null;
+      const cachedSampleRateHz = cachedStaticAnalysis?.sampleRateHz ?? null;
+      const cachedBitDepth = cachedStaticAnalysis?.bitDepth ?? null;
+      const cachedSampleFormat = cachedStaticAnalysis?.sampleFormat ?? null;
 
       if (cachedSampleRateHz !== null && Number.isFinite(cachedSampleRateHz)) {
-        byVersionId[version.id] = formatSampleRateHz(cachedSampleRateHz);
+        byVersionId[version.id] = composeSampleRateLine(
+          formatSampleRateHz(cachedSampleRateHz),
+          formatBitDepth(cachedBitDepth, cachedSampleFormat)
+        );
         continue;
       }
 
       const statusState = inspectorVersionSampleRateByVersionId[version.id];
-      byVersionId[version.id] = buildAnalysisValue(
+      const sampleRateText = buildAnalysisValue(
         statusState?.status ?? 'idle',
         formatSampleRateHz(statusState?.sampleRateHz),
         {
@@ -16612,6 +16714,15 @@ export function App(): JSX.Element {
           empty: '—',
         }
       );
+      // Only append the bit-depth segment when the row is in 'ready' status
+      // — during loading/error we don't have reliable bit-depth info, and
+      // we don't want "Loading… · —-bit" or similar broken composites.
+      const bitDepthText =
+        statusState?.status === 'ready'
+          ? formatBitDepth(statusState.bitDepth, statusState.sampleFormat)
+          : null;
+
+      byVersionId[version.id] = composeSampleRateLine(sampleRateText, bitDepthText);
     }
 
     return byVersionId;

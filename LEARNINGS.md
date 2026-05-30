@@ -29,7 +29,7 @@ Each entry looks like:
 **Symptom:** Every main-list-row LUFS column showed 'Loading' indefinitely after installing v3.270/v3.271; bit-depth still missing in inspector
 **Root cause:** v3.270 tightened isMasteringCacheEntryFresh to invalidate entries with bitDepth=null on lossless sources. But the SAME freshness check gates LUFS display at App.tsx:18519 (activeSongIntegratedLufsStatus), so every fresh entry with missing bit-depth had its valid integratedLufs HIDDEN and flipped to status='loading'. With ~71 album entries needing re-analysis sequentially via NEIGHBOR-priority queue, LUFS appeared stuck. Worse: if any re-analysis returned bitDepth=null (ffprobe failure / weird WAV header), the new entry would immediately fail freshness again → infinite re-analysis loop.
 **Fix:** Decoupled the two concerns. isMasteringCacheEntryFresh reverts to schema+cacheKey only (LUFS reads use cached value instantly). New isMasteringCacheEntryMissingBitDepth predicate flags entries needing bit-depth refresh — drives DISPATCH only, never gates READS. Inspector dispatch (App.tsx:7565) and warmup dispatch (App.tsx:8060) check both — full re-analysis when not fresh, background-only refresh when fresh-but-missing-bit-depth (keeps row at 'ready'/'fresh' state, no Loading flash).
-**Commit:** PENDING
+**Commit:** 220031d
 **Guard:** 10 vitest cases in masteringAnalysisCache.test.ts asserting (a) bitDepth=null on PCM/lossless sources STAYS FRESH (so LUFS renders) and (b) the new isMasteringCacheEntryMissingBitDepth predicate flags exactly those cases for refresh. Also covers the non-fresh entry case where the bit-depth signal must NOT fire (would double-dispatch).
 ---
 

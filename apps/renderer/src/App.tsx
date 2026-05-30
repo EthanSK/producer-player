@@ -3646,6 +3646,15 @@ export function App(): JSX.Element {
   >({});
   const masteringCacheByVersionIdRef = useRef<Record<string, MasteringCacheEntry>>({});
   const masteringCachePendingVersionIdsRef = useRef<Set<string>>(new Set());
+  // v3.272 — Tracks version IDs whose bit-depth has already been refreshed
+  // once this session (warmup or inspector dispatch). If ffprobe came back
+  // with bitDepth=null AGAIN (edge codec / probe failure), the predicate
+  // `isMasteringCacheEntryMissingBitDepth` would stay true forever and
+  // every subsequent warmup re-run would re-dispatch. Adding the versionId
+  // here on completion (regardless of result) prevents that loop. It's a
+  // session-only ref because the cache itself is session-only — a real
+  // file change still invalidates via cacheKey mismatch (path/size/mtime).
+  const masteringCacheBitDepthRefreshedVersionIdsRef = useRef<Set<string>>(new Set());
   const latestTrackWarmupKnownActiveVersionKeysRef = useRef<Map<string, string>>(new Map());
   const latestTrackWarmupDetectedVersionIdsRef = useRef<Set<string>>(new Set());
   // v3.259 — The selected-track effect deliberately waits before enqueueing its
@@ -7562,8 +7571,13 @@ export function App(): JSX.Element {
         // The OLD v3.270 logic baked (b) into the freshness check itself,
         // which then ALSO hid LUFS while the dispatch was in flight —
         // hence "stuck on Loading" (Ethan voice 7225). Decoupling fixes it.
+        // Same once-per-session guard as the warmup path: if ffprobe
+        // already returned bitDepth=null for this version once, don't
+        // re-dispatch indefinitely.
         const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
-        const isMissingBitDepth = isMasteringCacheEntryMissingBitDepth(cachedEntry, version);
+        const isMissingBitDepth =
+          !masteringCacheBitDepthRefreshedVersionIdsRef.current.has(version.id) &&
+          isMasteringCacheEntryMissingBitDepth(cachedEntry, version);
         if (isFresh && !isMissingBitDepth) {
           return;
         }
@@ -7637,6 +7651,30 @@ export function App(): JSX.Element {
             cacheKey,
             label: `${version.fileName} — version history`,
           });
+
+          // v3.272 — Mirror the warmup path: ALSO upsert the freshly-measured
+          // analysis into the global session cache. Previously the inspector
+          // dispatch only wrote into `inspectorVersionSampleRateByVersionId`
+          // (the per-row UI state), so even after a successful bit-depth
+          // re-analysis the cached entry in `masteringCacheByVersionId` still
+          // had bitDepth=null and the global LUFS row + integrated-LUFS text
+          // formatter + agent summaries kept reading the stale bit-depth.
+          // Codex review on commit 220031d flagged this as the gap that made
+          // bit-depth never appear on inspector rows even with the v3.272
+          // dispatch in place. Idempotent: cacheKey-keyed upsert; if another
+          // path beat us to it, the bit-depth value is the same. selectedSong
+          // is guaranteed non-null here — inspectorVersions only contains
+          // versions of selectedSong.
+          if (selectedSong) {
+            upsertMasteringCacheEntry(
+              createMasteringCacheEntry({
+                source: 'background-preload',
+                version,
+                song: selectedSong,
+                measured,
+              })
+            );
+          }
 
           // v3.121 (Concern 4) — DO NOT bail on `cancelled` here. The setter's
           // own `existing.cacheKey === cacheKey` guard already prevents stale
@@ -7727,6 +7765,9 @@ export function App(): JSX.Element {
           });
         } finally {
           inspectorVersionSampleRatePendingVersionIdsRef.current.delete(version.id);
+          // v3.272 — Same once-per-session bit-depth-refresh mark as the
+          // warmup path. See warmMeasuredAnalysis for rationale.
+          masteringCacheBitDepthRefreshedVersionIdsRef.current.add(version.id);
         }
       });
 
@@ -7736,7 +7777,12 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [inspectorVersions]);
+    // v3.272 — Effect now also uses selectedSong + the upsert/create
+    // callbacks for the bit-depth-cache-mirror path (Codex review on
+    // 220031d). Callbacks are stable (`useCallback([])`); selectedSong
+    // is the parent of inspectorVersions so any change already retriggers
+    // the effect, but list them explicitly for exhaustive-deps clarity.
+  }, [inspectorVersions, selectedSong, upsertMasteringCacheEntry, createMasteringCacheEntry]);
 
   const albumActiveVersions = useMemo(
     () =>
@@ -8070,10 +8116,15 @@ export function App(): JSX.Element {
       // the cached value, no "Loading…" — fixes voice 7225), then queue
       // a background re-analysis just like a non-fresh entry. The
       // existing pending-set guard ensures we don't double-dispatch
-      // even if the warmup re-runs.
-      const isMissingBitDepth = isFresh
-        ? isMasteringCacheEntryMissingBitDepth(cachedEntry, version)
-        : false;
+      // even if the warmup re-runs. Once-per-session ref prevents an
+      // infinite re-dispatch loop if ffprobe genuinely returns
+      // bitDepth=null again (e.g. weird WAV header / codec edge case)
+      // — without it, the predicate would stay true forever and every
+      // warmup re-run would re-queue this version.
+      const isMissingBitDepth =
+        isFresh &&
+        !masteringCacheBitDepthRefreshedVersionIdsRef.current.has(version.id) &&
+        isMasteringCacheEntryMissingBitDepth(cachedEntry, version);
 
       if (isFresh) {
         latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
@@ -8164,6 +8215,14 @@ export function App(): JSX.Element {
       } finally {
         masteringCachePendingVersionIdsRef.current.delete(version.id);
         latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
+        // v3.272 — Mark this version as bit-depth-refreshed regardless of
+        // outcome. If the re-analysis succeeded with a real bit-depth, the
+        // predicate is now false anyway (no harm in also being in the set).
+        // If it succeeded but ffprobe STILL returned bitDepth=null (the
+        // worst case: weird codec / corrupt header), the predicate would
+        // stay true forever and re-trigger every warmup re-run; this set
+        // breaks that loop.
+        masteringCacheBitDepthRefreshedVersionIdsRef.current.add(version.id);
       }
     }
 

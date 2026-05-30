@@ -22,6 +22,12 @@ const IGNORE_EXACT = new Set([
   'CLAUDE.md',
   'PLAN.md',
   'CHANGELOG.md',
+  // LEARNINGS.md is per-repo institutional memory (see ~/.claude/skills/learnings).
+  // It's appended to AFTER a fix lands and never affects shipped app/release
+  // behavior, so editing it alone should NOT force a release bump — same
+  // rationale as README/CHANGELOG. Without this, the learnings skill's
+  // record-after-fix flow can't co-commit alongside a non-version commit.
+  'LEARNINGS.md',
   '.gitignore',
   'site/version.json',
   'scripts/check-version-consistency.mjs',

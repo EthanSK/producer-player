@@ -4,6 +4,7 @@ import {
   MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
   buildMasteringCacheKey,
   isMasteringCacheEntryFresh,
+  isMasteringCacheEntryMissingBitDepth,
   parseVersionModifiedAtMs,
 } from './masteringAnalysisCache';
 
@@ -118,35 +119,50 @@ describe('mastering analysis session cache keys', () => {
     expect(parseVersionModifiedAtMs(makeVersion({ modifiedAt: '1969-12-31T23:59:59.000Z' }))).toBe(0);
   });
 
-  // v3.270 — Cache-freshness regression coverage for the bit-depth-null
-  // case Ethan hit on Mini after the v3.269 in-flight install (voice 7213,
-  // 2026-05-29). The relevant scenarios all stay at schemaVersion=2 +
-  // matching cacheKey — the new staleness signal is purely about the
-  // staticAnalysis.bitDepth/sampleFormat shape.
-  describe('bit-depth-null freshness (v3.270)', () => {
-    it('forces re-analysis when bitDepth is null on a PCM sampleFormat (.wav s32)', () => {
+  // v3.272 — REVERTED the v3.270 freshness-tightening regression
+  // (Ethan voice 7225, 2026-05-30). bitDepth-null no longer invalidates
+  // the entry — that gated the LUFS display and made every main-list-row
+  // appear stuck on "Loading…". Bit-depth refresh is now driven by a
+  // SEPARATE predicate (`isMasteringCacheEntryMissingBitDepth`) which
+  // only triggers a background re-analysis, NOT a freshness miss.
+  //
+  // These tests now assert the new contract:
+  //   * isMasteringCacheEntryFresh: schema + cacheKey only. bitDepth-null
+  //     on a lossless source STAYS FRESH so the cached LUFS renders.
+  //   * isMasteringCacheEntryMissingBitDepth: the bit-depth gap signal
+  //     that was previously baked into the freshness check, now exposed
+  //     as a standalone predicate driving dispatch-only behaviour.
+  describe('bit-depth-missing refresh signal (v3.272)', () => {
+    it('keeps entries fresh when bitDepth is null on a PCM sampleFormat (.wav s32) — LUFS must still render', () => {
       const version = makeVersion();
       const entry = makeEntry(version, { bitDepth: null, sampleFormat: 's32' });
-      expect(isMasteringCacheEntryFresh(entry, version)).toBe(false);
+      // FRESH = read OK. The LUFS display gates on isMasteringCacheEntryFresh,
+      // so a freshness MISS here is what caused the v3.270 "stuck on
+      // Loading" regression (voice 7225).
+      expect(isMasteringCacheEntryFresh(entry, version)).toBe(true);
+      // But mark it for background bit-depth refresh.
+      expect(isMasteringCacheEntryMissingBitDepth(entry, version)).toBe(true);
     });
 
-    it('forces re-analysis when bitDepth is null on a PCM sampleFormat (.flac s16)', () => {
+    it('keeps entries fresh when bitDepth is null on a PCM sampleFormat (.flac s16)', () => {
       const version = makeVersion({ extension: 'flac', filePath: '/mixes/Alpha v1.flac', fileName: 'Alpha v1.flac' });
       const entry = makeEntry(version, { bitDepth: null, sampleFormat: 's16' }, { extension: 'flac' });
-      expect(isMasteringCacheEntryFresh(entry, version)).toBe(false);
+      expect(isMasteringCacheEntryFresh(entry, version)).toBe(true);
+      expect(isMasteringCacheEntryMissingBitDepth(entry, version)).toBe(true);
     });
 
-    it('forces re-analysis when bitDepth is null AND sampleFormat is null on a lossless extension', () => {
+    it('keeps entries fresh when bitDepth and sampleFormat are both null on a lossless extension; flags for refresh', () => {
       // Trigger case: very old entry where sampleFormat wasn't yet stored.
       // We fall back to the file extension to decide it's a PCM source.
       const version = makeVersion();
       const entry = makeEntry(version, { bitDepth: null, sampleFormat: null });
-      expect(isMasteringCacheEntryFresh(entry, version)).toBe(false);
+      expect(isMasteringCacheEntryFresh(entry, version)).toBe(true);
+      expect(isMasteringCacheEntryMissingBitDepth(entry, version)).toBe(true);
     });
 
-    it('keeps entries fresh when bitDepth is null on a true lossy source (.mp3)', () => {
+    it('keeps entries fresh AND does NOT flag refresh when bitDepth is null on a true lossy source (.mp3)', () => {
       // mp3 has no PCM bit depth — null is the correct stored value.
-      // Don't re-analyse this needlessly.
+      // No re-analysis needed; entry is fully fresh and final.
       const version = makeVersion({ extension: 'mp3', filePath: '/mixes/Alpha v1.mp3', fileName: 'Alpha v1.mp3' });
       const entry = makeEntry(
         version,
@@ -154,21 +170,35 @@ describe('mastering analysis session cache keys', () => {
         { extension: 'mp3' }
       );
       expect(isMasteringCacheEntryFresh(entry, version)).toBe(true);
+      expect(isMasteringCacheEntryMissingBitDepth(entry, version)).toBe(false);
     });
 
-    it('keeps entries fresh when bitDepth is null and sampleFormat is a planar-variant PCM string', () => {
+    it('flags refresh when bitDepth is null and sampleFormat is a planar-variant PCM string (fltp)', () => {
       // The check normalises trailing `p` (planar). `fltp` → `flt`, so a
       // bitDepth=null on planar float WAS produced by an older code path
-      // and should re-analyse.
+      // and should be refreshed in the background.
       const version = makeVersion();
       const entry = makeEntry(version, { bitDepth: null, sampleFormat: 'fltp' });
-      expect(isMasteringCacheEntryFresh(entry, version)).toBe(false);
+      expect(isMasteringCacheEntryFresh(entry, version)).toBe(true);
+      expect(isMasteringCacheEntryMissingBitDepth(entry, version)).toBe(true);
     });
 
-    it('keeps entries fresh when bitDepth is a concrete number (24)', () => {
+    it('keeps entries fresh AND does NOT flag refresh when bitDepth is a concrete number (24)', () => {
       const version = makeVersion();
       const entry = makeEntry(version, { bitDepth: 24, sampleFormat: 's32' });
       expect(isMasteringCacheEntryFresh(entry, version)).toBe(true);
+      expect(isMasteringCacheEntryMissingBitDepth(entry, version)).toBe(false);
+    });
+
+    it('does NOT flag refresh when the cache entry is not fresh (cacheKey mismatch)', () => {
+      // A non-fresh entry implies a full re-analysis is already due via
+      // the freshness-miss path, so the bit-depth-only refresh signal
+      // must NOT also fire — would double-dispatch.
+      const version = makeVersion();
+      const entry = makeEntry(version, { bitDepth: null, sampleFormat: 's32' });
+      const differentVersion = makeVersion({ sizeBytes: 99999 });
+      expect(isMasteringCacheEntryFresh(entry, differentVersion)).toBe(false);
+      expect(isMasteringCacheEntryMissingBitDepth(entry, differentVersion)).toBe(false);
     });
   });
 });

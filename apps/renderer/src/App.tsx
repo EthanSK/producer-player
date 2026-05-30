@@ -85,6 +85,12 @@ import {
   MASTERING_SESSION_CACHE_DISCLOSURE_REMINDER,
   buildMasteringCacheKey,
   isMasteringCacheEntryFresh,
+  // v3.272 — Separate predicate that says "the entry is fresh enough to
+  // read, but bit-depth is missing on a lossless source so a background
+  // re-analysis should fill it in". Decoupled from isMasteringCacheEntryFresh
+  // so the LUFS display is no longer gated on bit-depth presence
+  // (Ethan voice 7225 — "all LUFS stuck on loading").
+  isMasteringCacheEntryMissingBitDepth,
   parseVersionModifiedAtMs,
 } from './masteringAnalysisCache';
 import {
@@ -7548,7 +7554,17 @@ export function App(): JSX.Element {
         }
 
         const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
-        if (isMasteringCacheEntryFresh(cachedEntry, version)) {
+        // v3.272 — Two reasons to skip dispatch:
+        //   (a) entry is fresh AND bit-depth is present → nothing to do.
+        //   (b) entry is fresh BUT bit-depth is missing on a lossless
+        //       source → dispatch a re-analysis to fill in bit-depth,
+        //       even though LUFS / sample-rate already display from cache.
+        // The OLD v3.270 logic baked (b) into the freshness check itself,
+        // which then ALSO hid LUFS while the dispatch was in flight —
+        // hence "stuck on Loading" (Ethan voice 7225). Decoupling fixes it.
+        const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
+        const isMissingBitDepth = isMasteringCacheEntryMissingBitDepth(cachedEntry, version);
+        if (isFresh && !isMissingBitDepth) {
           return;
         }
 
@@ -7569,39 +7585,51 @@ export function App(): JSX.Element {
 
         inspectorVersionSampleRatePendingVersionIdsRef.current.add(version.id);
 
-        setInspectorVersionSampleRateByVersionId((previous) => {
-          const existing = previous[version.id];
+        // v3.272 — Only flip the row to 'loading' when we're doing a FULL
+        // re-analysis (entry was not fresh). When the entry IS fresh and
+        // we're just refreshing bit-depth in the background, KEEP the
+        // existing 'ready' state visible — the user already sees a
+        // perfectly-valid LUFS + sample rate from cache; clobbering to
+        // 'loading' would re-introduce the "stuck on Loading" symptom
+        // even though it'd only last until the re-analysis completes
+        // (Ethan voice 7225). The setter at the success branch (line ~7638)
+        // will overwrite the ready entry with the fresh values once the
+        // bit-depth re-analysis returns.
+        if (!isFresh) {
+          setInspectorVersionSampleRateByVersionId((previous) => {
+            const existing = previous[version.id];
 
-          if (!existing || existing.cacheKey !== cacheKey) {
+            if (!existing || existing.cacheKey !== cacheKey) {
+              return {
+                ...previous,
+                [version.id]: {
+                  cacheKey,
+                  status: 'loading',
+                  sampleRateHz: null,
+                  integratedLufs: null,
+                  // v3.269 — Track bit-depth fields throughout the
+                  // loading/ready/error state machine (Ethan voice 7201).
+                  bitDepth: null,
+                  sampleFormat: null,
+                  error: null,
+                },
+              };
+            }
+
+            if (existing.status === 'loading') {
+              return previous;
+            }
+
             return {
               ...previous,
               [version.id]: {
-                cacheKey,
+                ...existing,
                 status: 'loading',
-                sampleRateHz: null,
-                integratedLufs: null,
-                // v3.269 — Track bit-depth fields throughout the
-                // loading/ready/error state machine (Ethan voice 7201).
-                bitDepth: null,
-                sampleFormat: null,
                 error: null,
               },
             };
-          }
-
-          if (existing.status === 'loading') {
-            return previous;
-          }
-
-          return {
-            ...previous,
-            [version.id]: {
-              ...existing,
-              status: 'loading',
-              error: null,
-            },
-          };
-        });
+          });
+        }
 
         try {
           const measured = await runMeasuredAnalysis(version.filePath, {
@@ -8036,6 +8064,16 @@ export function App(): JSX.Element {
       const { song, version } = entry;
       const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
       const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
+      // v3.272 — Even if the entry is fresh, we may want to refresh it in
+      // the background to fill in a missing bit-depth on a lossless
+      // source. Mark the row 'fresh' immediately (the LUFS column shows
+      // the cached value, no "Loading…" — fixes voice 7225), then queue
+      // a background re-analysis just like a non-fresh entry. The
+      // existing pending-set guard ensures we don't double-dispatch
+      // even if the warmup re-runs.
+      const isMissingBitDepth = isFresh
+        ? isMasteringCacheEntryMissingBitDepth(cachedEntry, version)
+        : false;
 
       if (isFresh) {
         latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
@@ -8045,7 +8083,14 @@ export function App(): JSX.Element {
             [version.id]: { status: 'fresh', error: null },
           }));
         }
-        return;
+        // Only return early when we have NO reason to re-analyse. If
+        // bit-depth is missing, fall through to the re-analysis path —
+        // the status stays 'fresh' (LUFS keeps showing) and the upsert
+        // at the end will overwrite the entry with the bit-depth-filled
+        // version.
+        if (!isMissingBitDepth) {
+          return;
+        }
       }
 
       if (masteringCachePendingVersionIdsRef.current.has(version.id)) {
@@ -8053,7 +8098,11 @@ export function App(): JSX.Element {
       }
 
       masteringCachePendingVersionIdsRef.current.add(version.id);
-      if (!cancelled) {
+      if (!cancelled && !isMissingBitDepth) {
+        // Only flip to 'pending' when we have NO cached LUFS to show —
+        // the 'pending' state surfaces "Loading" in the row badge. For
+        // bit-depth-only background refreshes, leave the status at
+        // 'fresh' so the row stays calm (voice 7225).
         setMasteringCacheStatusByVersionId((previous) => ({
           ...previous,
           [version.id]: {

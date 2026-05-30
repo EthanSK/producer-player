@@ -73,6 +73,30 @@ export function isMasteringCacheEntryFresh(
   entry: MasteringCacheEntry | undefined,
   version: SongVersion
 ): boolean {
+  // v3.272 — REVERTED to schema + cacheKey only (Ethan voice 7225, 2026-05-30).
+  //
+  // v3.270 tightened this predicate to also INVALIDATE entries with
+  // `bitDepth === null` on lossless sources. That worked for the bit-depth
+  // gap but caused a much louder regression: every main-list-row in
+  // Ethan's library/album view flipped to "Loading…" because the same
+  // freshness check gates the LUFS display at line ~18514 of App.tsx —
+  // hiding a perfectly-valid cached `integratedLufs` just because the
+  // entry lacked a bit-depth field. With ~71 entries needing re-analysis
+  // in parallel, the LUFS column appeared stuck on loading indefinitely
+  // (and would re-loop forever if ffprobe ever returned bitDepth=null
+  // for one of them).
+  //
+  // Fix: separate the two concerns.
+  //   * `isMasteringCacheEntryFresh`  → can I trust this entry's LUFS /
+  //     sample-rate / true-peak / normalization? (this function)
+  //   * `isMasteringCacheEntryMissingBitDepth` (new) → does this entry
+  //     ALSO need a background bit-depth refresh? (used only at dispatch
+  //     sites — never gates a read)
+  //
+  // Result: cached LUFS / sample-rate render INSTANTLY from disk-cache;
+  // bit-depth is filled in by a one-shot background re-analysis when
+  // applicable; no infinite re-analysis loop even if the re-analysis
+  // also returns null bitDepth.
   if (!entry) {
     return false;
   }
@@ -85,31 +109,6 @@ export function isMasteringCacheEntryFresh(
     return false;
   }
 
-  // v3.270 — Tighten freshness so entries with a missing `bitDepth` on a
-  // KNOWN-lossless source trigger re-analysis (Ethan voice 7213,
-  // 2026-05-29). The trigger case: the user installed v3.269 mid-session;
-  // some background analyses had already written cache entries at the new
-  // schemaVersion=2 BEFORE the rebuilt ffprobe pass produced bitDepth, so
-  // schemaVersion alone was a false-positive for "this entry has bit
-  // depth". The Inspector then trusted the stale entry and never
-  // re-analysed — Ethan's real songs on Mini showed "Sample rate: 48 kHz"
-  // with no bit-depth segment, even though the feature shipped.
-  //
-  // Decision tree when bitDepth is null:
-  //   1. sampleFormat is a PCM string (s16/s24/s32/flt/dbl/...) → re-analyse.
-  //      bitDepth SHOULD have been set by the v3.269 derivation logic; a null
-  //      here means the entry was written by an older path.
-  //   2. sampleFormat is null AND the file extension is a known lossless
-  //      container (.wav/.aiff/.flac/.alac) → re-analyse. Same reasoning,
-  //      using the extension as a fallback corroborating signal per Ethan's
-  //      "maybe use the file format" hint.
-  //   3. Otherwise (sampleFormat indicates lossy, or extension is .mp3/.m4a
-  //      and sampleFormat is null) → trust the null. It's a legitimate
-  //      lossy source where PCM bit depth doesn't map.
-  //
-  // We don't store codecName directly on the cache entry; sampleFormat +
-  // extension is enough to disambiguate in practice without changing the
-  // contract shape again.
   // Defensive: if the cache entry omits staticAnalysis entirely (shouldn't
   // happen at schema=2 but the tests use bare stubs and runtime drift is
   // possible), treat it as stale rather than crashing.
@@ -117,24 +116,62 @@ export function isMasteringCacheEntryFresh(
     return false;
   }
 
-  if (entry.staticAnalysis.bitDepth === null || entry.staticAnalysis.bitDepth === undefined) {
-    const sampleFormatLower = entry.staticAnalysis.sampleFormat?.toLowerCase().replace(/p$/, '') ?? null;
+  return true;
+}
 
-    if (sampleFormatLower !== null && PCM_SAMPLE_FORMATS.has(sampleFormatLower)) {
-      // PCM stream with no bit depth on a schema-2 entry → definitely stale.
-      return false;
-    }
+// v3.272 — Companion predicate that tells the renderer "the cached entry
+// is fresh enough to show, BUT it's missing a bit-depth that we'd expect
+// for this source type, so kick off a background re-analysis to fill it
+// in". This is exactly the v3.270 logic, but extracted to a separate
+// function so it can drive DISPATCH without gating DISPLAY.
+//
+// Returns true when:
+//   * Entry is fresh (must satisfy isMasteringCacheEntryFresh first), AND
+//   * bitDepth is null/undefined, AND
+//   * sampleFormat indicates PCM (s16/s24/s32/flt/dbl/…) OR
+//     sampleFormat is also null AND extension is a known lossless
+//     container (.wav/.aiff/.flac/.alac).
+//
+// Returns false when the null is legitimate (lossy source — mp3/aac/etc).
+// Returns false when bitDepth is a concrete number (no refresh needed).
+// Returns false when the entry isn't fresh anyway (a full re-analysis is
+// already implied by the freshness miss).
+export function isMasteringCacheEntryMissingBitDepth(
+  entry: MasteringCacheEntry | undefined,
+  version: SongVersion
+): boolean {
+  if (!isMasteringCacheEntryFresh(entry, version)) {
+    return false;
+  }
 
-    if (sampleFormatLower === null) {
-      // No sampleFormat to disambiguate — fall back to the file extension
-      // of the cached entry. If it's a lossless container, re-analyse;
-      // otherwise trust the null (true lossy source).
-      const extensionLower = entry.extension?.toLowerCase() ?? null;
-      if (extensionLower !== null && LOSSLESS_AUDIO_EXTENSIONS.has(extensionLower)) {
-        return false;
-      }
+  // isMasteringCacheEntryFresh guarantees entry + staticAnalysis are non-null,
+  // but TypeScript can't narrow through the boolean return — re-check defensively.
+  if (!entry || !entry.staticAnalysis) {
+    return false;
+  }
+
+  const bitDepth = entry.staticAnalysis.bitDepth;
+  if (bitDepth !== null && bitDepth !== undefined) {
+    return false;
+  }
+
+  const sampleFormatLower =
+    entry.staticAnalysis.sampleFormat?.toLowerCase().replace(/p$/, '') ?? null;
+
+  if (sampleFormatLower !== null && PCM_SAMPLE_FORMATS.has(sampleFormatLower)) {
+    // PCM stream with no bit depth on a schema-2 entry → missing.
+    return true;
+  }
+
+  if (sampleFormatLower === null) {
+    // No sampleFormat to disambiguate — fall back to file extension.
+    const extensionLower = entry.extension?.toLowerCase() ?? null;
+    if (extensionLower !== null && LOSSLESS_AUDIO_EXTENSIONS.has(extensionLower)) {
+      return true;
     }
   }
 
-  return true;
+  // sampleFormat indicates a true lossy source (no PCM bit depth), or the
+  // null is legitimate for the source type.
+  return false;
 }

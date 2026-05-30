@@ -7585,10 +7585,20 @@ export function App(): JSX.Element {
         const cacheKey = buildMasteringCacheKey(version);
         const statusState = inspectorVersionSampleRateByVersionIdRef.current[version.id];
 
+        // v3.273 — The previous skip-when-ready-or-loading guard had a
+        // hole: a row already hydrated from cache as 'ready' (matching
+        // cacheKey, status='ready') would skip dispatch even when
+        // isMissingBitDepth was true. That meant the bit-depth refresh
+        // (and the new cache-mirror upsert) never fired for any row
+        // visited at least once. Codex review on b4fa5c8 caught it.
+        // Fix: always allow the dispatch when we have a bit-depth
+        // refresh to do; only skip ready/loading rows for the genuine
+        // "nothing to do" case.
         if (
           statusState &&
           statusState.cacheKey === cacheKey &&
-          (statusState.status === 'ready' || statusState.status === 'loading')
+          (statusState.status === 'loading' ||
+            (statusState.status === 'ready' && !isMissingBitDepth))
         ) {
           return;
         }
@@ -7645,6 +7655,11 @@ export function App(): JSX.Element {
           });
         }
 
+        // v3.273 — Track whether the probe yielded a definitive answer so
+        // we only mark bit-depth-refreshed on real outcomes (not aborts).
+        // Codex review on b4fa5c8 caught the prior version always marking
+        // in `finally`, which blocked retries after an abort.
+        let probeYieldedResult = false;
         try {
           const measured = await runMeasuredAnalysis(version.filePath, {
             priority: ANALYSIS_PRIORITY_NEIGHBOR,
@@ -7665,6 +7680,12 @@ export function App(): JSX.Element {
           // path beat us to it, the bit-depth value is the same. selectedSong
           // is guaranteed non-null here — inspectorVersions only contains
           // versions of selectedSong.
+          //
+          // ORDERING: upsert MUST come BEFORE setInspectorVersionSampleRateByVersionId
+          // because the sample-rate text formatter reads masteringCacheByVersionId
+          // FIRST and `continue`s on a hit. Without this ordering, the row state
+          // would update on the next render but the formatter would still read
+          // the old (bitDepth=null) cache entry until React re-rendered again.
           if (selectedSong) {
             upsertMasteringCacheEntry(
               createMasteringCacheEntry({
@@ -7675,6 +7696,7 @@ export function App(): JSX.Element {
               })
             );
           }
+          probeYieldedResult = true;
 
           // v3.121 (Concern 4) — DO NOT bail on `cancelled` here. The setter's
           // own `existing.cacheKey === cacheKey` guard already prevents stale
@@ -7726,6 +7748,8 @@ export function App(): JSX.Element {
           // can complete it rather than flipping to a misleading "error"
           // badge in the version-history inspector.
           if (isAnalysisAbortError(error)) {
+            // Do NOT mark probeYieldedResult — the requeued retry deserves
+            // another shot at the bit-depth refresh (v3.273).
             return;
           }
           // v3.121 (Concern 4) — same fix as the success branch. Bailing on
@@ -7763,11 +7787,17 @@ export function App(): JSX.Element {
               },
             };
           });
+          // Genuine error/timeout = definitive result for the bit-depth
+          // refresh guard (v3.273).
+          probeYieldedResult = true;
         } finally {
           inspectorVersionSampleRatePendingVersionIdsRef.current.delete(version.id);
-          // v3.272 — Same once-per-session bit-depth-refresh mark as the
-          // warmup path. See warmMeasuredAnalysis for rationale.
-          masteringCacheBitDepthRefreshedVersionIdsRef.current.add(version.id);
+          // v3.272 + v3.273 — Mark bit-depth-refreshed only when the probe
+          // yielded a definitive result. See warmMeasuredAnalysis for
+          // rationale; the abort-error branch deliberately does NOT mark.
+          if (probeYieldedResult) {
+            masteringCacheBitDepthRefreshedVersionIdsRef.current.add(version.id);
+          }
         }
       });
 
@@ -8163,6 +8193,13 @@ export function App(): JSX.Element {
         }));
       }
 
+      // v3.273 — Only mark the bit-depth-refresh as "tried" when the probe
+      // actually COMPLETED (success OR genuine error/timeout — both yield
+      // a definitive answer). Abort errors (USER-click preemption) leave
+      // the work requeued; marking those would block the eventual retry.
+      // Codex review on b4fa5c8 caught this. Tracked as a local boolean
+      // because `finally` always runs even on early `return`.
+      let probeYieldedResult = false;
       try {
         const measured = await runMeasuredAnalysis(version.filePath, {
           priority: ANALYSIS_PRIORITY_NEIGHBOR,
@@ -8179,6 +8216,7 @@ export function App(): JSX.Element {
             measured,
           })
         );
+        probeYieldedResult = true;
       } catch (error: unknown) {
         // v3.198 — A v3.195 USER-click preemption SIGKILLs the running
         // NEIGHBOR ffmpeg, surfacing as an AbortError to this catch. The
@@ -8190,6 +8228,8 @@ export function App(): JSX.Element {
         // preempted warmup row flipped to a misleading "Error" badge in
         // the top-right LUFS slot.
         if (isAnalysisAbortError(error)) {
+          // Do NOT set probeYieldedResult — the requeued retry needs
+          // another shot at the bit-depth refresh.
           return;
         }
         // v3.121 (Concern 4) — let errors flow through even after the
@@ -8212,17 +8252,24 @@ export function App(): JSX.Element {
                 : 'Could not analyze this track yet.',
           },
         }));
+        // Definitive error result — treat as "we tried, here's the answer"
+        // for the bit-depth-refresh once-per-session guard. Re-trying on
+        // every warmup re-run after a real timeout/error would just
+        // re-burn ffmpeg budget.
+        probeYieldedResult = true;
       } finally {
         masteringCachePendingVersionIdsRef.current.delete(version.id);
         latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
-        // v3.272 — Mark this version as bit-depth-refreshed regardless of
-        // outcome. If the re-analysis succeeded with a real bit-depth, the
-        // predicate is now false anyway (no harm in also being in the set).
-        // If it succeeded but ffprobe STILL returned bitDepth=null (the
-        // worst case: weird codec / corrupt header), the predicate would
-        // stay true forever and re-trigger every warmup re-run; this set
-        // breaks that loop.
-        masteringCacheBitDepthRefreshedVersionIdsRef.current.add(version.id);
+        // v3.272 + v3.273 — Mark bit-depth-refreshed ONLY when the probe
+        // yielded a definitive result (success or genuine error). Aborts
+        // get retried by the queue and must NOT be marked, otherwise the
+        // retry is blocked. Idempotent: marking after a successful
+        // bitDepth-fill is harmless (predicate is already false); marking
+        // after a null-bitDepth success or a real error breaks the
+        // infinite-redispatch loop if the predicate stays true.
+        if (probeYieldedResult) {
+          masteringCacheBitDepthRefreshedVersionIdsRef.current.add(version.id);
+        }
       }
     }
 

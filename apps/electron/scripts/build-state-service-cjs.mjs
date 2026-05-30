@@ -214,4 +214,19 @@ await build({
   plugins: [shimElectronLog],
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/auto-update-downgrade.test.cjs + dist/mcp-control-server.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs + dist/actionLog.test.cjs');
+// v3.275 — Bit-depth fallback chain. Pure module — no electron / fs /
+// spawn dependencies. Bundle standalone so the unit tests can require it
+// without any shims. Ethan voice 7230 (2026-05-30) — see
+// bit-depth-fallback.ts for the full fallback chain rationale.
+await build({
+  entryPoints: [resolve(appDir, 'src/bit-depth-fallback.ts')],
+  outfile: resolve(appDir, 'dist/bit-depth-fallback.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+});
+
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/auto-update-downgrade.test.cjs + dist/mcp-control-server.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs + dist/actionLog.test.cjs + dist/bit-depth-fallback.test.cjs');

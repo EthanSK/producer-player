@@ -24,6 +24,16 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-05-30T23:56:19Z
+**Trigger:** voice 7230
+**Symptom:** Bit-depth segment still missing in Inspector after v3.274 LUFS+cache-mirror fixes — Ethan voice 7230 reported it still wasn't showing
+**Root cause:** Single-source bit-depth extraction in main.ts relied on ffprobe's bits_per_raw_sample OR bits_per_sample + float-only sample_fmt inference. When all three returned null/0 (edge codec paths, exotic WAV headers, transient ffprobe failures), bit depth was forever null. The v3.272 once-per-session refresh guard then marked the version as 'already-refreshed' so it never retried even on later launches — entire albums permanently capped at sample-rate-only display.
+**Fix:** apps/electron/src/bit-depth-fallback.ts (NEW pure module) + apps/electron/src/main.ts (rewired analyzeAudioFile probe). Six-step fallback chain in confidence order: (1) ffprobe bits_per_raw_sample, (2) ffprobe bits_per_sample, (3) ffprobe sample_fmt inference EXTENDED to all int formats (u8/s16/s24/s32/s64 — was only float in v3.269), (4) ffprobe codec_name inference (NEW — pcm_s16le/s24le/s32le/f32le/f64le + alac=24), (5) direct WAV/AIFF/FLAC header parse from first ~64 KiB of file (NEW — non-destructive, metadata-only, single fs.read, no decode), (6) extension-hint short-circuit for known-lossy extensions returns clean null. Each step carries a source tag we log when ANY fallback fires (not when step 1 wins) so we can see in production logs which path is bearing load.
+**Commit:** PENDING
+**Guard:** 54 vitest-equivalent node:test cases in apps/electron/test/bit-depth-fallback.test.cjs covering every step + every header format + the orchestrator's full chain ordering. Tests include the Ethan thedrums case (s16/16-bit WAV via step 2), pure-codec_name resolution, header-only fallback when ffprobe fails entirely, and the lossy short-circuit. Synthetic WAV/AIFF/FLAC headers are byte-constructed in the test so we cover RIFX/RF64/WAVE_FORMAT_EXTENSIBLE/AIFC/FLAC-STREAMINFO edge cases without real fixtures. Telemetry log entry on every non-trivial fallback gives runtime visibility.
+---
+
+---
 **Date:** 2026-05-30T21:38:23Z
 **Trigger:** Ethan voice 7225 (2026-05-30)
 **Symptom:** Every main-list-row LUFS column showed 'Loading' indefinitely after installing v3.270/v3.271; bit-depth still missing in inspector

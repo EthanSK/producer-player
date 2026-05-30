@@ -172,6 +172,16 @@ import {
   logErrorMain,
   ACTION_LOG_FILE_NAME,
 } from './actionLog';
+// v3.275 — Bit-depth fallback chain (Ethan voice 7230, 2026-05-30).
+// Pure module: deterministic resolution from ffprobe payload + (optionally)
+// a header buffer + (optionally) the file extension. See module docstring
+// for the full chain. We import the orchestrator + the signal type only;
+// the individual step helpers stay encapsulated.
+import {
+  resolveBitDepth,
+  type BitDepthFfprobeSignal,
+  type BitDepthResolution,
+} from './bit-depth-fallback';
 import {
   buildUiZoomState,
   getNextUiZoomPreference,
@@ -3484,7 +3494,17 @@ async function analyzeAudioFileInternal(
   // `bits_per_sample`, `sample_fmt`) in a single child-process call. The
   // existing diagnostic-regex fallback for sample rate is preserved for the
   // ffprobe-failure path.
-  const [volumedetectResult, probedAudioFormat] = await Promise.all([
+  //
+  // v3.275 — In addition to ffprobe, also kick off a tiny (≤64 KiB) header
+  // read in parallel so the bit-depth fallback chain can parse the WAV/AIFF/
+  // FLAC header directly when ffprobe returns null for both
+  // bits_per_raw_sample AND bits_per_sample AND sample_fmt can't be inferred
+  // (Ethan voice 7230). This is metadata-only — we never decode audio frames
+  // and never read past the first 64 KiB. The read is non-destructive,
+  // background, low-resource (~64 KiB single fs.read, no extra ffmpeg/
+  // ffprobe spawn) and runs in parallel with the existing two ffmpeg
+  // children so total wall-clock latency is unchanged.
+  const [volumedetectResult, probedAudioFormat, headerBuffer] = await Promise.all([
     runProcessCapture(ffmpegCommand, [
       '-hide_banner',
       '-nostats',
@@ -3526,15 +3546,13 @@ async function analyzeAudioFileInternal(
 
         return {
           sampleRateHz: parseInteger(stream.sample_rate),
-          // Prefer bits_per_raw_sample when present — for lossless PCM
-          // formats it's the true source-bit-depth (e.g. 24 for a 24-bit
-          // WAV stored in an s32 sample format container). bits_per_sample
-          // is the next-best signal (mostly populated for the same family).
-          // For lossy codecs (mp3, AAC) both come back 0/empty, which we
-          // surface as null so the UI can render "—".
-          bitDepth:
-            parseInteger(stream.bits_per_raw_sample) ??
-            parseInteger(stream.bits_per_sample),
+          // v3.275 — Surface BOTH raw fields independently so the fallback
+          // chain (resolveBitDepth in bit-depth-fallback.ts) can apply its
+          // confidence-ordered tiebreak rather than us collapsing to one
+          // value here. The old `bitDepth: raw ?? perSample` was correct
+          // but threw away the provenance which the chain needs.
+          bitsPerRawSample: parseInteger(stream.bits_per_raw_sample),
+          bitsPerSample: parseInteger(stream.bits_per_sample),
           sampleFormat:
             typeof stream.sample_fmt === 'string' && stream.sample_fmt.length > 0
               ? stream.sample_fmt
@@ -3546,51 +3564,79 @@ async function analyzeAudioFileInternal(
         return null;
       }
     })(),
+    // v3.275 — Direct header read for the bit-depth fallback chain. Reads at
+    // most 64 KiB from the start of the file (any standards-compliant WAV/
+    // AIFF/FLAC header fits in well under 1 KiB; the 64 KiB cap is just a
+    // safety net for unusual chunk orderings or large RIFF cue/list chunks
+    // appearing before the fmt chunk). Catches every error path: a transient
+    // EMFILE / EACCES / ENOENT shouldn't fail the whole analysis — just
+    // return null and let ffprobe-derived steps drive resolution.
+    readAudioFileHeader(resolvedPath),
   ]);
 
   const sampleRateHz =
     probedAudioFormat?.sampleRateHz ??
     parseSampleRateHzFromDiagnostics(ebur128Result.stderr) ??
     parseSampleRateHzFromDiagnostics(volumedetectResult.stderr);
-  // v3.269 — Derive a "real" bit depth that handles the float / int /
-  // lossy distinction at the source so the renderer can format it simply.
-  // Rules:
-  //  - If sample_fmt is `flt`/`fltp` → 32 (float headroom — UI labels it as
-  //    "32-bit float").
-  //  - If sample_fmt is `dbl`/`dblp` → 64 (rarely seen but real for some
-  //    masters bounced via JUCE/Reaper).
-  //  - If sample_fmt is `s32` and `bits_per_raw_sample` reports 24 → 24
-  //    (24-bit PCM stored in a 32-bit sample container — common WAV case;
-  //    we already trust `bits_per_raw_sample` first so this is a no-op).
-  //  - For lossy codecs (mp3, aac, opus, vorbis, alac without raw_sample
-  //    set) → null. PCM bit depth doesn't map.
-  const sampleFormatLower =
-    probedAudioFormat?.sampleFormat?.toLowerCase().replace(/p$/, '') ?? null;
-  const codecNameLower = probedAudioFormat?.codecName?.toLowerCase() ?? null;
-  const LOSSY_CODECS = new Set([
-    'mp3',
-    'aac',
-    'opus',
-    'vorbis',
-    'wmav1',
-    'wmav2',
-    'ac3',
-    'eac3',
-  ]);
-  const isLossyCodec = codecNameLower !== null && LOSSY_CODECS.has(codecNameLower);
-  const bitDepth: number | null = (() => {
-    if (isLossyCodec) {
-      return null;
-    }
-    if (sampleFormatLower === 'flt') {
-      return 32;
-    }
-    if (sampleFormatLower === 'dbl') {
-      return 64;
-    }
-    return probedAudioFormat?.bitDepth ?? null;
-  })();
+
+  // v3.275 — Bit-depth resolution now goes through the deterministic
+  // fallback chain in `bit-depth-fallback.ts`. The chain is, in order:
+  //   1) ffprobe bits_per_raw_sample
+  //   2) ffprobe bits_per_sample
+  //   3) ffprobe sample_fmt inference (all int + float formats; v3.269 only
+  //      covered float, this is the extension)
+  //   4) ffprobe codec_name inference (NEW — covers pcm_s16le/pcm_s24le/
+  //      pcm_f32le/etc. and alac=24 for cases where bits_per_sample is
+  //      empty but the codec name still encodes the depth)
+  //   5) Direct WAV/AIFF/FLAC header parse from the first ~64 KiB of the
+  //      file (NEW — metadata-only, no decode, single tiny fs.read)
+  //   6) Extension hint — returns null cleanly for known-lossy extensions
+  //      (.mp3/.aac/.m4a/etc.) so the renderer skips the segment instead
+  //      of showing "Loading…" forever
+  // Each step's outcome carries a `source` tag we log when bit depth had
+  // to come from a fallback (i.e. NOT bits_per_raw_sample) so we can see
+  // in production logs which path is bearing the load for which files.
+  // Ethan voice 7230 (2026-05-30): "There's a chain of best efforts ... it
+  // should be nondestructive and just run in the background and not take up
+  // a lot of resources. It should be just the metadata read."
+  const ffprobeSignal: BitDepthFfprobeSignal = {
+    bitsPerRawSample: probedAudioFormat?.bitsPerRawSample ?? null,
+    bitsPerSample: probedAudioFormat?.bitsPerSample ?? null,
+    sampleFormat: probedAudioFormat?.sampleFormat ?? null,
+    codecName: probedAudioFormat?.codecName ?? null,
+  };
+  const fileExtension = extname(resolvedPath).replace(/^\./, '').toLowerCase() || null;
+  const bitDepthResolution: BitDepthResolution = resolveBitDepth(
+    ffprobeSignal,
+    fileExtension,
+    headerBuffer
+  );
+  const bitDepth: number | null = bitDepthResolution.bitDepth;
   const sampleFormat: string | null = probedAudioFormat?.sampleFormat ?? null;
+
+  // Light-touch telemetry: only log when a fallback step won OR when
+  // every step failed. Steady-state (ffprobe's bits_per_raw_sample wins
+  // — the overwhelming majority) stays quiet. Helps debug Ethan-style
+  // "still no bit depth" reports without flooding the log.
+  if (
+    bitDepthResolution.source !== 'ffprobe-bits-per-raw-sample' &&
+    bitDepthResolution.source !== 'extension-hint-lossy'
+  ) {
+    log.info('[producer-player:analysis] bit-depth fallback source', {
+      filePath: resolvedPath,
+      source: bitDepthResolution.source,
+      bitDepth: bitDepthResolution.bitDepth,
+      // Include the raw ffprobe signal so a "source=unknown" or
+      // "source=header-*" log entry tells us exactly what ffprobe handed
+      // us (often the next investigation step).
+      ffprobe: {
+        bitsPerRawSample: ffprobeSignal.bitsPerRawSample,
+        bitsPerSample: ffprobeSignal.bitsPerSample,
+        sampleFormat: ffprobeSignal.sampleFormat,
+        codecName: ffprobeSignal.codecName,
+      },
+    });
+  }
 
   const integratedMatches = Array.from(
     ebur128Result.stderr.matchAll(/\bI:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LUFS/gi)
@@ -3773,6 +3819,49 @@ interface PlaybackProbeStream {
   sample_fmt?: unknown;
   bits_per_raw_sample?: unknown;
   bits_per_sample?: unknown;
+}
+
+/**
+ * v3.275 — Read the first N bytes of a file for the bit-depth header parser.
+ *
+ * Caps the read at 64 KiB by default — every standards-compliant WAV/AIFF/
+ * FLAC header fits in well under 1 KiB, but some Reaper/Pro Tools bounces
+ * insert large `cue` / `list` / `bext` chunks before the `fmt ` chunk, so
+ * we give the parser breathing room. The single fs.read() call is
+ * non-destructive and cheaper than spawning a child process — comfortably
+ * within Ethan's "should be just the metadata read" constraint.
+ *
+ * Returns null on any error (missing file, EACCES, EMFILE, etc.) — the
+ * bit-depth chain treats null as "skip the header step" and falls through
+ * to the extension-hint step gracefully.
+ */
+async function readAudioFileHeader(
+  filePath: string,
+  maxBytes = 64 * 1024
+): Promise<Buffer | null> {
+  let fileHandle: import('node:fs/promises').FileHandle | null = null;
+  try {
+    fileHandle = await fs.open(filePath, 'r');
+    const buffer = Buffer.alloc(maxBytes);
+    const { bytesRead } = await fileHandle.read(buffer, 0, maxBytes, 0);
+    if (bytesRead <= 0) {
+      return null;
+    }
+    // Slice to actual bytes read so the parser's bounds checks work on a
+    // tightly-sized view (the parsers use DataView which respects the
+    // sliced byteLength).
+    return buffer.subarray(0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    if (fileHandle !== null) {
+      try {
+        await fileHandle.close();
+      } catch {
+        // ignore close errors — read succeeded or failed already
+      }
+    }
+  }
 }
 
 function parseInteger(value: unknown): number | null {

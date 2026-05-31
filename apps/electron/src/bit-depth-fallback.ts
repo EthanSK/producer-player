@@ -111,6 +111,23 @@ const LOSSY_CODEC_NAMES = new Set([
   'amr_wb',
 ]);
 
+// Codecs whose DECODER emits a sample_fmt that doesn't match the source's
+// stored bit depth — for these, sample_fmt is misleading and we MUST defer
+// to the header parser (step 5) instead of letting step 3 fire. Concrete
+// example: FLAC source is stored as s16/s24, but ffmpeg's flac decoder
+// hands frames out as s16p/fltp/s32 depending on the source — so a 16-bit
+// FLAC with sample_fmt=fltp would otherwise be reported as 32-bit. ALAC
+// has the same issue. The lossy short-circuit at step 2a handles codecs
+// where the answer is "no bit depth"; this set handles codecs where the
+// answer is "bit depth exists, but you have to read the header to get it".
+// Established 2026-05-30 (codex review on commit 66a6b90).
+const DEFERRED_CODEC_NAMES = new Set([
+  'flac',
+  // alac is handled in bitDepthFromCodecName with a hardcoded 24 (modal),
+  // so it doesn't need to be in this set. Add here ONLY if we drop the
+  // hardcoded ALAC default in favor of strict header parsing.
+]);
+
 // Lossy file extensions — used by step 6 (extension hint) to short-circuit
 // to a clean null instead of "unknown". Mirrors LOSSY_CODEC_NAMES but
 // keyed by extension because we may not have a codec_name signal at all.
@@ -266,6 +283,24 @@ function bitDepthFromCodecName(codecName: string | null): number | null {
 /**
  * Resolve bit depth from the ffprobe signal alone (steps 1-4 of the chain).
  * Returns null if every ffprobe-derived step failed.
+ *
+ * IMPORTANT ORDERING DETAIL — codex review on commit 66a6b90 caught a real
+ * bug where step 3 (sample_fmt) could return a misleading 32 for lossy
+ * codecs whose decoder emits fltp samples (mp3, aac, opus, ...). Even
+ * though `bits_per_raw_sample` and `bits_per_sample` are both null/0
+ * for lossy codecs, ffmpeg's decoded frames come out as floats, so
+ * `sample_fmt=fltp` is the norm — without a lossy short-circuit above
+ * step 3, we'd report MP3s as "32-bit". Similarly, `pcm_s24le` with
+ * `sample_fmt=s32` (24-in-32 container, both bits_per_X empty in some
+ * older ffprobe versions) would be reported as 32 instead of 24.
+ *
+ * FIX: insert a CODEC-NAME PRIORITY check before step 3:
+ *   * Lossy codec → return { null, ffprobe-codec-name } immediately
+ *     (semantic "no PCM bit depth applies").
+ *   * pcm_* / alac with a derivable depth → return that depth and skip
+ *     the sample_fmt step (codec name is more authoritative).
+ * Only fall through to step 3 (sample_fmt) when codec_name didn't yield
+ * a verdict either way (e.g. flac, where depth lives in STREAMINFO).
  */
 export function resolveBitDepthFromFfprobe(
   signal: BitDepthFfprobeSignal
@@ -280,19 +315,52 @@ export function resolveBitDepthFromFfprobe(
     return { bitDepth: signal.bitsPerSample, source: 'ffprobe-bits-per-sample' };
   }
 
+  // STEP 2a — Codex-review fix (66a6b90 review): lossy codec short-circuit
+  // BEFORE the sample_fmt step. MP3/AAC/Opus etc. decode to float samples,
+  // so a literal sample_fmt=fltp would otherwise win step 3 with bitDepth=32
+  // — wrong, because lossy codecs have no PCM bit depth. Pre-empting with
+  // the codec name catches this. Returns null bit depth (semantic "no PCM
+  // depth applies") tagged ffprobe-codec-name so logs/telemetry can still
+  // see the codec drove the decision.
+  if (signal.codecName !== null) {
+    const codecLower = signal.codecName.toLowerCase();
+    if (LOSSY_CODEC_NAMES.has(codecLower)) {
+      return { bitDepth: null, source: 'ffprobe-codec-name' };
+    }
+  }
+
+  // STEP 2b — Codex-review fix (66a6b90 review): if codec_name encodes a
+  // specific bit depth (pcm_s24le, pcm_f32le, alac, ...) prefer it over the
+  // sample_fmt step. Reason: a 24-in-s32 WAV reports sample_fmt=s32 even
+  // though the source depth is 24; codec_name pcm_s24le gives us the
+  // correct 24 directly. bits_per_raw_sample would have caught this at
+  // step 1 too — but on older ffprobe versions / unusual probes it's null,
+  // and we want the codec-name to still recover the right answer.
+  const fromCodecName = bitDepthFromCodecName(signal.codecName);
+  if (fromCodecName !== null) {
+    return { bitDepth: fromCodecName, source: 'ffprobe-codec-name' };
+  }
+
+  // STEP 2c — Codex-review fix (66a6b90 follow-up): if codec_name is a
+  // "deferred" codec (flac, etc.) whose decoder emits a sample_fmt
+  // unrelated to source depth, SKIP step 3 entirely — sample_fmt would
+  // lie. Drop straight to 'unknown' so the orchestrator falls through to
+  // the header parser (step 5). Concrete bug this prevents: a 16-bit
+  // FLAC with sample_fmt=fltp was being reported as 32-bit because
+  // step 3 ran on the decoder's float-frame output instead of waiting
+  // for the STREAMINFO header read.
+  const codecLower = signal.codecName?.toLowerCase() ?? null;
+  if (codecLower !== null && DEFERRED_CODEC_NAMES.has(codecLower)) {
+    return { bitDepth: null, source: 'unknown' };
+  }
+
   // Step 3: sample_fmt inference (extended in v3.275 to cover int formats,
-  // not just float as in v3.269).
+  // not just float as in v3.269). Reached only when codec_name was either
+  // null or didn't yield a depth (e.g. unknown codec — last-ditch).
   const normalizedSampleFormat = normalizeSampleFormat(signal.sampleFormat);
   const fromSampleFormat = bitDepthFromSampleFormat(normalizedSampleFormat);
   if (fromSampleFormat !== null) {
     return { bitDepth: fromSampleFormat, source: 'ffprobe-sample-format' };
-  }
-
-  // Step 4: codec_name inference (NEW in v3.275 — was previously only used
-  // for lossy-detection, not for deriving bit depth).
-  const fromCodecName = bitDepthFromCodecName(signal.codecName);
-  if (fromCodecName !== null) {
-    return { bitDepth: fromCodecName, source: 'ffprobe-codec-name' };
   }
 
   return { bitDepth: null, source: 'unknown' };
@@ -376,8 +444,12 @@ export function parseBitDepthFromWavHeader(buffer: Buffer | Uint8Array): number 
 
     if (chunkId === 'fmt ') {
       // fmt chunk found — payload starts at offset+8.
+      // Codex-review hardening (66a6b90 review): also require chunkSize >= 16
+      // so a malformed fmt chunk with a truncated declared size doesn't
+      // let us read past its own boundary into garbage / the next chunk.
+      // Canonical PCM fmt is exactly 16; extended forms are 18, 40, etc.
       const payloadStart = offset + 8;
-      if (payloadStart + 16 > view.byteLength) {
+      if (chunkSize < 16 || payloadStart + 16 > view.byteLength) {
         return null;
       }
       const audioFormat = view.getUint16(payloadStart, littleEndian);
@@ -386,15 +458,29 @@ export function parseBitDepthFromWavHeader(buffer: Buffer | Uint8Array): number 
       // WAVE_FORMAT_EXTENSIBLE — the canonical BitsPerSample is the
       // CONTAINER size; the real source depth is at offset 18
       // (wValidBitsPerSample). Honor it when the chunk is big enough.
+      //
+      // Codex-review hardening (66a6b90 review): also validate cbSize >= 22
+      // before trusting wValidBitsPerSample. The extensible spec sets
+      // cbSize=22 for a real EXTENSIBLE chunk (giving wValidBitsPerSample,
+      // dwChannelMask, and the 16-byte SubFormat GUID). cbSize=0 or <22
+      // means the writer wrote AudioFormat=0xfffe but DIDN'T actually
+      // populate the extensible tail — reading offset 18 would be garbage.
+      // cbSize lives at payloadStart+16 (2 bytes, LE).
       if (audioFormat === 0xfffe && chunkSize >= 40) {
         if (payloadStart + 20 > view.byteLength) {
           // Truncated extensible header — fall back to BitsPerSample.
           return bitsPerSample > 0 ? bitsPerSample : null;
         }
-        const validBits = view.getUint16(payloadStart + 18, littleEndian);
-        if (validBits > 0) {
-          return validBits;
+        const cbSize = view.getUint16(payloadStart + 16, littleEndian);
+        if (cbSize >= 22) {
+          const validBits = view.getUint16(payloadStart + 18, littleEndian);
+          if (validBits > 0) {
+            return validBits;
+          }
         }
+        // cbSize too small or wValidBitsPerSample was 0 — fall through to
+        // BitsPerSample. This matches the documented WAVE behavior:
+        // wValidBitsPerSample=0 means "same as BitsPerSample".
       }
 
       return bitsPerSample > 0 ? bitsPerSample : null;

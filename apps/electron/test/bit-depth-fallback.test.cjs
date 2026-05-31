@@ -143,17 +143,24 @@ test('ffprobe step 4 — codec_name alac → 24 (modal value, header refines)', 
   assert.deepEqual(result, { bitDepth: 24, source: 'ffprobe-codec-name' });
 });
 
-test('ffprobe step 4 — codec_name mp3 → unknown (lossy, no PCM depth)', () => {
+test('ffprobe step 2a — codec_name mp3 short-circuits to null (lossy, no PCM depth)', () => {
+  // v3.275 follow-up: lossy short-circuit now fires from step 2a, so the
+  // source tag is 'ffprobe-codec-name' (the codec drove the decision),
+  // not 'unknown'. This is the codex-review fix from 66a6b90 review.
   const result = resolveBitDepthFromFfprobe({
     bitsPerRawSample: null,
     bitsPerSample: null,
     sampleFormat: null,
     codecName: 'mp3',
   });
-  assert.deepEqual(result, { bitDepth: null, source: 'unknown' });
+  assert.deepEqual(result, { bitDepth: null, source: 'ffprobe-codec-name' });
 });
 
 test('ffprobe step 4 — codec_name flac → unknown (defer to header parser)', () => {
+  // FLAC's bit depth lives in STREAMINFO, so the codec-name step yields
+  // no verdict and we fall through to sample_fmt step. With sampleFormat
+  // also null, the whole chain bottoms out at 'unknown'. The caller is
+  // expected to feed in a header buffer (step 5) for FLAC.
   const result = resolveBitDepthFromFfprobe({
     bitsPerRawSample: null,
     bitsPerSample: null,
@@ -630,6 +637,113 @@ test('orchestrator — never throws on bad header buffer (graceful chain to next
     garbageHeader
   );
   assert.deepEqual(result, { bitDepth: null, source: 'unknown' });
+});
+
+// ---------------------------------------------------------------------------
+// Codex-review regression tests (v3.275 follow-up)
+// ---------------------------------------------------------------------------
+
+test('codex-fix — mp3 codec with fltp sample_fmt + zero bps does NOT report 32-bit', () => {
+  // Pre-fix: step 3 (sample_fmt) ran before codec_name and would have
+  // returned 32 for fltp. With the lossy short-circuit at step 2a,
+  // mp3+fltp now correctly returns null with source 'ffprobe-codec-name'.
+  const result = resolveBitDepthFromFfprobe({
+    bitsPerRawSample: null,
+    bitsPerSample: 0,
+    sampleFormat: 'fltp',
+    codecName: 'mp3',
+  });
+  assert.deepEqual(result, { bitDepth: null, source: 'ffprobe-codec-name' });
+});
+
+test('codex-fix — aac codec with fltp sample_fmt does NOT report 32-bit', () => {
+  const result = resolveBitDepthFromFfprobe({
+    bitsPerRawSample: null,
+    bitsPerSample: null,
+    sampleFormat: 'fltp',
+    codecName: 'aac',
+  });
+  assert.deepEqual(result, { bitDepth: null, source: 'ffprobe-codec-name' });
+});
+
+test('codex-fix — opus codec with fltp does NOT report 32-bit', () => {
+  const result = resolveBitDepthFromFfprobe({
+    bitsPerRawSample: null,
+    bitsPerSample: null,
+    sampleFormat: 'fltp',
+    codecName: 'opus',
+  });
+  assert.deepEqual(result, { bitDepth: null, source: 'ffprobe-codec-name' });
+});
+
+test('codex-fix — pcm_s24le with s32 sample_fmt reports 24, not 32', () => {
+  // The classic 24-in-32 container case. Without step 2b (codec-name
+  // priority) we would have hit step 3 (sample_fmt=s32 → 32). Codec
+  // name pcm_s24le takes priority because it's more specific.
+  const result = resolveBitDepthFromFfprobe({
+    bitsPerRawSample: null,
+    bitsPerSample: null,
+    sampleFormat: 's32',
+    codecName: 'pcm_s24le',
+  });
+  assert.deepEqual(result, { bitDepth: 24, source: 'ffprobe-codec-name' });
+});
+
+test('codex-fix — alac with fltp sample_fmt reports 24, not 32', () => {
+  // ALAC decodes to float internally; without step 2b, fltp would have
+  // returned 32. With codec-name priority, alac's modal 24 wins.
+  const result = resolveBitDepthFromFfprobe({
+    bitsPerRawSample: null,
+    bitsPerSample: null,
+    sampleFormat: 'fltp',
+    codecName: 'alac',
+  });
+  assert.deepEqual(result, { bitDepth: 24, source: 'ffprobe-codec-name' });
+});
+
+test('codex-fix — flac codec defers to header parser (no codec-name guess)', () => {
+  // FLAC's bit depth lives in STREAMINFO; codec_name='flac' should NOT
+  // return a guess. Caller falls through to step 5 (header parse) when
+  // codec_name yields no verdict.
+  const result = resolveBitDepth(
+    {
+      bitsPerRawSample: null,
+      bitsPerSample: null,
+      sampleFormat: 'fltp', // FLAC decoder emits float
+      codecName: 'flac',
+    },
+    'flac',
+    buildFlacHeader({ bitsPerSample: 16 })
+  );
+  assert.deepEqual(result, { bitDepth: 16, source: 'header-flac' });
+});
+
+test('codex-fix — WAVE_FORMAT_EXTENSIBLE with cbSize=0 falls back to BitsPerSample', () => {
+  // Hostile WAV: AudioFormat=0xfffe but cbSize=0 (writer forgot to
+  // populate the extensible tail). Pre-fix would have read garbage at
+  // offset 18 as wValidBitsPerSample. Post-fix: cbSize<22 means skip
+  // the validBits read and use BitsPerSample directly.
+  const buffer = buildWavHeader({
+    audioFormat: 0xfffe,
+    withExtensible: true,
+    bitsPerSample: 32,
+    validBitsPerSample: 0, // simulate writer leaving it at 0
+  });
+  // Manually zero out cbSize at offset 36 (it's set to 22 by buildWavHeader)
+  buffer.writeUInt16LE(0, 36);
+  // The parser must fall back to BitsPerSample=32, NOT trust the zero
+  // valid-bits field.
+  assert.equal(parseBitDepthFromWavHeader(buffer), 32);
+});
+
+test('codex-fix — WAV fmt chunk with declared chunkSize<16 returns null (corruption guard)', () => {
+  // Build a real fmt header, then corrupt chunkSize to 8 (less than the
+  // minimum canonical fmt size of 16). The parser must refuse to read,
+  // not trust the bytes that follow.
+  const buffer = buildWavHeader({ bitsPerSample: 24 });
+  // chunkSize lives at offset 16 (after 12-byte RIFF/WAVE + 4-byte 'fmt ' id).
+  buffer.writeUInt32LE(8, 16);
+  assert.equal(parseBitDepthFromWavHeader(buffer), null);
 });
 
 test('orchestrator — null sample_fmt + null codec_name + lossless ext + valid header → header wins', () => {

@@ -3574,6 +3574,19 @@ async function analyzeAudioFileInternal(
     readAudioFileHeader(resolvedPath),
   ]);
 
+  // v3.275 — Codex review (66a6b90) caught a cancellation race: the new
+  // readAudioFileHeader has no requestId hookup and can't be SIGKILL'd
+  // (it's not a child process — it's a Node fs.read inside this same
+  // process). If cancel arrives after both ffmpeg children exit but
+  // BEFORE the fs.read resolves, runProcessCapture's child-tracking
+  // wouldn't see anything to kill. Post-await cancel check below is the
+  // catch-all: if the request was cancelled at any point during the
+  // Promise.all, raise AnalysisAbortError now so the caller gets the
+  // expected reject path instead of a result with stale/wrong data.
+  if (isAnalysisRequestCancelled(requestId)) {
+    throw new AnalysisAbortError(requestId ?? '<no-id>');
+  }
+
   const sampleRateHz =
     probedAudioFormat?.sampleRateHz ??
     parseSampleRateHzFromDiagnostics(ebur128Result.stderr) ??
@@ -3614,14 +3627,23 @@ async function analyzeAudioFileInternal(
   const bitDepth: number | null = bitDepthResolution.bitDepth;
   const sampleFormat: string | null = probedAudioFormat?.sampleFormat ?? null;
 
-  // Light-touch telemetry: only log when a fallback step won OR when
-  // every step failed. Steady-state (ffprobe's bits_per_raw_sample wins
-  // — the overwhelming majority) stays quiet. Helps debug Ethan-style
-  // "still no bit depth" reports without flooding the log.
-  if (
-    bitDepthResolution.source !== 'ffprobe-bits-per-raw-sample' &&
-    bitDepthResolution.source !== 'extension-hint-lossy'
-  ) {
+  // Light-touch telemetry: only log when a NON-TRIVIAL fallback fires
+  // (step 3+) OR when every step failed. Steady-state happy-path wins
+  // — step 1 (bits_per_raw_sample) and step 2 (bits_per_sample) for
+  // ordinary PCM, plus the explicit lossy extension short-circuit —
+  // stay quiet. This is the v3.275 follow-up to codex review (66a6b90)
+  // which flagged that normal pcm_s16le WAVs (most common case! they
+  // hit step 2, not step 1, because ffprobe leaves bits_per_raw_sample
+  // empty for non-extended formats) would otherwise log every analysis.
+  // Logging only fires for sample-format/codec-name inference, header
+  // parse rescues, or genuine unknowns — the cases we actually care
+  // about for "why didn't bit depth show up" investigations.
+  const QUIET_SOURCES = new Set([
+    'ffprobe-bits-per-raw-sample',
+    'ffprobe-bits-per-sample',
+    'extension-hint-lossy',
+  ]);
+  if (!QUIET_SOURCES.has(bitDepthResolution.source)) {
     log.info('[producer-player:analysis] bit-depth fallback source', {
       filePath: resolvedPath,
       source: bitDepthResolution.source,

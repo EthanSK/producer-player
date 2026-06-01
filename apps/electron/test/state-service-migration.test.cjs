@@ -80,6 +80,9 @@ function makeRichState() {
     songProjectFilePaths: {
       'song-a': '/Users/ethan/Projects/song-a.logic',
     },
+    songDisplayTitles: {
+      'song-a': 'Custom Stage Title',
+    },
     perSongReferenceTracks: {
       'song-a': '/Users/ethan/refs/reference.wav',
     },
@@ -113,6 +116,7 @@ test('PER_TRACK_KEYS surface is stable and matches expected songId-keyed fields'
     'songRatings',
     'songChecklists',
     'songProjectFilePaths',
+    'songDisplayTitles',
     'perSongReferenceTracks',
     'perSongRestoreReferenceEnabled',
     'eqSnapshots',
@@ -204,6 +208,7 @@ test('splitStateForDisk hoists songId-keyed fields into per-track buckets', () =
   assert.equal(songA.songRatings, 9);
   assert.ok(Array.isArray(songA.songChecklists));
   assert.equal(songA.songProjectFilePaths, '/Users/ethan/Projects/song-a.logic');
+  assert.equal(songA.songDisplayTitles, 'Custom Stage Title');
   assert.ok(songA.eqSnapshots);
   assert.ok(songA.eqLiveStates);
   assert.deepEqual(songA.songDawOffsets, { seconds: 42, enabled: true });

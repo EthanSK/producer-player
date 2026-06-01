@@ -2879,6 +2879,14 @@ body.floating-switcher-panel-dragging * {
   gap: 10px;
 }
 
+.main-list-row-title-group {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .main-list-row-title {
   display: block;
   min-width: 0;
@@ -2886,6 +2894,54 @@ body.floating-switcher-panel-dragging * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.main-list-row-title-edit {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease,
+    background 120ms ease;
+}
+
+.main-list-row:hover .main-list-row-title-edit,
+.main-list-row:focus-within .main-list-row-title-edit {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.main-list-row-title-edit:hover,
+.main-list-row-title-edit:focus-visible {
+  color: var(--text-main);
+  border-color: var(--accent);
+  background: rgba(92, 167, 255, 0.12);
+  outline: none;
+}
+
+.main-list-row-title-input {
+  min-width: 0;
+  flex: 1;
+  height: 26px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-main);
+  font: inherit;
+  font-weight: 700;
+  padding: 2px 7px;
+  outline: none;
 }
 
 .main-list-row-bottom {

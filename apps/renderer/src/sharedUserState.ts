@@ -149,6 +149,25 @@ export function sanitizeSongProjectFilePaths(value: unknown): Record<string, str
   return Object.fromEntries(entries);
 }
 
+export function sanitizeSongDisplayTitles(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const entries = Object.entries(value).flatMap(([songId, displayTitle]) => {
+    const normalizedTitle =
+      typeof displayTitle === 'string' ? displayTitle.trim() : '';
+
+    if (songId.length === 0 || normalizedTitle.length === 0) {
+      return [];
+    }
+
+    return [[songId, normalizedTitle] as const];
+  });
+
+  return Object.fromEntries(entries);
+}
+
 export function mergeLegacyAndSharedUserState(
   shared: SharedUserStateDraft,
   legacy: SharedUserStateDraft

@@ -122,6 +122,7 @@ import {
 import {
   mergeLegacyAndSharedUserState,
   sanitizeSongChecklists,
+  sanitizeSongDisplayTitles,
   sanitizeSongProjectFilePaths,
   sanitizeSongRatings,
 } from './sharedUserState';
@@ -901,6 +902,7 @@ const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
 const SONG_PROJECT_FILE_PATHS_STORAGE_KEY = 'producer-player.song-project-file-paths.v1';
+const SONG_DISPLAY_TITLES_STORAGE_KEY = 'producer-player.song-display-titles.v1';
 const PLAYBACK_VOLUME_STORAGE_KEY = 'producer-player.playback-volume.v1';
 const AUTOPLAY_NEXT_ENABLED_STORAGE_KEY = 'producer-player.autoplay-next-enabled.v1';
 const ICLOUD_BACKUP_ENABLED_KEY = 'producer-player.icloud-backup-enabled.v1';
@@ -1894,7 +1896,7 @@ function getSongDisplayFileName(song: SongWithVersions): string {
   return getActiveSongVersion(song)?.fileName ?? song.title;
 }
 
-function getSongDisplayTitle(song: SongWithVersions): string {
+function getSongFileDerivedDisplayTitle(song: SongWithVersions): string {
   const activeVersion = getActiveSongVersion(song);
   if (!activeVersion) {
     return song.title;
@@ -1909,6 +1911,18 @@ function getSongDisplayTitle(song: SongWithVersions): string {
   }
 
   return stem.trim() || song.title;
+}
+
+function getSongDisplayTitle(
+  song: SongWithVersions,
+  songDisplayTitles: Record<string, string> = {}
+): string {
+  const savedTitle = songDisplayTitles[song.id]?.trim();
+  if (savedTitle) {
+    return savedTitle;
+  }
+
+  return getSongFileDerivedDisplayTitle(song);
 }
 
 function getVersionNumberFromFileName(fileName: string): number | null {
@@ -2319,6 +2333,34 @@ function persistSongProjectFilePaths(projectFilePaths: Record<string, string>): 
   window.localStorage.setItem(
     SONG_PROJECT_FILE_PATHS_STORAGE_KEY,
     JSON.stringify(projectFilePaths)
+  );
+}
+
+function readStoredSongDisplayTitles(): Record<string, string> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SONG_DISPLAY_TITLES_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    return sanitizeSongDisplayTitles(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+function persistSongDisplayTitles(displayTitles: Record<string, string>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(
+    SONG_DISPLAY_TITLES_STORAGE_KEY,
+    JSON.stringify(displayTitles)
   );
 }
 
@@ -3130,6 +3172,12 @@ export function App(): JSX.Element {
   const [songProjectFilePaths, setSongProjectFilePaths] = useState<Record<string, string>>(
     () => readStoredSongProjectFilePaths()
   );
+  const [songDisplayTitles, setSongDisplayTitles] = useState<Record<string, string>>(
+    () => readStoredSongDisplayTitles()
+  );
+  const [songDisplayTitleEditingId, setSongDisplayTitleEditingId] =
+    useState<string | null>(null);
+  const [songDisplayTitleDraft, setSongDisplayTitleDraft] = useState('');
   // v3.221 — "Save Copy on All" button progress + lockout (voice 3132).
   // `null` = idle. When running, holds `{ current, total }` so the
   // album-top button can render "Saving copy 3 of 24…" and stay
@@ -3918,6 +3966,8 @@ export function App(): JSX.Element {
   const albumChecklistComposerRef = useRef<HTMLTextAreaElement | null>(null);
   const albumArtInputRef = useRef<HTMLInputElement | null>(null);
   const albumTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const songDisplayTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const songDisplayTitleSkipBlurSaveRef = useRef(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playOnNextLoadRef = useRef(false);
@@ -5062,6 +5112,10 @@ export function App(): JSX.Element {
   }, [songProjectFilePaths]);
 
   useEffect(() => {
+    persistSongDisplayTitles(songDisplayTitles);
+  }, [songDisplayTitles]);
+
+  useEffect(() => {
     if (!sharedUserStateReady) {
       return;
     }
@@ -5276,6 +5330,24 @@ export function App(): JSX.Element {
                 }
                 if (pathCount > 0) migratedFields.push(`projectPaths(${pathCount})`);
               }
+            }
+          } catch { /* ignore */ }
+
+          // Song display titles (merge). These are app-only labels: they
+          // deliberately do not rename files or affect scanner grouping.
+          try {
+            const lsTitles = window.localStorage.getItem(SONG_DISPLAY_TITLES_STORAGE_KEY);
+            if (lsTitles && lsTitles.length > 0) {
+              const parsed = sanitizeSongDisplayTitles(JSON.parse(lsTitles));
+              let titleCount = 0;
+              for (const [id, title] of Object.entries(parsed)) {
+                if (!(id in userState.songDisplayTitles)) {
+                  userState.songDisplayTitles[id] = title;
+                  migrated = true;
+                  titleCount++;
+                }
+              }
+              if (titleCount > 0) migratedFields.push(`displayTitles(${titleCount})`);
             }
           } catch { /* ignore */ }
 
@@ -5549,6 +5621,16 @@ export function App(): JSX.Element {
             const merged = { ...prev };
             for (const [id, path] of Object.entries(userState.songProjectFilePaths)) {
               if (!(id in merged)) merged[id] = path;
+            }
+            return merged;
+          });
+        }
+
+        if (userState.songDisplayTitles && Object.keys(userState.songDisplayTitles).length > 0) {
+          setSongDisplayTitles((prev) => {
+            const merged = { ...prev };
+            for (const [id, title] of Object.entries(userState.songDisplayTitles)) {
+              if (!(id in merged)) merged[id] = title;
             }
             return merged;
           });
@@ -5862,6 +5944,7 @@ export function App(): JSX.Element {
         songRatings,
         songChecklists,
         songProjectFilePaths,
+        songDisplayTitles,
         albumTitle,
         albumArtDataUrl: albumArt ?? '',
         albumChecklists,
@@ -6078,6 +6161,7 @@ export function App(): JSX.Element {
     songRatings,
     songChecklists,
     songProjectFilePaths,
+    songDisplayTitles,
     albumTitle,
     albumArt,
     albumChecklists,
@@ -6118,6 +6202,7 @@ export function App(): JSX.Element {
       setSongRatings(sanitizeSongRatings(userState.songRatings));
       setSongChecklists(sanitizeSongChecklists(userState.songChecklists));
       setSongProjectFilePaths(sanitizeSongProjectFilePaths(userState.songProjectFilePaths));
+      setSongDisplayTitles(sanitizeSongDisplayTitles(userState.songDisplayTitles));
 
       if (userState.albumTitle && userState.albumTitle.length > 0) {
         setAlbumTitle(userState.albumTitle);
@@ -6345,6 +6430,7 @@ export function App(): JSX.Element {
       persistSongRatings(userState.songRatings);
       persistSongChecklists(userState.songChecklists);
       persistSongProjectFilePaths(userState.songProjectFilePaths);
+      persistSongDisplayTitles(userState.songDisplayTitles);
     });
   }, []);
 
@@ -7396,7 +7482,8 @@ export function App(): JSX.Element {
 
       const matchesSongText =
         song.title.toLowerCase().includes(query) ||
-        song.normalizedTitle.toLowerCase().includes(query);
+        song.normalizedTitle.toLowerCase().includes(query) ||
+        getSongDisplayTitle(song, songDisplayTitles).toLowerCase().includes(query);
 
       if (matchingVersionNames.length > 0) {
         matchedVersions.set(song.id, matchingVersionNames);
@@ -7409,7 +7496,7 @@ export function App(): JSX.Element {
       songs: filteredSongs,
       matchedVersionNamesBySongId: matchedVersions,
     };
-  }, [albumSongs, searchText]);
+  }, [albumSongs, searchText, songDisplayTitles]);
 
   const songDateOpacityBySongId = useMemo(
     () =>
@@ -8395,7 +8482,9 @@ export function App(): JSX.Element {
         }
       : {
           fileName: selectedPlaybackVersion?.fileName ?? 'Selected track',
-          subtitle: selectedSong?.title ?? 'Selected track',
+          subtitle: selectedSong
+            ? getSongDisplayTitle(selectedSong, songDisplayTitles)
+            : 'Selected track',
         };
   const idealsMixSource = useMemo<IdealStemAnalysisSource | null>(() => {
     if (!selectedPlaybackVersion || !activeMixPlaybackSource) {
@@ -11316,6 +11405,43 @@ export function App(): JSX.Element {
     setAlbumTitleEditing(false);
   }
 
+  function handleSongDisplayTitleStartEdit(song: SongWithVersions): void {
+    songDisplayTitleSkipBlurSaveRef.current = false;
+    setSongDisplayTitleDraft(getSongDisplayTitle(song, songDisplayTitles));
+    setSongDisplayTitleEditingId(song.id);
+    requestAnimationFrame(() => {
+      songDisplayTitleInputRef.current?.focus();
+      songDisplayTitleInputRef.current?.select();
+    });
+  }
+
+  function handleSongDisplayTitleSave(song: SongWithVersions): void {
+    const fallbackTitle = getSongFileDerivedDisplayTitle(song);
+    const trimmedTitle = songDisplayTitleDraft.trim();
+
+    setSongDisplayTitles((currentTitles) => {
+      const nextTitles = { ...currentTitles };
+
+      // Empty strings and values equal to the filename-derived fallback mean
+      // "use the file name again", so the persisted map stays sparse and
+      // imports cannot keep invisible redundant overrides alive.
+      if (trimmedTitle.length === 0 || trimmedTitle === fallbackTitle) {
+        delete nextTitles[song.id];
+      } else {
+        nextTitles[song.id] = trimmedTitle;
+      }
+
+      return nextTitles;
+    });
+    songDisplayTitleSkipBlurSaveRef.current = false;
+    setSongDisplayTitleEditingId(null);
+  }
+
+  function handleSongDisplayTitleCancel(): void {
+    songDisplayTitleSkipBlurSaveRef.current = true;
+    setSongDisplayTitleEditingId(null);
+  }
+
   function handleAlbumArtClick(): void {
     albumArtInputRef.current?.click();
   }
@@ -14095,7 +14221,7 @@ export function App(): JSX.Element {
 
     const inputs: BulkSaveCopyInputSong[] = albumSongs.map((song) => ({
       id: song.id,
-      title: getSongDisplayTitle(song),
+      title: getSongDisplayTitle(song, songDisplayTitles),
       projectFilePath: songProjectFilePaths[song.id] ?? null,
       targetVersion: computeSongProjectSaveCopyTargetVersion(song),
     }));
@@ -18647,7 +18773,7 @@ export function App(): JSX.Element {
             const secondaryRowText = showMatchedVersions
               ? `Matched versions: ${matchedVersionNames.join(', ')}`
               : `${song.versions.length} version(s)`;
-            const songRowTitle = getSongDisplayTitle(song);
+            const songRowTitle = getSongDisplayTitle(song, songDisplayTitles);
             const songRowMetadataLabel = getSongRowMetadataLabel(song);
             const activeSongVersion = getActiveSongVersion(song);
             const activeSongNextExportFileName = activeSongVersion
@@ -18783,9 +18909,62 @@ export function App(): JSX.Element {
                   }
                 >
                   <div className="main-list-row-top">
-                    <strong className="main-list-row-title" data-testid="main-list-row-title">
-                      {songRowTitle}
-                    </strong>
+                    <div className="main-list-row-title-group">
+                      {songDisplayTitleEditingId === song.id ? (
+                        <input
+                          ref={songDisplayTitleInputRef}
+                          type="text"
+                          className="main-list-row-title-input"
+                          value={songDisplayTitleDraft}
+                          onChange={(event) => setSongDisplayTitleDraft(event.target.value)}
+                          onClick={(event) => event.stopPropagation()}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onDragStart={(event) => event.preventDefault()}
+                          onKeyDown={(event) => {
+                            event.stopPropagation();
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              handleSongDisplayTitleSave(song);
+                            }
+                            if (event.key === 'Escape') {
+                              event.preventDefault();
+                              handleSongDisplayTitleCancel();
+                            }
+                          }}
+                          onBlur={() => {
+                            if (songDisplayTitleSkipBlurSaveRef.current) {
+                              songDisplayTitleSkipBlurSaveRef.current = false;
+                              return;
+                            }
+                            handleSongDisplayTitleSave(song);
+                          }}
+                          data-testid="main-list-row-title-input"
+                          aria-label={`Display title for ${getSongFileDerivedDisplayTitle(song)}`}
+                        />
+                      ) : (
+                        <>
+                          <strong className="main-list-row-title" data-testid="main-list-row-title">
+                            {songRowTitle}
+                          </strong>
+                          <button
+                            type="button"
+                            className="main-list-row-title-edit"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleSongDisplayTitleStartEdit(song);
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            draggable={false}
+                            data-testid="main-list-row-title-edit-button"
+                            aria-label={`Edit display title for ${songRowTitle}`}
+                            title="Edit display title"
+                          >
+                            ✎
+                          </button>
+                        </>
+                      )}
+                    </div>
                     {/* v3.108 — LUFS now stands alone in the top-right (no more
                         V·WAV pill alongside it). The version capsule moved to
                         the row's bottom-left, replacing the plain "N version(s)"
@@ -19680,7 +19859,7 @@ export function App(): JSX.Element {
             */}
             <div className="checklist-modal-header">
               <div>
-                <h2>{getSongDisplayTitle(checklistModalSong)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Mark new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to use that device for subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
+                <h2>{getSongDisplayTitle(checklistModalSong, songDisplayTitles)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Mark new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to use that device for subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
                 <p className="muted" data-testid="song-checklist-header-counts">
                   {checklistCompletedCount}/{checklistModalTodoItems.length} todos · {checklistModalTodoItems.length - checklistCompletedCount} left
                   {checklistNoteCount > 0 ? (
@@ -24166,7 +24345,7 @@ export function App(): JSX.Element {
                 onDoubleClick={(event) => handleFloatingSwitcherHeaderDoubleClick('version', event)}
                 title="Drag to move. Double-click to reset."
               >
-                <h4>Versions{versionSwitcherSong ? ` — ${getSongDisplayTitle(versionSwitcherSong)}` : ''}</h4>
+                <h4>Versions{versionSwitcherSong ? ` — ${getSongDisplayTitle(versionSwitcherSong, songDisplayTitles)}` : ''}</h4>
                 <button
                   type="button"
                   className="version-switcher-close"

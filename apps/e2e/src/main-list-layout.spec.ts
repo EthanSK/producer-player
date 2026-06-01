@@ -87,4 +87,83 @@ test.describe('Main list row layout', () => {
       await cleanupE2ETestDirectories(directories);
     }
   });
+
+  test('track display title can be edited, searched, and restored after relaunch', async () => {
+    const directories = await createE2ETestDirectories('producer-player-main-list-title-edit');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      {
+        relativePath: 'Original File Name v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z'),
+      },
+    ]);
+
+    let firstLaunch: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+    let secondLaunch: Awaited<ReturnType<typeof launchProducerPlayer>> | null = null;
+
+    try {
+      firstLaunch = await launchProducerPlayer(directories.userDataDirectory);
+      await firstLaunch.page.evaluate(async (folderPath) => {
+        await (
+          window as typeof window & {
+            producerPlayer: { linkFolder: (path: string) => Promise<unknown> };
+          }
+        ).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+
+      const firstRow = firstLaunch.page.getByTestId('main-list-row').first();
+      await expect(firstRow).toBeVisible();
+      await expect(firstRow.getByTestId('main-list-row-title')).toHaveText('Original File Name');
+
+      await firstRow.hover();
+      await firstRow.getByTestId('main-list-row-title-edit-button').click();
+      await firstRow.getByTestId('main-list-row-title-input').fill('Display Title');
+      await firstRow.getByTestId('main-list-row-title-input').press('Enter');
+
+      await expect(firstRow.getByTestId('main-list-row-title')).toHaveText('Display Title');
+
+      // Search uses the renderer state hook instead of a visible input so the
+      // test stays focused on display-title behavior rather than header layout.
+      await firstLaunch.page.evaluate(() => {
+        (
+          window as typeof window & {
+            __producerPlayerSetSearchText?: (next: string) => void;
+          }
+        ).__producerPlayerSetSearchText?.('Display Title');
+      });
+      await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await firstLaunch.page.evaluate(() => {
+        (
+          window as typeof window & {
+            __producerPlayerSetSearchText?: (next: string) => void;
+          }
+        ).__producerPlayerSetSearchText?.('');
+      });
+
+      // The unified-state writer is debounced in the renderer; give it one
+      // flush window before closing so this test covers the real disk path.
+      await firstLaunch.page.waitForTimeout(900);
+      await firstLaunch.electronApp.close();
+      firstLaunch = null;
+
+      secondLaunch = await launchProducerPlayer(directories.userDataDirectory);
+      if ((await secondLaunch.page.getByTestId('main-list-row').count()) === 0) {
+        await secondLaunch.page.evaluate(async (folderPath) => {
+          await (
+            window as typeof window & {
+              producerPlayer: { linkFolder: (path: string) => Promise<unknown> };
+            }
+          ).producerPlayer.linkFolder(folderPath);
+        }, directories.fixtureDirectory);
+      }
+
+      await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(1);
+      await expect(secondLaunch.page.getByTestId('main-list-row-title')).toHaveText('Display Title');
+    } finally {
+      await firstLaunch?.electronApp.close();
+      await secondLaunch?.electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
 });

@@ -739,6 +739,9 @@ export interface ProducerPlayerUserState {
   songRatings: Record<string, number>;
   songChecklists: Record<string, SongChecklistItem[]>;
   songProjectFilePaths: Record<string, string>;
+  // Optional per-track display names. These do not rename files or affect
+  // scanner grouping; they only override the title shown inside the app.
+  songDisplayTitles: Record<string, string>;
 
   // Album
   albumTitle: string;

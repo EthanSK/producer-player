@@ -74,6 +74,7 @@ export const PER_TRACK_KEYS = [
   'songRatings',
   'songChecklists',
   'songProjectFilePaths',
+  'songDisplayTitles',
   'perSongReferenceTracks',
   'perSongRestoreReferenceEnabled',
   'eqSnapshots',
@@ -234,6 +235,16 @@ function parseSongProjectFilePaths(value: unknown): Record<string, string> {
     const normalizedPath = typeof p === 'string' ? p.trim() : '';
     if (songId.length === 0 || normalizedPath.length === 0) return [];
     return [[songId, normalizedPath] as const];
+  });
+  return Object.fromEntries(entries);
+}
+
+function parseSongDisplayTitles(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  const entries = Object.entries(value).flatMap(([songId, title]) => {
+    const normalizedTitle = typeof title === 'string' ? title.trim() : '';
+    if (songId.length === 0 || normalizedTitle.length === 0) return [];
+    return [[songId, normalizedTitle] as const];
   });
   return Object.fromEntries(entries);
 }
@@ -696,6 +707,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     songRatings: {},
     songChecklists: {},
     songProjectFilePaths: {},
+    songDisplayTitles: {},
     albumTitle: 'Untitled Album',
     albumArtDataUrl: '',
     albumChecklists: {},
@@ -785,6 +797,7 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     songRatings: parseSongRatings(raw.songRatings),
     songChecklists: parseSongChecklists(raw.songChecklists),
     songProjectFilePaths: parseSongProjectFilePaths(raw.songProjectFilePaths),
+    songDisplayTitles: parseSongDisplayTitles(raw.songDisplayTitles),
     albumTitle: typeof raw.albumTitle === 'string' && raw.albumTitle.length > 0 ? raw.albumTitle : fallback.albumTitle,
     albumArtDataUrl: typeof raw.albumArtDataUrl === 'string' ? raw.albumArtDataUrl : '',
     albumChecklists: parseAlbumChecklists(raw.albumChecklists),

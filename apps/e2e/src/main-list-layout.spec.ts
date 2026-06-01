@@ -115,8 +115,20 @@ test.describe('Main list row layout', () => {
       await expect(firstRow).toBeVisible();
       await expect(firstRow.getByTestId('main-list-row-title')).toHaveText('Original File Name');
 
-      await firstRow.hover();
-      await firstRow.getByTestId('main-list-row-title-edit-button').click();
+      const editButton = firstRow.getByTestId('main-list-row-title-edit-button');
+      const rowBox = await firstRow.boundingBox();
+      expect(rowBox).not.toBeNull();
+
+      // The edit affordance should not flicker in just because the pointer
+      // crossed the row; Ethan wanted it reserved for direct title intent.
+      if (rowBox) {
+        await firstLaunch.page.mouse.move(rowBox.x + rowBox.width - 8, rowBox.y + 8);
+      }
+      await expect(editButton).toHaveCSS('opacity', '0');
+
+      await firstRow.getByTestId('main-list-row-title').hover();
+      await expect(editButton).toHaveCSS('opacity', '1');
+      await editButton.click();
       await firstRow.getByTestId('main-list-row-title-input').fill('Display Title');
       await firstRow.getByTestId('main-list-row-title-input').press('Enter');
 

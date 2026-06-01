@@ -18943,7 +18943,7 @@ export function App(): JSX.Element {
                           aria-label={`Display title for ${getSongFileDerivedDisplayTitle(song)}`}
                         />
                       ) : (
-                        <>
+                        <span className="main-list-row-title-edit-zone">
                           <strong className="main-list-row-title" data-testid="main-list-row-title">
                             {songRowTitle}
                           </strong>
@@ -18962,7 +18962,7 @@ export function App(): JSX.Element {
                           >
                             ✎
                           </button>
-                        </>
+                        </span>
                       )}
                     </div>
                     {/* v3.108 — LUFS now stands alone in the top-right (no more

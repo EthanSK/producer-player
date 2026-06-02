@@ -2742,11 +2742,10 @@ body.floating-switcher-panel-dragging * {
   flex: 1;
 }
 
-/* v3.261 — Bottom-of-track-list checklist total. The main list is a flex column
-   so this footer can use margin-top:auto to sit in the otherwise-empty gap when
-   the album has fewer rows than the scroll area, while still scrolling naturally
-   after the rows when the list is long. It intentionally says exactly "Total
-   number: N" per Ethan's voice note; title/aria carry the fuller explanation. */
+/* Bottom-of-track-list checklist total. The main list is a flex column so this
+   footer can use margin-top:auto to sit in the otherwise-empty gap when the
+   album has fewer rows than the scroll area, while still scrolling naturally
+   after the rows when the list is long. */
 .main-list-checklist-total {
   margin-top: auto;
   padding: 10px 8px 2px 42px;

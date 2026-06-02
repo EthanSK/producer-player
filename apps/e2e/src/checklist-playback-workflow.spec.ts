@@ -204,7 +204,11 @@ test.describe('checklist playback workflow', () => {
       await linkFixtureFolder(page, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        'Total checklist items remaining: 0'
+        'Total checklist items remaining: 0 out of 0'
+      );
+      await expect(page.getByTestId('main-list-checklist-total')).toHaveAttribute(
+        'aria-label',
+        '0 of 0 checklist items remaining across all tracks'
       );
 
       await page
@@ -217,7 +221,7 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('song-checklist-add').click();
       await page.getByTestId('song-checklist-done-header').click();
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        'Total checklist items remaining: 1'
+        'Total checklist items remaining: 1 out of 1'
       );
 
       await page
@@ -241,7 +245,11 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('song-checklist-done-header').click();
 
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        'Total checklist items remaining: 2'
+        'Total checklist items remaining: 2 out of 3'
+      );
+      await expect(page.getByTestId('main-list-checklist-total')).toHaveAttribute(
+        'aria-label',
+        '2 of 3 checklist items remaining across all tracks'
       );
     } finally {
       await electronApp.close();

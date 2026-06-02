@@ -7532,6 +7532,15 @@ export function App(): JSX.Element {
     [albumSongs, songChecklists]
   );
 
+  const totalSongChecklistTodoCount = useMemo(
+    () =>
+      albumSongs.reduce(
+        (total, song) => total + countSongChecklistTodos(songChecklists[song.id] ?? []),
+        0
+      ),
+    [albumSongs, songChecklists]
+  );
+
   useEffect(() => {
     if (songs.length === 0) {
       setSelectedSongId(null);
@@ -19189,9 +19198,10 @@ export function App(): JSX.Element {
             <li
               className="main-list-checklist-total"
               data-testid="main-list-checklist-total"
-              aria-label={`${totalRemainingSongChecklistTodoCount} checklist item${totalRemainingSongChecklistTodoCount === 1 ? '' : 's'} remaining across all tracks`}
+              aria-label={`${totalRemainingSongChecklistTodoCount} of ${totalSongChecklistTodoCount} checklist item${totalSongChecklistTodoCount === 1 ? '' : 's'} remaining across all tracks`}
             >
-              Total checklist items remaining: {totalRemainingSongChecklistTodoCount}
+              Total checklist items remaining: {totalRemainingSongChecklistTodoCount} out of{' '}
+              {totalSongChecklistTodoCount}
             </li>
           ) : null}
         </ul>

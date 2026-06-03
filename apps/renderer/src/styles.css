@@ -3380,6 +3380,20 @@ button.album-checklist-button.has-items {
   align-items: center;
 }
 
+button.transport-main-button {
+  min-width: 42px;
+  height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+button.transport-jump-previous-button {
+  font-size: 15px;
+}
+
 .skip-button {
   font-size: 11px;
   font-weight: 600;
@@ -5395,6 +5409,11 @@ button.checklist-mini-player-button:hover {
 button.checklist-autoplay-button {
   min-width: 34px;
   padding: 0 8px;
+}
+
+button.checklist-jump-previous-button {
+  min-width: 34px;
+  font-size: 14px;
 }
 
 .checklist-transport-group {

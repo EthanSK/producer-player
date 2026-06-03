@@ -19315,16 +19315,6 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="skip-button"
-                    data-testid="player-jump-previous-track"
-                    onClick={() => handleJumpToPreviousTrack()}
-                    title="Jump to previous track in the current queue."
-                    aria-label="Jump to previous track"
-                  >
-                    ⏮
-                  </button>
-                  <button
-                    type="button"
-                    className="skip-button"
                     data-testid="player-skip-back-10"
                     onClick={() => handleSkipSeconds(-10)}
                     title="Skip back 10 seconds. (Shortcut: 0)"
@@ -19396,8 +19386,20 @@ export function App(): JSX.Element {
                   </button>
                 </div>
                 <div className="transport-main-row">
+                  {/* Direct track-jump is main transport, not a time-skip chip. */}
                   <button
                     type="button"
+                    className="transport-main-button transport-jump-previous-button"
+                    data-testid="player-jump-previous-track"
+                    onClick={() => handleJumpToPreviousTrack()}
+                    title="Jump to previous track in the current queue."
+                    aria-label="Jump to previous track"
+                  >
+                    ⏮
+                  </button>
+                  <button
+                    type="button"
+                    className="transport-main-button"
                     data-testid="player-prev"
                     onClick={() => handlePreviousTrack()}
                     title="Restart current track when past 0:02; otherwise go to previous track."
@@ -19419,6 +19421,7 @@ export function App(): JSX.Element {
                   </button>
                   <button
                     type="button"
+                    className="transport-main-button"
                     data-testid="player-next"
                     onClick={() => handleNextTrack()}
                     title="Jump to next track in the current queue."
@@ -21417,31 +21420,34 @@ export function App(): JSX.Element {
                     ◀◀
                   </button>
 
-                  <div className="checklist-transport-group">
-                    <button
-                      ref={checklistJumpPreviousTrackButtonRef}
-                      type="button"
-                      className="checklist-skip-button"
-                      data-testid="song-checklist-jump-previous-track"
-                      onClick={() => handleJumpToPreviousTrack({ syncChecklistModal: true })}
-                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
-                      onKeyDown={(event) => {
-                        if (event.key === ' ') {
-                          event.preventDefault();
-                          void handleTogglePlayback();
-                          return;
-                        }
+                  {/* Direct track-jump belongs with the primary nav buttons,
+                      not inside the second-skip cluster below. */}
+                  <button
+                    ref={checklistJumpPreviousTrackButtonRef}
+                    type="button"
+                    className="checklist-mini-player-button checklist-jump-previous-button"
+                    data-testid="song-checklist-jump-previous-track"
+                    onClick={() => handleJumpToPreviousTrack({ syncChecklistModal: true })}
+                    onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
+                    onKeyDown={(event) => {
+                      if (event.key === ' ') {
+                        event.preventDefault();
+                        void handleTogglePlayback();
+                        return;
+                      }
 
-                        if (isUnmodifiedShiftTab(event)) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
-                        }
-                      }}
-                      title="Jump to previous track"
-                      aria-label="Jump to previous track"
-                    >
-                      ⏮
-                    </button>
+                      if (isUnmodifiedShiftTab(event)) {
+                        event.preventDefault();
+                        checklistComposerTextareaRef.current?.focus();
+                      }
+                    }}
+                    title="Jump to previous track"
+                    aria-label="Jump to previous track"
+                  >
+                    ⏮
+                  </button>
+
+                  <div className="checklist-transport-group">
                     <button
                       ref={checklistSkipBackTenButtonRef}
                       type="button"
@@ -23809,16 +23815,6 @@ export function App(): JSX.Element {
                 <button
                   type="button"
                   className="analysis-overlay-transport-button analysis-overlay-skip-button"
-                  data-testid="analysis-overlay-jump-previous-track"
-                  onClick={() => handleJumpToPreviousTrack()}
-                  title="Jump to previous track"
-                  aria-label="Jump to previous track"
-                >
-                  ⏮
-                </button>
-                <button
-                  type="button"
-                  className="analysis-overlay-transport-button analysis-overlay-skip-button"
                   data-testid="analysis-overlay-skip-back-10"
                   onClick={() => handleSkipSeconds(-10)}
                   title="Skip back 10 seconds (Shortcut: 0)"
@@ -23845,6 +23841,18 @@ export function App(): JSX.Element {
                   aria-label="Skip back 1 second"
                 >
                   −1s
+                </button>
+                {/* Keep the direct queue jump beside the main previous button
+                    so it reads as track navigation, not a −seconds skip. */}
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-jump-previous-button"
+                  data-testid="analysis-overlay-jump-previous-track"
+                  onClick={() => handleJumpToPreviousTrack()}
+                  title="Jump to previous track"
+                  aria-label="Jump to previous track"
+                >
+                  ⏮
                 </button>
                 <button
                   type="button"

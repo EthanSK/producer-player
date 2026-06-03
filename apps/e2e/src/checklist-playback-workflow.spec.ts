@@ -570,6 +570,20 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('transport-checklist-button').click();
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 
+      // Mirror the main player: the direct previous-track jump is a primary
+      // checklist transport button beside ◀◀, not part of the ±seconds cluster.
+      const checklistPrimaryTransportOrder = await page.evaluate(() => {
+        const buttons = Array.from(
+          document.querySelectorAll('.checklist-mini-player-transport > [data-testid]')
+        );
+        return buttons.map((b) => (b as HTMLElement).dataset.testid);
+      });
+      expect(checklistPrimaryTransportOrder).toEqual([
+        'song-checklist-mini-player-prev',
+        'song-checklist-jump-previous-track',
+        'song-checklist-mini-player-next',
+      ]);
+
       const checklistInput = page.getByTestId('song-checklist-input');
       await checklistInput.fill('draft for current song');
 
@@ -915,8 +929,8 @@ test.describe('checklist playback workflow', () => {
       await expect(skipBack2).toBeVisible();
       await expect(skipForward2).toBeVisible();
 
-      // Keep the direct previous-track jump next to the rewind buttons, not
-      // hidden in the lower play/pause row, so cueing comparisons stays quick.
+      // The direct previous-track jump is main track navigation, not another
+      // second-skip chip; lock it next to the ◀◀ restart/previous button.
       const skipRowOrder = await page.evaluate(() => {
         const buttons = Array.from(
           document.querySelectorAll('.transport-skip-row [data-testid]')
@@ -924,7 +938,6 @@ test.describe('checklist playback workflow', () => {
         return buttons.map((b) => (b as HTMLElement).dataset.testid);
       });
       expect(skipRowOrder).toEqual([
-        'player-jump-previous-track',
         'player-skip-back-10',
         'player-skip-back-5',
         'player-skip-back-2',
@@ -933,6 +946,19 @@ test.describe('checklist playback workflow', () => {
         'player-skip-forward-2',
         'player-skip-forward-5',
         'player-skip-forward-10',
+      ]);
+      const mainTransportOrder = await page.evaluate(() => {
+        const buttons = Array.from(
+          document.querySelectorAll('.transport-main-row [data-testid]')
+        );
+        return buttons.map((b) => (b as HTMLElement).dataset.testid);
+      });
+      expect(mainTransportOrder).toEqual([
+        'player-jump-previous-track',
+        'player-prev',
+        'player-play-toggle',
+        'player-next',
+        'player-autoplay-next',
       ]);
 
       const scrubber = page.getByTestId('player-scrubber');
@@ -991,12 +1017,12 @@ test.describe('checklist playback workflow', () => {
           .map((element) => (element as HTMLElement).dataset.testid)
           .filter((testid) =>
             testid === 'analysis-overlay-jump-previous-track' ||
-            testid === 'analysis-overlay-skip-back-10'
+            testid === 'analysis-overlay-prev'
           )
       );
       expect(overlayTransportOrder).toEqual([
         'analysis-overlay-jump-previous-track',
-        'analysis-overlay-skip-back-10',
+        'analysis-overlay-prev',
       ]);
 
       const fullScreenSpectrum = page.getByTestId('spectrum-analyzer-full');

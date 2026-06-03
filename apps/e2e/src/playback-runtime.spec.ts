@@ -2455,7 +2455,7 @@ test.describe('playback runtime deep dive', () => {
     }
   });
 
-  test('previous restarts current track first, then goes to previous track on the next press', async () => {
+  test('direct previous jumps tracks while rewind always restarts the current track', async () => {
     const fixtureDirectory = await fs.mkdtemp(
       path.join(os.tmpdir(), 'producer-player-e2e-previous-track-behavior-fixture-')
     );
@@ -2534,6 +2534,11 @@ test.describe('playback runtime deep dive', () => {
       await expect.poll(readScrubberValue).toBeLessThan(0.25);
 
       await page.getByTestId('player-prev').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(secondTrackName);
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await expect.poll(readScrubberValue).toBeLessThan(0.25);
+
+      await page.getByTestId('player-jump-previous-track').click();
       await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
 

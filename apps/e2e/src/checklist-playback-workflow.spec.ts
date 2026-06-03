@@ -542,7 +542,7 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
-  test('checklist mini-player next/previous reinitialize the checklist to the moved song', async () => {
+  test('checklist mini-player next/direct previous reinitialize while rewind keeps the current checklist', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-mini-player-reinitialize-on-track-nav'
     );
@@ -653,14 +653,28 @@ test.describe('checklist playback workflow', () => {
       );
       await expect(checklistInput).toHaveValue('');
 
-      await checklistInput.fill('draft for previous button');
+      await checklistInput.fill('draft for rewind button');
+
+      const miniScrubber = page.getByTestId('song-checklist-mini-player-scrubber');
+      await miniScrubber.evaluate((element) => {
+        const scrubber = element as HTMLInputElement;
+        scrubber.value = '1.4';
+        scrubber.dispatchEvent(new Event('input', { bubbles: true }));
+        scrubber.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await expect
+        .poll(async () => Number.parseFloat(await miniScrubber.inputValue()))
+        .toBeGreaterThan(1);
 
       await page.getByTestId('song-checklist-mini-player-prev').click();
-      await expect(page.getByTestId('player-track-name')).toContainText(`${firstSongTitle} v1.wav`);
+      await expect(page.getByTestId('player-track-name')).toContainText(`${secondSongTitle} v1.wav`);
       await expect(page.locator('.checklist-modal-header h2')).toContainText(
-        `${firstSongTitle} Checklist`
+        `${secondSongTitle} Checklist`
       );
-      await expect(checklistInput).toHaveValue('');
+      await expect(checklistInput).toHaveValue('draft for rewind button');
+      await expect
+        .poll(async () => Number.parseFloat(await miniScrubber.inputValue()))
+        .toBeLessThan(0.25);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
@@ -971,7 +985,7 @@ test.describe('checklist playback workflow', () => {
       await expect(skipForward2).toBeVisible();
 
       // The direct previous-track jump is main track navigation, not another
-      // second-skip chip; lock it next to the ◀◀ restart/previous button.
+      // second-skip chip; lock it next to the ◀◀ rewind button.
       const skipRowOrder = await page.evaluate(() => {
         const buttons = Array.from(
           document.querySelectorAll('.transport-skip-row [data-testid]')

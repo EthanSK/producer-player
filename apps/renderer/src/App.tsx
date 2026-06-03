@@ -897,7 +897,6 @@ const PLAYBACK_BACKGROUND_WARMUP_GRACE_MS = PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_
 const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
-const PREVIOUS_TRACK_RESTART_THRESHOLD_SECONDS = 2;
 const DEFAULT_PLAYBACK_VOLUME = 1;
 const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
@@ -12249,46 +12248,25 @@ export function App(): JSX.Element {
     resetChecklistComposer(0);
   }
 
-  function handlePreviousTrack(options?: { syncChecklistModal?: boolean }): void {
+  function handleRewindCurrentTrack(): void {
     const audio = audioRef.current;
     const currentTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
 
-    if (currentTime > PREVIOUS_TRACK_RESTART_THRESHOLD_SECONDS) {
+    if (audio) {
+      // v3.283 — ◀◀ is now a pure rewind-to-start control. The old
+      // "press once to restart, press again near 0:00 to jump tracks" rule
+      // became confusing once Ethan added the dedicated ⏮ previous-track jump.
       handleSeek(0);
-      logPlaybackEvent('transport-previous-restart-current-track', {
-        currentTimeSeconds: currentTime,
-      });
-      return;
-    }
-
-    const movedToPrevious = moveInQueueRef.current(-1, {
-      wrap: repeatMode === 'all',
-      autoplay: shouldAutoplayOnTransport(),
-    });
-
-    if (movedToPrevious) {
-      if (options?.syncChecklistModal) {
-        syncChecklistModalToQueueMoveTarget();
-      }
-
-      logPlaybackEvent('transport-previous-move-queue', {
-        currentTimeSeconds: currentTime,
-      });
-      return;
-    }
-
-    if (audio && currentTime > 0.01) {
-      handleSeek(0);
-      logPlaybackEvent('transport-previous-restart-fallback', {
+      logPlaybackEvent('transport-rewind-current-track', {
         currentTimeSeconds: currentTime,
       });
     }
   }
 
   function handleJumpToPreviousTrack(options?: { syncChecklistModal?: boolean }): void {
-    // Separate from handlePreviousTrack: this control is for Ethan's
-    // rewind-adjacent "previous song" jump and must never restart the
-    // current track just because the playhead is past the normal 2s threshold.
+    // Separate from handleRewindCurrentTrack: this control is for Ethan's
+    // rewind-adjacent "previous song" jump and must never restart/rewind the
+    // current track just because the playhead is somewhere in the song.
     const movedToPrevious = moveInQueueRef.current(-1, {
       wrap: repeatMode === 'all',
       autoplay: shouldAutoplayOnTransport(),
@@ -17212,7 +17190,9 @@ export function App(): JSX.Element {
       void handleTogglePlayback();
     },
     next: handleNextTrack,
-    previous: handlePreviousTrack,
+    // Main-process/media-key "previous-track" is still actual queue
+    // navigation. The in-app ◀◀ button below is now rewind-only.
+    previous: handleJumpToPreviousTrack,
   };
   handleSkipSecondsRef.current = handleSkipSeconds;
 
@@ -19363,7 +19343,7 @@ export function App(): JSX.Element {
             </div>
 
             <div className="player-transport">
-              <HelpTooltip text={"What this is: The main playback controls — play/pause, skip forward/back, previous/next track, repeat mode, and volume.\n\nHow to use it: Press the play button or hit Space anywhere in the app to toggle playback. Use the skip buttons (±1s, ±5s, ±10s) for fine seeking. Click ◀◀ / ▶▶ to move between tracks. Drag the scrubber to jump to any position. Adjust volume with the slider.\n\nWhy you'd want to: Quickly navigate through your songs and compare sections without leaving the app.\n\nTip: Space bar toggles play/pause globally (unless you're typing in a text field). The previous-track button restarts the current song if past 2 seconds, or goes to the previous track if near the start."} />
+              <HelpTooltip text={"What this is: The main playback controls — play/pause, skip forward/back, previous/next track, repeat mode, and volume.\n\nHow to use it: Press the play button or hit Space anywhere in the app to toggle playback. Use the skip buttons (±1s, ±5s, ±10s) for fine seeking. Click ⏮ to jump to the previous track, ◀◀ to rewind the current track to the start, and ▶▶ to move to the next track. Drag the scrubber to jump to any position. Adjust volume with the slider.\n\nWhy you'd want to: Quickly navigate through your songs and compare sections without leaving the app.\n\nTip: Space bar toggles play/pause globally unless you're typing in a text field."} />
               <div className="transport-nav-group">
                 <div className="transport-skip-row">
                   <button
@@ -19455,8 +19435,9 @@ export function App(): JSX.Element {
                     type="button"
                     className="transport-main-button"
                     data-testid="player-prev"
-                    onClick={() => handlePreviousTrack()}
-                    title="Restart current track when past 0:02; otherwise go to previous track."
+                    onClick={() => handleRewindCurrentTrack()}
+                    title="Rewind to the start of the current track."
+                    aria-label="Rewind to start of current track"
                   >
                     ◀◀
                   </button>
@@ -21461,7 +21442,7 @@ export function App(): JSX.Element {
                     type="button"
                     className="checklist-mini-player-button"
                     data-testid="song-checklist-mini-player-prev"
-                    onClick={() => handlePreviousTrack({ syncChecklistModal: true })}
+                    onClick={() => handleRewindCurrentTrack()}
                     onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
                     onKeyDown={(event) => {
                       if (event.key === ' ') {
@@ -21475,8 +21456,8 @@ export function App(): JSX.Element {
                         checklistComposerTextareaRef.current?.focus();
                       }
                     }}
-                    title="Previous track"
-                    aria-label="Previous track"
+                    title="Rewind to the start of the current track"
+                    aria-label="Rewind to start of current track"
                   >
                     ◀◀
                   </button>
@@ -23903,7 +23884,7 @@ export function App(): JSX.Element {
                 >
                   −1s
                 </button>
-                {/* Keep the direct queue jump beside the main previous button
+                {/* Keep the direct queue jump beside the main rewind button
                     so it reads as track navigation, not a −seconds skip. */}
                 <button
                   type="button"
@@ -23919,9 +23900,9 @@ export function App(): JSX.Element {
                   type="button"
                   className="analysis-overlay-transport-button"
                   data-testid="analysis-overlay-prev"
-                  onClick={() => handlePreviousTrack()}
-                  title="Previous track"
-                  aria-label="Previous track"
+                  onClick={() => handleRewindCurrentTrack()}
+                  title="Rewind to start of current track"
+                  aria-label="Rewind to start of current track"
                 >
                   ◀◀
                 </button>

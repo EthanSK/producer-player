@@ -4007,6 +4007,7 @@ export function App(): JSX.Element {
   const checklistDawOffsetMinutesInputRef = useRef<HTMLInputElement | null>(null);
   const checklistDawOffsetSecondsInputRef = useRef<HTMLInputElement | null>(null);
   const checklistSkipBackTenButtonRef = useRef<HTMLButtonElement | null>(null);
+  const checklistJumpPreviousTrackButtonRef = useRef<HTMLButtonElement | null>(null);
   const checklistSkipBackFiveButtonRef = useRef<HTMLButtonElement | null>(null);
   const lastFocusedChecklistTransportRef = useRef<HTMLButtonElement | null>(null);
   const checklistPreviewDragStateRef = useRef<{
@@ -12231,6 +12232,24 @@ export function App(): JSX.Element {
     }
   }
 
+  function handleJumpToPreviousTrack(options?: { syncChecklistModal?: boolean }): void {
+    // Separate from handlePreviousTrack: this control is for Ethan's
+    // rewind-adjacent "previous song" jump and must never restart the
+    // current track just because the playhead is past the normal 2s threshold.
+    const movedToPrevious = moveInQueueRef.current(-1, {
+      wrap: repeatMode === 'all',
+      autoplay: shouldAutoplayOnTransport(),
+    });
+
+    if (movedToPrevious) {
+      if (options?.syncChecklistModal) {
+        syncChecklistModalToQueueMoveTarget();
+      }
+
+      logPlaybackEvent('transport-jump-previous-track', {});
+    }
+  }
+
   function handleNextTrack(options?: { syncChecklistModal?: boolean }): void {
     const movedToNext = moveInQueueRef.current(1, {
       wrap: repeatMode === 'all',
@@ -19296,6 +19315,16 @@ export function App(): JSX.Element {
                   <button
                     type="button"
                     className="skip-button"
+                    data-testid="player-jump-previous-track"
+                    onClick={() => handleJumpToPreviousTrack()}
+                    title="Jump to previous track in the current queue."
+                    aria-label="Jump to previous track"
+                  >
+                    ⏮
+                  </button>
+                  <button
+                    type="button"
+                    className="skip-button"
                     data-testid="player-skip-back-10"
                     onClick={() => handleSkipSeconds(-10)}
                     title="Skip back 10 seconds. (Shortcut: 0)"
@@ -21239,6 +21268,7 @@ export function App(): JSX.Element {
                     event.preventDefault();
                     const rememberedTransportButton = lastFocusedChecklistTransportRef.current;
                     const fallbackTransportButton =
+                      checklistJumpPreviousTrackButtonRef.current ??
                       checklistSkipBackTenButtonRef.current ??
                       checklistSkipBackFiveButtonRef.current;
                     const targetTransportButton =
@@ -21388,6 +21418,30 @@ export function App(): JSX.Element {
                   </button>
 
                   <div className="checklist-transport-group">
+                    <button
+                      ref={checklistJumpPreviousTrackButtonRef}
+                      type="button"
+                      className="checklist-skip-button"
+                      data-testid="song-checklist-jump-previous-track"
+                      onClick={() => handleJumpToPreviousTrack({ syncChecklistModal: true })}
+                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
+                      onKeyDown={(event) => {
+                        if (event.key === ' ') {
+                          event.preventDefault();
+                          void handleTogglePlayback();
+                          return;
+                        }
+
+                        if (isUnmodifiedShiftTab(event)) {
+                          event.preventDefault();
+                          checklistComposerTextareaRef.current?.focus();
+                        }
+                      }}
+                      title="Jump to previous track"
+                      aria-label="Jump to previous track"
+                    >
+                      ⏮
+                    </button>
                     <button
                       ref={checklistSkipBackTenButtonRef}
                       type="button"
@@ -21636,7 +21690,7 @@ export function App(): JSX.Element {
                 Clear Completed
               </button>
               <span className="checklist-transport-hint" data-testid="song-checklist-shift-tab-hint">
-                Shift+Tab toggles input ↔ time jumping controls
+                Shift+Tab toggles input ↔ transport controls
               </span>
               <button
                 type="button"
@@ -23752,6 +23806,16 @@ export function App(): JSX.Element {
           {selectedPlaybackVersion ? (
             <div className="mastering-playback-float" data-testid="mastering-playback-float">
               <div className="analysis-overlay-transport" data-testid="analysis-overlay-transport">
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-skip-button"
+                  data-testid="analysis-overlay-jump-previous-track"
+                  onClick={() => handleJumpToPreviousTrack()}
+                  title="Jump to previous track"
+                  aria-label="Jump to previous track"
+                >
+                  ⏮
+                </button>
                 <button
                   type="button"
                   className="analysis-overlay-transport-button analysis-overlay-skip-button"

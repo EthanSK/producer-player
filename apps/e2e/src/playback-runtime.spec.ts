@@ -2520,6 +2520,15 @@ test.describe('playback runtime deep dive', () => {
 
       await expect.poll(readScrubberValue, { timeout: 12_000 }).toBeGreaterThan(2.3);
 
+      await page.getByTestId('player-jump-previous-track').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(firstTrackName);
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('player-next').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(secondTrackName);
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await expect.poll(readScrubberValue, { timeout: 8_000 }).toBeGreaterThan(2.3);
+
       await page.getByTestId('player-prev').click();
       await expect(page.getByTestId('player-track-name')).toContainText(secondTrackName);
       await expect.poll(readScrubberValue).toBeLessThan(0.25);

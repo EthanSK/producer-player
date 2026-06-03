@@ -582,6 +582,24 @@ test.describe('checklist playback workflow', () => {
 
       await checklistInput.fill('draft for moved song');
 
+      await page.getByTestId('song-checklist-jump-previous-track').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(`${firstSongTitle} v1.wav`);
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${firstSongTitle} Checklist`
+      );
+      await expect(checklistInput).toHaveValue('');
+
+      await checklistInput.fill('draft after direct jump');
+
+      await page.getByTestId('song-checklist-mini-player-next').click();
+      await expect(page.getByTestId('player-track-name')).toContainText(`${secondSongTitle} v1.wav`);
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${secondSongTitle} Checklist`
+      );
+      await expect(checklistInput).toHaveValue('');
+
+      await checklistInput.fill('draft for previous button');
+
       await page.getByTestId('song-checklist-mini-player-prev').click();
       await expect(page.getByTestId('player-track-name')).toContainText(`${firstSongTitle} v1.wav`);
       await expect(page.locator('.checklist-modal-header h2')).toContainText(
@@ -890,19 +908,23 @@ test.describe('checklist playback workflow', () => {
       const skipForward5 = page.getByTestId('player-skip-forward-5');
       const skipBack2 = page.getByTestId('player-skip-back-2');
       const skipForward2 = page.getByTestId('player-skip-forward-2');
+      const jumpPreviousTrack = page.getByTestId('player-jump-previous-track');
+      await expect(jumpPreviousTrack).toBeVisible();
       await expect(skipBack5).toBeVisible();
       await expect(skipForward5).toBeVisible();
       await expect(skipBack2).toBeVisible();
       await expect(skipForward2).toBeVisible();
 
-      // Verify button order: -5, -2, -1, +1, +2, +5 (left to right)
+      // Keep the direct previous-track jump next to the rewind buttons, not
+      // hidden in the lower play/pause row, so cueing comparisons stays quick.
       const skipRowOrder = await page.evaluate(() => {
         const buttons = Array.from(
-          document.querySelectorAll('.transport-skip-row [data-testid^="player-skip-"]')
+          document.querySelectorAll('.transport-skip-row [data-testid]')
         );
         return buttons.map((b) => (b as HTMLElement).dataset.testid);
       });
       expect(skipRowOrder).toEqual([
+        'player-jump-previous-track',
         'player-skip-back-10',
         'player-skip-back-5',
         'player-skip-back-2',
@@ -962,6 +984,20 @@ test.describe('checklist playback workflow', () => {
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
       await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText(/Reference Track/i);
       await expect(page.getByTestId('analysis-overlay-reference-panel')).toContainText('Quick A/B');
+      await expect(page.getByTestId('analysis-overlay-jump-previous-track')).toBeVisible();
+
+      const overlayTransportOrder = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('.analysis-overlay-transport [data-testid]'))
+          .map((element) => (element as HTMLElement).dataset.testid)
+          .filter((testid) =>
+            testid === 'analysis-overlay-jump-previous-track' ||
+            testid === 'analysis-overlay-skip-back-10'
+          )
+      );
+      expect(overlayTransportOrder).toEqual([
+        'analysis-overlay-jump-previous-track',
+        'analysis-overlay-skip-back-10',
+      ]);
 
       const fullScreenSpectrum = page.getByTestId('spectrum-analyzer-full');
       await expect(fullScreenSpectrum).toBeVisible();

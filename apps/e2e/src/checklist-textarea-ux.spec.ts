@@ -260,6 +260,7 @@ test.describe('Checklist textarea UX', () => {
       await linkSingleSongAndOpenChecklist(page, directories.fixtureDirectory);
 
       const composer = page.getByTestId('song-checklist-input');
+      const jumpPreviousTrack = page.getByTestId('song-checklist-jump-previous-track');
       const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
       const skipForwardFive = page.getByTestId('song-checklist-skip-forward-5');
       const skipForwardTen = page.getByTestId('song-checklist-skip-forward-10');
@@ -267,11 +268,15 @@ test.describe('Checklist textarea UX', () => {
       const miniPlayerNext = page.getByTestId('song-checklist-mini-player-next');
       const shiftTabHint = page.getByTestId('song-checklist-shift-tab-hint');
 
-      await expect(shiftTabHint).toHaveText('Shift+Tab toggles input ↔ time jumping controls');
+      await expect(shiftTabHint).toHaveText('Shift+Tab toggles input ↔ transport controls');
 
       await skipForwardTen.focus();
       await skipForwardTen.press('Tab');
       await expect(miniPlayerNext).toBeFocused();
+
+      await jumpPreviousTrack.focus();
+      await jumpPreviousTrack.press('Shift+Tab');
+      await expect(composer).toBeFocused();
 
       await skipBackTen.focus();
       await skipBackTen.press('Shift+Tab');
@@ -305,15 +310,17 @@ test.describe('Checklist textarea UX', () => {
       await linkSingleSongAndOpenChecklist(page, directories.fixtureDirectory);
 
       const composer = page.getByTestId('song-checklist-input');
+      const jumpPreviousTrack = page.getByTestId('song-checklist-jump-previous-track');
       const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
       const skipForwardTen = page.getByTestId('song-checklist-skip-forward-10');
 
+      await expect(jumpPreviousTrack).toBeVisible();
       await expect(skipBackTen).toBeVisible();
       await expect(skipForwardTen).toBeVisible();
 
       await composer.focus();
       await composer.press('Shift+Tab');
-      await expect(skipBackTen).toBeFocused();
+      await expect(jumpPreviousTrack).toBeFocused();
 
       await skipForwardTen.focus();
       await expect(skipForwardTen).toBeFocused();
@@ -330,7 +337,7 @@ test.describe('Checklist textarea UX', () => {
 
       await composer.focus();
       await composer.press('Shift+Tab');
-      await expect(skipBackTen).toBeFocused();
+      await expect(jumpPreviousTrack).toBeFocused();
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

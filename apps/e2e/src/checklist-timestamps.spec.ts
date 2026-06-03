@@ -97,7 +97,7 @@ test.describe('Checklist timestamp feature', () => {
     }
   });
 
-  test('typing starts a frozen 3-second lookback timestamp without rewinding the playhead', async () => {
+  test('typing starts a frozen 3-second lookback timestamp and rewinds the playhead', async () => {
     test.skip(!hasFfmpeg(), 'ffmpeg is required for real playback timestamp coverage.');
 
     const fixtureDirectory = await fs.mkdtemp(
@@ -162,11 +162,18 @@ test.describe('Checklist timestamp feature', () => {
         .getByTestId('song-checklist-input-timestamp-preview')
         .textContent())
         ?.trim() ?? '0:00';
-      expect(minimumObservedPlayhead).toBeGreaterThan(playheadBeforeTyping - 0.4);
-
       const previewTimestampSeconds = parseTimestampBadgeText(previewBadgeText);
       const expectedLookbackTimestamp = Math.max(0, Math.floor(playheadBeforeTyping - 3));
       expect(previewTimestampSeconds).toBe(expectedLookbackTimestamp);
+      /*
+       * Regression guard for v3.282: this feature intentionally rewinds the
+       * actual mini-player playhead, not just the preview badge, so typing a
+       * note lets Ethan instantly re-hear the few seconds that triggered it.
+       */
+      expect(minimumObservedPlayhead).toBeLessThanOrEqual(expectedLookbackTimestamp + 0.5);
+      expect(minimumObservedPlayhead).toBeGreaterThanOrEqual(
+        Math.max(0, expectedLookbackTimestamp - 0.3)
+      );
 
       await composer.press('Enter');
       await expect(page.getByTestId('song-checklist-item-text').first()).toHaveValue('A');

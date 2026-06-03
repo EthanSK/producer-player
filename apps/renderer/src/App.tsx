@@ -94,6 +94,7 @@ import {
   parseVersionModifiedAtMs,
 } from './masteringAnalysisCache';
 import {
+  DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS,
   orderLatestTrackWarmupEntries,
   runSequentialLatestTrackWarmup,
 } from './latestTrackWarmup';
@@ -2154,18 +2155,20 @@ function createListeningDeviceId(): string {
   return `listening-device-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
 }
 
-// Deterministic palette of pleasant, distinguishable hues for listening-device
-// chips. Each device id hashes to exactly one entry so the same device always
-// looks the same across sessions even though only the id is persisted.
+// Listening-device chip colours are intentionally ordered by maximum visual
+// separation for the first handful of devices. Ethan only has ~5 devices, so
+// assigning the saved-device list to this sequence makes the chips read as
+// red / blue / yellow / green / pink instead of letting random UUID hashes put
+// multiple devices into neighbouring blue/teal/purple buckets.
 const LISTENING_DEVICE_PALETTE: ReadonlyArray<{ fg: string; bg: string; border: string }> = [
   { fg: '#ffc8c8', bg: 'rgba(255, 94, 94, 0.18)', border: 'rgba(255, 94, 94, 0.55)' },   // red
-  { fg: '#ffd7b0', bg: 'rgba(255, 150, 60, 0.18)', border: 'rgba(255, 150, 60, 0.55)' }, // orange
+  { fg: '#b8daff', bg: 'rgba(92, 167, 255, 0.18)', border: 'rgba(92, 167, 255, 0.55)' }, // blue
   { fg: '#ffeeaa', bg: 'rgba(240, 200, 70, 0.18)', border: 'rgba(240, 200, 70, 0.6)' },  // yellow
   { fg: '#bff0c2', bg: 'rgba(90, 210, 120, 0.18)', border: 'rgba(90, 210, 120, 0.55)' }, // green
-  { fg: '#a8ecd8', bg: 'rgba(70, 210, 180, 0.18)', border: 'rgba(70, 210, 180, 0.55)' }, // teal
-  { fg: '#b8daff', bg: 'rgba(92, 167, 255, 0.18)', border: 'rgba(92, 167, 255, 0.55)' }, // blue
-  { fg: '#ccb8ff', bg: 'rgba(150, 120, 255, 0.20)', border: 'rgba(150, 120, 255, 0.55)' },// purple
   { fg: '#f7bce8', bg: 'rgba(235, 120, 200, 0.18)', border: 'rgba(235, 120, 200, 0.55)' },// pink
+  { fg: '#ffd7b0', bg: 'rgba(255, 150, 60, 0.18)', border: 'rgba(255, 150, 60, 0.55)' }, // orange
+  { fg: '#ccb8ff', bg: 'rgba(150, 120, 255, 0.20)', border: 'rgba(150, 120, 255, 0.55)' },// purple
+  { fg: '#a8ecd8', bg: 'rgba(70, 210, 180, 0.18)', border: 'rgba(70, 210, 180, 0.55)' }, // teal
   { fg: '#e6d3b3', bg: 'rgba(200, 160, 100, 0.18)', border: 'rgba(200, 160, 100, 0.55)' },// tan
   { fg: '#c5d9b6', bg: 'rgba(160, 195, 120, 0.18)', border: 'rgba(160, 195, 120, 0.55)' },// olive
 ];
@@ -2183,6 +2186,22 @@ function hashListeningDeviceId(id: string): number {
 function getListeningDeviceColor(id: string): { fg: string; bg: string; border: string } {
   const index = hashListeningDeviceId(id) % LISTENING_DEVICE_PALETTE.length;
   return LISTENING_DEVICE_PALETTE[index];
+}
+
+function getListeningDeviceColorInSet(
+  id: string,
+  devices: readonly ListeningDevice[],
+): { fg: string; bg: string; border: string } {
+  const index = devices.findIndex((device) => device.id === id);
+  if (index >= 0) {
+    return LISTENING_DEVICE_PALETTE[index % LISTENING_DEVICE_PALETTE.length];
+  }
+
+  // Deleted / historical checklist items can still reference an old device
+  // id that no longer exists in the saved-device list. Keep those stable by
+  // falling back to the old id hash instead of letting missing references
+  // inherit whatever colour the current list index would have used.
+  return getListeningDeviceColor(id);
 }
 
 function sanitizeListeningDevices(value: unknown): ListeningDevice[] {
@@ -3751,6 +3770,7 @@ export function App(): JSX.Element {
   const [masteringCacheStatusByVersionId, setMasteringCacheStatusByVersionId] = useState<
     Record<string, MasteringCacheStatusState>
   >({});
+  const masteringCacheStatusByVersionIdRef = useRef<Record<string, MasteringCacheStatusState>>({});
   const [inspectorVersionSampleRateByVersionId, setInspectorVersionSampleRateByVersionId] =
     useState<Record<string, InspectorVersionSampleRateState>>({});
   const inspectorVersionSampleRateByVersionIdRef = useRef<
@@ -3770,6 +3790,9 @@ export function App(): JSX.Element {
   const [versionSwitcherBounds, setVersionSwitcherBounds] = useState<AgentChatPanelBounds | null>(
     () => readStoredFloatingSwitcherBounds(VERSION_SWITCHER_BOUNDS_STORAGE_KEY)
   );
+  useEffect(() => {
+    masteringCacheStatusByVersionIdRef.current = masteringCacheStatusByVersionId;
+  }, [masteringCacheStatusByVersionId]);
   const [floatingSwitcherViewportSize, setFloatingSwitcherViewportSize] =
     useState<AgentChatViewport>(() =>
       typeof window !== 'undefined'
@@ -7645,15 +7668,45 @@ export function App(): JSX.Element {
 
     let cancelled = false;
 
-    // v3.140/v3.265 — selected-song/version-history analysis is intent-driven,
-    // not optional background precompute, but it must not occupy the same USER
-    // bucket as the actual selected track. v3.264 let every version-history row
-    // become USER priority; on a cold launch that could make the status popover
-    // look stuck behind "urgent" work and let the visible selected-track panel
-    // dedupe to an aging version-history promise. Keep version-history jobs in
-    // NEIGHBOR: they still jump ordinary latest-track background warmup, while
-    // the selected-track effect remains the single source of USER priority.
+    const waitForVisibleMainListWarmup = async (): Promise<void> => {
+      const visibleLatestVersions = songs
+        .map((song) => getLatestSongVersion(song))
+        .filter((version): version is SongVersion => version !== null);
+
+      if (visibleLatestVersions.length === 0) {
+        return;
+      }
+
+      const visibleMainListStillNeedsLufs = (): boolean =>
+        visibleLatestVersions.some((version) => {
+          const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
+          if (isMasteringCacheEntryFresh(cachedEntry, version)) {
+            return false;
+          }
+
+          const statusState = masteringCacheStatusByVersionIdRef.current[version.id];
+          return statusState?.status !== 'error';
+        });
+
+      while (!cancelled && visibleMainListStillNeedsLufs()) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS);
+        });
+      }
+    };
+
+    // v3.140/v3.265/v3.282 — selected-song/version-history analysis is useful,
+    // but it must not outrank what Ethan sees first on cold open: the main
+    // track list's LUFS badges. Version-history rows therefore wait until the
+    // visible latest-track warmup has either cached LUFS for every visible row
+    // or recorded an error, then enqueue at BACKGROUND priority. Clicking/cueing
+    // a version still promotes that file through the selected-track USER path.
     void (async () => {
+      await waitForVisibleMainListWarmup();
+      if (cancelled) {
+        return;
+      }
+
       const tasks = inspectorVersions.map(async (version) => {
         if (cancelled) {
           return;
@@ -7759,7 +7812,7 @@ export function App(): JSX.Element {
         let probeYieldedResult = false;
         try {
           const measured = await runMeasuredAnalysis(version.filePath, {
-            priority: ANALYSIS_PRIORITY_NEIGHBOR,
+            priority: ANALYSIS_PRIORITY_BACKGROUND,
             cacheKey,
             label: `${version.fileName} — version history`,
           });
@@ -7909,7 +7962,7 @@ export function App(): JSX.Element {
     // 220031d). Callbacks are stable (`useCallback([])`); selectedSong
     // is the parent of inspectorVersions so any change already retriggers
     // the effect, but list them explicitly for exhaustive-deps clarity.
-  }, [inspectorVersions, selectedSong, upsertMasteringCacheEntry, createMasteringCacheEntry]);
+  }, [inspectorVersions, selectedSong, songs, upsertMasteringCacheEntry, createMasteringCacheEntry]);
 
   const albumActiveVersions = useMemo(
     () =>
@@ -15320,11 +15373,12 @@ export function App(): JSX.Element {
     }
 
     if (wasEmpty && checklistTimestampMode === 'live') {
-      // Typing captures the "just heard it" lookback timestamp for the new
-      // note, but it must not seek playback backwards. Ethan uses this while
-      // listening in real time, so the preview freezes independently from the
-      // audible playhead.
-      freezeChecklistTimestampAtCurrentPlayback();
+      // v3.282 — restore the original "hear something, start typing, jump
+      // back a few seconds" flow. The preview timestamp and actual playhead
+      // must stay together here so Ethan can immediately re-hear the moment
+      // that triggered the note; the explicit Set Now button still captures
+      // without lookback/seek.
+      freezeChecklistTimestampAtCurrentPlayback({ syncPlaybackToCapturedTimestamp: true });
     }
   }
 
@@ -20090,8 +20144,9 @@ export function App(): JSX.Element {
                       style={
                         activeListeningDevice
                           ? (() => {
-                              const color = getListeningDeviceColor(
+                              const color = getListeningDeviceColorInSet(
                                 activeListeningDevice.id,
+                                listeningDevices,
                               );
                               return { color: color.fg };
                             })()
@@ -20469,7 +20524,7 @@ export function App(): JSX.Element {
                 >
                   {listeningDevices.length > 0 ? (
                     listeningDevices.map((device) => {
-                      const color = getListeningDeviceColor(device.id);
+                      const color = getListeningDeviceColorInSet(device.id, listeningDevices);
                       const isActive = device.id === activeListeningDeviceId;
                       return (
                         <span
@@ -20651,7 +20706,7 @@ export function App(): JSX.Element {
                         ? 'deleted device'
                         : null;
                     const deviceColor = item.listeningDeviceId
-                      ? getListeningDeviceColor(item.listeningDeviceId)
+                      ? getListeningDeviceColorInSet(item.listeningDeviceId, listeningDevices)
                       : null;
                     const isListeningDeviceAssignmentTarget =
                       checklistListeningDeviceAssignmentItemId === item.id;
@@ -20674,7 +20729,10 @@ export function App(): JSX.Element {
                           hoveredChecklistTag.versionNumber === item.versionNumber));
                     const groupHighlightColor =
                       isGroupedHighlight && hoveredChecklistTag?.type === 'listening-device'
-                        ? getListeningDeviceColor(hoveredChecklistTag.id).border
+                        ? getListeningDeviceColorInSet(
+                            hoveredChecklistTag.id,
+                            listeningDevices,
+                          ).border
                         : isGroupedHighlight
                           ? 'rgba(170, 170, 170, 0.55)'
                           : null;
@@ -21102,7 +21160,7 @@ export function App(): JSX.Element {
                           ? 'deleted device'
                           : null;
                       const deviceColor = item.listeningDeviceId
-                        ? getListeningDeviceColor(item.listeningDeviceId)
+                        ? getListeningDeviceColorInSet(item.listeningDeviceId, listeningDevices)
                         : null;
                       const isCurrentVersionTag =
                         item.versionNumber !== null &&
@@ -21320,7 +21378,10 @@ export function App(): JSX.Element {
                 </button>
                 <div className="listening-device-reminder">
                   {activeListeningDevice && activeListeningDeviceId ? (() => {
-                    const color = getListeningDeviceColor(activeListeningDeviceId);
+                    const color = getListeningDeviceColorInSet(
+                      activeListeningDeviceId,
+                      listeningDevices,
+                    );
                     return (
                       <div
                         role="button"

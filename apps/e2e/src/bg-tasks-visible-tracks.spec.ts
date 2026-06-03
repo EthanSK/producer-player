@@ -85,9 +85,15 @@ async function writeTestWav(filePath: string): Promise<void> {
 interface QueueDump {
   active: number;
   pending: number;
+  activeByPriority: { user: number; neighbor: number; background: number };
   pendingByPriority: { user: number; neighbor: number; background: number };
   totalEnqueuedByPriority: { user: number; neighbor: number; background: number };
 }
+
+type WarmupState = Array<{
+  fileName: string;
+  measuredReady: boolean;
+}>;
 
 async function readMeasuredQueueDump(page: import('@playwright/test').Page): Promise<QueueDump> {
   return page.evaluate(() => {
@@ -101,6 +107,20 @@ async function readMeasuredQueueDump(page: import('@playwright/test').Page): Pro
     }
     return dump;
   }) as Promise<QueueDump>;
+}
+
+async function readVisibleWarmupState(page: import('@playwright/test').Page): Promise<WarmupState> {
+  return page.evaluate(() => {
+    const state = (
+      window as unknown as {
+        __producerPlayerGetVisibleLatestWarmupState?: () => WarmupState;
+      }
+    ).__producerPlayerGetVisibleLatestWarmupState?.();
+    if (!state) {
+      throw new Error('__producerPlayerGetVisibleLatestWarmupState not exposed yet');
+    }
+    return state;
+  }) as Promise<WarmupState>;
 }
 
 test.describe('Background tasks visible-songs prioritization @smoke', () => {
@@ -217,6 +237,102 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       );
       expect(finalDump.pendingByPriority.background).toBe(0);
       expect(finalDump.totalEnqueuedByPriority.background).toBe(0);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
+  test('version-history analysis waits behind visible main-list LUFS on cold open @smoke', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-bg-tasks-version-history-priority'
+    );
+
+    // Alpha has old versions, so the Inspector's Version History has real work
+    // to do. Write Alpha last so its latest v3 file is the initially-selected
+    // row; Bravo/Charlie prove that the visible main-list LUFS pass still gets
+    // priority across all current track rows before those old Alpha versions
+    // start spending measured-analysis slots.
+    await writeTestWav(
+      path.join(directories.fixtureDirectory, 'Bravo Track v1.wav')
+    );
+    await writeTestWav(
+      path.join(directories.fixtureDirectory, 'Charlie Track v1.wav')
+    );
+    await writeTestWav(
+      path.join(directories.fixtureDirectory, 'Alpha Track v1.wav')
+    );
+    await writeTestWav(
+      path.join(directories.fixtureDirectory, 'Alpha Track v2.wav')
+    );
+    await writeTestWav(
+      path.join(directories.fixtureDirectory, 'Alpha Track v3.wav')
+    );
+
+    const { electronApp, page } = await launchProducerPlayer(
+      directories.userDataDirectory,
+      {
+        extraEnv: {
+          PRODUCER_PLAYER_ANALYSIS_DELAY_MS: '900',
+        },
+      }
+    );
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (
+          window as unknown as {
+            producerPlayer: { linkFolder: (folder: string) => Promise<void> };
+          }
+        ).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(3, {
+        timeout: 15_000,
+      });
+
+      await page.waitForFunction(
+        () =>
+          typeof (
+            window as unknown as {
+              __producerPlayerGetMeasuredQueueDump?: () => unknown;
+              __producerPlayerGetVisibleLatestWarmupState?: () => unknown;
+            }
+          ).__producerPlayerGetMeasuredQueueDump === 'function' &&
+          typeof (
+            window as unknown as {
+              __producerPlayerGetVisibleLatestWarmupState?: () => unknown;
+            }
+          ).__producerPlayerGetVisibleLatestWarmupState === 'function',
+        null,
+        { timeout: 10_000 }
+      );
+
+      await expect
+        .poll(async () => (await readMeasuredQueueDump(page)).activeByPriority.neighbor, {
+          timeout: 8_000,
+        })
+        .toBeGreaterThan(0);
+
+      const dumpWhileVisibleRowsStillWarm = await readMeasuredQueueDump(page);
+      const visibleStateWhileWarm = await readVisibleWarmupState(page);
+      expect(visibleStateWhileWarm.some((entry) => !entry.measuredReady)).toBe(true);
+      expect(dumpWhileVisibleRowsStillWarm.activeByPriority.background).toBe(0);
+      expect(dumpWhileVisibleRowsStillWarm.pendingByPriority.background).toBe(0);
+      expect(dumpWhileVisibleRowsStillWarm.totalEnqueuedByPriority.background).toBe(0);
+
+      await expect
+        .poll(async () => {
+          const state = await readVisibleWarmupState(page);
+          return state.every((entry) => entry.measuredReady);
+        }, { timeout: 20_000 })
+        .toBe(true);
+
+      await expect
+        .poll(async () => (await readMeasuredQueueDump(page)).totalEnqueuedByPriority.background, {
+          timeout: 8_000,
+        })
+        .toBeGreaterThan(0);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

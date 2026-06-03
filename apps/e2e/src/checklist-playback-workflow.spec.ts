@@ -99,7 +99,7 @@ async function waitForPlaybackSeconds(
 }
 
 test.describe('checklist playback workflow', () => {
-  test('typing freezes the preview timestamp with lookback without rewinding playback', async () => {
+  test('typing freezes the preview timestamp and rewinds playback by roughly three seconds', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-typing-freeze'
     );
@@ -133,7 +133,10 @@ test.describe('checklist playback workflow', () => {
 
       await expect
         .poll(async () => Number(await scrubber.inputValue()))
-        .toBeGreaterThanOrEqual(pausedSeconds - 0.2);
+        .toBeLessThanOrEqual(expectedSeconds + 0.5);
+      await expect
+        .poll(async () => Number(await scrubber.inputValue()))
+        .toBeGreaterThanOrEqual(Math.max(0, expectedSeconds - 0.3));
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
@@ -583,6 +586,44 @@ test.describe('checklist playback workflow', () => {
         'song-checklist-jump-previous-track',
         'song-checklist-mini-player-next',
       ]);
+
+      // Layout regression for v3.282: the direct previous-track button lives
+      // in its own auto-sized grid column. When it accidentally sat in the
+      // stretchy play/skip column, ⏮ became much wider than ◀◀ and pushed the
+      // checklist transport controls onto another row.
+      const checklistTransportGeometry = await page.evaluate(() => {
+        const readRect = (selector: string) => {
+          const element = document.querySelector(selector);
+          if (!(element instanceof HTMLElement)) {
+            throw new Error(`Missing checklist transport element: ${selector}`);
+          }
+          const rect = element.getBoundingClientRect();
+          return {
+            width: rect.width,
+            top: rect.top,
+            bottom: rect.bottom,
+            centerY: rect.top + rect.height / 2,
+          };
+        };
+
+        return {
+          prev: readRect('[data-testid="song-checklist-mini-player-prev"]'),
+          jump: readRect('[data-testid="song-checklist-jump-previous-track"]'),
+          skipGroup: readRect('.checklist-transport-group'),
+          next: readRect('[data-testid="song-checklist-mini-player-next"]'),
+        };
+      });
+      expect(Math.abs(checklistTransportGeometry.jump.width - checklistTransportGeometry.prev.width))
+        .toBeLessThanOrEqual(1);
+      expect(checklistTransportGeometry.jump.width).toBeLessThanOrEqual(36);
+      for (const rect of [
+        checklistTransportGeometry.jump,
+        checklistTransportGeometry.skipGroup,
+        checklistTransportGeometry.next,
+      ]) {
+        expect(Math.abs(rect.centerY - checklistTransportGeometry.prev.centerY))
+          .toBeLessThanOrEqual(2);
+      }
 
       const checklistInput = page.getByTestId('song-checklist-input');
       await checklistInput.fill('draft for current song');

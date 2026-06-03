@@ -125,6 +125,84 @@ test.describe('Checklist and export UX improvements', () => {
     }
   });
 
+  test('first saved listening-device chips use maximally separated colours', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-device-colors'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await page.getByTestId('listening-device-strip-collapsed-toggle').click();
+
+      const deviceNames = [
+        'Studio Monitors',
+        'AirPods Pro',
+        'Car Check',
+        'Phone Speaker',
+        'Kitchen Speaker',
+      ];
+      const input = page.getByTestId('listening-device-input');
+      const chipRow = page.getByTestId('listening-device-chip-row');
+
+      for (const name of deviceNames) {
+        await input.fill(name);
+        await page.keyboard.press('Enter');
+        await expect(chipRow).toContainText(name);
+      }
+
+      const chipColors = await page.evaluate(() => {
+        return Array.from(
+          document.querySelectorAll<HTMLElement>(
+            '.listening-device-chip[data-testid^="listening-device-chip-"]'
+          )
+        ).map((chip) => ({
+          text: chip.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+          borderColor: getComputedStyle(chip).borderTopColor,
+          foreground: getComputedStyle(chip).color,
+        }));
+      });
+
+      /*
+       * v3.282 — Ethan only has about five listening devices, so the first
+       * five saved chips must land in deliberately separated red/blue/yellow/
+       * green/pink buckets instead of hash-colliding into similar hues.
+       */
+      expect(chipColors).toHaveLength(deviceNames.length);
+      expect(new Set(chipColors.map((chip) => chip.borderColor)).size).toBe(
+        deviceNames.length
+      );
+      expect(chipColors.map((chip) => chip.borderColor)).toEqual([
+        'rgba(255, 94, 94, 0.55)',
+        'rgba(92, 167, 255, 0.55)',
+        'rgba(240, 200, 70, 0.6)',
+        'rgba(90, 210, 120, 0.55)',
+        'rgba(235, 120, 200, 0.55)',
+      ]);
+      expect(chipColors.map((chip) => chip.foreground)).toEqual([
+        'rgb(255, 200, 200)',
+        'rgb(184, 218, 255)',
+        'rgb(255, 238, 170)',
+        'rgb(191, 240, 194)',
+        'rgb(247, 188, 232)',
+      ]);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('listening-device strip collapse state persists across app restarts', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-collapse-restart'

@@ -681,6 +681,78 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('checklist warns when the modal track is not the loaded playback track', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-track-mismatch-warning'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 2_800,
+      frequencyHz: 440,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
+      durationMs: 2_800,
+      frequencyHz: 660,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const queueTitles = await page.getByTestId('main-list-row-title').allTextContents();
+      const [firstSongTitle, secondSongTitle] = queueTitles.map((title) => title.trim());
+
+      expect(firstSongTitle).toBeTruthy();
+      expect(secondSongTitle).toBeTruthy();
+      expect(secondSongTitle).not.toBe(firstSongTitle);
+
+      await cueSongVersion(page, secondSongTitle, `${secondSongTitle} v1.wav`);
+
+      // Matched case: the checklist is for the same song that the player has
+      // loaded, so the mini-player should stay quiet.
+      await page
+        .getByTestId('main-list-row')
+        .filter({ hasText: secondSongTitle })
+        .first()
+        .getByTestId('song-checklist-button')
+        .click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${secondSongTitle} Checklist`
+      );
+      await expect(page.getByTestId('song-checklist-track-mismatch-warning')).toHaveCount(0);
+
+      await page.getByTestId('song-checklist-done-header').click();
+      await expect(page.getByTestId('song-checklist-modal')).toHaveCount(0);
+
+      // Mismatched case: opening Track A's checklist must not silently imply
+      // that the scrubber is controlling Track A while Track B remains loaded.
+      await page
+        .getByTestId('main-list-row')
+        .filter({ hasText: firstSongTitle })
+        .first()
+        .getByTestId('song-checklist-button')
+        .click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await expect(page.locator('.checklist-modal-header h2')).toContainText(
+        `${firstSongTitle} Checklist`
+      );
+      await expect(page.getByTestId('player-track-name')).toContainText(`${secondSongTitle} v1.wav`);
+
+      const warning = page.getByTestId('song-checklist-track-mismatch-warning');
+      await expect(warning).toBeVisible();
+      await expect(warning).toContainText('Not playing this track.');
+      await expect(warning).toContainText(`Playing: ${secondSongTitle}`);
+      await expect(page.getByTestId('song-checklist-track-mismatch-name')).toHaveText(
+        secondSongTitle
+      );
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('typing at track end pauses instead of auto-advancing the checklist modal', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-pause-at-end-while-typing'

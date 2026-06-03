@@ -16722,6 +16722,19 @@ export function App(): JSX.Element {
   const activeListeningDevice = activeListeningDeviceId
     ? listeningDevicesById.get(activeListeningDeviceId) ?? null
     : null;
+  // Voice 10146 — checklist rows can be inspected while a different track stays
+  // loaded. Call that out near the mini-player so the scrubber/transport does
+  // not look like it belongs to the checklist currently on screen.
+  const checklistModalPlayingSong = selectedPlaybackSongId
+    ? snapshot.songs.find((song) => song.id === selectedPlaybackSongId) ?? null
+    : null;
+  const checklistModalPlaybackMismatch =
+    checklistModalSong !== null &&
+    checklistModalPlayingSong !== null &&
+    checklistModalSong.id !== checklistModalPlayingSong.id;
+  const checklistModalPlaybackMismatchTrackName = checklistModalPlaybackMismatch
+    ? getSongDisplayTitle(checklistModalPlayingSong, songDisplayTitles)
+    : '';
   const isListeningDeviceRenameMode = listeningDeviceInputMode === 'rename';
   const listeningDeviceSubmitDisabled =
     listeningDeviceDraftName.trim().length === 0 ||
@@ -21422,6 +21435,23 @@ export function App(): JSX.Element {
 
             {selectedPlaybackVersion ? (
               <div className="checklist-mini-player" data-testid="song-checklist-mini-player">
+                {checklistModalPlaybackMismatch ? (
+                  <div
+                    className="checklist-mini-player-track-warning"
+                    role="status"
+                    data-testid="song-checklist-track-mismatch-warning"
+                  >
+                    <span className="checklist-mini-player-track-warning-icon" aria-hidden="true">
+                      ⚠️
+                    </span>
+                    <span>
+                      Not playing this track. Playing:{' '}
+                      <strong data-testid="song-checklist-track-mismatch-name">
+                        {checklistModalPlaybackMismatchTrackName}
+                      </strong>
+                    </span>
+                  </div>
+                ) : null}
                 <div className="checklist-mini-player-scrubber-row">
                   <span className="muted">{formatTime(currentTimeSeconds)}</span>
                   <input

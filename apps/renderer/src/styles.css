@@ -5361,6 +5361,36 @@ body.is-dragging-checklist-timestamp * {
   box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.22);
 }
 
+/* v3.284 — Track-mismatch warning lives directly above the checklist playhead,
+ * because the playhead/transport are the misleading controls when the modal is
+ * inspecting one song while playback is loaded on another. */
+.checklist-mini-player-track-warning {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 184, 77, 0.42);
+  border-radius: 8px;
+  background: rgba(255, 184, 77, 0.11);
+  color: #ffd28a;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.checklist-mini-player-track-warning strong {
+  color: #ffe8bd;
+  font-weight: 800;
+}
+
+.checklist-mini-player-track-warning-icon {
+  flex-shrink: 0;
+  line-height: 1;
+}
+
 .checklist-mini-player-scrubber-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -6748,6 +6778,12 @@ button.checklist-play-toggle[data-playing='true'] {
 
   .checklist-mini-player-scrubber-row .muted {
     text-align: center;
+  }
+
+  .checklist-mini-player-track-warning {
+    align-items: flex-start;
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .checklist-mini-player-transport {

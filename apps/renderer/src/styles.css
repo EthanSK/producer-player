@@ -5411,10 +5411,10 @@ body.is-dragging-checklist-timestamp * {
 
 .checklist-mini-player-transport {
   display: grid;
-  /* Four real transport regions: previous, direct previous-track jump, the
-     dense play/skip cluster, and next. The direct jump used to land in the
-     stretchy middle column, making the ⏮ button comically wide and pushing
-     the rest of the checklist controls onto a new grid row. */
+  /* Four real transport regions: direct previous-track jump, current-track
+     rewind, the dense play/skip cluster, and next. The direct jump needs its
+     own auto-sized column so it stays next to ◀◀ without becoming a stretchy
+     seconds-skip control. */
   grid-template-columns: auto auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;

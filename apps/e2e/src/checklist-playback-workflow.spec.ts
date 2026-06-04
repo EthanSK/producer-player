@@ -573,8 +573,8 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('transport-checklist-button').click();
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 
-      // Mirror the main player: the direct previous-track jump is a primary
-      // checklist transport button beside ◀◀, not part of the ±seconds cluster.
+      // Mirror the main player: the direct previous-track jump sits directly
+      // left of the ◀◀ rewind button, not in the ±seconds cluster.
       const checklistPrimaryTransportOrder = await page.evaluate(() => {
         const buttons = Array.from(
           document.querySelectorAll('.checklist-mini-player-transport > [data-testid]')
@@ -582,8 +582,8 @@ test.describe('checklist playback workflow', () => {
         return buttons.map((b) => (b as HTMLElement).dataset.testid);
       });
       expect(checklistPrimaryTransportOrder).toEqual([
-        'song-checklist-mini-player-prev',
         'song-checklist-jump-previous-track',
+        'song-checklist-mini-player-prev',
         'song-checklist-mini-player-next',
       ]);
 

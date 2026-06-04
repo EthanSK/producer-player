@@ -21468,32 +21468,9 @@ export function App(): JSX.Element {
                   <span className="muted">{formatTime(durationSeconds)}</span>
                 </div>
                 <div className="checklist-mini-player-transport">
-                  <button
-                    type="button"
-                    className="checklist-mini-player-button"
-                    data-testid="song-checklist-mini-player-prev"
-                    onClick={() => handleRewindCurrentTrack()}
-                    onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
-                    onKeyDown={(event) => {
-                      if (event.key === ' ') {
-                        event.preventDefault();
-                        void handleTogglePlayback();
-                        return;
-                      }
-
-                      if (isUnmodifiedShiftTab(event)) {
-                        event.preventDefault();
-                        checklistComposerTextareaRef.current?.focus();
-                      }
-                    }}
-                    title="Rewind to the start of the current track"
-                    aria-label="Rewind to start of current track"
-                  >
-                    ◀◀
-                  </button>
-
-                  {/* Direct track-jump belongs with the primary nav buttons,
-                      not inside the second-skip cluster below. */}
+                  {/* Keep the checklist mini-player order aligned with the main
+                      transport: direct previous-track jump sits immediately left
+                      of the current-track rewind button. */}
                   <button
                     ref={checklistJumpPreviousTrackButtonRef}
                     type="button"
@@ -21517,6 +21494,30 @@ export function App(): JSX.Element {
                     aria-label="Jump to previous track"
                   >
                     ⏮
+                  </button>
+
+                  <button
+                    type="button"
+                    className="checklist-mini-player-button"
+                    data-testid="song-checklist-mini-player-prev"
+                    onClick={() => handleRewindCurrentTrack()}
+                    onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
+                    onKeyDown={(event) => {
+                      if (event.key === ' ') {
+                        event.preventDefault();
+                        void handleTogglePlayback();
+                        return;
+                      }
+
+                      if (isUnmodifiedShiftTab(event)) {
+                        event.preventDefault();
+                        checklistComposerTextareaRef.current?.focus();
+                      }
+                    }}
+                    title="Rewind to the start of the current track"
+                    aria-label="Rewind to start of current track"
+                  >
+                    ◀◀
                   </button>
 
                   <div className="checklist-transport-group">

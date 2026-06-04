@@ -747,6 +747,32 @@ test.describe('checklist playback workflow', () => {
       await expect(page.getByTestId('song-checklist-track-mismatch-name')).toHaveText(
         secondSongTitle
       );
+
+      const playTrackButton = page.getByTestId('song-checklist-play-track');
+      await expect(playTrackButton).toBeVisible();
+      await expect(playTrackButton).toHaveText('Play track');
+
+      // Voice 10171 — Ethan wanted this control on the right-hand side of the
+      // mismatch message, so lock the geometry instead of only checking that the
+      // button exists somewhere in the modal.
+      const warningActionLayout = await warning.evaluate((warningElement) => {
+        const copy = warningElement.querySelector('.checklist-mini-player-track-warning-copy');
+        const action = warningElement.querySelector('[data-testid="song-checklist-play-track"]');
+        if (!(copy instanceof HTMLElement) || !(action instanceof HTMLElement)) {
+          throw new Error('Missing mismatch-warning copy or Play track button.');
+        }
+
+        return {
+          copyLeft: copy.getBoundingClientRect().left,
+          actionLeft: action.getBoundingClientRect().left,
+        };
+      });
+      expect(warningActionLayout.actionLeft).toBeGreaterThan(warningActionLayout.copyLeft);
+
+      await playTrackButton.click();
+      await expect(page.getByTestId('player-track-name')).toContainText(`${firstSongTitle} v1.wav`);
+      await expect(page.getByTestId('song-checklist-track-mismatch-warning')).toHaveCount(0);
+      await waitForPlaybackSeconds(page, 0.2);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

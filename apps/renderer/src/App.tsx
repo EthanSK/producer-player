@@ -14954,6 +14954,49 @@ export function App(): JSX.Element {
     handleOpenSongChecklist(selectedPlaybackSongId);
   }
 
+  function handlePlayChecklistModalTrack(): void {
+    const modalSongId = checklistModalSongIdRef.current;
+    if (!modalSongId) {
+      return;
+    }
+
+    const modalSong = snapshot.songs.find((song) => song.id === modalSongId) ?? null;
+    const nextPlaybackVersionId = modalSong
+      ? getPreferredPlaybackVersionId(modalSong)
+      : null;
+
+    if (!modalSong || !nextPlaybackVersionId) {
+      return;
+    }
+
+    // Voice 10171: the mismatch warning now has an explicit "Play track"
+    // affordance. The selected row/checklist can already be the modal song while
+    // audio is still loaded on another song, so preserve the currently loaded
+    // playhead by comparing against selectedPlaybackSongIdRef, not selectedSongId.
+    if (modalSong.id !== selectedPlaybackSongIdRef.current) {
+      rememberCurrentSongPlayhead();
+    }
+
+    setPlaybackError(null);
+    setSelectedSongId(modalSong.id);
+
+    // If the user was auditioning the reference source, "Play track" should
+    // play the checklist song's mix, not silently keep the reference source
+    // routed through the player.
+    if (playbackPreviewMode === 'reference') {
+      setPlaybackPreviewMode('mix');
+    }
+
+    playOnNextLoadRef.current = true;
+    playbackIntentPlayingRef.current = true;
+    setSelectedPlaybackVersionId(nextPlaybackVersionId);
+    schedulePlaybackLoadTimeout('checklist-mismatch-play-track');
+    logPlaybackEvent('checklist-mismatch-play-track', {
+      songId: modalSong.id,
+      versionId: nextPlaybackVersionId,
+    });
+  }
+
   async function handleQuickSwitcherSelect(songId: string): Promise<void> {
     const song = albumSongs.find((s) => s.id === songId);
     if (!song) return;
@@ -21444,12 +21487,22 @@ export function App(): JSX.Element {
                     <span className="checklist-mini-player-track-warning-icon" aria-hidden="true">
                       ⚠️
                     </span>
-                    <span>
+                    <span className="checklist-mini-player-track-warning-copy">
                       Not playing this track. Playing:{' '}
                       <strong data-testid="song-checklist-track-mismatch-name">
                         {checklistModalPlaybackMismatchTrackName}
                       </strong>
                     </span>
+                    <button
+                      type="button"
+                      className="checklist-mini-player-track-warning-action"
+                      data-testid="song-checklist-play-track"
+                      onClick={handlePlayChecklistModalTrack}
+                      disabled={!checklistModalCanOpenMastering}
+                      title="Load and play the track this checklist is for."
+                    >
+                      Play track
+                    </button>
                   </div>
                 ) : null}
                 <div className="checklist-mini-player-scrubber-row">

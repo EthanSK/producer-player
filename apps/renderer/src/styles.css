@@ -5367,7 +5367,8 @@ body.is-dragging-checklist-timestamp * {
 .checklist-mini-player-track-warning {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 7px;
   min-height: 28px;
   padding: 5px 10px;
@@ -5378,7 +5379,7 @@ body.is-dragging-checklist-timestamp * {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.25;
-  text-align: center;
+  text-align: left;
 }
 
 .checklist-mini-player-track-warning strong {
@@ -5386,9 +5387,38 @@ body.is-dragging-checklist-timestamp * {
   font-weight: 800;
 }
 
+.checklist-mini-player-track-warning-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .checklist-mini-player-track-warning-icon {
   flex-shrink: 0;
   line-height: 1;
+}
+
+.checklist-mini-player-track-warning-action {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 232, 189, 0.52);
+  border-radius: 999px;
+  background: rgba(255, 232, 189, 0.14);
+  color: #fff2d3;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.checklist-mini-player-track-warning-action:hover:not(:disabled) {
+  border-color: rgba(255, 232, 189, 0.78);
+  background: rgba(255, 232, 189, 0.22);
+}
+
+.checklist-mini-player-track-warning-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
 }
 
 .checklist-mini-player-scrubber-row {

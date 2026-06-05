@@ -265,6 +265,98 @@ test.describe('Checklist timestamp feature', () => {
     }
   });
 
+  test('wont fix tooltip portals above version badges instead of sitting underneath them', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-wontfix-tooltip-layer'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+
+      // Pre-seed a versioned row so the Won't Fix tooltip opens directly into
+      // the v-number badge area. Voice 10173 reported that the tooltip was
+      // being painted underneath that badge instead of above it.
+      await page.evaluate(() => {
+        const songs = document.querySelectorAll('[data-song-id]');
+        const songId = songs[0]?.getAttribute('data-song-id');
+        if (!songId) return;
+
+        window.localStorage.setItem(
+          'producer-player.song-checklists.v1',
+          JSON.stringify({
+            [songId]: [
+              {
+                id: 'test-wontfix-tooltip-item',
+                text: 'Versioned row with tooltip',
+                completed: false,
+                timestampSeconds: 83,
+                versionNumber: 2,
+              },
+            ],
+          })
+        );
+      });
+
+      await page.reload();
+      await page.waitForSelector('[data-testid="app-shell"]');
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const wontFixToggle = page.getByTestId('song-checklist-item-wontfix-toggle');
+      const versionBadge = page.getByTestId('song-checklist-item-version');
+      await page.getByTestId('song-checklist-item-text').hover();
+      await expect(wontFixToggle).toBeVisible();
+      await expect(versionBadge).toHaveText('v2');
+
+      await wontFixToggle.hover();
+
+      const tooltip = page.locator('#song-checklist-item-wontfix-popover-test-wontfix-tooltip-item');
+      await expect(tooltip).toBeVisible();
+
+      const layerProof = await page.evaluate(() => {
+        const tooltipElement = document.querySelector(
+          '#song-checklist-item-wontfix-popover-test-wontfix-tooltip-item'
+        );
+        const versionElement = document.querySelector('[data-testid="song-checklist-item-version"]');
+
+        if (!(tooltipElement instanceof HTMLElement) || !(versionElement instanceof HTMLElement)) {
+          throw new Error('Missing Won’t Fix tooltip or version badge.');
+        }
+
+        const tooltipRect = tooltipElement.getBoundingClientRect();
+        const versionRect = versionElement.getBoundingClientRect();
+        const tooltipZIndex = Number.parseInt(window.getComputedStyle(tooltipElement).zIndex, 10);
+        const versionZIndex = Number.parseInt(window.getComputedStyle(versionElement).zIndex, 10);
+
+        return {
+          isPortalledToBody: tooltipElement.parentElement === document.body,
+          overlapsVersionBadge:
+            tooltipRect.left < versionRect.right &&
+            tooltipRect.right > versionRect.left &&
+            tooltipRect.top < versionRect.bottom &&
+            tooltipRect.bottom > versionRect.top,
+          tooltipZIndex,
+          versionZIndex: Number.isNaN(versionZIndex) ? 0 : versionZIndex,
+        };
+      });
+
+      expect(layerProof.isPortalledToBody).toBe(true);
+      expect(layerProof.overlapsVersionBadge).toBe(true);
+      expect(layerProof.tooltipZIndex).toBeGreaterThan(layerProof.versionZIndex);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('checklist item persists timestampSeconds and captured versionNumber', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-timestamp-persist'

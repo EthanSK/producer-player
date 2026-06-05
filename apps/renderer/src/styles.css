@@ -5258,7 +5258,9 @@ body.is-dragging-checklist-timestamp * {
   pointer-events: none;
   transform: translateY(-2px);
   transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
-  /* Anchor for the in-app popover tooltip (.checklist-item-wontfix-popover) */
+  /* Anchor for FloatingTooltip's hidden marker. The visible tooltip is
+   * portalled to document.body so it can sit above the version switcher,
+   * checklist version badges, and any scroll clipping. */
   position: relative;
 }
 
@@ -5274,33 +5276,6 @@ body.is-dragging-checklist-timestamp * {
   border-color: rgba(170, 170, 170, 0.7);
   color: var(--text-main);
   box-shadow: 0 0 0 2px rgba(170, 170, 170, 0.12);
-}
-
-/* v3.248 — In-app popover tooltip for the Won't Fix toggle. Inherits
-   the instant-fade panel from `.main-list-row-metadata-popover`. Anchor
-   to the RIGHT of the button (the checkbox column lives at the left
-   edge of the row, so the popover has plenty of room to open to the
-   right without clipping). */
-.checklist-item-wontfix-popover {
-  left: calc(100% + 6px);
-  right: auto;
-  top: 50%;
-  transform: translateY(calc(-50% - 2px));
-  max-width: 260px;
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-.checklist-item-wontfix-toggle:hover .checklist-item-wontfix-popover,
-.checklist-item-wontfix-toggle:focus-visible .checklist-item-wontfix-popover {
-  opacity: 1;
-  transform: translateY(-50%);
-}
-
-.checklist-item-wontfix-popover-body {
-  color: var(--text-main);
-  font-weight: 500;
-  white-space: normal;
 }
 
 /* Row-level wontFix tint — slightly desaturated so the item reads as

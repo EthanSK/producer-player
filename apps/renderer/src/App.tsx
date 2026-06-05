@@ -20921,20 +20921,15 @@ export function App(): JSX.Element {
                             aria-describedby={`song-checklist-item-wontfix-popover-${item.id}`}
                           >
                             <span aria-hidden="true">—</span>
-                            <span
+                            <FloatingTooltip
                               id={`song-checklist-item-wontfix-popover-${item.id}`}
-                              className="main-list-row-metadata-popover checklist-item-wontfix-popover"
-                              role="tooltip"
+                              label="Mark as Won't Fix"
+                              placement="right"
                             >
-                              <span className="main-list-row-metadata-popover-label">
-                                Mark as Won't Fix
-                              </span>
-                              <span className="checklist-item-wontfix-popover-body">
-                                Marks this item resolved without ticking it. Counts toward
-                                progress, but renders with a struck-through "won't fix" look
-                                instead of a blue check.
-                              </span>
-                            </span>
+                              Marks this item resolved without ticking it. Counts toward
+                              progress, but renders with a struck-through "won't fix" look
+                              instead of a blue check.
+                            </FloatingTooltip>
                           </button>
                         ) : null}
                       </div>
@@ -21939,20 +21934,15 @@ export function App(): JSX.Element {
                             aria-describedby={`album-checklist-item-wontfix-popover-${item.id}`}
                           >
                             <span aria-hidden="true">—</span>
-                            <span
+                            <FloatingTooltip
                               id={`album-checklist-item-wontfix-popover-${item.id}`}
-                              className="main-list-row-metadata-popover checklist-item-wontfix-popover"
-                              role="tooltip"
+                              label="Mark as Won't Fix"
+                              placement="right"
                             >
-                              <span className="main-list-row-metadata-popover-label">
-                                Mark as Won't Fix
-                              </span>
-                              <span className="checklist-item-wontfix-popover-body">
-                                Marks this item resolved without ticking it. Counts toward
-                                progress, but renders with a struck-through "won't fix" look
-                                instead of a blue check.
-                              </span>
-                            </span>
+                              Marks this item resolved without ticking it. Counts toward
+                              progress, but renders with a struck-through "won't fix" look
+                              instead of a blue check.
+                            </FloatingTooltip>
                           </button>
                         ) : null}
                       </div>

@@ -478,6 +478,104 @@ test.describe('Checklist and export UX improvements', () => {
     }
   });
 
+  test('sorting outstanding uses the timestamp just dragged onto an existing row', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-sort-after-timestamp-drag'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.evaluate(() => {
+        const row = document.querySelector<HTMLElement>('[data-song-id]');
+        const songId = row?.getAttribute('data-song-id');
+        if (!songId) {
+          throw new Error('Could not find linked song id for drag-then-sort test.');
+        }
+
+        /*
+         * Storage is newest-first, so the rendered order starts as
+         * mid-timestamp above high-timestamp. Dragging the high row down to
+         * 0:00 must make it sort ABOVE the mid row; if the click reads the old
+         * 0:12 value, the visual order stays unchanged and this catches it.
+         */
+        const storedNewestFirst = [
+          {
+            id: 'dragged-high',
+            text: 'Was late, dragged to start',
+            completed: false,
+            timestampSeconds: 12,
+            versionNumber: 1,
+            listeningDeviceId: null,
+          },
+          {
+            id: 'middle',
+            text: 'Middle timestamp',
+            completed: false,
+            timestampSeconds: 6,
+            versionNumber: 1,
+            listeningDeviceId: null,
+          },
+        ];
+
+        window.localStorage.setItem(
+          'producer-player.song-checklists.v1',
+          JSON.stringify({ [songId]: storedNewestFirst }),
+        );
+      });
+
+      await page.reload();
+      await page.waitForSelector('[data-testid="app-shell"]');
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+
+      const rows = page.getByTestId('song-checklist-item-row');
+      const readOrder = async (): Promise<string[]> =>
+        rows.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute('data-item-id') ?? ''),
+        );
+
+      expect(await readOrder()).toEqual(['middle', 'dragged-high']);
+
+      const draggedTimestamp = page
+        .locator('[data-testid="song-checklist-item-row"][data-item-id="dragged-high"]')
+        .getByTestId('song-checklist-item-timestamp');
+      const draggedTimestampBox = await draggedTimestamp.boundingBox();
+      expect(draggedTimestampBox).not.toBeNull();
+
+      const startX = (draggedTimestampBox?.x ?? 0) + (draggedTimestampBox?.width ?? 0) / 2;
+      const startY = (draggedTimestampBox?.y ?? 0) + (draggedTimestampBox?.height ?? 0) / 2;
+      await page.mouse.move(startX, startY);
+      await page.mouse.down();
+      // Timestamp badge dragging uses 0.1 seconds per vertical pixel. Moving
+      // down by 160px comfortably clamps the seeded 0:12 timestamp to 0:00
+      // without needing a huge out-of-viewport gesture.
+      await page.mouse.move(startX, startY + 160, { steps: 8 });
+      await page.mouse.up();
+
+      await page.getByTestId('checklist-sort-outstanding-collapsed').click();
+
+      await expect
+        .poll(async () => readOrder(), { timeout: 5_000, intervals: [100] })
+        .toEqual(['dragged-high', 'middle']);
+      await expect(draggedTimestamp).toHaveText('0:00');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('clear completed checklist asks for confirmation and respects cancel/confirm', async () => {
     const directories = await createE2ETestDirectories('producer-player-checklist-clear-confirm');
 

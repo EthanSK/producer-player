@@ -4032,11 +4032,6 @@ export function App(): JSX.Element {
   const checklistFindInputRef = useRef<HTMLInputElement | null>(null);
   const checklistFindReturnFocusRef = useRef<HTMLElement | null>(null);
   const checklistFindRowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
-  // Sort visibility guard: when Ethan drags an existing item's timestamp to
-  // 0:00 and then sorts outstanding rows, that item legitimately moves upward
-  // in playback-time order. Remember the last row he touched so the sort can
-  // keep it visible instead of making it feel like the row vanished.
-  const checklistLastInteractedItemIdRef = useRef<string | null>(null);
   // DAW offset MM / SS inputs — refs used for auto-advancing focus once the
   // minutes field has 2 digits, and for returning focus on backspace from an
   // empty seconds field (standard time-input UX).
@@ -14760,48 +14755,6 @@ export function App(): JSX.Element {
     );
   }
 
-  function scrollChecklistItemIntoViewAfterRender(itemId: string): void {
-    // Use the checklist's own scroll region rather than `scrollIntoView()`.
-    // Native scrolling can bubble to the overlay/page; this keeps the modal
-    // shell still and only reveals the row that was just sorted elsewhere.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const scrollRegion = checklistItemScrollRegionRef.current;
-        const row = checklistFindRowRefs.current.get(itemId) ?? null;
-        if (!scrollRegion || !row || !row.isConnected) {
-          return;
-        }
-
-        const regionRect = scrollRegion.getBoundingClientRect();
-        const rowRect = row.getBoundingClientRect();
-        const rowTop = rowRect.top - regionRect.top + scrollRegion.scrollTop;
-        const rowBottom = rowTop + rowRect.height;
-        const visibleTop = scrollRegion.scrollTop;
-        const visibleBottom = visibleTop + scrollRegion.clientHeight;
-
-        if (rowTop < visibleTop) {
-          scrollRegion.scrollTop = Math.max(0, rowTop - 8);
-        } else if (rowBottom > visibleBottom) {
-          scrollRegion.scrollTop = rowBottom - scrollRegion.clientHeight + 8;
-        }
-      });
-    });
-  }
-
-  function keepLastInteractedChecklistItemVisibleAfterSort(songId: string): void {
-    const itemId = checklistLastInteractedItemIdRef.current;
-    if (!itemId) {
-      return;
-    }
-
-    const items = songChecklistsRef.current[songId] ?? [];
-    if (!items.some((item) => item.id === itemId)) {
-      return;
-    }
-
-    scrollChecklistItemIntoViewAfterRender(itemId);
-  }
-
   function handleChecklistFindRowElement(
     itemId: string,
     node: HTMLLIElement | null,
@@ -15348,7 +15301,6 @@ export function App(): JSX.Element {
       return;
     }
     event.preventDefault();
-    checklistLastInteractedItemIdRef.current = itemId;
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
@@ -15751,7 +15703,6 @@ export function App(): JSX.Element {
   function handleSortChecklistMoveOutstandingToBottom(songId: string): void {
     logAction('checklist.sort.outstanding-to-bottom', { songId });
     sortChecklistMoveOutstandingToBottom(songId);
-    keepLastInteractedChecklistItemVisibleAfterSort(songId);
   }
 
   // v3.255.0 — "Sort outstanding by time". Sorts only active, not-completed
@@ -15768,7 +15719,6 @@ export function App(): JSX.Element {
   function handleSortChecklistOutstandingByTimestamp(songId: string): void {
     logAction('checklist.sort.outstanding-by-timestamp', { songId });
     sortChecklistOutstandingByTimestamp(songId);
-    keepLastInteractedChecklistItemVisibleAfterSort(songId);
   }
 
   function handleSubmitListeningDevice(): void {
@@ -21250,9 +21200,6 @@ export function App(): JSX.Element {
                         // selection, and caret movement still belong to the
                         // textarea rather than row reorder.
                         draggable={false}
-                        onFocus={() => {
-                          checklistLastInteractedItemIdRef.current = item.id;
-                        }}
                         onChange={(event) => {
                           autosizeChecklistTextarea(event.currentTarget);
                           handleChecklistItemTextChange(

@@ -153,6 +153,26 @@ describe('sortChecklistOutstandingByTimestamp', () => {
     ]);
   });
 
+  it('treats 0:00 as a real timestamp when sorting outstanding todos', () => {
+    const storage = rendered(
+      makeItem('done', { completed: true }),
+      makeItem('late', { timestampSeconds: 44 }),
+      makeItem('start', { timestampSeconds: 0 }),
+      makeItem('untimed'),
+    );
+    const out = sortChecklistOutstandingByTimestamp(storage);
+    // Regression guard for Ethan voice 10271: a manually dragged timestamp at
+    // zero must stay in the timestamped group, not fall through as "missing"
+    // and appear to vanish below untimed outstanding work after Sort
+    // outstanding.
+    expect(renderedOf(out).map((it) => it.id)).toEqual([
+      'done',
+      'start',
+      'late',
+      'untimed',
+    ]);
+  });
+
   it('does not reorder completed or Won\'t Fix rows while sorting outstanding todos', () => {
     const storage = rendered(
       makeItem('w1', { wontFix: true, completedAt: 5000 }),

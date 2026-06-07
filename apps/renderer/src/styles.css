@@ -3712,6 +3712,14 @@ button.autoplay-next-button:focus-visible::after {
   box-shadow: 0 0 0 1px rgba(92, 167, 255, 0.08);
 }
 
+.checklist-find-bar--expanded-bottom {
+  /* v3.289 — when the listening-device controls are expanded, search belongs
+   * at the bottom of that whole section and spans both the editor column and
+   * saved-device/sort column. */
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+
 .checklist-find-bar.has-no-results {
   border-color: rgba(231, 76, 60, 0.42);
   background: rgba(231, 76, 60, 0.08);

@@ -22,6 +22,36 @@ export function normalizeChecklistFindQuery(query: string): string {
   return query.trim().toLocaleLowerCase();
 }
 
+function normalizeChecklistFindHaystack(text: string): string {
+  return text.toLocaleLowerCase();
+}
+
+function normalizeChecklistFindNeedle(query: string): string {
+  // Spaces in Ethan's fuzzy searches are usually just chunking ("vcl sib")
+  // rather than a request to match literal whitespace. Strip them from the
+  // fuzzy needle while keeping exact substring search whitespace-aware below.
+  return query.replace(/\s+/g, '');
+}
+
+function isFuzzySubsequenceMatch(text: string, query: string): boolean {
+  const fuzzyNeedle = normalizeChecklistFindNeedle(query);
+  if (fuzzyNeedle.length === 0) {
+    return false;
+  }
+
+  let needleIndex = 0;
+  for (const character of text) {
+    if (character === fuzzyNeedle[needleIndex]) {
+      needleIndex += 1;
+      if (needleIndex >= fuzzyNeedle.length) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export function isChecklistFindKeyboardShortcut(
   event: ChecklistFindKeyboardEventLike,
   platform: string,
@@ -54,8 +84,9 @@ export function buildChecklistFindMatches(
   }
 
   return items.flatMap((item, itemIndex) => {
-    const normalizedText = item.text.toLocaleLowerCase();
-    return normalizedText.includes(normalizedQuery)
+    const normalizedText = normalizeChecklistFindHaystack(item.text);
+    return normalizedText.includes(normalizedQuery) ||
+      isFuzzySubsequenceMatch(normalizedText, normalizedQuery)
       ? [{ id: item.id, itemIndex }]
       : [];
   });

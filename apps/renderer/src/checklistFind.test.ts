@@ -27,6 +27,16 @@ describe('checklist find helpers', () => {
     ]);
   });
 
+  it('fuzzy-matches query characters through checklist text in order', () => {
+    expect(buildChecklistFindMatches(items, 'vcl sib')).toEqual([
+      { id: 'intro', itemIndex: 0 },
+    ]);
+    expect(buildChecklistFindMatches(items, 'bss chrs')).toEqual([
+      { id: 'chorus', itemIndex: 1 },
+    ]);
+    expect(buildChecklistFindMatches(items, 'zzzz')).toEqual([]);
+  });
+
   it('does not match empty or whitespace-only queries', () => {
     expect(buildChecklistFindMatches(items, '')).toEqual([]);
     expect(buildChecklistFindMatches(items, '   ')).toEqual([]);

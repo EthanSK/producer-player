@@ -4032,6 +4032,11 @@ export function App(): JSX.Element {
   const checklistFindInputRef = useRef<HTMLInputElement | null>(null);
   const checklistFindReturnFocusRef = useRef<HTMLElement | null>(null);
   const checklistFindRowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  // Sort visibility guard: when Ethan drags an existing item's timestamp to
+  // 0:00 and then sorts outstanding rows, that item legitimately moves upward
+  // in playback-time order. Remember the last row he touched so the sort can
+  // keep it visible instead of making it feel like the row vanished.
+  const checklistLastInteractedItemIdRef = useRef<string | null>(null);
   // DAW offset MM / SS inputs — refs used for auto-advancing focus once the
   // minutes field has 2 digits, and for returning focus on backspace from an
   // empty seconds field (standard time-input UX).
@@ -14755,6 +14760,48 @@ export function App(): JSX.Element {
     );
   }
 
+  function scrollChecklistItemIntoViewAfterRender(itemId: string): void {
+    // Use the checklist's own scroll region rather than `scrollIntoView()`.
+    // Native scrolling can bubble to the overlay/page; this keeps the modal
+    // shell still and only reveals the row that was just sorted elsewhere.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const scrollRegion = checklistItemScrollRegionRef.current;
+        const row = checklistFindRowRefs.current.get(itemId) ?? null;
+        if (!scrollRegion || !row || !row.isConnected) {
+          return;
+        }
+
+        const regionRect = scrollRegion.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        const rowTop = rowRect.top - regionRect.top + scrollRegion.scrollTop;
+        const rowBottom = rowTop + rowRect.height;
+        const visibleTop = scrollRegion.scrollTop;
+        const visibleBottom = visibleTop + scrollRegion.clientHeight;
+
+        if (rowTop < visibleTop) {
+          scrollRegion.scrollTop = Math.max(0, rowTop - 8);
+        } else if (rowBottom > visibleBottom) {
+          scrollRegion.scrollTop = rowBottom - scrollRegion.clientHeight + 8;
+        }
+      });
+    });
+  }
+
+  function keepLastInteractedChecklistItemVisibleAfterSort(songId: string): void {
+    const itemId = checklistLastInteractedItemIdRef.current;
+    if (!itemId) {
+      return;
+    }
+
+    const items = songChecklistsRef.current[songId] ?? [];
+    if (!items.some((item) => item.id === itemId)) {
+      return;
+    }
+
+    scrollChecklistItemIntoViewAfterRender(itemId);
+  }
+
   function handleChecklistFindRowElement(
     itemId: string,
     node: HTMLLIElement | null,
@@ -15301,6 +15348,7 @@ export function App(): JSX.Element {
       return;
     }
     event.preventDefault();
+    checklistLastInteractedItemIdRef.current = itemId;
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
@@ -15703,6 +15751,7 @@ export function App(): JSX.Element {
   function handleSortChecklistMoveOutstandingToBottom(songId: string): void {
     logAction('checklist.sort.outstanding-to-bottom', { songId });
     sortChecklistMoveOutstandingToBottom(songId);
+    keepLastInteractedChecklistItemVisibleAfterSort(songId);
   }
 
   // v3.255.0 — "Sort outstanding by time". Sorts only active, not-completed
@@ -15719,6 +15768,7 @@ export function App(): JSX.Element {
   function handleSortChecklistOutstandingByTimestamp(songId: string): void {
     logAction('checklist.sort.outstanding-by-timestamp', { songId });
     sortChecklistOutstandingByTimestamp(songId);
+    keepLastInteractedChecklistItemVisibleAfterSort(songId);
   }
 
   function handleSubmitListeningDevice(): void {
@@ -16424,6 +16474,7 @@ export function App(): JSX.Element {
     checklistFindActiveIndex,
     checklistFindMatches.length,
   );
+  const checklistFindVisible = checklistFindOpen || !checklistListeningStripCollapsed;
   useEffect(() => {
     const coercedIndex = coerceChecklistFindActiveIndex(
       checklistFindActiveIndex,
@@ -16435,7 +16486,7 @@ export function App(): JSX.Element {
   }, [checklistFindActiveIndex, checklistFindMatches.length]);
 
   useEffect(() => {
-    if (!checklistFindOpen || !checklistFindActiveMatch) {
+    if (!checklistFindVisible || !checklistFindActiveMatch) {
       return;
     }
 
@@ -16444,7 +16495,7 @@ export function App(): JSX.Element {
         .get(checklistFindActiveMatch.id)
         ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
-  }, [checklistFindOpen, checklistFindActiveMatch?.id]);
+  }, [checklistFindVisible, checklistFindActiveMatch?.id]);
 
   const listeningDeviceRenameTarget = useMemo(
     () =>
@@ -17576,6 +17627,97 @@ export function App(): JSX.Element {
   ]
     .filter(Boolean)
     .join(' ');
+
+  const renderChecklistFindBar = (placement: 'collapsed-top' | 'expanded-bottom'): ReactNode => {
+    const isExpandedBottom = placement === 'expanded-bottom';
+    const hasQuery = checklistFindQuery.trim().length > 0;
+
+    return (
+      <div
+        className={`checklist-find-bar checklist-find-bar--${placement}${
+          checklistFindQuery.trim().length > 0 && checklistFindMatches.length === 0
+            ? ' has-no-results'
+            : ''
+        }`}
+        data-testid={
+          isExpandedBottom
+            ? 'song-checklist-find-bar-expanded'
+            : 'song-checklist-find-bar'
+        }
+        role="search"
+        aria-label="Find checklist items"
+      >
+        <span className="checklist-find-label" aria-hidden="true">
+          {isExpandedBottom ? 'Search' : 'Find'}
+        </span>
+        <input
+          ref={checklistFindInputRef}
+          type="search"
+          className="checklist-find-input"
+          value={checklistFindQuery}
+          onFocus={() => {
+            setChecklistFindOpen(true);
+          }}
+          onChange={(event) => handleChecklistFindQueryChange(event.currentTarget.value)}
+          onKeyDown={handleChecklistFindInputKeyDown}
+          placeholder="Fuzzy search checklist items"
+          aria-label="Find in checklist"
+          aria-describedby="song-checklist-find-status"
+          data-testid="song-checklist-find-input"
+        />
+        <span
+          id="song-checklist-find-status"
+          className="checklist-find-status"
+          data-testid="song-checklist-find-status"
+          aria-live="polite"
+        >
+          {checklistFindStatusText}
+        </span>
+        <div className="checklist-find-actions" aria-label="Find navigation">
+          <button
+            type="button"
+            className="ghost checklist-find-action"
+            onClick={() => handleChecklistFindStep('previous')}
+            disabled={checklistFindMatches.length === 0}
+            aria-label="Previous checklist find match"
+            title="Previous match (Shift+Enter)"
+            data-testid="song-checklist-find-previous"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="ghost checklist-find-action"
+            onClick={() => handleChecklistFindStep('next')}
+            disabled={checklistFindMatches.length === 0}
+            aria-label="Next checklist find match"
+            title="Next match (Enter)"
+            data-testid="song-checklist-find-next"
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            className="ghost checklist-find-action checklist-find-close"
+            onClick={() =>
+              isExpandedBottom && hasQuery
+                ? handleChecklistFindQueryChange('')
+                : handleCloseChecklistFind()
+            }
+            aria-label={isExpandedBottom && hasQuery ? 'Clear checklist search' : 'Close checklist find'}
+            title={isExpandedBottom && hasQuery ? 'Clear search' : 'Close find (Esc)'}
+            data-testid={
+              isExpandedBottom
+                ? 'song-checklist-find-clear'
+                : 'song-checklist-find-close'
+            }
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -20128,74 +20270,9 @@ export function App(): JSX.Element {
               </button>
             </div>
 
-            {checklistFindOpen ? (
-              <div
-                className={`checklist-find-bar${
-                  checklistFindQuery.trim().length > 0 && checklistFindMatches.length === 0
-                    ? ' has-no-results'
-                    : ''
-                }`}
-                data-testid="song-checklist-find-bar"
-                role="search"
-                aria-label="Find checklist items"
-              >
-                <span className="checklist-find-label" aria-hidden="true">Find</span>
-                <input
-                  ref={checklistFindInputRef}
-                  type="search"
-                  className="checklist-find-input"
-                  value={checklistFindQuery}
-                  onChange={(event) => handleChecklistFindQueryChange(event.currentTarget.value)}
-                  onKeyDown={handleChecklistFindInputKeyDown}
-                  placeholder="Search checklist items"
-                  aria-label="Find in checklist"
-                  aria-describedby="song-checklist-find-status"
-                  data-testid="song-checklist-find-input"
-                />
-                <span
-                  id="song-checklist-find-status"
-                  className="checklist-find-status"
-                  data-testid="song-checklist-find-status"
-                  aria-live="polite"
-                >
-                  {checklistFindStatusText}
-                </span>
-                <div className="checklist-find-actions" aria-label="Find navigation">
-                  <button
-                    type="button"
-                    className="ghost checklist-find-action"
-                    onClick={() => handleChecklistFindStep('previous')}
-                    disabled={checklistFindMatches.length === 0}
-                    aria-label="Previous checklist find match"
-                    title="Previous match (Shift+Enter)"
-                    data-testid="song-checklist-find-previous"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost checklist-find-action"
-                    onClick={() => handleChecklistFindStep('next')}
-                    disabled={checklistFindMatches.length === 0}
-                    aria-label="Next checklist find match"
-                    title="Next match (Enter)"
-                    data-testid="song-checklist-find-next"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost checklist-find-action checklist-find-close"
-                    onClick={() => handleCloseChecklistFind()}
-                    aria-label="Close checklist find"
-                    title="Close find (Esc)"
-                    data-testid="song-checklist-find-close"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            ) : null}
+            {checklistFindOpen && checklistListeningStripCollapsed
+              ? renderChecklistFindBar('collapsed-top')
+              : null}
 
             <div
               className={`listening-device-strip${
@@ -20770,6 +20847,13 @@ export function App(): JSX.Element {
                   );
                 })()}
               </div>
+              {/*
+                v3.289 — expanded listening-device section now owns the
+                checklist search affordance. Putting it at the bottom of the
+                expanded block keeps the device editor/chips intact above it
+                while making fuzzy item search visible without Cmd/Ctrl+F.
+              */}
+              {renderChecklistFindBar('expanded-bottom')}
               </div>
               ) : null}
             </div>
@@ -21166,6 +21250,9 @@ export function App(): JSX.Element {
                         // selection, and caret movement still belong to the
                         // textarea rather than row reorder.
                         draggable={false}
+                        onFocus={() => {
+                          checklistLastInteractedItemIdRef.current = item.id;
+                        }}
                         onChange={(event) => {
                           autosizeChecklistTextarea(event.currentTarget);
                           handleChecklistItemTextChange(

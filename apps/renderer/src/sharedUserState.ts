@@ -81,6 +81,14 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
       isNote !== true && (candidate as { wontFix?: unknown }).wontFix === true
         ? true
         : undefined;
+    // High priority is a visual urgency flag for todo rows. Notes intentionally
+    // clear it with the same "notes are context, not tasks" rule used for
+    // Won't Fix, and we only persist explicit true values so historical rows do
+    // not grow `highPriority: false` noise after a save/load cycle.
+    const highPriority =
+      isNote !== true && (candidate as { highPriority?: unknown }).highPriority === true
+        ? true
+        : undefined;
     // v3.249.0 — Optional completion timestamp (Date.now() millis). Only
     // carried forward when the item is actually done (completed === true
     // or wontFix === true) AND the raw value is a finite positive
@@ -108,6 +116,7 @@ function sanitizeSongChecklistItems(value: unknown): SongChecklistItem[] {
         ...(fromMastering ? { fromMastering: true } : {}),
         ...(isNote ? { isNote: true } : {}),
         ...(wontFix ? { wontFix: true } : {}),
+        ...(highPriority ? { highPriority: true } : {}),
         ...(completedAt !== undefined ? { completedAt } : {}),
       },
     ];

@@ -272,3 +272,64 @@ test('album checklist item isNote=true survives write/read round-trip (v3.188)',
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('checklist highPriority=true survives write/read round-trip', async () => {
+  const dir = mktmp();
+  try {
+    migrateStateIfNeeded(dir);
+    const svc = new UserStateService(dir);
+    const base = createDefaultUserState();
+    base.songChecklists = {
+      'song-a': [
+        {
+          id: 'song-priority',
+          text: 'fix this first',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+          highPriority: true,
+        },
+        {
+          id: 'song-normal',
+          text: 'ordinary item',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+        },
+        {
+          id: 'song-note',
+          text: 'note cannot keep task priority',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+          isNote: true,
+          highPriority: true,
+        },
+      ],
+    };
+    base.albumChecklists = {
+      default: [
+        { id: 'album-priority', text: 'album first', completed: false, highPriority: true },
+        { id: 'album-wontfix', text: 'album skipped', completed: false, wontFix: true },
+        { id: 'album-note', text: 'album note', completed: false, isNote: true, highPriority: true },
+      ],
+    };
+    await svc.writeUserState(base);
+
+    const reader = await reloadService(dir);
+    const restored = await reader.readUserState();
+    const songItems = restored.songChecklists['song-a'];
+    const albumItems = restored.albumChecklists.default;
+    assert.equal(songItems[0].highPriority, true, 'song priority item: highPriority preserved');
+    assert.equal(songItems[1].highPriority, undefined, 'song normal item: highPriority omitted');
+    assert.equal(songItems[2].highPriority, undefined, 'song note item: highPriority cleared');
+    assert.equal(albumItems[0].highPriority, true, 'album priority item: highPriority preserved');
+    assert.equal(albumItems[1].wontFix, true, 'album wontFix still round-trips with new optional flags');
+    assert.equal(albumItems[2].highPriority, undefined, 'album note item: highPriority cleared');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -242,6 +242,72 @@ describe('shared user state sanitizers', () => {
     });
   });
 
+  it('preserves highPriority=true for todos and clears it from notes', () => {
+    expect(
+      sanitizeSongChecklists({
+        songA: [
+          {
+            id: 'item-priority',
+            text: 'Fix this first',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: null,
+            highPriority: true,
+          },
+          {
+            id: 'item-priority-bogus',
+            text: 'String priority should not become true',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: null,
+            highPriority: 'yes',
+          },
+          {
+            id: 'item-note-priority',
+            text: 'Notes are not urgent todos',
+            completed: false,
+            timestampSeconds: null,
+            versionNumber: null,
+            listeningDeviceId: null,
+            isNote: true,
+            highPriority: true,
+          },
+        ],
+      })
+    ).toEqual({
+      songA: [
+        {
+          id: 'item-priority',
+          text: 'Fix this first',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+          highPriority: true,
+        },
+        {
+          id: 'item-priority-bogus',
+          text: 'String priority should not become true',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+        },
+        {
+          id: 'item-note-priority',
+          text: 'Notes are not urgent todos',
+          completed: false,
+          timestampSeconds: null,
+          versionNumber: null,
+          listeningDeviceId: null,
+          isNote: true,
+        },
+      ],
+    });
+  });
+
   it('keeps only valid per-song project file paths', () => {
     expect(
       sanitizeSongProjectFilePaths({

@@ -417,6 +417,15 @@ export interface SongChecklistItem {
    */
   wontFix?: boolean;
   /**
+   * True when Ethan has explicitly marked the checklist item as high priority.
+   *
+   * This is a lightweight visual priority flag, not a completion state: it does
+   * not change todo counts, timestamps, Won't Fix semantics, or sorting. The
+   * renderer uses it to apply the purple-gradient high-priority treatment and
+   * to keep the row's priority toggle active after reloads.
+   */
+  highPriority?: boolean;
+  /**
    * v3.249.0 — Timestamp (Date.now() millis) when the item was marked done
    * (either via the blue tick or via Won't Fix). Kept as durable completion
    * history even though v3.255 moved the visible checklist time-sort workflow
@@ -478,6 +487,13 @@ export interface AlbumChecklistItem {
    * renders with a muted "Won't Fix" style and the horizontal-bar icon.
    */
   wontFix?: boolean;
+  /**
+   * True when the album-level checklist item has been marked as high priority.
+   *
+   * Kept separate from `completed` / `wontFix` so project-level tasks can stay
+   * visually urgent without changing progress math.
+   */
+  highPriority?: boolean;
 }
 
 export interface SavedReferenceTrack {

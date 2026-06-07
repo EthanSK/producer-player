@@ -67,6 +67,69 @@ test.describe('Checklist and export UX improvements', () => {
     }
   });
 
+  test('high-priority checklist button tints song and album rows purple', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-high-priority'
+    );
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Track A v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (window as any).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+
+      await page.getByTestId('song-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await page.getByTestId('song-checklist-input').fill('Fix the vocal first');
+      await page.getByTestId('song-checklist-add').click();
+
+      const songRow = page.getByTestId('song-checklist-item-row');
+      const songPriorityButton = page.getByTestId('song-checklist-item-high-priority-toggle');
+      await expect(songRow).toHaveCount(1);
+      await songRow.hover();
+      await songPriorityButton.click();
+      await expect(songPriorityButton).toHaveAttribute('aria-pressed', 'true');
+      await expect(songRow).toHaveClass(/checklist-item-row--high-priority/);
+
+      const songPriorityPaint = await songRow.evaluate((row) => {
+        const style = getComputedStyle(row);
+        return {
+          backgroundImage: style.backgroundImage,
+          borderColor: style.borderTopColor,
+        };
+      });
+      // The class assertion proves the state toggle landed; the paint check
+      // catches accidental "class only, no visible purple treatment" regressions.
+      // We read while the row is still hovered from clicking the stacked
+      // priority button, so the brighter hover border is the expected state.
+      expect(songPriorityPaint.backgroundImage).toContain('linear-gradient');
+      expect(songPriorityPaint.borderColor).toBe('rgba(222, 166, 255, 0.6)');
+
+      await page.getByTestId('song-checklist-done-header').click();
+      await page.getByTestId('album-checklist-button').click();
+      await expect(page.getByTestId('album-checklist-modal')).toBeVisible();
+      await page.getByTestId('album-checklist-input').fill('Sort final credits first');
+      await page.getByTestId('album-checklist-add-button').click();
+
+      const albumRow = page.locator('.album-checklist-modal-card .checklist-item-row');
+      const albumPriorityButton = page.getByTestId('album-checklist-item-high-priority-toggle');
+      await expect(albumRow).toHaveCount(1);
+      await albumRow.hover();
+      await albumPriorityButton.click();
+      await expect(albumPriorityButton).toHaveAttribute('aria-pressed', 'true');
+      await expect(albumRow).toHaveClass(/checklist-item-row--high-priority/);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('listening-device strip collapse control sits at the top-left when expanded', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-collapse-left'

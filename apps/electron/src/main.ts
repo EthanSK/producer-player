@@ -2466,6 +2466,14 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       (candidate as { wontFix?: unknown }).wontFix === true
         ? true
         : undefined;
+    // High priority is a renderer-visible todo urgency flag. Keep it in the
+    // legacy shared-state parse path so older import/migration sources don't
+    // drop the purple priority state on cold-start.
+    const highPriority =
+      isNote !== true &&
+      (candidate as { highPriority?: unknown }).highPriority === true
+        ? true
+        : undefined;
     const rawCompletedAt = (candidate as { completedAt?: unknown }).completedAt;
     const isDoneRow = candidate.completed === true || wontFix === true;
     const completedAt =
@@ -2487,6 +2495,7 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
         ...(fromMastering ? { fromMastering: true } : {}),
         ...(isNote ? { isNote: true } : {}),
         ...(wontFix ? { wontFix: true } : {}),
+        ...(highPriority ? { highPriority: true } : {}),
         ...(completedAt !== undefined ? { completedAt } : {}),
       },
     ];

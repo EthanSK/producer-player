@@ -2293,6 +2293,9 @@ function readStoredAlbumChecklists(): Record<string, AlbumChecklistItem[]> {
           // v3.244.0 — also preserve wontFix when explicitly true. Notes
           // ignore completion math entirely so wontFix is cleared when
           // isNote is set.
+          // High priority mirrors that optional-true persistence model: it is
+          // a visual task urgency flag, so notes clear it and historical rows
+          // avoid acquiring stray `highPriority: false` JSON.
           .map((item) => {
             const candidate = item as AlbumChecklistItem;
             const isNote =
@@ -2302,12 +2305,18 @@ function readStoredAlbumChecklists(): Record<string, AlbumChecklistItem[]> {
               (candidate as { wontFix?: unknown }).wontFix === true
                 ? true
                 : undefined;
+            const highPriority =
+              isNote !== true &&
+              (candidate as { highPriority?: unknown }).highPriority === true
+                ? true
+                : undefined;
             return {
               id: candidate.id,
               text: candidate.text,
               completed: candidate.completed,
               ...(isNote ? { isNote: true } : {}),
               ...(wontFix ? { wontFix: true } : {}),
+              ...(highPriority ? { highPriority: true } : {}),
             };
           });
       }
@@ -14879,6 +14888,29 @@ export function App(): JSX.Element {
     });
   }
 
+  // High priority is intentionally independent from completion: a row can be
+  // urgent while open, checked, or marked Won't Fix. We only strip the optional
+  // key when toggled off so saved state stays compact and historical rows do
+  // not acquire false-valued priority noise.
+  function handleToggleAlbumChecklistItemHighPriority(itemId: string): void {
+    logAction('checklist.album.toggle-high-priority', { itemId });
+    const key = getAlbumChecklistKey();
+    setAlbumChecklists((prev) => {
+      const existing = prev[key] ?? [];
+      return {
+        ...prev,
+        [key]: existing.map((item) => {
+          if (item.id !== itemId || item.isNote === true) return item;
+          if (item.highPriority === true) {
+            const { highPriority: _highPriority, ...rest } = item;
+            return rest;
+          }
+          return { ...item, highPriority: true };
+        }),
+      };
+    });
+  }
+
   // v3.183.0 — flip an album-checklist row between todo and note mode.
   function handleToggleAlbumChecklistItemNoteMode(itemId: string): void {
     logAction('checklist.album.convert-note', { itemId });
@@ -14892,8 +14924,9 @@ export function App(): JSX.Element {
           const nextIsNote = !(item.isNote === true);
           if (nextIsNote) {
             // v3.244.0 — notes ignore completion math entirely so also
-            // strip any wontFix flag when becoming a note.
-            const { wontFix: _wontFix, ...rest } = item;
+            // strip any wontFix flag when becoming a note. High priority is
+            // also todo-only visual urgency, so notes clear that flag too.
+            const { wontFix: _wontFix, highPriority: _highPriority, ...rest } = item;
             return { ...rest, isNote: true, completed: false };
           }
           const { isNote: _isNote, ...rest } = item;
@@ -16077,6 +16110,23 @@ export function App(): JSX.Element {
     );
   }
 
+  // High priority is a visual urgency marker rather than a third completion
+  // state. It coexists with completed / Won't Fix rows so Ethan can keep an
+  // item visually loud without changing any of the checklist progress math.
+  function handleToggleChecklistItemHighPriority(songId: string, itemId: string): void {
+    logAction('checklist.song.toggle-high-priority', { songId, itemId });
+    updateSongChecklistItems(songId, (items) =>
+      items.map((item) => {
+        if (item.id !== itemId || item.isNote === true) return item;
+        if (item.highPriority === true) {
+          const { highPriority: _highPriority, ...rest } = item;
+          return rest;
+        }
+        return { ...item, highPriority: true };
+      })
+    );
+  }
+
   // v3.183.0 — flip a song-checklist row between todo and note mode.
   // Notes render without a checkbox and don't count toward the todo
   // total. We omit `isNote` rather than storing `false` so historical
@@ -16092,10 +16142,17 @@ export function App(): JSX.Element {
           // true` never leaks into a todo count if it later flips back.
           // v3.244.0 — notes ignore completion math entirely so also
           // strip any wontFix flag.
+          // High-priority is also a todo-only visual flag; clear it on the
+          // same transition so notes don't keep task urgency decorations.
           // v3.249.0 — also drop the completedAt timestamp so a stale value
           // can't survive the note round-trip if the item is later converted
           // back to a todo and re-ticked.
-          const { wontFix: _wontFix, completedAt: _completedAt, ...rest } = item;
+          const {
+            wontFix: _wontFix,
+            highPriority: _highPriority,
+            completedAt: _completedAt,
+            ...rest
+          } = item;
           return { ...rest, isNote: true, completed: false };
         }
         // Becoming a todo again: strip the isNote key entirely.
@@ -17406,6 +17463,10 @@ export function App(): JSX.Element {
             // doesn't re-recommend something the user already decided
             // to skip.
             wontFix: item.wontFix === true ? true : undefined,
+            // High-priority rows should remain visible to the agent context as
+            // user intent, but the optional field stays absent for ordinary
+            // rows to keep prompt payloads compact.
+            highPriority: item.highPriority === true ? true : undefined,
             timestampSeconds: item.timestampSeconds,
             versionNumber: item.versionNumber,
           })),
@@ -20834,6 +20895,8 @@ export function App(): JSX.Element {
                         isCurrentVersionTag ? ' checklist-item--current-version' : ''
                       }${item.isNote === true ? ' checklist-item-row--note' : ''}${
                         item.wontFix === true ? ' checklist-item-row--wontfix' : ''
+                      }${
+                        item.highPriority === true ? ' checklist-item-row--high-priority' : ''
                       }`}
                       style={
                         groupHighlightColor
@@ -20929,6 +20992,43 @@ export function App(): JSX.Element {
                               Marks this item resolved without ticking it. Counts toward
                               progress, but renders with a struck-through "won't fix" look
                               instead of a blue check.
+                            </FloatingTooltip>
+                          </button>
+                        ) : null}
+                        {item.isNote !== true ? (
+                          <button
+                            type="button"
+                            className={`checklist-item-priority-toggle${
+                              item.highPriority === true ? ' is-high-priority' : ''
+                            }`}
+                            onClick={() =>
+                              handleToggleChecklistItemHighPriority(
+                                checklistModalSong.id,
+                                item.id
+                              )
+                            }
+                            data-testid="song-checklist-item-high-priority-toggle"
+                            aria-label={
+                              item.highPriority === true
+                                ? 'Clear high priority'
+                                : 'Mark as high priority'
+                            }
+                            aria-pressed={item.highPriority === true}
+                            aria-describedby={`song-checklist-item-high-priority-popover-${item.id}`}
+                          >
+                            <span aria-hidden="true">!</span>
+                            <FloatingTooltip
+                              id={`song-checklist-item-high-priority-popover-${item.id}`}
+                              label={
+                                item.highPriority === true
+                                  ? 'Clear High Priority'
+                                  : 'Mark High Priority'
+                              }
+                              placement="right"
+                            >
+                              Adds the purple high-priority treatment to this checklist
+                              row without changing done counts, Won't Fix state, or
+                              timestamps.
                             </FloatingTooltip>
                           </button>
                         ) : null}
@@ -21211,6 +21311,8 @@ export function App(): JSX.Element {
                             isCurrentVersionTag ? ' checklist-item--current-version' : ''
                           }${item.isNote === true ? ' checklist-item-row--note' : ''}${
                             item.wontFix === true ? ' checklist-item-row--wontfix' : ''
+                          }${
+                            item.highPriority === true ? ' checklist-item-row--high-priority' : ''
                           }`}
                         >
                           <div className="checklist-item-checkbox-column">
@@ -21877,7 +21979,7 @@ export function App(): JSX.Element {
                   {albumChecklistItems.map((item) => (
                     <li
                       key={item.id}
-                      className={`checklist-item-row${item.isNote === true ? ' checklist-item-row--note' : ''}${item.wontFix === true ? ' checklist-item-row--wontfix' : ''}`}
+                      className={`checklist-item-row${item.isNote === true ? ' checklist-item-row--note' : ''}${item.wontFix === true ? ' checklist-item-row--wontfix' : ''}${item.highPriority === true ? ' checklist-item-row--high-priority' : ''}`}
                     >
                       {/* v3.248 — Checkbox column wrapper, see song-checklist
                           equivalent above. Houses checkbox + hover-revealed
@@ -21942,6 +22044,37 @@ export function App(): JSX.Element {
                               Marks this item resolved without ticking it. Counts toward
                               progress, but renders with a struck-through "won't fix" look
                               instead of a blue check.
+                            </FloatingTooltip>
+                          </button>
+                        ) : null}
+                        {item.isNote !== true ? (
+                          <button
+                            type="button"
+                            className={`checklist-item-priority-toggle${
+                              item.highPriority === true ? ' is-high-priority' : ''
+                            }`}
+                            onClick={() => handleToggleAlbumChecklistItemHighPriority(item.id)}
+                            data-testid="album-checklist-item-high-priority-toggle"
+                            aria-label={
+                              item.highPriority === true
+                                ? 'Clear high priority'
+                                : 'Mark as high priority'
+                            }
+                            aria-pressed={item.highPriority === true}
+                            aria-describedby={`album-checklist-item-high-priority-popover-${item.id}`}
+                          >
+                            <span aria-hidden="true">!</span>
+                            <FloatingTooltip
+                              id={`album-checklist-item-high-priority-popover-${item.id}`}
+                              label={
+                                item.highPriority === true
+                                  ? 'Clear High Priority'
+                                  : 'Mark High Priority'
+                              }
+                              placement="right"
+                            >
+                              Adds the purple high-priority treatment to this checklist
+                              row without changing done counts or Won't Fix state.
                             </FloatingTooltip>
                           </button>
                         ) : null}

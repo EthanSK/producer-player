@@ -5278,6 +5278,60 @@ body.is-dragging-checklist-timestamp * {
   box-shadow: 0 0 0 2px rgba(170, 170, 170, 0.12);
 }
 
+/* High-priority toggle — stacked underneath the Won't Fix affordance in the
+   checkbox column. Inactive rows keep the same hover-reveal behavior as Won't
+   Fix so the column stays quiet; active rows keep the button visible as a
+   durable "this row is loud" control. */
+.checklist-item-priority-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(176, 121, 255, 0.32);
+  background: rgba(123, 82, 255, 0.08);
+  color: rgba(215, 192, 255, 0.8);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease, background 0.15s ease;
+  /* FloatingTooltip anchors from inside the button; the visible tooltip is
+   * still portalled to body so it escapes checklist scroll clipping. */
+  position: relative;
+}
+
+.checklist-item-row:hover .checklist-item-priority-toggle,
+.checklist-item-row:focus-within .checklist-item-priority-toggle,
+.checklist-item-priority-toggle.is-high-priority {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.checklist-item-priority-toggle:hover,
+.checklist-item-priority-toggle:focus-visible {
+  border-color: rgba(206, 165, 255, 0.72);
+  color: #f5eeff;
+  background: rgba(145, 92, 255, 0.18);
+  box-shadow: 0 0 0 2px rgba(168, 100, 255, 0.16);
+}
+
+.checklist-item-priority-toggle.is-high-priority {
+  border-color: rgba(231, 171, 255, 0.82);
+  background: linear-gradient(135deg, rgba(120, 70, 255, 0.96), rgba(212, 84, 255, 0.88));
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(180, 83, 255, 0.32);
+}
+
 /* Row-level wontFix tint — slightly desaturated so the item reads as
    "settled, not actively pursued" without dominating the list. */
 .checklist-item-row--wontfix {
@@ -5287,6 +5341,23 @@ body.is-dragging-checklist-timestamp * {
 
 .checklist-item-row--wontfix:hover {
   background: rgba(150, 160, 170, 0.09);
+}
+
+/* High-priority row tint — intentionally more visible than Won't Fix's muted
+   slate state, because the point is to make the urgent row jump out while
+   preserving the checklist's dark console styling. The left inset bar survives
+   overlap with completed / Won't Fix text styling and also makes drag-overlay
+   previews read as high priority. */
+.checklist-item-row--high-priority {
+  background: linear-gradient(135deg, rgba(111, 70, 255, 0.22), rgba(211, 85, 255, 0.14) 52%, rgba(255, 255, 255, 0.035));
+  border-color: rgba(205, 144, 255, 0.44);
+  box-shadow: inset 3px 0 0 rgba(226, 156, 255, 0.86), 0 0 0 1px rgba(164, 92, 255, 0.12), 0 10px 24px rgba(85, 41, 170, 0.18);
+}
+
+.checklist-item-row--high-priority:hover,
+.checklist-item-row--high-priority:focus-within {
+  background: linear-gradient(135deg, rgba(127, 82, 255, 0.27), rgba(222, 93, 255, 0.18) 52%, rgba(255, 255, 255, 0.05));
+  border-color: rgba(222, 166, 255, 0.6);
 }
 
 /* Won't-Fix text is struck through + dimmed so the visual delta from a

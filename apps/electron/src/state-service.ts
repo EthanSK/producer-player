@@ -168,6 +168,14 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       (c as { wontFix?: unknown }).wontFix === true
         ? true
         : undefined;
+    // High priority follows the same optional-true persistence shape as
+    // Won't Fix: task rows can carry it, notes clear it, and false/missing
+    // values stay omitted so older saved state remains byte-light.
+    const highPriority =
+      isNote !== true &&
+      (c as { highPriority?: unknown }).highPriority === true
+        ? true
+        : undefined;
     const rawCompletedAt = (c as { completedAt?: unknown }).completedAt;
     const isDoneRow = c.completed === true || wontFix === true;
     const completedAt =
@@ -187,6 +195,7 @@ function parseSongChecklistItems(value: unknown): SongChecklistItem[] {
       ...(fromMastering ? { fromMastering: true } : {}),
       ...(isNote ? { isNote: true } : {}),
       ...(wontFix ? { wontFix: true } : {}),
+      ...(highPriority ? { highPriority: true } : {}),
       ...(completedAt !== undefined ? { completedAt } : {}),
     }];
   });
@@ -265,11 +274,26 @@ function parseAlbumChecklists(value: unknown): Record<string, AlbumChecklistItem
         // explicitly true so historical items round-trip without a stray
         // `isNote: false` key. (v3.188 restored.)
         const isNote = item.isNote === true ? true : undefined;
+        // Album rows share the same optional todo-only flags as song rows.
+        // Preserve explicit true values here so state-service write/read
+        // round-trips don't quietly strip UI state from album checklist rows.
+        const wontFix =
+          isNote !== true &&
+          (item as { wontFix?: unknown }).wontFix === true
+            ? true
+            : undefined;
+        const highPriority =
+          isNote !== true &&
+          (item as { highPriority?: unknown }).highPriority === true
+            ? true
+            : undefined;
         return [{
           id: item.id,
           text: item.text,
           completed: item.completed,
           ...(isNote ? { isNote: true } : {}),
+          ...(wontFix ? { wontFix: true } : {}),
+          ...(highPriority ? { highPriority: true } : {}),
         }];
       });
     }

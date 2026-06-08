@@ -3107,6 +3107,23 @@ function AutoplayNextIcon(): JSX.Element {
   );
 }
 
+function RewindToStartIcon(): JSX.Element {
+  // v3.292 — Rewind-to-start should look like "go to the start of this song",
+  // not another previous-track jump. This mirrors the app's inline
+  // AutoplayNextIcon language but uses only one backward play triangle plus a
+  // start bar, matching Ethan's "one arrow facing backwards with a line" ask.
+  return (
+    <svg
+      className="autoplay-next-icon rewind-to-start-icon"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path className="autoplay-next-next-bar" d="M5.2 7.2v9.6" />
+      <path className="autoplay-next-play" d="M17.6 6.4v11.2L9.2 12l8.4-5.6z" />
+    </svg>
+  );
+}
+
 interface AutoplayNextButtonProps {
   enabled: boolean;
   className: string;
@@ -12270,9 +12287,10 @@ export function App(): JSX.Element {
     const currentTime = audio && Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
 
     if (audio) {
-      // v3.283 — ◀◀ is now a pure rewind-to-start control. The old
-      // "press once to restart, press again near 0:00 to jump tracks" rule
-      // became confusing once Ethan added the dedicated ⏮ previous-track jump.
+      // v3.292 — this action is still pure rewind-to-start, but the visible
+      // icon is now a one-arrow start icon. Ethan called out that ◀◀ reads as
+      // the direct opposite of the ▶▶ next-track button, so ◀◀ now belongs to
+      // previous-track jump.
       handleSeek(0);
       logPlaybackEvent('transport-rewind-current-track', {
         currentTimeSeconds: currentTime,
@@ -17312,8 +17330,8 @@ export function App(): JSX.Element {
       void handleTogglePlayback();
     },
     next: handleNextTrack,
-    // Main-process/media-key "previous-track" is still actual queue
-    // navigation. The in-app ◀◀ button below is now rewind-only.
+    // Main-process/media-key "previous-track" stays actual queue navigation;
+    // that now matches the in-app ◀◀ button after Ethan's v3.292 flip.
     previous: handleJumpToPreviousTrack,
   };
   handleSkipSecondsRef.current = handleSkipSeconds;
@@ -19562,7 +19580,7 @@ export function App(): JSX.Element {
             </div>
 
             <div className="player-transport">
-              <HelpTooltip text={"What this is: The main playback controls — play/pause, skip forward/back, previous/next track, repeat mode, and volume.\n\nHow to use it: Press the play button or hit Space anywhere in the app to toggle playback. Use the skip buttons (±1s, ±5s, ±10s) for fine seeking. Click ⏮ to jump to the previous track, ◀◀ to rewind the current track to the start, and ▶▶ to move to the next track. Drag the scrubber to jump to any position. Adjust volume with the slider.\n\nWhy you'd want to: Quickly navigate through your songs and compare sections without leaving the app.\n\nTip: Space bar toggles play/pause globally unless you're typing in a text field."} />
+              <HelpTooltip text={"What this is: The main playback controls — play/pause, skip forward/back, previous/next track, repeat mode, and volume.\n\nHow to use it: Press the play button or hit Space anywhere in the app to toggle playback. Use the skip buttons (±1s, ±5s, ±10s) for fine seeking. Click ◀◀ to jump to the previous track, the left-facing arrow-with-line button to rewind the current track to the start, and ▶▶ to move to the next track. Drag the scrubber to jump to any position. Adjust volume with the slider.\n\nWhy you'd want to: Quickly navigate through your songs and compare sections without leaving the app.\n\nTip: Space bar toggles play/pause globally unless you're typing in a text field."} />
               <div className="transport-nav-group">
                 <div className="transport-skip-row">
                   <button
@@ -19648,7 +19666,7 @@ export function App(): JSX.Element {
                     title="Jump to previous track in the current queue."
                     aria-label="Jump to previous track"
                   >
-                    ⏮
+                    ◀◀
                   </button>
                   <button
                     type="button"
@@ -19658,7 +19676,7 @@ export function App(): JSX.Element {
                     title="Rewind to the start of the current track."
                     aria-label="Rewind to start of current track"
                   >
-                    ◀◀
+                    <RewindToStartIcon />
                   </button>
                   <button
                     type="button"
@@ -21663,8 +21681,8 @@ export function App(): JSX.Element {
                 </div>
                 <div className="checklist-mini-player-transport">
                   {/* Keep the checklist mini-player order aligned with the main
-                      transport: direct previous-track jump sits immediately left
-                      of the current-track rewind button. */}
+                      transport: ◀◀ is previous-track navigation and the
+                      one-arrow start icon is current-track rewind-to-start. */}
                   <button
                     ref={checklistJumpPreviousTrackButtonRef}
                     type="button"
@@ -21687,7 +21705,7 @@ export function App(): JSX.Element {
                     title="Jump to previous track"
                     aria-label="Jump to previous track"
                   >
-                    ⏮
+                    ◀◀
                   </button>
 
                   <button
@@ -21711,7 +21729,7 @@ export function App(): JSX.Element {
                     title="Rewind to the start of the current track"
                     aria-label="Rewind to start of current track"
                   >
-                    ◀◀
+                    <RewindToStartIcon />
                   </button>
 
                   <div className="checklist-transport-group">
@@ -24135,8 +24153,8 @@ export function App(): JSX.Element {
                 >
                   −1s
                 </button>
-                {/* Keep the direct queue jump beside the main rewind button
-                    so it reads as track navigation, not a −seconds skip. */}
+                {/* Keep the direct queue jump beside the main rewind button so
+                    the overlay mirrors the main dock and checklist mini-player. */}
                 <button
                   type="button"
                   className="analysis-overlay-transport-button analysis-overlay-jump-previous-button"
@@ -24145,7 +24163,7 @@ export function App(): JSX.Element {
                   title="Jump to previous track"
                   aria-label="Jump to previous track"
                 >
-                  ⏮
+                  ◀◀
                 </button>
                 <button
                   type="button"
@@ -24155,7 +24173,7 @@ export function App(): JSX.Element {
                   title="Rewind to start of current track"
                   aria-label="Rewind to start of current track"
                 >
-                  ◀◀
+                  <RewindToStartIcon />
                 </button>
                 <button
                   type="button"

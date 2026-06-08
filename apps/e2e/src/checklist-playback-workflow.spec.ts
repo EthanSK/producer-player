@@ -573,8 +573,9 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('transport-checklist-button').click();
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 
-      // Mirror the main player: the direct previous-track jump sits directly
-      // left of the ◀◀ rewind button, not in the ±seconds cluster.
+      // Mirror the main player: the direct previous-track jump is the ◀◀
+      // button and sits directly left of the one-arrow start icon, not in the
+      // ±seconds cluster.
       const checklistPrimaryTransportOrder = await page.evaluate(() => {
         const buttons = Array.from(
           document.querySelectorAll('.checklist-mini-player-transport > [data-testid]')
@@ -586,11 +587,16 @@ test.describe('checklist playback workflow', () => {
         'song-checklist-mini-player-prev',
         'song-checklist-mini-player-next',
       ]);
+      await expect(page.getByTestId('song-checklist-jump-previous-track')).toHaveText('◀◀');
+      await expect(
+        page.getByTestId('song-checklist-mini-player-prev').locator('.rewind-to-start-icon')
+      ).toBeVisible();
 
       // Layout regression for v3.282: the direct previous-track button lives
       // in its own auto-sized grid column. When it accidentally sat in the
-      // stretchy play/skip column, ⏮ became much wider than ◀◀ and pushed the
-      // checklist transport controls onto another row.
+      // stretchy play/skip column, the previous-track button became much wider
+      // than the rewind button and pushed the checklist transport controls onto
+      // another row.
       const checklistTransportGeometry = await page.evaluate(() => {
         const readRect = (selector: string) => {
           const element = document.querySelector(selector);
@@ -656,6 +662,12 @@ test.describe('checklist playback workflow', () => {
       await checklistInput.fill('draft for rewind button');
 
       const miniScrubber = page.getByTestId('song-checklist-mini-player-scrubber');
+      // The mini-player input is controlled by the active audio duration. Wait
+      // for the newly navigated track to expose a real max before forcing a
+      // mid-song seek, otherwise React legitimately clamps the value back to 0.
+      await expect
+        .poll(async () => Number.parseFloat((await miniScrubber.getAttribute('max')) ?? '0'))
+        .toBeGreaterThan(2);
       await miniScrubber.evaluate((element) => {
         const scrubber = element as HTMLInputElement;
         scrubber.value = '1.4';
@@ -1083,7 +1095,7 @@ test.describe('checklist playback workflow', () => {
       await expect(skipForward2).toBeVisible();
 
       // The direct previous-track jump is main track navigation, not another
-      // second-skip chip; lock it next to the ◀◀ rewind button.
+      // second-skip chip; lock ◀◀ next to the one-arrow start button.
       const skipRowOrder = await page.evaluate(() => {
         const buttons = Array.from(
           document.querySelectorAll('.transport-skip-row [data-testid]')
@@ -1113,6 +1125,8 @@ test.describe('checklist playback workflow', () => {
         'player-next',
         'player-autoplay-next',
       ]);
+      await expect(page.getByTestId('player-jump-previous-track')).toHaveText('◀◀');
+      await expect(page.getByTestId('player-prev').locator('.rewind-to-start-icon')).toBeVisible();
 
       const scrubber = page.getByTestId('player-scrubber');
       const scrubberStart = Number(await scrubber.inputValue());
@@ -1177,6 +1191,10 @@ test.describe('checklist playback workflow', () => {
         'analysis-overlay-jump-previous-track',
         'analysis-overlay-prev',
       ]);
+      await expect(page.getByTestId('analysis-overlay-jump-previous-track')).toHaveText('◀◀');
+      await expect(
+        page.getByTestId('analysis-overlay-prev').locator('.rewind-to-start-icon')
+      ).toBeVisible();
 
       const fullScreenSpectrum = page.getByTestId('spectrum-analyzer-full');
       await expect(fullScreenSpectrum).toBeVisible();

@@ -5503,10 +5503,10 @@ body.is-dragging-checklist-timestamp * {
 
 .checklist-mini-player-transport {
   display: grid;
-  /* Four real transport regions: direct previous-track jump, current-track
-     rewind, the dense play/skip cluster, and next. The direct jump needs its
-     own auto-sized column so it stays next to ◀◀ without becoming a stretchy
-     seconds-skip control. */
+  /* Four real transport regions: previous-track jump (◀◀), current-track
+     rewind (one-arrow start icon), the dense play/skip cluster, and next. The
+     direct jump needs its own auto-sized column so it stays next to the rewind
+     button without becoming a stretchy seconds-skip control. */
   grid-template-columns: auto auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;

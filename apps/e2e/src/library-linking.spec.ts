@@ -140,8 +140,11 @@ test.describe('Producer Player desktop shell', () => {
         'track positions are preserved across versions'
       );
       await expect(page.getByTestId('reset-all-times-button')).toHaveText('Reset All Times');
-      await expect(page.getByTestId('reset-all-times-button')).toHaveAttribute(
-        'title',
+      // Ethan specifically asked for the app-native instant tooltip here, not
+      // Electron/macOS's delayed native `title` bubble.
+      await expect(page.getByTestId('reset-all-times-button')).not.toHaveAttribute('title', /.+/);
+      await page.getByTestId('reset-all-times-tooltip-anchor').hover();
+      await expect(page.locator('#reset-all-times-tooltip')).toContainText(
         'Link tracks before resetting playback times.'
       );
       await expect(page.getByTestId('reset-all-times-button')).toBeDisabled();
@@ -156,8 +159,8 @@ test.describe('Producer Player desktop shell', () => {
       // Nested folders are ignored by scan policy.
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await expect(page.getByTestId('reset-all-times-button')).toBeEnabled();
-      await expect(page.getByTestId('reset-all-times-button')).toHaveAttribute(
-        'title',
+      await page.getByTestId('reset-all-times-tooltip-anchor').hover();
+      await expect(page.locator('#reset-all-times-tooltip')).toContainText(
         'Set playback time to zero for every track.'
       );
       await page.getByTestId('reset-all-times-button').click();

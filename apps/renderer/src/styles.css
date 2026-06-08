@@ -2724,6 +2724,14 @@ body.floating-switcher-panel-dragging * {
   color: var(--text-muted);
 }
 
+.reset-all-times-tooltip-anchor {
+  /* The wrapper, not the button, owns the hover target so the in-app tooltip
+     still opens when the Reset All Times button is disabled before folders are
+     linked. */
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
 .reset-all-times-button {
   flex-shrink: 0;
   padding: 4px 8px;

@@ -9844,6 +9844,14 @@ export function App(): JSX.Element {
   const listHintText = isSearching
     ? 'Search is filtering the list — clear it to reorder tracks.'
     : 'Drag tracks to reorder — track positions are preserved across versions.';
+  // v3.291 - Reset All Times lives in a native Electron window, so a `title`
+  // attribute turns into macOS's slow system tooltip. Keep the copy in the
+  // app's instant FloatingTooltip surface instead.
+  const resetAllTimesTooltip = songs.length > 0
+    ? isPlaying
+      ? 'Set playback time to zero for every track except the one currently playing.'
+      : 'Set playback time to zero for every track.'
+    : 'Link tracks before resetting playback times.';
   const showEmptyStateAddFolder = songs.length === 0 && !isSearching && !loading;
   const emptyStateText = isSearching
     ? 'No matching tracks or versions.'
@@ -18991,22 +18999,24 @@ export function App(): JSX.Element {
           >
             {listHintText}
           </p>
-          <button
-            type="button"
-            className="reset-all-times-button"
-            data-testid="reset-all-times-button"
-            onClick={handleResetAllPlaybackTimes}
-            disabled={songs.length === 0}
-            title={
-              songs.length > 0
-                ? isPlaying
-                  ? 'Set playback time to zero for every track except the one currently playing.'
-                  : 'Set playback time to zero for every track.'
-                : 'Link tracks before resetting playback times.'
-            }
+          <span
+            className="reset-all-times-tooltip-anchor"
+            data-testid="reset-all-times-tooltip-anchor"
           >
-            Reset All Times
-          </button>
+            <button
+              type="button"
+              className="reset-all-times-button"
+              data-testid="reset-all-times-button"
+              onClick={handleResetAllPlaybackTimes}
+              disabled={songs.length === 0}
+              aria-describedby="reset-all-times-tooltip"
+            >
+              Reset All Times
+            </button>
+            <FloatingTooltip id="reset-all-times-tooltip" label="Reset All Times" placement="bottom">
+              {resetAllTimesTooltip}
+            </FloatingTooltip>
+          </span>
         </div>
 
         <ul

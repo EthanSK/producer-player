@@ -2346,8 +2346,9 @@ test.describe('playback runtime deep dive', () => {
         .poll(async () => Number(await page.getByTestId('player-scrubber').inputValue()))
         .toBeGreaterThan(4);
 
-      await expect(page.getByTestId('reset-all-times-button')).toHaveAttribute(
-        'title',
+      await expect(page.getByTestId('reset-all-times-button')).not.toHaveAttribute('title', /.+/);
+      await page.getByTestId('reset-all-times-tooltip-anchor').hover();
+      await expect(page.locator('#reset-all-times-tooltip')).toContainText(
         'Set playback time to zero for every track except the one currently playing.'
       );
       await page.getByTestId('reset-all-times-button').click();

@@ -4234,6 +4234,94 @@ button.autoplay-next-button:focus-visible::after {
   box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.12);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .checklist-item-row.is-active {
+    /*
+     * "Just played" timestamp marker: a quick pop tells the user playback
+     * crossed this row, then the long dimming tail makes the row searchable
+     * while scrolling and communicates roughly how long ago it happened.
+     */
+    animation-duration: 12s;
+    animation-timing-function: ease-out;
+    animation-fill-mode: forwards;
+    will-change: background, border-color, box-shadow, transform;
+  }
+
+  /* Alternate identical keyframes so repeated crossings restart the pulse
+     even if the previous 12-second tail is still fading. */
+  .checklist-item-row.is-active-pulse-odd {
+    animation-name: checklistTimestampJustPlayedTailOdd;
+  }
+
+  .checklist-item-row.is-active-pulse-even {
+    animation-name: checklistTimestampJustPlayedTailEven;
+  }
+
+  @keyframes checklistTimestampJustPlayedTailOdd {
+    0% {
+      transform: scale(1);
+      border-color: rgba(92, 167, 255, 0.96);
+      background: rgba(92, 167, 255, 0.26);
+      box-shadow: 0 0 0 3px rgba(92, 167, 255, 0.26), 0 0 28px rgba(92, 167, 255, 0.34);
+    }
+    5% {
+      transform: scale(1.012);
+      border-color: rgba(139, 198, 255, 1);
+      background: rgba(92, 167, 255, 0.30);
+      box-shadow: 0 0 0 4px rgba(92, 167, 255, 0.22), 0 0 36px rgba(92, 167, 255, 0.38);
+    }
+    13% {
+      transform: scale(1);
+      border-color: rgba(92, 167, 255, 0.75);
+      background: rgba(92, 167, 255, 0.18);
+      box-shadow: 0 0 0 3px rgba(92, 167, 255, 0.16), 0 0 24px rgba(92, 167, 255, 0.22);
+    }
+    42% {
+      border-color: rgba(92, 167, 255, 0.50);
+      background: rgba(92, 167, 255, 0.095);
+      box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.09), 0 0 16px rgba(92, 167, 255, 0.12);
+    }
+    100% {
+      transform: scale(1);
+      border-color: rgba(92, 167, 255, 0.35);
+      background: rgba(92, 167, 255, 0.035);
+      box-shadow: 0 0 0 1px rgba(92, 167, 255, 0.035);
+    }
+  }
+
+  @keyframes checklistTimestampJustPlayedTailEven {
+    0% {
+      transform: scale(1);
+      border-color: rgba(92, 167, 255, 0.96);
+      background: rgba(92, 167, 255, 0.26);
+      box-shadow: 0 0 0 3px rgba(92, 167, 255, 0.26), 0 0 28px rgba(92, 167, 255, 0.34);
+    }
+    5% {
+      transform: scale(1.012);
+      border-color: rgba(139, 198, 255, 1);
+      background: rgba(92, 167, 255, 0.30);
+      box-shadow: 0 0 0 4px rgba(92, 167, 255, 0.22), 0 0 36px rgba(92, 167, 255, 0.38);
+    }
+    13% {
+      transform: scale(1);
+      border-color: rgba(92, 167, 255, 0.75);
+      background: rgba(92, 167, 255, 0.18);
+      box-shadow: 0 0 0 3px rgba(92, 167, 255, 0.16), 0 0 24px rgba(92, 167, 255, 0.22);
+    }
+    42% {
+      border-color: rgba(92, 167, 255, 0.50);
+      background: rgba(92, 167, 255, 0.095);
+      box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.09), 0 0 16px rgba(92, 167, 255, 0.12);
+    }
+    100% {
+      transform: scale(1);
+      border-color: rgba(92, 167, 255, 0.35);
+      background: rgba(92, 167, 255, 0.035);
+      box-shadow: 0 0 0 1px rgba(92, 167, 255, 0.035);
+    }
+  }
+}
+
 .checklist-item-row.is-find-match {
   border-color: rgba(255, 214, 102, 0.55);
   background: rgba(255, 214, 102, 0.08);

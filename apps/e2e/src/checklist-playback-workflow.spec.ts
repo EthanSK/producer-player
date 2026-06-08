@@ -143,7 +143,7 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
-  test('set now captures checklist timestamp and matching items flash when playback reaches them', async () => {
+  test('set now captures checklist timestamp and matching items pulse with a long tail when playback reaches them', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-set-now-highlight'
     );
@@ -180,10 +180,21 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('song-checklist-skip-back-10').click();
 
       await page.getByTestId('song-checklist-play-toggle').click();
+      const highlightedRow = page.locator('.checklist-item-row').first();
       await expect.poll(async () => {
-        const className = await page.locator('.checklist-item-row').first().getAttribute('class');
+        const className = await highlightedRow.getAttribute('class');
         return className ?? '';
       }).toContain('is-active');
+      await expect
+        .poll(async () => (await highlightedRow.getAttribute('class')) ?? '')
+        .toMatch(/is-active-pulse-(odd|even)/);
+
+      // Ethan wants a visible "how long ago did this play?" tail, not a
+      // tiny flash that vanishes before he can scroll the checklist to find it.
+      await page.waitForTimeout(1600);
+      await expect
+        .poll(async () => (await highlightedRow.getAttribute('class')) ?? '')
+        .toContain('is-active');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

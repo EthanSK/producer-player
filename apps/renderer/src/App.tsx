@@ -1587,7 +1587,10 @@ const CHECKLIST_PREVIEW_DRAG_SECONDS_PER_PIXEL = 0.1;
  * existing seek-on-click affordance).
  */
 const CHECKLIST_PREVIEW_DRAG_THRESHOLD_PX = 3;
-const CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS = 1200;
+// Keep the "just played" checklist glow around long enough that Ethan can
+// scroll the modal and still spot which timestamp just passed. The CSS uses
+// this same window as a visual age cue: punchy pulse first, then a slow fade.
+const CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS = 12_000;
 const CHECKLIST_HISTORY_LIMIT = 100;
 const PLAYER_DOCK_PREVIEW_VISUAL_WIDTH = 180;
 
@@ -3357,7 +3360,12 @@ export function App(): JSX.Element {
   const [songDawOffsets, setSongDawOffsets] = useState<
     Record<string, { seconds: number; enabled: boolean }>
   >({});
-  const [activeChecklistTimestampIds, setActiveChecklistTimestampIds] = useState<string[]>([]);
+  // Recently-crossed checklist timestamps. The numeric token flips each time
+  // the playhead re-crosses an item so CSS can restart the pulse even while
+  // the previous long-tail fade is still visible.
+  const [activeChecklistTimestampHighlights, setActiveChecklistTimestampHighlights] = useState<
+    Record<string, number>
+  >({});
   const [checklistUndoStack, setChecklistUndoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
   const [checklistRedoStack, setChecklistRedoStack] = useState<Record<string, SongChecklistItem[]>[]>([]);
   const [activeChecklistDragId, setActiveChecklistDragId] = useState<string | null>(null);
@@ -4403,7 +4411,7 @@ export function App(): JSX.Element {
     if (checklistModalSongId === null) {
       checklistInputFocusedRef.current = false;
       lastFocusedChecklistTransportRef.current = null;
-      setActiveChecklistTimestampIds([]);
+      setActiveChecklistTimestampHighlights({});
       for (const timeout of checklistHighlightTimeoutsRef.current.values()) {
         clearTimeout(timeout);
       }
@@ -14548,7 +14556,7 @@ export function App(): JSX.Element {
       clearTimeout(timeout);
     }
     checklistHighlightTimeoutsRef.current.clear();
-    setActiveChecklistTimestampIds([]);
+    setActiveChecklistTimestampHighlights({});
   }
 
   function resetChecklistComposer(nextTimestamp: number | null = 0): void {
@@ -15470,9 +15478,10 @@ export function App(): JSX.Element {
   }
 
   function highlightChecklistTimestamp(itemId: string): void {
-    setActiveChecklistTimestampIds((current) =>
-      current.includes(itemId) ? current : [...current, itemId]
-    );
+    setActiveChecklistTimestampHighlights((current) => ({
+      ...current,
+      [itemId]: (current[itemId] ?? 0) + 1,
+    }));
 
     const existingTimeout = checklistHighlightTimeoutsRef.current.get(itemId);
     if (existingTimeout) {
@@ -15480,7 +15489,11 @@ export function App(): JSX.Element {
     }
 
     const timeout = setTimeout(() => {
-      setActiveChecklistTimestampIds((current) => current.filter((id) => id !== itemId));
+      setActiveChecklistTimestampHighlights((current) => {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      });
       checklistHighlightTimeoutsRef.current.delete(itemId);
     }, CHECKLIST_TIMESTAMP_HIGHLIGHT_DURATION_MS);
 
@@ -20896,6 +20909,14 @@ export function App(): JSX.Element {
                         : isGroupedHighlight
                           ? 'rgba(170, 170, 170, 0.55)'
                           : null;
+                    const timestampHighlightToken =
+                      activeChecklistTimestampHighlights[item.id] ?? null;
+                    const timestampHighlightClass =
+                      timestampHighlightToken === null
+                        ? ''
+                        : ` is-active is-active-pulse-${
+                            timestampHighlightToken % 2 === 0 ? 'even' : 'odd'
+                          }`;
 
                     // v3.24: "now-playing" marker. The checklist item's
                     // version tag is current only when its v1/v2/... tag
@@ -20949,9 +20970,8 @@ export function App(): JSX.Element {
                       }}
                       className={`checklist-item-row${
                         hasItemMetadata ? ' has-metadata' : ''
-                      }${activeChecklistTimestampIds.includes(item.id) ? ' is-active' : ''}${
-                        isGroupedHighlight ? ' is-group-highlighted' : ''
-                      }${isChecklistFindMatch ? ' is-find-match' : ''}${
+                      }${timestampHighlightClass}${isGroupedHighlight ? ' is-group-highlighted' : ''}${
+                        isChecklistFindMatch ? ' is-find-match' : ''}${
                         isChecklistFindActiveMatch ? ' is-find-active-match' : ''
                       }${
                         isCurrentVersionTag ? ' checklist-item--current-version' : ''

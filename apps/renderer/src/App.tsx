@@ -899,12 +899,11 @@ const PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS = 0.025;
 const PLAYBACK_SELECTED_MEASURED_JOB_DELAY_MS = 900;
 const PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS = 1250;
 const PLAYBACK_BACKGROUND_WARMUP_GRACE_MS = PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS;
-// Natural album playback has a stricter invariant than ordinary track clicks:
-// the silence between songs must be repeatable so Ethan can judge and note the
-// transition. During an autoplay handoff, keep selected-track stats and latest-
-// track warmup away from the audio element for a little longer than the normal
-// "new selection" settle window.
-const PLAYBACK_AUTOPLAY_HANDOFF_GRACE_MS = 2000;
+// Any audible track switch has a stricter invariant than ordinary UI work: the
+// first seconds of the new song must be click-free, even if LUFS/waveform stats
+// arrive a little later. Keep selected-track analysis and latest-track warmup
+// away from the audio element during that hot window.
+const PLAYBACK_AUDIBLE_TRACK_SWITCH_GRACE_MS = 3000;
 const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
@@ -4236,6 +4235,7 @@ export function App(): JSX.Element {
   const applyPlaybackGain = useCallback(
     (nextVolume: number, nextNormalizationGainDb: number) => {
       const audio = audioRef.current;
+      const audioContext = playbackAudioContextRef.current;
       const gainState = computePlaybackGainState({
         baseVolume: nextVolume,
         transformGainDb: nextNormalizationGainDb,
@@ -4245,12 +4245,41 @@ export function App(): JSX.Element {
 
       const transformGainNode = playbackTransformGainNodeRef.current;
       if (transformGainNode) {
-        transformGainNode.gain.value = gainState.transformGainLinear;
+        try {
+          if (audioContext) {
+            transformGainNode.gain.cancelScheduledValues(audioContext.currentTime);
+            transformGainNode.gain.setValueAtTime(
+              transformGainNode.gain.value,
+              audioContext.currentTime
+            );
+            transformGainNode.gain.linearRampToValueAtTime(
+              gainState.transformGainLinear,
+              audioContext.currentTime + PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS
+            );
+          } else {
+            transformGainNode.gain.value = gainState.transformGainLinear;
+          }
+        } catch {
+          transformGainNode.gain.value = gainState.transformGainLinear;
+        }
       }
 
       const gainNode = playbackGainNodeRef.current;
       if (gainNode) {
-        gainNode.gain.value = gainState.playerVolumeLinear;
+        try {
+          if (audioContext) {
+            gainNode.gain.cancelScheduledValues(audioContext.currentTime);
+            gainNode.gain.setValueAtTime(gainNode.gain.value, audioContext.currentTime);
+            gainNode.gain.linearRampToValueAtTime(
+              gainState.playerVolumeLinear,
+              audioContext.currentTime + PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS
+            );
+          } else {
+            gainNode.gain.value = gainState.playerVolumeLinear;
+          }
+        } catch {
+          gainNode.gain.value = gainState.playerVolumeLinear;
+        }
         if (audio) {
           audio.volume = 1;
         }
@@ -7055,6 +7084,14 @@ export function App(): JSX.Element {
   function schedulePlaybackLoadTimeout(context: string): void {
     clearPlaybackLoadTimeout();
 
+    if (playOnNextLoadRef.current || playbackIntentPlayingRef.current) {
+      reservePlaybackSettleWindow(
+        `audible-track-switch:${context}`,
+        PLAYBACK_AUDIBLE_TRACK_SWITCH_GRACE_MS,
+        { log: true }
+      );
+    }
+
     loadTimeoutRef.current = setTimeout(() => {
       const source = playbackSourceRef.current;
       const activeAudio = audioRef.current;
@@ -9726,7 +9763,10 @@ export function App(): JSX.Element {
     soloedBands,
     eqBandGains,
     eqEnabled,
-    desiredPlaybackKey,
+    // The MediaElementAudioSourceNode stays wired to the same <audio> element
+    // across source changes. Rebuilding this graph on every song switch creates
+    // exactly the kind of audible click Ethan hears, so only rebuild when the
+    // processing chain itself changes.
     playbackPreviewMode,
     pluginChain,
     loadedInstanceIds,
@@ -10205,7 +10245,7 @@ export function App(): JSX.Element {
       if (autoplay) {
         reservePlaybackSettleWindow(
           'queue-autoplay-handoff',
-          PLAYBACK_AUTOPLAY_HANDOFF_GRACE_MS,
+          PLAYBACK_AUDIBLE_TRACK_SWITCH_GRACE_MS,
           { log: true }
         );
       }

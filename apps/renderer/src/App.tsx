@@ -21856,19 +21856,6 @@ export function App(): JSX.Element {
                     >
                       <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
                     </button>
-                    <AutoplayNextButton
-                      enabled={autoplayNextEnabled}
-                      className="checklist-mini-player-button checklist-autoplay-button"
-                      testId="song-checklist-autoplay-next"
-                      onClick={handleToggleAutoplayNext}
-                      onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
-                      onKeyDown={(event) => {
-                        if (isUnmodifiedShiftTab(event)) {
-                          event.preventDefault();
-                          checklistComposerTextareaRef.current?.focus();
-                        }
-                      }}
-                    />
                     <button
                       type="button"
                       className="checklist-skip-button checklist-skip-button-small"
@@ -21963,6 +21950,23 @@ export function App(): JSX.Element {
                   >
                     ▶▶
                   </button>
+
+                  {/* v3.295 — keep Autoplay beside the next-track control like
+                      the main dock. It no longer lives between Play and +2s,
+                      so the checklist timestamp seek buttons stay symmetric. */}
+                  <AutoplayNextButton
+                    enabled={autoplayNextEnabled}
+                    className="checklist-mini-player-button checklist-autoplay-button"
+                    testId="song-checklist-autoplay-next"
+                    onClick={handleToggleAutoplayNext}
+                    onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
+                    onKeyDown={(event) => {
+                      if (isUnmodifiedShiftTab(event)) {
+                        event.preventDefault();
+                        checklistComposerTextareaRef.current?.focus();
+                      }
+                    }}
+                  />
                 </div>
               </div>
             ) : null}

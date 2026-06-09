@@ -584,9 +584,9 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('transport-checklist-button').click();
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 
-      // v3.294: mirror the main player order. Rewind-to-start sits on the
-      // outside left, while ◀◀ sits closer to the play cluster so previous and
-      // next track controls read as the queue-nav pair.
+      // v3.295: mirror the main player order. Rewind-to-start sits on the
+      // outside left, ◀◀/▶▶ flank the play cluster, and Autoplay sits to the
+      // right of next instead of splitting the ±timestamp seek buttons.
       const checklistPrimaryTransportOrder = await page.evaluate(() => {
         const buttons = Array.from(
           document.querySelectorAll('.checklist-mini-player-transport > [data-testid]')
@@ -597,6 +597,22 @@ test.describe('checklist playback workflow', () => {
         'song-checklist-mini-player-prev',
         'song-checklist-jump-previous-track',
         'song-checklist-mini-player-next',
+        'song-checklist-autoplay-next',
+      ]);
+      const checklistSeekClusterOrder = await page.evaluate(() => {
+        const buttons = Array.from(
+          document.querySelectorAll('.checklist-transport-group [data-testid]')
+        );
+        return buttons.map((b) => (b as HTMLElement).dataset.testid);
+      });
+      expect(checklistSeekClusterOrder).toEqual([
+        'song-checklist-skip-back-10',
+        'song-checklist-skip-back-5',
+        'song-checklist-skip-back-2',
+        'song-checklist-play-toggle',
+        'song-checklist-skip-forward-2',
+        'song-checklist-skip-forward-5',
+        'song-checklist-skip-forward-10',
       ]);
       await expect(page.getByTestId('song-checklist-jump-previous-track')).toHaveText('◀◀');
       await expect(
@@ -628,6 +644,7 @@ test.describe('checklist playback workflow', () => {
           jump: readRect('[data-testid="song-checklist-jump-previous-track"]'),
           skipGroup: readRect('.checklist-transport-group'),
           next: readRect('[data-testid="song-checklist-mini-player-next"]'),
+          autoplay: readRect('[data-testid="song-checklist-autoplay-next"]'),
         };
       });
       expect(Math.abs(checklistTransportGeometry.jump.width - checklistTransportGeometry.prev.width))
@@ -637,6 +654,7 @@ test.describe('checklist playback workflow', () => {
         checklistTransportGeometry.jump,
         checklistTransportGeometry.skipGroup,
         checklistTransportGeometry.next,
+        checklistTransportGeometry.autoplay,
       ]) {
         expect(Math.abs(rect.centerY - checklistTransportGeometry.prev.centerY))
           .toBeLessThanOrEqual(2);

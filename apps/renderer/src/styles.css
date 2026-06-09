@@ -5591,11 +5591,11 @@ body.is-dragging-checklist-timestamp * {
 
 .checklist-mini-player-transport {
   display: grid;
-  /* Four real transport regions: current-track rewind, previous-track jump
-     (◀◀), the dense play/skip cluster, and next. The direct jump needs its
-     own auto-sized column so ◀◀ can sit between rewind-to-start and the play
-     cluster instead of becoming a stretchy seconds-skip control. */
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  /* Five real transport regions: current-track rewind, previous-track jump
+     (◀◀), the symmetric timestamp seek cluster, next, and Autoplay. Autoplay
+     deliberately sits after next to match the main dock and avoid splitting
+     the -seconds/+seconds checklist controls around Play. */
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
 }

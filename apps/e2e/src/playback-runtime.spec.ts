@@ -2521,9 +2521,9 @@ test.describe('playback runtime deep dive', () => {
 
       await expect.poll(readScrubberValue, { timeout: 12_000 }).toBeGreaterThan(2.3);
 
-      // Ethan voice 10276: the visible symbols are deliberately flipped from
-      // v3.291. ◀◀ is the previous-track jump because it mirrors ▶▶ next;
-      // the one-arrow start icon is the rewind-to-start action.
+      // Ethan voice 10276/10282: ◀◀ remains the previous-track jump because it
+      // mirrors ▶▶ next; the one-arrow start icon remains rewind-to-start and
+      // is placed outside that queue-nav pair.
       await expect(page.getByTestId('player-jump-previous-track')).toHaveText('◀◀');
       await expect(page.getByTestId('player-prev').locator('.rewind-to-start-icon')).toBeVisible();
 

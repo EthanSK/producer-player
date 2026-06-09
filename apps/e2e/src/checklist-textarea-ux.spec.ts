@@ -311,16 +311,20 @@ test.describe('Checklist textarea UX', () => {
 
       const composer = page.getByTestId('song-checklist-input');
       const jumpPreviousTrack = page.getByTestId('song-checklist-jump-previous-track');
+      const miniPlayerPrev = page.getByTestId('song-checklist-mini-player-prev');
       const skipBackTen = page.getByTestId('song-checklist-skip-back-10');
       const skipForwardTen = page.getByTestId('song-checklist-skip-forward-10');
 
       await expect(jumpPreviousTrack).toBeVisible();
+      await expect(miniPlayerPrev).toBeVisible();
       await expect(skipBackTen).toBeVisible();
       await expect(skipForwardTen).toBeVisible();
 
       await composer.focus();
       await composer.press('Shift+Tab');
-      await expect(jumpPreviousTrack).toBeFocused();
+      // v3.294 — with rewind-to-start now visually first, the keyboard loop
+      // falls back to that same leftmost transport control after a reopen.
+      await expect(miniPlayerPrev).toBeFocused();
 
       await skipForwardTen.focus();
       await expect(skipForwardTen).toBeFocused();
@@ -337,7 +341,7 @@ test.describe('Checklist textarea UX', () => {
 
       await composer.focus();
       await composer.press('Shift+Tab');
-      await expect(jumpPreviousTrack).toBeFocused();
+      await expect(miniPlayerPrev).toBeFocused();
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

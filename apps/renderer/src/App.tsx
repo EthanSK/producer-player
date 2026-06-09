@@ -4063,6 +4063,7 @@ export function App(): JSX.Element {
   const checklistDawOffsetMinutesInputRef = useRef<HTMLInputElement | null>(null);
   const checklistDawOffsetSecondsInputRef = useRef<HTMLInputElement | null>(null);
   const checklistSkipBackTenButtonRef = useRef<HTMLButtonElement | null>(null);
+  const checklistRewindToStartButtonRef = useRef<HTMLButtonElement | null>(null);
   const checklistJumpPreviousTrackButtonRef = useRef<HTMLButtonElement | null>(null);
   const checklistSkipBackFiveButtonRef = useRef<HTMLButtonElement | null>(null);
   const lastFocusedChecklistTransportRef = useRef<HTMLButtonElement | null>(null);
@@ -19593,7 +19594,7 @@ export function App(): JSX.Element {
             </div>
 
             <div className="player-transport">
-              <HelpTooltip text={"What this is: The main playback controls — play/pause, skip forward/back, previous/next track, repeat mode, and volume.\n\nHow to use it: Press the play button or hit Space anywhere in the app to toggle playback. Use the skip buttons (±1s, ±5s, ±10s) for fine seeking. Click ◀◀ to jump to the previous track, the left-facing arrow-with-line button to rewind the current track to the start, and ▶▶ to move to the next track. Drag the scrubber to jump to any position. Adjust volume with the slider.\n\nWhy you'd want to: Quickly navigate through your songs and compare sections without leaving the app.\n\nTip: Space bar toggles play/pause globally unless you're typing in a text field."} />
+              <HelpTooltip text={"What this is: The main playback controls — play/pause, skip forward/back, previous/next track, repeat mode, and volume.\n\nHow to use it: Press the play button or hit Space anywhere in the app to toggle playback. Use the skip buttons (±1s, ±5s, ±10s) for fine seeking. Click the left-facing arrow-with-line button to rewind the current track to the start, ◀◀ to jump to the previous track, and ▶▶ to move to the next track. Drag the scrubber to jump to any position. Adjust volume with the slider.\n\nWhy you'd want to: Quickly navigate through your songs and compare sections without leaving the app.\n\nTip: Space bar toggles play/pause globally unless you're typing in a text field."} />
               <div className="transport-nav-group">
                 <div className="transport-skip-row">
                   <button
@@ -19670,17 +19671,8 @@ export function App(): JSX.Element {
                   </button>
                 </div>
                 <div className="transport-main-row">
-                  {/* Direct track-jump is main transport, not a time-skip chip. */}
-                  <button
-                    type="button"
-                    className="transport-main-button transport-jump-previous-button"
-                    data-testid="player-jump-previous-track"
-                    onClick={() => handleJumpToPreviousTrack()}
-                    title="Jump to previous track in the current queue."
-                    aria-label="Jump to previous track"
-                  >
-                    ◀◀
-                  </button>
+                  {/* v3.294 — keep rewind-to-start outside the queue nav pair so
+                      ◀◀ and ▶▶ visually mirror each other around Play. */}
                   <button
                     type="button"
                     className="transport-main-button"
@@ -19690,6 +19682,16 @@ export function App(): JSX.Element {
                     aria-label="Rewind to start of current track"
                   >
                     <RewindToStartIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="transport-main-button transport-jump-previous-button"
+                    data-testid="player-jump-previous-track"
+                    onClick={() => handleJumpToPreviousTrack()}
+                    title="Jump to previous track in the current queue."
+                    aria-label="Jump to previous track"
+                  >
+                    ◀◀
                   </button>
                   <button
                     type="button"
@@ -21545,6 +21547,10 @@ export function App(): JSX.Element {
                     event.preventDefault();
                     const rememberedTransportButton = lastFocusedChecklistTransportRef.current;
                     const fallbackTransportButton =
+                      // v3.294 — fallback follows the leftmost visible
+                      // transport control after rewind-to-start moved outside
+                      // the previous/next track pair.
+                      checklistRewindToStartButtonRef.current ??
                       checklistJumpPreviousTrackButtonRef.current ??
                       checklistSkipBackTenButtonRef.current ??
                       checklistSkipBackFiveButtonRef.current;
@@ -21700,9 +21706,33 @@ export function App(): JSX.Element {
                   <span className="muted">{formatTime(durationSeconds)}</span>
                 </div>
                 <div className="checklist-mini-player-transport">
-                  {/* Keep the checklist mini-player order aligned with the main
-                      transport: ◀◀ is previous-track navigation and the
-                      one-arrow start icon is current-track rewind-to-start. */}
+                  {/* v3.294 — match the main dock: rewind-to-start sits outside
+                      the direct previous/next track pair, making ◀◀ mirror ▶▶. */}
+                  <button
+                    ref={checklistRewindToStartButtonRef}
+                    type="button"
+                    className="checklist-mini-player-button"
+                    data-testid="song-checklist-mini-player-prev"
+                    onClick={() => handleRewindCurrentTrack()}
+                    onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
+                    onKeyDown={(event) => {
+                      if (event.key === ' ') {
+                        event.preventDefault();
+                        void handleTogglePlayback();
+                        return;
+                      }
+
+                      if (isUnmodifiedShiftTab(event)) {
+                        event.preventDefault();
+                        checklistComposerTextareaRef.current?.focus();
+                      }
+                    }}
+                    title="Rewind to the start of the current track"
+                    aria-label="Rewind to start of current track"
+                  >
+                    <RewindToStartIcon />
+                  </button>
+
                   <button
                     ref={checklistJumpPreviousTrackButtonRef}
                     type="button"
@@ -21726,30 +21756,6 @@ export function App(): JSX.Element {
                     aria-label="Jump to previous track"
                   >
                     ◀◀
-                  </button>
-
-                  <button
-                    type="button"
-                    className="checklist-mini-player-button"
-                    data-testid="song-checklist-mini-player-prev"
-                    onClick={() => handleRewindCurrentTrack()}
-                    onFocus={(event) => { lastFocusedChecklistTransportRef.current = event.currentTarget; }}
-                    onKeyDown={(event) => {
-                      if (event.key === ' ') {
-                        event.preventDefault();
-                        void handleTogglePlayback();
-                        return;
-                      }
-
-                      if (isUnmodifiedShiftTab(event)) {
-                        event.preventDefault();
-                        checklistComposerTextareaRef.current?.focus();
-                      }
-                    }}
-                    title="Rewind to the start of the current track"
-                    aria-label="Rewind to start of current track"
-                  >
-                    <RewindToStartIcon />
                   </button>
 
                   <div className="checklist-transport-group">
@@ -24173,18 +24179,8 @@ export function App(): JSX.Element {
                 >
                   −1s
                 </button>
-                {/* Keep the direct queue jump beside the main rewind button so
-                    the overlay mirrors the main dock and checklist mini-player. */}
-                <button
-                  type="button"
-                  className="analysis-overlay-transport-button analysis-overlay-jump-previous-button"
-                  data-testid="analysis-overlay-jump-previous-track"
-                  onClick={() => handleJumpToPreviousTrack()}
-                  title="Jump to previous track"
-                  aria-label="Jump to previous track"
-                >
-                  ◀◀
-                </button>
+                {/* v3.294 — the overlay uses the same left-to-right nav language
+                    as the dock: rewind-to-start, previous track, play, next. */}
                 <button
                   type="button"
                   className="analysis-overlay-transport-button"
@@ -24194,6 +24190,16 @@ export function App(): JSX.Element {
                   aria-label="Rewind to start of current track"
                 >
                   <RewindToStartIcon />
+                </button>
+                <button
+                  type="button"
+                  className="analysis-overlay-transport-button analysis-overlay-jump-previous-button"
+                  data-testid="analysis-overlay-jump-previous-track"
+                  onClick={() => handleJumpToPreviousTrack()}
+                  title="Jump to previous track"
+                  aria-label="Jump to previous track"
+                >
+                  ◀◀
                 </button>
                 <button
                   type="button"

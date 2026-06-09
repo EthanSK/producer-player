@@ -584,9 +584,9 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('transport-checklist-button').click();
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
 
-      // Mirror the main player: the direct previous-track jump is the ◀◀
-      // button and sits directly left of the one-arrow start icon, not in the
-      // ±seconds cluster.
+      // v3.294: mirror the main player order. Rewind-to-start sits on the
+      // outside left, while ◀◀ sits closer to the play cluster so previous and
+      // next track controls read as the queue-nav pair.
       const checklistPrimaryTransportOrder = await page.evaluate(() => {
         const buttons = Array.from(
           document.querySelectorAll('.checklist-mini-player-transport > [data-testid]')
@@ -594,8 +594,8 @@ test.describe('checklist playback workflow', () => {
         return buttons.map((b) => (b as HTMLElement).dataset.testid);
       });
       expect(checklistPrimaryTransportOrder).toEqual([
-        'song-checklist-jump-previous-track',
         'song-checklist-mini-player-prev',
+        'song-checklist-jump-previous-track',
         'song-checklist-mini-player-next',
       ]);
       await expect(page.getByTestId('song-checklist-jump-previous-track')).toHaveText('◀◀');
@@ -679,12 +679,11 @@ test.describe('checklist playback workflow', () => {
       await expect
         .poll(async () => Number.parseFloat((await miniScrubber.getAttribute('max')) ?? '0'))
         .toBeGreaterThan(2);
-      await miniScrubber.evaluate((element) => {
-        const scrubber = element as HTMLInputElement;
-        scrubber.value = '1.4';
-        scrubber.dispatchEvent(new Event('input', { bubbles: true }));
-        scrubber.dispatchEvent(new Event('change', { bubbles: true }));
-      });
+      // Use the real mini-player seek button instead of mutating the
+      // controlled range input by hand. React can legitimately restore the
+      // DOM value to the current app state before the synthetic range change
+      // lands, while the +2s button goes through the same handler a user uses.
+      await page.getByTestId('song-checklist-skip-forward-2').click();
       await expect
         .poll(async () => Number.parseFloat(await miniScrubber.inputValue()))
         .toBeGreaterThan(1);
@@ -1130,8 +1129,8 @@ test.describe('checklist playback workflow', () => {
         return buttons.map((b) => (b as HTMLElement).dataset.testid);
       });
       expect(mainTransportOrder).toEqual([
-        'player-jump-previous-track',
         'player-prev',
+        'player-jump-previous-track',
         'player-play-toggle',
         'player-next',
         'player-autoplay-next',
@@ -1199,8 +1198,8 @@ test.describe('checklist playback workflow', () => {
           )
       );
       expect(overlayTransportOrder).toEqual([
-        'analysis-overlay-jump-previous-track',
         'analysis-overlay-prev',
+        'analysis-overlay-jump-previous-track',
       ]);
       await expect(page.getByTestId('analysis-overlay-jump-previous-track')).toHaveText('◀◀');
       await expect(

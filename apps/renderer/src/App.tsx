@@ -121,6 +121,11 @@ import {
   type PlaybackContextState,
 } from './audioPlaybackResilience';
 import {
+  buildPlaybackSourceCacheKey,
+  extendPlaybackSettleUntil,
+  getNextPlaybackQueueVersion,
+} from './playbackHandoff';
+import {
   mergeLegacyAndSharedUserState,
   sanitizeSongChecklists,
   sanitizeSongDisplayTitles,
@@ -894,6 +899,12 @@ const PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS = 0.025;
 const PLAYBACK_SELECTED_MEASURED_JOB_DELAY_MS = 900;
 const PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS = 1250;
 const PLAYBACK_BACKGROUND_WARMUP_GRACE_MS = PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS;
+// Natural album playback has a stricter invariant than ordinary track clicks:
+// the silence between songs must be repeatable so Ethan can judge and note the
+// transition. During an autoplay handoff, keep selected-track stats and latest-
+// track warmup away from the audio element for a little longer than the normal
+// "new selection" settle window.
+const PLAYBACK_AUTOPLAY_HANDOFF_GRACE_MS = 2000;
 const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
@@ -4097,6 +4108,13 @@ export function App(): JSX.Element {
   const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedReferenceClickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sourceRequestIdRef = useRef(0);
+  // Resolved mix playback sources are cached per version fingerprint so the
+  // next natural album transition can swap sources synchronously at `ended`
+  // time instead of waiting on an IPC/file-system roundtrip.
+  const playbackSourceCacheRef = useRef<Map<string, PlaybackSourceInfo>>(new Map());
+  const playbackSourceResolveInFlightRef = useRef<Map<string, Promise<PlaybackSourceInfo>>>(
+    new Map()
+  );
   // BUG FIX (2026-04-16, a992797): overlapping reference loads could resolve out of order,
   // feeding stale analysis into level match. Added cancellation token mirroring mix-source pattern.
   // Found by GPT-5.4 shadow audit, 2026-04-16.
@@ -4326,6 +4344,32 @@ export function App(): JSX.Element {
     playbackSourceReadyRef.current = playbackSourceReady;
   }, [playbackSourceReady]);
 
+  const resolvePlaybackSourceForVersion = useCallback((version: SongVersion) => {
+    const cacheKey = buildPlaybackSourceCacheKey(version);
+    const cachedSource = playbackSourceCacheRef.current.get(cacheKey);
+    if (cachedSource) {
+      return Promise.resolve(cachedSource);
+    }
+
+    const inFlightResolve = playbackSourceResolveInFlightRef.current.get(cacheKey);
+    if (inFlightResolve) {
+      return inFlightResolve;
+    }
+
+    const resolvePromise = window.producerPlayer
+      .resolvePlaybackSource(version.filePath)
+      .then((source) => {
+        playbackSourceCacheRef.current.set(cacheKey, source);
+        return source;
+      })
+      .finally(() => {
+        playbackSourceResolveInFlightRef.current.delete(cacheKey);
+      });
+
+    playbackSourceResolveInFlightRef.current.set(cacheKey, resolvePromise);
+    return resolvePromise;
+  }, []);
+
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
@@ -4456,9 +4500,25 @@ export function App(): JSX.Element {
     // a separate background path, so this timestamp tells it not to admit
     // another measured ffmpeg preload while the audio element is doing its
     // first decode/schedule work for the newly selected track.
-    playbackBackgroundWarmupPausedUntilRef.current = Math.max(
-      playbackBackgroundWarmupPausedUntilRef.current,
-      Date.now() + PLAYBACK_BACKGROUND_WARMUP_GRACE_MS
+    //
+    // v3.296 — Autoplay handoff can reserve a longer window before this effect
+    // runs. Respect that longer deadline when choosing the USER_SELECTED job
+    // start delay, so stats do not wake up in the exact silence between songs.
+    const selectedPlaybackSettleUntilMs = reservePlaybackSettleWindow(
+      'selected-track-analysis',
+      PLAYBACK_BACKGROUND_WARMUP_GRACE_MS
+    );
+    const selectedPlaybackSettleDelayMs = Math.max(
+      0,
+      selectedPlaybackSettleUntilMs - Date.now()
+    );
+    const selectedMeasuredJobDelayMs = Math.max(
+      PLAYBACK_SELECTED_MEASURED_JOB_DELAY_MS,
+      selectedPlaybackSettleDelayMs
+    );
+    const selectedPreviewJobDelayMs = Math.max(
+      PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS,
+      selectedPlaybackSettleDelayMs
     );
 
     let cancelled = false;
@@ -4516,7 +4576,7 @@ export function App(): JSX.Element {
         priority: ANALYSIS_PRIORITY_USER_SELECTED,
         key: previewKey,
         label: previewLabel,
-        startDelayMs: PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_MS,
+        startDelayMs: selectedPreviewJobDelayMs,
       })
         .then((previewResult) => {
           cacheMasteringAnalysisValue(
@@ -4566,7 +4626,7 @@ export function App(): JSX.Element {
         priority: ANALYSIS_PRIORITY_USER_SELECTED,
         cacheKey: measuredKey,
         label: measuredLabel,
-        startDelayMs: PLAYBACK_SELECTED_MEASURED_JOB_DELAY_MS,
+        startDelayMs: selectedMeasuredJobDelayMs,
       })
         .then((measuredResult) => {
           // Always populate the measured session cache and mastering entry,
@@ -6831,6 +6891,31 @@ export function App(): JSX.Element {
     });
   }
 
+  function reservePlaybackSettleWindow(
+    reason: string,
+    durationMs: number,
+    options: { log?: boolean } = {}
+  ): number {
+    const now = Date.now();
+    const previousPausedUntilMs = playbackBackgroundWarmupPausedUntilRef.current;
+    const nextPausedUntilMs = extendPlaybackSettleUntil(
+      previousPausedUntilMs,
+      now,
+      durationMs
+    );
+    playbackBackgroundWarmupPausedUntilRef.current = nextPausedUntilMs;
+
+    if (options.log && nextPausedUntilMs > previousPausedUntilMs) {
+      logPlaybackEvent('playback-settle-window-reserved', {
+        reason,
+        durationMs,
+        pausedUntilMs: nextPausedUntilMs,
+      });
+    }
+
+    return nextPausedUntilMs;
+  }
+
   function restoreAudiblePlaybackGain(reason: string): void {
     const audio = audioRef.current;
     const gainNode = playbackGainNodeRef.current;
@@ -8523,11 +8608,14 @@ export function App(): JSX.Element {
     upsertMasteringCacheEntry,
   ]);
 
+  const cachedSelectedMixPlaybackSource = selectedPlaybackVersion
+    ? playbackSourceCacheRef.current.get(buildPlaybackSourceCacheKey(selectedPlaybackVersion)) ?? null
+    : null;
   const activeMixPlaybackSource =
     selectedPlaybackFilePath &&
     mixPlaybackSourceSelectedFilePath === selectedPlaybackFilePath
-      ? mixPlaybackSource
-      : null;
+      ? mixPlaybackSource ?? cachedSelectedMixPlaybackSource
+      : cachedSelectedMixPlaybackSource;
   const referencePlaybackKey = getReferencePlaybackKey(referenceTrack);
   const isRefMode = playbackPreviewMode === 'reference' && referenceTrack !== null;
   const selectedNormalizationPlatform = getNormalizationPlatformProfile(
@@ -9658,7 +9746,7 @@ export function App(): JSX.Element {
   }
 
   useEffect(() => {
-    if (!selectedPlaybackVersionId || !selectedPlaybackFilePath) {
+    if (!selectedPlaybackVersion || !selectedPlaybackFilePath) {
       setMixPlaybackSource(null);
       setMixPlaybackSourceSelectedFilePath(null);
       return;
@@ -9668,12 +9756,29 @@ export function App(): JSX.Element {
     const requestId = sourceRequestIdRef.current + 1;
     sourceRequestIdRef.current = requestId;
 
+    const requestedVersion = selectedPlaybackVersion;
     const requestedFilePath = selectedPlaybackFilePath;
-    setMixPlaybackSource(null);
     setMixPlaybackSourceSelectedFilePath(requestedFilePath);
 
-    window.producerPlayer
-      .resolvePlaybackSource(requestedFilePath)
+    const sourceCacheKey = buildPlaybackSourceCacheKey(requestedVersion);
+    const cachedSource = playbackSourceCacheRef.current.get(sourceCacheKey);
+    if (cachedSource) {
+      // A prefetched source is the whole autoplay handoff fast path: React can
+      // commit the next playable URL immediately instead of briefly clearing
+      // the audio element while Electron resolves the same path again.
+      setMixPlaybackSource(cachedSource);
+      logPlaybackEvent('source-cache-hit', {
+        requestId,
+        filePath: requestedFilePath,
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setMixPlaybackSource(null);
+
+    resolvePlaybackSourceForVersion(requestedVersion)
       .then((source) => {
         if (cancelled || requestId !== sourceRequestIdRef.current) {
           return;
@@ -9700,7 +9805,7 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [selectedPlaybackFilePath, selectedPlaybackVersionId]);
+  }, [resolvePlaybackSourceForVersion, selectedPlaybackFilePath, selectedPlaybackVersion]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -9951,7 +10056,7 @@ export function App(): JSX.Element {
 
       for (const version of versionsNeedingDuration) {
         try {
-          const source = await window.producerPlayer.resolvePlaybackSource(version.filePath);
+          const source = await resolvePlaybackSourceForVersion(version);
           const resolvedSeconds = await probeDurationFromUrl(source.url);
 
           if (cancelled || resolvedSeconds === null) {
@@ -9980,7 +10085,7 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [playbackQueue, resolvedAlbumDurationSecondsByVersionId]);
+  }, [playbackQueue, resolvePlaybackSourceForVersion, resolvedAlbumDurationSecondsByVersionId]);
 
   const albumDurationSeconds = useMemo(() => {
     let totalSeconds = 0;
@@ -10015,6 +10120,58 @@ export function App(): JSX.Element {
     return playbackQueue.findIndex((version) => version.id === selectedPlaybackVersionId);
   }, [playbackQueue, selectedPlaybackVersionId]);
 
+  const nextAutoplayPlaybackVersion = useMemo(
+    () =>
+      getNextPlaybackQueueVersion(playbackQueue, currentQueueIndex, {
+        wrap: repeatMode === 'all',
+      }),
+    [currentQueueIndex, playbackQueue, repeatMode]
+  );
+
+  useEffect(() => {
+    if (!autoplayNextEnabled || playbackPreviewMode !== 'mix' || !nextAutoplayPlaybackVersion) {
+      return;
+    }
+
+    const intendsPlayback =
+      isPlayingRef.current || playbackIntentPlayingRef.current || playOnNextLoadRef.current;
+    if (!intendsPlayback) {
+      return;
+    }
+
+    let cancelled = false;
+    void resolvePlaybackSourceForVersion(nextAutoplayPlaybackVersion)
+      .then((source) => {
+        if (cancelled) {
+          return;
+        }
+        logPlaybackEvent('autoplay-next-source-prefetched', {
+          filePath: nextAutoplayPlaybackVersion.filePath,
+          sourceStrategy: source.sourceStrategy,
+        });
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        const message = cause instanceof Error ? cause.message : String(cause);
+        logPlaybackEvent('autoplay-next-source-prefetch-failed', {
+          filePath: nextAutoplayPlaybackVersion.filePath,
+          message,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    autoplayNextEnabled,
+    isPlaying,
+    nextAutoplayPlaybackVersion,
+    playbackPreviewMode,
+    resolvePlaybackSourceForVersion,
+  ]);
+
   useEffect(() => {
     moveInQueueRef.current = (direction, { wrap, autoplay }) => {
       queueMoveTargetSongIdRef.current = null;
@@ -10045,6 +10202,13 @@ export function App(): JSX.Element {
       }
 
       queueMoveTargetSongIdRef.current = nextVersion.songId;
+      if (autoplay) {
+        reservePlaybackSettleWindow(
+          'queue-autoplay-handoff',
+          PLAYBACK_AUTOPLAY_HANDOFF_GRACE_MS,
+          { log: true }
+        );
+      }
       playOnNextLoadRef.current = autoplay;
       playbackIntentPlayingRef.current = autoplay;
       rememberCurrentSongPlayhead();
@@ -11098,6 +11262,19 @@ export function App(): JSX.Element {
       startedVersionIds: [...latestTrackWarmupDebugRef.current.startedVersionIds],
       completedVersionIds: [...latestTrackWarmupDebugRef.current.completedVersionIds],
     });
+    (window as unknown as {
+      __producerPlayerGetPlaybackHandoffState?: () => {
+        pausedUntilMs: number;
+        cachedSourceFilePaths: string[];
+        inFlightCacheKeys: string[];
+      };
+    }).__producerPlayerGetPlaybackHandoffState = () => ({
+      pausedUntilMs: playbackBackgroundWarmupPausedUntilRef.current,
+      cachedSourceFilePaths: Array.from(playbackSourceCacheRef.current.values()).map(
+        (source) => source.originalFilePath ?? source.filePath
+      ),
+      inFlightCacheKeys: Array.from(playbackSourceResolveInFlightRef.current.keys()),
+    });
     const readWarmupState = (entries: typeof libraryActiveVersions) =>
       entries.map(({ song, version }) => {
         const cacheKey = buildMasteringCacheKey(version);
@@ -11247,6 +11424,9 @@ export function App(): JSX.Element {
       delete (window as unknown as {
         __producerPlayerGetLatestWarmupDebugState?: unknown;
       }).__producerPlayerGetLatestWarmupDebugState;
+      delete (window as unknown as {
+        __producerPlayerGetPlaybackHandoffState?: unknown;
+      }).__producerPlayerGetPlaybackHandoffState;
       delete (window as unknown as {
         __producerPlayerGetVisibleLatestWarmupState?: unknown;
       }).__producerPlayerGetVisibleLatestWarmupState;

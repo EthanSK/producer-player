@@ -897,6 +897,78 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('natural autoplay prefetches the next source and reserves a quiet handoff window', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-autoplay-handoff-prefetch'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 1_900,
+      frequencyHz: 300,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
+      durationMs: 1_900,
+      frequencyHz: 700,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+
+      const queueTitles = await page.getByTestId('main-list-row-title').allTextContents();
+      const [firstSongTitle, secondSongTitle] = queueTitles.map((title) => title.trim());
+      expect(firstSongTitle).toBeTruthy();
+      expect(secondSongTitle).toBeTruthy();
+
+      const firstFileName = `${firstSongTitle} v1.wav`;
+      const secondFileName = `${secondSongTitle} v1.wav`;
+      const secondTrackPath = path.join(directories.fixtureDirectory, secondFileName);
+
+      await cueSongVersion(page, firstSongTitle, firstFileName);
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await page.getByTestId('song-checklist-play-toggle').click();
+
+      await expect
+        .poll(async () =>
+          page.evaluate((expectedPath) => {
+            const hook = (window as unknown as {
+              __producerPlayerGetPlaybackHandoffState?: () => {
+                cachedSourceFilePaths: string[];
+              };
+            }).__producerPlayerGetPlaybackHandoffState;
+            return hook?.().cachedSourceFilePaths.includes(expectedPath) ?? false;
+          }, secondTrackPath)
+        )
+        .toBe(true);
+
+      await expect
+        .poll(async () => (await page.getByTestId('player-track-name').textContent()) ?? '')
+        .toContain(secondFileName);
+
+      // The transition itself should leave the background queues in the longer
+      // handoff grace window, so stats/warmup cannot start in the audible gap.
+      await expect
+        .poll(async () =>
+          page.evaluate(() => {
+            const hook = (window as unknown as {
+              __producerPlayerGetPlaybackHandoffState?: () => {
+                pausedUntilMs: number;
+              };
+            }).__producerPlayerGetPlaybackHandoffState;
+            const state = hook?.();
+            return state ? state.pausedUntilMs - Date.now() : 0;
+          })
+        )
+        .toBeGreaterThan(500);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('autoplay-next toggle is shared, persisted, and stops natural track-end advance', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-autoplay-next-toggle'

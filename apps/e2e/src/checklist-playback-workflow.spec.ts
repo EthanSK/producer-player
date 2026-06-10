@@ -945,6 +945,27 @@ test.describe('checklist playback workflow', () => {
         .toBe(true);
 
       await expect
+        .poll(async () =>
+          page.evaluate((expectedPath) => {
+            const hook = (window as unknown as {
+              __producerPlayerGetPlaybackHandoffState?: () => {
+                preloadedSourceFilePath: string | null;
+                preloadedReadyState: number | null;
+                preloadedStatus: string | null;
+              };
+            }).__producerPlayerGetPlaybackHandoffState;
+            const state = hook?.();
+            return Boolean(
+              state &&
+                state.preloadedSourceFilePath === expectedPath &&
+                state.preloadedStatus === 'ready' &&
+                (state.preloadedReadyState ?? 0) >= 2
+            );
+          }, secondTrackPath)
+        )
+        .toBe(true);
+
+      await expect
         .poll(async () => (await page.getByTestId('player-track-name').textContent()) ?? '')
         .toContain(secondFileName);
 

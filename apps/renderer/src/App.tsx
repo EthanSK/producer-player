@@ -886,6 +886,7 @@ const REPEAT_MODE_LABEL: Record<RepeatMode, string> = {
 };
 
 const PLAYBACK_LOAD_TIMEOUT_MS = 4500;
+const AUTOPLAY_MEDIA_PRELOAD_READY_STATE = 2; // HTMLMediaElement.HAVE_CURRENT_DATA.
 const PLAYBACK_OUTPUT_RECOVERY_DELAY_MS = 80;
 const PLAYBACK_OUTPUT_RECOVERY_MIN_INTERVAL_MS = 750;
 const PLAYBACK_GAIN_RECOVERY_RAMP_SECONDS = 0.025;
@@ -908,6 +909,15 @@ const PLAYHEAD_END_RESET_MIN_THRESHOLD_SECONDS = 1;
 const PLAYHEAD_END_RESET_MAX_THRESHOLD_SECONDS = 5;
 const PLAYHEAD_END_RESET_DURATION_RATIO = 0.05;
 const DEFAULT_PLAYBACK_VOLUME = 1;
+
+type AutoplayMediaPreloadState = {
+  cacheKey: string;
+  filePath: string;
+  url: string;
+  readyState: number;
+  status: 'loading' | 'ready' | 'error';
+};
+
 const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
@@ -4114,6 +4124,15 @@ export function App(): JSX.Element {
   const playbackSourceResolveInFlightRef = useRef<Map<string, Promise<PlaybackSourceInfo>>>(
     new Map()
   );
+  // Natural album autoplay needs the next decoded media path ready before the
+  // current file ends. The source-cache above removes IPC/filesystem resolve
+  // latency; this hidden media element asks Chromium to read/decode enough of
+  // the next local file that the visible player can start immediately.
+  const autoplayMediaPreloadAudioRef = useRef<HTMLAudioElement | null>(null);
+  const autoplayMediaPreloadStateRef = useRef<AutoplayMediaPreloadState | null>(null);
+  const autoplayMediaPreloadCleanupRef = useRef<(() => void) | null>(null);
+  const autoplayMediaPreloadRequestIdRef = useRef(0);
+  const autoplayHandoffStartAtZeroSongIdRef = useRef<string | null>(null);
   // BUG FIX (2026-04-16, a992797): overlapping reference loads could resolve out of order,
   // feeding stale analysis into level match. Added cancellation token mirroring mix-source pattern.
   // Found by GPT-5.4 shadow audit, 2026-04-16.
@@ -4126,7 +4145,7 @@ export function App(): JSX.Element {
   const dragTargetRef = useRef<{ songId: string; position: DragOverPosition } | null>(null);
   const moveInQueueRef = useRef<(
     direction: 1 | -1,
-    options: { wrap: boolean; autoplay: boolean }
+    options: { wrap: boolean; autoplay: boolean; startAtZero?: boolean }
   ) => boolean>(() => false);
   const transportActionRef = useRef<{
     toggle: () => void;
@@ -6920,6 +6939,163 @@ export function App(): JSX.Element {
     });
   }
 
+  function clearAutoplayMediaPreload(reason: string): void {
+    autoplayMediaPreloadRequestIdRef.current += 1;
+    autoplayMediaPreloadCleanupRef.current?.();
+    autoplayMediaPreloadCleanupRef.current = null;
+    autoplayMediaPreloadStateRef.current = null;
+
+    const preloadAudio = autoplayMediaPreloadAudioRef.current;
+    if (!preloadAudio) {
+      return;
+    }
+
+    preloadAudio.pause();
+    preloadAudio.removeAttribute('src');
+    preloadAudio.load();
+    logPlaybackEvent('autoplay-next-media-preload-cleared', { reason });
+  }
+
+  function getAutoplayMediaPreloadAudio(): HTMLAudioElement {
+    if (autoplayMediaPreloadAudioRef.current) {
+      return autoplayMediaPreloadAudioRef.current;
+    }
+
+    const preloadAudio = new Audio();
+    preloadAudio.preload = 'auto';
+    preloadAudio.muted = true;
+    preloadAudio.volume = 0;
+    autoplayMediaPreloadAudioRef.current = preloadAudio;
+    return preloadAudio;
+  }
+
+  function startAutoplayMediaPreload(version: SongVersion, source: PlaybackSourceInfo): void {
+    if (!source.exists) {
+      clearAutoplayMediaPreload('missing-next-source');
+      return;
+    }
+
+    const cacheKey = buildPlaybackSourceCacheKey(version);
+    const preloadAudio = getAutoplayMediaPreloadAudio();
+    const previousPreload = autoplayMediaPreloadStateRef.current;
+    const isSamePreload =
+      previousPreload?.cacheKey === cacheKey &&
+      previousPreload.url === source.url &&
+      (preloadAudio.currentSrc === source.url || preloadAudio.src === source.url);
+
+    if (
+      isSamePreload &&
+      preloadAudio.readyState >= AUTOPLAY_MEDIA_PRELOAD_READY_STATE
+    ) {
+      autoplayMediaPreloadStateRef.current = {
+        cacheKey,
+        filePath: source.originalFilePath ?? source.filePath,
+        url: source.url,
+        readyState: preloadAudio.readyState,
+        status: 'ready',
+      };
+      return;
+    }
+
+    autoplayMediaPreloadCleanupRef.current?.();
+    autoplayMediaPreloadCleanupRef.current = null;
+
+    const requestId = autoplayMediaPreloadRequestIdRef.current + 1;
+    autoplayMediaPreloadRequestIdRef.current = requestId;
+
+    const rememberPreloadState = (status: AutoplayMediaPreloadState['status']) => {
+      if (requestId !== autoplayMediaPreloadRequestIdRef.current) {
+        return;
+      }
+
+      autoplayMediaPreloadStateRef.current = {
+        cacheKey,
+        filePath: source.originalFilePath ?? source.filePath,
+        url: source.url,
+        readyState: preloadAudio.readyState,
+        status,
+      };
+    };
+
+    const markReady = (event: string) => {
+      rememberPreloadState('ready');
+      logPlaybackEvent('autoplay-next-media-preloaded', {
+        event,
+        filePath: source.originalFilePath ?? source.filePath,
+        readyState: preloadAudio.readyState,
+        sourceStrategy: source.sourceStrategy,
+      });
+    };
+
+    const markLoading = (event: string) => {
+      rememberPreloadState(
+        preloadAudio.readyState >= AUTOPLAY_MEDIA_PRELOAD_READY_STATE ? 'ready' : 'loading'
+      );
+      logPlaybackEvent('autoplay-next-media-preload-progress', {
+        event,
+        filePath: source.originalFilePath ?? source.filePath,
+        readyState: preloadAudio.readyState,
+      });
+    };
+
+    const markError = () => {
+      rememberPreloadState('error');
+      const code = preloadAudio.error?.code ?? null;
+      logPlaybackEvent('autoplay-next-media-preload-failed', {
+        filePath: source.originalFilePath ?? source.filePath,
+        code,
+      });
+    };
+
+    const onLoadedMetadata = () => markLoading('loadedmetadata');
+    const onLoadedData = () => markReady('loadeddata');
+    const onCanPlay = () => markReady('canplay');
+    const onCanPlayThrough = () => markReady('canplaythrough');
+
+    preloadAudio.addEventListener('loadedmetadata', onLoadedMetadata);
+    preloadAudio.addEventListener('loadeddata', onLoadedData);
+    preloadAudio.addEventListener('canplay', onCanPlay);
+    preloadAudio.addEventListener('canplaythrough', onCanPlayThrough);
+    preloadAudio.addEventListener('error', markError);
+
+    autoplayMediaPreloadCleanupRef.current = () => {
+      preloadAudio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      preloadAudio.removeEventListener('loadeddata', onLoadedData);
+      preloadAudio.removeEventListener('canplay', onCanPlay);
+      preloadAudio.removeEventListener('canplaythrough', onCanPlayThrough);
+      preloadAudio.removeEventListener('error', markError);
+    };
+
+    if (!isSamePreload) {
+      preloadAudio.pause();
+      preloadAudio.removeAttribute('src');
+      preloadAudio.src = source.url;
+      preloadAudio.load();
+    }
+
+    rememberPreloadState(
+      preloadAudio.readyState >= AUTOPLAY_MEDIA_PRELOAD_READY_STATE ? 'ready' : 'loading'
+    );
+    logPlaybackEvent('autoplay-next-media-preload-started', {
+      filePath: source.originalFilePath ?? source.filePath,
+      readyState: preloadAudio.readyState,
+      sourceStrategy: source.sourceStrategy,
+    });
+  }
+
+  function isAutoplayMediaPreloaded(source: PlaybackSourceInfo): boolean {
+    const preloadState = autoplayMediaPreloadStateRef.current;
+    const preloadAudio = autoplayMediaPreloadAudioRef.current;
+
+    return Boolean(
+      preloadState &&
+        preloadAudio &&
+        preloadState.url === source.url &&
+        preloadAudio.readyState >= AUTOPLAY_MEDIA_PRELOAD_READY_STATE &&
+        (preloadAudio.currentSrc === source.url || preloadAudio.src === source.url)
+    );
+  }
+
   function reservePlaybackSettleWindow(
     reason: string,
     durationMs: number,
@@ -7128,7 +7304,10 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const audio = new Audio();
-    audio.preload = 'metadata';
+    // Album-transition timing matters more than tiny memory savings here: keep
+    // the visible element in `auto` mode so a prefetched local file can begin
+    // as soon as we swap to it.
+    audio.preload = 'auto';
     audio.volume = 1;
     audioRef.current = audio;
     let playbackAudioContextStateChangeHandler: (() => void) | null = null;
@@ -7350,6 +7529,7 @@ export function App(): JSX.Element {
       const advanced = moveInQueueRef.current(1, {
         wrap: mode === 'all',
         autoplay: true,
+        startAtZero: true,
       });
 
       if (
@@ -7468,6 +7648,8 @@ export function App(): JSX.Element {
         clearTimeout(playbackOutputRecoveryTimerRef.current);
         playbackOutputRecoveryTimerRef.current = null;
       }
+      clearAutoplayMediaPreload('player-unmount');
+      autoplayMediaPreloadAudioRef.current = null;
       playOnNextLoadRef.current = false;
       playbackIntentPlayingRef.current = false;
 
@@ -9920,11 +10102,21 @@ export function App(): JSX.Element {
     setPlaybackSourceReady(false);
     setPlaybackSourceSupport('unknown');
 
-    const rememberedPosition = playbackPositionBySongIdRef.current.get(activeSourceKey) ?? null;
-    pendingRestoreTimeRef.current =
-      rememberedPosition !== null && Number.isFinite(rememberedPosition) && rememberedPosition > 0
-        ? rememberedPosition
-        : null;
+    const shouldStartAutoplayHandoffAtZero =
+      autoplayHandoffStartAtZeroSongIdRef.current === activeSourceKey;
+    if (shouldStartAutoplayHandoffAtZero) {
+      // Natural album playback should match the exported timeline: the next
+      // song starts at its file start, never at an old remembered manual
+      // playhead from a previous audition.
+      pendingRestoreTimeRef.current = null;
+      autoplayHandoffStartAtZeroSongIdRef.current = null;
+    } else {
+      const rememberedPosition = playbackPositionBySongIdRef.current.get(activeSourceKey) ?? null;
+      pendingRestoreTimeRef.current =
+        rememberedPosition !== null && Number.isFinite(rememberedPosition) && rememberedPosition > 0
+          ? rememberedPosition
+          : null;
+    }
 
     setPlaybackSource(activeSource);
 
@@ -9953,6 +10145,8 @@ export function App(): JSX.Element {
 
     const gainNode = playbackGainNodeRef.current;
     const audioContext = playbackAudioContextRef.current;
+    const shouldUseInstantPreloadedHandoff =
+      shouldResumeAfterSwitch && isAutoplayMediaPreloaded(activeSource);
 
     /** Apply the source change, log it, and start loading. */
     const commitSourceSwitch = () => {
@@ -9983,6 +10177,35 @@ export function App(): JSX.Element {
       }
 
       audio.load();
+
+      if (shouldUseInstantPreloadedHandoff) {
+        playOnNextLoadRef.current = false;
+        playbackIntentPlayingRef.current = true;
+        logPlaybackEvent('autoplay-next-preloaded-play-requested', {
+          filePath: activeSource.filePath,
+          originalFilePath: activeSource.originalFilePath,
+        });
+
+        void resumePlaybackContextIfNeeded()
+          .then(() => audio.play())
+          .then(() => {
+            if (gainNode && audioContext) {
+              gainNode.gain.setValueAtTime(gainNode.gain.value, audioContext.currentTime);
+              gainNode.gain.linearRampToValueAtTime(
+                targetGainLinearRef.current,
+                audioContext.currentTime + 0.015
+              );
+            }
+          })
+          .catch((cause: unknown) => {
+            const message = cause instanceof Error ? cause.message : String(cause);
+            playOnNextLoadRef.current = true;
+            playbackIntentPlayingRef.current = true;
+            logPlaybackEvent('autoplay-next-preloaded-play-deferred', {
+              message,
+            });
+          });
+      }
     };
 
     // Micro-crossfade: ramp gain to 0 before switching to avoid an audible click
@@ -10170,12 +10393,14 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!autoplayNextEnabled || playbackPreviewMode !== 'mix' || !nextAutoplayPlaybackVersion) {
+      clearAutoplayMediaPreload('autoplay-inactive');
       return;
     }
 
     const intendsPlayback =
       isPlayingRef.current || playbackIntentPlayingRef.current || playOnNextLoadRef.current;
     if (!intendsPlayback) {
+      clearAutoplayMediaPreload('playback-not-intended');
       return;
     }
 
@@ -10189,6 +10414,7 @@ export function App(): JSX.Element {
           filePath: nextAutoplayPlaybackVersion.filePath,
           sourceStrategy: source.sourceStrategy,
         });
+        startAutoplayMediaPreload(nextAutoplayPlaybackVersion, source);
       })
       .catch((cause: unknown) => {
         if (cancelled) {
@@ -10213,7 +10439,7 @@ export function App(): JSX.Element {
   ]);
 
   useEffect(() => {
-    moveInQueueRef.current = (direction, { wrap, autoplay }) => {
+    moveInQueueRef.current = (direction, { wrap, autoplay, startAtZero }) => {
       queueMoveTargetSongIdRef.current = null;
 
       if (playbackQueue.length === 0) {
@@ -10248,6 +10474,9 @@ export function App(): JSX.Element {
           PLAYBACK_AUDIBLE_TRACK_SWITCH_GRACE_MS,
           { log: true }
         );
+      }
+      if (autoplay && startAtZero) {
+        autoplayHandoffStartAtZeroSongIdRef.current = nextVersion.songId;
       }
       playOnNextLoadRef.current = autoplay;
       playbackIntentPlayingRef.current = autoplay;
@@ -11307,6 +11536,9 @@ export function App(): JSX.Element {
         pausedUntilMs: number;
         cachedSourceFilePaths: string[];
         inFlightCacheKeys: string[];
+        preloadedSourceFilePath: string | null;
+        preloadedReadyState: number | null;
+        preloadedStatus: string | null;
       };
     }).__producerPlayerGetPlaybackHandoffState = () => ({
       pausedUntilMs: playbackBackgroundWarmupPausedUntilRef.current,
@@ -11314,6 +11546,9 @@ export function App(): JSX.Element {
         (source) => source.originalFilePath ?? source.filePath
       ),
       inFlightCacheKeys: Array.from(playbackSourceResolveInFlightRef.current.keys()),
+      preloadedSourceFilePath: autoplayMediaPreloadStateRef.current?.filePath ?? null,
+      preloadedReadyState: autoplayMediaPreloadStateRef.current?.readyState ?? null,
+      preloadedStatus: autoplayMediaPreloadStateRef.current?.status ?? null,
     });
     const readWarmupState = (entries: typeof libraryActiveVersions) =>
       entries.map(({ song, version }) => {

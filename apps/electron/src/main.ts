@@ -4164,11 +4164,12 @@ async function ensureTranscodedPlaybackFile(
 
 function buildDirectPlaybackSourceInfo(
   filePath: string,
-  exists: boolean
+  exists: boolean,
+  stats?: { size: number; mtimeMs: number }
 ): PlaybackSourceInfo {
   return {
     filePath,
-    url: buildPlaybackUrl(filePath),
+    url: buildPlaybackUrl(filePath, stats),
     mimeType: getPlaybackMimeType(filePath),
     extension: extname(filePath).replace('.', '').toLowerCase(),
     exists,
@@ -4182,11 +4183,18 @@ function getPlaybackMimeType(filePath: string): string {
   return PLAYBACK_MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
 }
 
-function buildPlaybackUrl(filePath: string): string {
+function buildPlaybackUrl(filePath: string, stats?: { size: number; mtimeMs: number }): string {
   const resolved = resolve(filePath);
   playbackAllowedPaths.add(resolved);
   const encodedPath = Buffer.from(resolved, 'utf8').toString('base64url');
-  return `${PLAYBACK_PROTOCOL}://${PLAYBACK_PROTOCOL_HOST}/${encodedPath}`;
+  // Fingerprint direct local files so Chromium can safely reuse the media
+  // cache after the hidden autoplay preloader has read the next track. Without
+  // this, the protocol has to say "no-store" to avoid stale masters at the same
+  // path, and every album handoff pays the file-open/decode warmup again.
+  const cacheToken = stats
+    ? `?v=${Math.trunc(stats.mtimeMs)}-${stats.size}`
+    : '';
+  return `${PLAYBACK_PROTOCOL}://${PLAYBACK_PROTOCOL_HOST}/${encodedPath}${cacheToken}`;
 }
 
 function parseByteRange(
@@ -4253,7 +4261,10 @@ async function resolvePlaybackSource(filePath: string): Promise<PlaybackSourceIn
   const extension = extname(resolvedPath).replace('.', '').toLowerCase();
 
   if (!shouldTranscodeForPlayback(extension)) {
-    return buildDirectPlaybackSourceInfo(resolvedPath, true);
+    return buildDirectPlaybackSourceInfo(resolvedPath, true, {
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+    });
   }
 
   try {
@@ -4348,7 +4359,7 @@ async function registerPlaybackProtocol(): Promise<void> {
           'Content-Length': String(byteRange.end - byteRange.start + 1),
           'Content-Range': `bytes ${byteRange.start}-${byteRange.end}/${stats.size}`,
           'Accept-Ranges': 'bytes',
-          'Cache-Control': 'no-store',
+          'Cache-Control': 'private, max-age=31536000, immutable',
         },
       });
     }
@@ -4361,7 +4372,7 @@ async function registerPlaybackProtocol(): Promise<void> {
         'Content-Type': mimeType,
         'Content-Length': String(stats.size),
         'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-store',
+        'Cache-Control': 'private, max-age=31536000, immutable',
       },
     });
   });

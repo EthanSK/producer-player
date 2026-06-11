@@ -7836,68 +7836,37 @@ button.reference-action.active {
 }
 
 
-/* v3.159 — Spectrum Analyzer Ideals trigger. Futuristic rainbow treatment,
- * intentionally placed in the Spectrum panel controls rather than the global
- * mastering header. */
+/* v3.299 — Spectrum Analyzer Ideals trigger. Ethan found the old animated
+ * rainbow pill too loud inside the mastering surface, so this now reads as a
+ * restrained secondary control while still staying discoverable beside the
+ * panel drag handle. */
 .ideals-trigger-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 74px;
+  min-width: 66px;
   height: 28px;
-  padding: 4px 12px;
-  border: 0;
+  padding: 4px 11px;
+  border: 1px solid rgba(92, 167, 255, 0.34);
   border-radius: 999px;
-  background: linear-gradient(
-    115deg,
-    #5ca7ff 0%,
-    #7c6dff 22%,
-    #b46eff 42%,
-    #ff7ab6 62%,
-    #ffd166 80%,
-    #5eead4 100%
-  );
-  background-size: 240% 240%;
-  color: #071018;
+  background: rgba(92, 167, 255, 0.07);
+  color: var(--text-secondary, #9ab6d3);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28),
-    0 0 18px rgba(180, 110, 255, 0.42), 0 8px 24px rgba(0, 0, 0, 0.24);
-  transition: transform 0.16s ease, filter 0.16s ease, box-shadow 0.16s ease;
-  animation: ideals-rainbow-shift 5.5s ease-in-out infinite;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  box-shadow: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .ideals-trigger-button:hover,
 .ideals-trigger-button:focus-visible {
-  filter: saturate(1.18) brightness(1.08);
-  transform: translateY(-1px);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.38),
-    0 0 24px rgba(255, 122, 182, 0.46), 0 10px 28px rgba(0, 0, 0, 0.3);
-}
-
-@keyframes ideals-rainbow-shift {
-  0%,
-  100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ideals-trigger-button {
-    animation: none;
-    transition: none;
-  }
-
-  .ideals-trigger-button:hover,
-  .ideals-trigger-button:focus-visible {
-    transform: none;
-  }
+  background: rgba(92, 167, 255, 0.13);
+  border-color: rgba(92, 167, 255, 0.58);
+  color: var(--text-primary, #e0eaf5);
+  box-shadow: 0 0 0 2px rgba(92, 167, 255, 0.12);
 }
 
 /* ============================================================================

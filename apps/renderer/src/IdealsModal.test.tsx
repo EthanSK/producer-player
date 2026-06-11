@@ -97,6 +97,18 @@ describe('IdealsModal', () => {
     expect(styles).toMatch(/\.ideals-stem-grid\s*\{[\s\S]*grid-template-columns:\s*1fr;/);
   });
 
+  it('keeps the Spectrum Ideals trigger subtle instead of rainbow animated', () => {
+    const triggerRule = styles.match(/\.ideals-trigger-button\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
+
+    // This button lives inside the working Spectrum panel, so it should read
+    // like a quiet secondary action rather than the old attention-grabbing
+    // rainbow CTA.
+    expect(triggerRule).toContain('background: rgba(92, 167, 255, 0.07);');
+    expect(triggerRule).toContain('border: 1px solid rgba(92, 167, 255, 0.34);');
+    expect(triggerRule).not.toContain('linear-gradient');
+    expect(styles).not.toContain('ideals-rainbow-shift');
+  });
+
   it('makes full-view stem graphs interactive and adds a stem-vs-mix A/B control', () => {
     expect(idealsSource).toContain('onPointerMove={updateActiveFrequencyFromPointer}');
     expect(idealsSource).toContain('data-testid={`ideals-curve-readout-${guide.id}');

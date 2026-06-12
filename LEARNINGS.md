@@ -24,6 +24,26 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-06-12T11:43:34Z
+**Trigger:** voice 7426 (ship) / voice 7421 (diagnosis)
+**Symptom:** Residual crackle when rapidly switching tracks (A<->B<->A) during playback or on long/large files, at v3.299 — after prior multi-threading fixes (worker analysis v3.240, 15ms crossfade, deferred kickoff) the LAST main-thread starvation source remained
+**Root cause:** extractTransferableChannels (trackAnalysisClient.ts) did a full copy.set(source) memcpy of EVERY audio channel (~170MB for a 4-min stereo 44.1k track) on the RENDERER MAIN THREAD before transferring buffers to the analysis worker. That synchronous memcpy starved WebAudio's high-res render scheduling during the deferred analysis window -> crackle.
+**Fix:** Zero-copy worker handoff: transfer getChannelData()'s underlying ArrayBuffer DIRECTLY (in the postMessage transfer list) instead of copy.set-ing into a fresh Float32Array. Detach-safety verified: the AudioBuffer + its AudioContext are discarded/close()'d immediately after analyzeAudioBufferInWorker returns (audioAnalysis.ts analyzeTrackFromUrl, sole caller; buffer is a function-local never read post-call, context.close in finally ~L226-231) so detaching the channel buffers is harmless. Correctness guard: zero-copy only when the channel view exactly spans its own ArrayBuffer (byteOffset 0, full length — always true in Chromium WebAudio); else per-channel copy fallback. Eliminates the ~170MB main-thread memcpy. Marks the (c) residual item from the voice-7421 diagnosis as RESOLVED.
+**Commit:** PENDING-PR
+**Guard:** trackAnalysisClient.test.ts: new 'zero-copy transfer safety (v3.300)' describe block — (1) source-inspection test asserting analyzeTrackFromUrl never reads the AudioBuffer after the worker call (fails if someone adds a post-analysis buffer.getChannelData/numberOfChannels/return buffer), (2) zero-copy correctness test. All 500 renderer tests + typecheck + full build green.
+---
+
+---
+**Date:** 2026-06-11T22:03:43Z
+**Trigger:** voice 7421
+**Symptom:** Crackle/glitch in audio when switching tracks during playback (voice 7421, still reported at v3.299 — Ethan hypothesis: LUFS/stats loading competes with audio thread)
+**Root cause:** Original root cause (his hypothesis) was CORRECT and already largely fixed across v3.225->v3.237->v3.240->v3.263->v3.296: renderer-main-thread CPU (per-sample analysis loops + decode) starved the audio engine's high-res scheduling during play-start. Already-fixed: (1) measured LUFS/true-peak/bit-depth run in MAIN PROCESS via ffmpeg IPC (window.producerPlayer.analyzeAudioFile) — fully off renderer thread; (2) per-sample JS loops (mono mixdown, peak/RMS, tonal balance, frame loudness, waveform peaks) moved into a dedicated Web Worker in v3.240 (trackAnalysisWorker.ts); (3) splice-click handled by 15ms gain.linearRampToValueAtTime crossfade around audio.src swap (App.tsx commitSourceSwitch ~L10152-10225); (4) analysis kickoff deferred 1250ms (preview) / 900ms (measured) past play-start via startDelayMs (App.tsx L900-902). RESIDUAL main-thread costs that survive on the renderer during the deferred window (can still crackle on rapid A<->B<->A switching or long/large files): (a) fetch(url)+response.arrayBuffer() reads whole file into renderer memory (audioAnalysis.ts L195-200); (b) AudioContext.decodeAudioData promise-resolution + large AudioBuffer alloc touches main (audioAnalysis.ts L207); (c) extractTransferableChannels does a full copy.set(source) memcpy of EVERY channel (~170MB for a 4-min stereo 44.1k track) on the renderer main thread before transferring to the worker (trackAnalysisClient.ts L152-167).
+**Fix:** DIAGNOSIS ONLY this pass (no code shipped). Multi-threading is ALREADY the answer and is ALREADY implemented — Ethan hypothesis confirmed but the work is mostly done. Recommended residual fix (contained, low-risk): in trackAnalysisClient.ts extractTransferableChannels, transfer getChannelData()'s underlying ArrayBuffer ZERO-COPY instead of copy.set — the defensive copy exists only to avoid detaching the AudioBuffer, but the AudioBuffer + its AudioContext are discarded/closed immediately after the worker call (audioAnalysis.ts finally L229-231 context.close), so detach-safety is moot. Eliminates the ~170MB main-thread memcpy. Bigger optional win: move fetch+decode off renderer entirely (decode WAV/AIFF PCM in the main process or an OfflineAudioContext path), or skip the preview WebAudio decode for scalar readouts (LUFS already comes from ffmpeg IPC; preview decode only feeds waveform peaks + tonal balance + realtime graph).
+**Commit:** n/a-diagnosis-only
+**Guard:** Existing: trackAnalysisClient.test.ts (worker fallback), audioAnalysisQueue.test.ts. A zero-copy-transfer change must keep a regression test asserting the AudioBuffer is not read after analyzeAudioBufferInWorker returns.
+---
+
+---
 **Date:** 2026-05-30T23:56:19Z
 **Trigger:** voice 7230
 **Symptom:** Bit-depth segment still missing in Inspector after v3.274 LUFS+cache-mirror fixes — Ethan voice 7230 reported it still wasn't showing

@@ -144,21 +144,62 @@ function bootWorker(): Worker | null {
 }
 
 /**
- * Extract per-channel Float32Array data from an AudioBuffer in a way that
- * does NOT copy the underlying PCM data twice. Each returned Float32Array
- * is backed by its own ArrayBuffer (a copy of the AudioBuffer's channel
- * data) so the buffers can be safely transferred to the worker.
+ * Extract per-channel Float32Array data from an AudioBuffer for transfer to
+ * the analysis worker.
+ *
+ * v3.300 — ZERO-COPY track-switch crackle fix (voice 7421 diagnosis / voice
+ * 7426 ship). This used to do a full `copy.set(source)` memcpy of EVERY
+ * channel — ~170MB for a 4-min stereo 44.1k track — on the RENDERER MAIN
+ * THREAD before posting to the worker. That synchronous memcpy is the last
+ * remaining main-thread cost in the deferred analysis window, and it's what
+ * still starved WebAudio's high-resolution render scheduling on rapid
+ * A<->B<->A track switching and on long/large files → the residual crackle.
+ *
+ * The fix: transfer `getChannelData()`'s UNDERLYING ArrayBuffer directly
+ * (zero-copy) instead of copying into a fresh buffer first.
+ *
+ * Why dropping the defensive copy is SAFE here (detach-safety invariant):
+ *   - The ONLY reason to copy was to avoid DETACHING the AudioBuffer's
+ *     backing store when we transfer it to the worker (a transferred
+ *     ArrayBuffer becomes unusable on this side).
+ *   - But the AudioBuffer + its AudioContext are discarded and
+ *     `context.close()`'d IMMEDIATELY after `analyzeAudioBufferInWorker`
+ *     returns — see `audioAnalysis.ts` `analyzeTrackFromUrl`: `buffer` is a
+ *     function-local that is never read again after the worker call, and the
+ *     `finally` block closes the context (~L226-231). Nothing downstream
+ *     holds a reference to the AudioBuffer, so detaching it is harmless.
+ *   - Verified 2026-06-12: the sole production caller is
+ *     `analyzeTrackFromUrl`; it does not return, store, or re-read `buffer`
+ *     post-analysis. The regression test
+ *     `does-not-read-audiobuffer-after-analysis` guards this invariant.
+ *
+ * Correctness guard (the one case where we still copy): zero-copy only works
+ * when `getChannelData()` returns a Float32Array that EXACTLY spans its own
+ * ArrayBuffer (byteOffset 0, full length). Chromium/WebAudio always gives
+ * each channel its own exactly-sized buffer, but if a runtime ever returned
+ * a sub-view into a shared/larger buffer, `new Float32Array(buf)` in the
+ * worker would read the wrong region. In that (never-observed) case we fall
+ * back to a per-channel copy so the analysis numbers stay correct.
  */
 function extractTransferableChannels(buffer: AudioBuffer): Float32Array[] {
   const channelCount = buffer.numberOfChannels;
   const channels: Float32Array[] = new Array(channelCount);
   for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
-    // `getChannelData` returns a reference to the AudioBuffer's internal
-    // storage. We must copy it into a fresh Float32Array so transferring
-    // its underlying buffer to the worker doesn't detach the AudioBuffer's
-    // internal state (which could break any code that still holds a
-    // reference to the buffer post-analysis).
     const source = buffer.getChannelData(channelIndex);
+    // Fast path (the only one that ever fires in production): the channel
+    // view owns its whole ArrayBuffer, so we can transfer it as-is with no
+    // memcpy. The AudioBuffer is thrown away right after (see invariant
+    // above), so detaching `source.buffer` costs us nothing.
+    const spansWholeBuffer =
+      source.byteOffset === 0 &&
+      source.byteLength === source.buffer.byteLength;
+    if (spansWholeBuffer) {
+      channels[channelIndex] = source;
+      continue;
+    }
+    // Defensive fallback for an exotic runtime where getChannelData returns a
+    // sub-view: copy just this channel so the transferred buffer maps 1:1 to
+    // the channel data the worker reconstructs via `new Float32Array(buf)`.
     const copy = new Float32Array(source.length);
     copy.set(source);
     channels[channelIndex] = copy;

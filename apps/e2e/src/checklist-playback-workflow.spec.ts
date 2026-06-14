@@ -935,21 +935,28 @@ test.describe('checklist playback workflow', () => {
       durationMs: 1_900,
       frequencyHz: 700,
     });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track C v1.wav'), {
+      durationMs: 1_900,
+      frequencyHz: 1_000,
+    });
 
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
 
     try {
       await linkFixtureFolder(page, directories.fixtureDirectory);
-      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(3);
 
       const queueTitles = await page.getByTestId('main-list-row-title').allTextContents();
-      const [firstSongTitle, secondSongTitle] = queueTitles.map((title) => title.trim());
+      const [firstSongTitle, secondSongTitle, thirdSongTitle] = queueTitles.map((title) => title.trim());
       expect(firstSongTitle).toBeTruthy();
       expect(secondSongTitle).toBeTruthy();
+      expect(thirdSongTitle).toBeTruthy();
 
       const firstFileName = `${firstSongTitle} v1.wav`;
       const secondFileName = `${secondSongTitle} v1.wav`;
+      const thirdFileName = `${thirdSongTitle} v1.wav`;
       const secondTrackPath = path.join(directories.fixtureDirectory, secondFileName);
+      const thirdTrackPath = path.join(directories.fixtureDirectory, thirdFileName);
 
       await cueSongVersion(page, firstSongTitle, firstFileName);
 
@@ -1010,6 +1017,31 @@ test.describe('checklist playback workflow', () => {
           })
         )
         .toBeGreaterThan(500);
+
+      // Regression guard for the residual handoff glitch: after the app lands
+      // on Track B, the sidecar preloader waits briefly before loading Track C
+      // so it does not compete with the visible player's own decode. It should
+      // still finish soon enough for natural autoplay on short songs.
+      await expect
+        .poll(async () =>
+          page.evaluate((expectedPath) => {
+            const hook = (window as unknown as {
+              __producerPlayerGetPlaybackHandoffState?: () => {
+                preloadedSourceFilePath: string | null;
+                preloadedReadyState: number | null;
+                preloadedStatus: string | null;
+              };
+            }).__producerPlayerGetPlaybackHandoffState;
+            const state = hook?.();
+            return Boolean(
+              state &&
+                state.preloadedSourceFilePath === expectedPath &&
+                state.preloadedStatus === 'ready' &&
+                (state.preloadedReadyState ?? 0) >= 2
+            );
+          }, thirdTrackPath)
+        )
+        .toBe(true);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

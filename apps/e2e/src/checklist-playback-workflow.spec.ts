@@ -218,11 +218,11 @@ test.describe('checklist playback workflow', () => {
       await linkFixtureFolder(page, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        'Total checklist items remaining: 0 out of 0'
+        "Total checklist items remaining: 0 out of 0 · Won't Fix: 0 · Notes: 0"
       );
       await expect(page.getByTestId('main-list-checklist-total')).toHaveAttribute(
         'aria-label',
-        '0 of 0 checklist items remaining across all tracks'
+        "0 of 0 checklist items remaining across all tracks; 0 Won't Fix; 0 notes"
       );
 
       await page
@@ -233,9 +233,12 @@ test.describe('checklist playback workflow', () => {
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
       await page.getByTestId('song-checklist-input').fill('Track A remaining item');
       await page.getByTestId('song-checklist-add').click();
+      await expect(page.getByTestId('song-checklist-header-counts')).toHaveText(
+        "0/1 todos · 1 left · 0 notes · 0 Won't Fix"
+      );
       await page.getByTestId('song-checklist-done-header').click();
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        'Total checklist items remaining: 1 out of 1'
+        "Total checklist items remaining: 1 out of 1 · Won't Fix: 0 · Notes: 0"
       );
 
       await page
@@ -248,6 +251,10 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('song-checklist-add').click();
       await page.getByTestId('song-checklist-input').fill('Track B resolved item');
       await page.getByTestId('song-checklist-add').click();
+      await page.getByTestId('song-checklist-input').fill("Track B won't fix item");
+      await page.getByTestId('song-checklist-add').click();
+      await page.getByTestId('song-checklist-input').fill('Track B note item');
+      await page.getByTestId('song-checklist-add').click();
 
       // Completed items should drop out of the footer total just like they drop
       // out of each per-track "remaining/total" checklist badge.
@@ -256,14 +263,33 @@ test.describe('checklist playback workflow', () => {
         .filter({ hasText: 'Track B resolved item' })
         .locator('input[type="checkbox"]')
         .check();
+
+      // The footer also reports deliberately ignored todos and permanent
+      // notes. Drive those states through the same hover-revealed row controls
+      // Ethan uses in the real checklist rather than seeding localStorage.
+      const wontFixRow = page
+        .getByTestId('song-checklist-item-row')
+        .filter({ hasText: "Track B won't fix item" });
+      await wontFixRow.hover();
+      await wontFixRow.getByTestId('song-checklist-item-wontfix-toggle').click();
+
+      const noteRow = page
+        .getByTestId('song-checklist-item-row')
+        .filter({ hasText: 'Track B note item' });
+      await noteRow.hover();
+      await noteRow.getByTestId('song-checklist-item-mode-toggle').click();
+
+      await expect(page.getByTestId('song-checklist-header-counts')).toHaveText(
+        "2/3 todos · 1 left · 1 note · 1 Won't Fix"
+      );
       await page.getByTestId('song-checklist-done-header').click();
 
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        'Total checklist items remaining: 2 out of 3'
+        "Total checklist items remaining: 2 out of 4 · Won't Fix: 1 · Notes: 1"
       );
       await expect(page.getByTestId('main-list-checklist-total')).toHaveAttribute(
         'aria-label',
-        '2 of 3 checklist items remaining across all tracks'
+        "2 of 4 checklist items remaining across all tracks; 1 Won't Fix; 1 note"
       );
     } finally {
       await electronApp.close();

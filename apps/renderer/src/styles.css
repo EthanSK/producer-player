@@ -2759,8 +2759,10 @@ body.floating-switcher-panel-dragging * {
   padding: 10px 8px 2px 42px;
   min-height: 34px;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: flex-start;
+  gap: 4px 10px;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
@@ -5270,6 +5272,11 @@ body.is-dragging-checklist-timestamp * {
 /* Note count chip inside the checklist header counts line. */
 .checklist-note-count {
   color: #ffc457;
+  font-weight: 600;
+}
+
+.checklist-wontfix-count {
+  color: #8fa3bf;
   font-weight: 600;
 }
 

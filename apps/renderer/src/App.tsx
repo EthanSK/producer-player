@@ -1646,6 +1646,19 @@ function countRemainingSongChecklistTodos(items: readonly SongChecklistItem[]): 
   return items.filter(isSongChecklistTodoRemaining).length;
 }
 
+function countSongChecklistNotes(items: readonly SongChecklistItem[]): number {
+  // Notes are reference/context rows. Keeping this as a named helper makes the
+  // footer/header math explicit instead of re-deriving "items minus todos" in
+  // several places and accidentally counting future non-todo modes as notes.
+  return items.filter((item) => item.isNote === true).length;
+}
+
+function countSongChecklistWontFixes(items: readonly SongChecklistItem[]): number {
+  // Won't Fix is a resolved todo state, not a note. Count only actionable rows
+  // so a historically-migrated note can never inflate the Won't Fix summary.
+  return items.filter((item) => isSongChecklistTodo(item) && item.wontFix === true).length;
+}
+
 function isTextEntryElement(element: Element | null): boolean {
   if (!(element instanceof HTMLElement)) {
     return false;
@@ -7898,6 +7911,24 @@ export function App(): JSX.Element {
     () =>
       albumSongs.reduce(
         (total, song) => total + countSongChecklistTodos(songChecklists[song.id] ?? []),
+        0
+      ),
+    [albumSongs, songChecklists]
+  );
+
+  const totalSongChecklistWontFixCount = useMemo(
+    () =>
+      albumSongs.reduce(
+        (total, song) => total + countSongChecklistWontFixes(songChecklists[song.id] ?? []),
+        0
+      ),
+    [albumSongs, songChecklists]
+  );
+
+  const totalSongChecklistNoteCount = useMemo(
+    () =>
+      albumSongs.reduce(
+        (total, song) => total + countSongChecklistNotes(songChecklists[song.id] ?? []),
         0
       ),
     [albumSongs, songChecklists]
@@ -17296,10 +17327,12 @@ export function App(): JSX.Element {
   function handleChecklistDawOffsetEnabledChange(nextEnabled: boolean): void {
     writeChecklistDawOffset(checklistDawOffsetSeconds, nextEnabled);
   }
-  // v3.183.0 — Notes don't contribute to the todo count; the header shows
-  // both numbers side-by-side as "X / Y todos · N notes".
+  // Header count chips: todos remain the primary progress metric, but Ethan
+  // also wants "reference" rows surfaced here so he can see, at a glance,
+  // how much of the track's context is notes vs deliberate Won't Fix calls.
   const checklistModalTodoItems = checklistModalItems.filter((item) => item.isNote !== true);
-  const checklistNoteCount = checklistModalItems.length - checklistModalTodoItems.length;
+  const checklistNoteCount = countSongChecklistNotes(checklistModalItems);
+  const checklistWontFixCount = countSongChecklistWontFixes(checklistModalItems);
   // v3.244.0 — Won't Fix counts as done. Both `completed` and `wontFix`
   // resolve a todo for progress math.
   const checklistCompletedCount = checklistModalTodoItems.filter(
@@ -19957,10 +19990,24 @@ export function App(): JSX.Element {
             <li
               className="main-list-checklist-total"
               data-testid="main-list-checklist-total"
-              aria-label={`${totalRemainingSongChecklistTodoCount} of ${totalSongChecklistTodoCount} checklist item${totalSongChecklistTodoCount === 1 ? '' : 's'} remaining across all tracks`}
+              aria-label={`${totalRemainingSongChecklistTodoCount} of ${totalSongChecklistTodoCount} checklist item${totalSongChecklistTodoCount === 1 ? '' : 's'} remaining across all tracks; ${totalSongChecklistWontFixCount} Won't Fix; ${totalSongChecklistNoteCount} note${totalSongChecklistNoteCount === 1 ? '' : 's'}`}
             >
-              Total checklist items remaining: {totalRemainingSongChecklistTodoCount} out of{' '}
-              {totalSongChecklistTodoCount}
+              {/* Footer summary now surfaces the resolved-without-action and
+                  reference-note totals beside the existing todo progress. That
+                  keeps Ethan's scan point at the bottom of the tracklist
+                  complete without changing the per-row checklist badges. */}
+              <span>
+                Total checklist items remaining: {totalRemainingSongChecklistTodoCount} out of{' '}
+                {totalSongChecklistTodoCount}
+              </span>
+              {' · '}
+              <span className="main-list-checklist-total-segment" data-testid="main-list-wontfix-total">
+                Won&apos;t Fix: {totalSongChecklistWontFixCount}
+              </span>
+              {' · '}
+              <span className="main-list-checklist-total-segment" data-testid="main-list-note-total">
+                Notes: {totalSongChecklistNoteCount}
+              </span>
             </li>
           ) : null}
         </ul>
@@ -20646,14 +20693,14 @@ export function App(): JSX.Element {
                 <h2>{getSongDisplayTitle(checklistModalSong, songDisplayTitles)} Checklist <HelpTooltip text={"What this is: A per-song to-do list for tracking mixing and mastering tasks — notes, fixes, revisions, and auto-captured findings from the Mastering Checklist.\n\nHow to use it: Type a note in the input field and press Enter to add it. Click the checkbox to mark items done. Click the × to delete an item. You can optionally capture a playback timestamp so each note links to a specific moment in the song (the mini-player below the list lets you scrub, skip, and play without leaving this view).\n\nFrom Mastering: Rows in the full-screen Mastering view have a \"+ Add to checklist\" button. Clicking it inserts the finding here tagged with a FROM MASTERING eyebrow. Those items are timeless — they apply to the whole master, not a single moment — so they render without a timestamp badge.\n\nListening devices: Mark new items with the device you were listening on (speakers, headphones, car, phone…) so you can filter what mattered on which system. Add devices in the strip above the list and click a chip to use that device for subsequent items.\n\nVersions: Items are tagged with the mix version number that was playing when you added them, so a note like \"kick too loud in chorus\" stays attached to the v3 bounce even after you import v4.\n\nDAW offset: Turn on the DAW offset control in the header to shift displayed timestamps by a fixed minutes:seconds amount so they line up with your DAW's arrangement timeline. Clicks still seek to the correct audio position.\n\nReordering: Drag-and-drop rows to reorder them, or use Alt+Arrow on a selected row. Storage keeps newest-first, render order is chronological so new items appear at the bottom.\n\nTip: Use Cmd/Ctrl+Z to undo and Cmd/Ctrl+Shift+Z (or Cmd/Ctrl+Y) to redo checklist changes. Shift+Tab toggles between the input and transport controls."} /></h2>
                 <p className="muted" data-testid="song-checklist-header-counts">
                   {checklistCompletedCount}/{checklistModalTodoItems.length} todos · {checklistModalTodoItems.length - checklistCompletedCount} left
-                  {checklistNoteCount > 0 ? (
-                    <>
-                      {' · '}
-                      <span className="checklist-note-count" data-testid="song-checklist-note-count">
-                        {checklistNoteCount} note{checklistNoteCount === 1 ? '' : 's'}
-                      </span>
-                    </>
-                  ) : null}
+                  {' · '}
+                  <span className="checklist-note-count" data-testid="song-checklist-note-count">
+                    {checklistNoteCount} note{checklistNoteCount === 1 ? '' : 's'}
+                  </span>
+                  {' · '}
+                  <span className="checklist-wontfix-count" data-testid="song-checklist-wontfix-count">
+                    {checklistWontFixCount} Won&apos;t Fix
+                  </span>
                 </p>
               </div>
               <div

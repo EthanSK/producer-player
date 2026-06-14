@@ -91,6 +91,10 @@ import type {
   AutoUpdateInstallVersionResult,
   AutoUpdateRecheckResult,
   AutoUpdateState,
+  CustomScriptConfig,
+  CustomScriptRunContext,
+  CustomScriptRunRequest,
+  CustomScriptRunResult,
   MasteringAnalysisCachePayload,
   MasteringAnalysisCacheState,
   MicrophonePermissionStatus,
@@ -234,6 +238,8 @@ const TEST_REFERENCE_IMPORT_PATH =
   process.env.PRODUCER_PLAYER_E2E_REFERENCE_IMPORT_PATH ?? null;
 const TEST_PROJECT_FILE_PICK_PATH =
   process.env.PRODUCER_PLAYER_E2E_PROJECT_FILE_PICK_PATH ?? null;
+const TEST_CUSTOM_SCRIPT_PICK_PATH =
+  process.env.PRODUCER_PLAYER_E2E_CUSTOM_SCRIPT_PICK_PATH ?? null;
 const TEST_DOWNGRADE_RELEASES_JSON =
   process.env.PRODUCER_PLAYER_E2E_DOWNGRADE_RELEASES_JSON ?? null;
 const TEST_DOWNGRADE_RECORD_PATH =
@@ -256,6 +262,8 @@ const AUTO_UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 // then if it fails we schedule attempt 2 after the first delay, etc.).
 const AUTO_UPDATE_RETRY_DELAYS_MS = [10_000, 30_000, 60_000] as const;
 const AGENT_FEATURES_DISABLED_MESSAGE = 'Agent features are disabled by feature flag.';
+const CUSTOM_SCRIPT_TIMEOUT_MS = 5 * 60 * 1000;
+const CUSTOM_SCRIPT_OUTPUT_MAX_CHARS = 120_000;
 
 /**
  * Subdirectory inside the OS temp dir used to stage agent-chat file attachments.
@@ -1226,6 +1234,12 @@ function requireMcpMainWindow(): BrowserWindow {
     throw new Error('Producer Player has no active window to control.');
   }
   return mainWindow;
+}
+
+function publishUserStateChanged(state: ProducerPlayerUserState): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(IPC_CHANNELS.USER_STATE_CHANGED, state);
+  }
 }
 
 async function runMcpAutoUpdateCheck(): Promise<{ status: 'ok'; state: AutoUpdateState } | { status: 'error'; message: string }> {
@@ -3821,6 +3835,270 @@ async function pickProjectFile(initialPath?: string | null): Promise<ProjectFile
   };
 }
 
+async function pickCustomScript(initialPath?: string | null): Promise<ProjectFileSelection | null> {
+  const testSelectionPath = TEST_CUSTOM_SCRIPT_PICK_PATH;
+  let selectedPath: string | undefined;
+
+  if (testSelectionPath) {
+    selectedPath = resolve(testSelectionPath);
+  } else {
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Choose custom bash script',
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Scripts',
+          extensions: ['sh', 'bash', 'command', 'zsh'],
+        },
+        {
+          name: 'All files',
+          extensions: ['*'],
+        },
+      ],
+    };
+
+    const defaultPath = resolveDialogDefaultPath(initialPath);
+    if (defaultPath) dialogOptions.defaultPath = defaultPath;
+
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    selectedPath = result.filePaths[0];
+  }
+
+  if (!selectedPath) {
+    return null;
+  }
+
+  rememberDialogDirectory(selectedPath);
+
+  return {
+    filePath: selectedPath,
+    fileName: basename(selectedPath),
+  };
+}
+
+function normalizeCustomScriptConfig(value: unknown): CustomScriptConfig | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const filePath = typeof record.filePath === 'string' ? record.filePath.trim() : '';
+  if (filePath.length === 0) return null;
+  const name = typeof record.name === 'string' && record.name.trim().length > 0
+    ? record.name.trim()
+    : 'Custom Script';
+  return { name, filePath: resolve(filePath) };
+}
+
+function normalizeCustomScriptContext(value: unknown): CustomScriptRunContext {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const readNullableString = (key: string): string | null => {
+    const next = record[key];
+    return typeof next === 'string' && next.trim().length > 0 ? next : null;
+  };
+  return {
+    selectedFolderId: readNullableString('selectedFolderId'),
+    selectedFolderPath: readNullableString('selectedFolderPath'),
+    selectedFolderName: readNullableString('selectedFolderName'),
+    selectedSongId: readNullableString('selectedSongId'),
+    selectedSongTitle: readNullableString('selectedSongTitle'),
+    selectedPlaybackVersionId: readNullableString('selectedPlaybackVersionId'),
+    selectedPlaybackFilePath: readNullableString('selectedPlaybackFilePath'),
+    selectedPlaybackFileName: readNullableString('selectedPlaybackFileName'),
+  };
+}
+
+function appendLimitedOutput(
+  current: string,
+  chunk: Buffer,
+): { text: string; truncated: boolean } {
+  const incoming = chunk.toString('utf8');
+  const combined = `${current}${incoming}`;
+  if (combined.length <= CUSTOM_SCRIPT_OUTPUT_MAX_CHARS) {
+    return { text: combined, truncated: false };
+  }
+  return {
+    text: combined.slice(0, CUSTOM_SCRIPT_OUTPUT_MAX_CHARS),
+    truncated: true,
+  };
+}
+
+function buildCustomScriptEnvironment(
+  scriptPath: string,
+  context: CustomScriptRunContext,
+): NodeJS.ProcessEnv {
+  const pathEntries = [
+    process.env.PATH,
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ]
+    .flatMap((entry) => (entry ? entry.split(':') : []))
+    .filter((entry, index, all) => entry.length > 0 && all.indexOf(entry) === index);
+
+  return {
+    ...process.env,
+    PATH: pathEntries.join(':'),
+    PRODUCER_PLAYER_CUSTOM_SCRIPT_PATH: scriptPath,
+    PRODUCER_PLAYER_APP_VERSION: APP_VERSION_INFO.displayVersion,
+    PRODUCER_PLAYER_APP_SEMVER: APP_VERSION_INFO.semanticVersion,
+    PRODUCER_PLAYER_SELECTED_FOLDER_ID: context.selectedFolderId ?? '',
+    PRODUCER_PLAYER_SELECTED_FOLDER_PATH: context.selectedFolderPath ?? '',
+    PRODUCER_PLAYER_SELECTED_FOLDER_NAME: context.selectedFolderName ?? '',
+    PRODUCER_PLAYER_SELECTED_SONG_ID: context.selectedSongId ?? '',
+    PRODUCER_PLAYER_SELECTED_SONG_TITLE: context.selectedSongTitle ?? '',
+    PRODUCER_PLAYER_SELECTED_PLAYBACK_VERSION_ID: context.selectedPlaybackVersionId ?? '',
+    PRODUCER_PLAYER_SELECTED_PLAYBACK_FILE_PATH: context.selectedPlaybackFilePath ?? '',
+    PRODUCER_PLAYER_SELECTED_PLAYBACK_FILE_NAME: context.selectedPlaybackFileName ?? '',
+  };
+}
+
+async function runCustomScript(
+  request: CustomScriptRunRequest,
+): Promise<CustomScriptRunResult> {
+  const startedAtDate = new Date();
+  const startedAt = startedAtDate.toISOString();
+  const fail = (message: string): CustomScriptRunResult => ({
+    ok: false,
+    exitCode: null,
+    signal: null,
+    stdout: '',
+    stderr: '',
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    error: message,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedAtDate.getTime(),
+  });
+
+  const config = normalizeCustomScriptConfig(request?.config);
+  if (!config) {
+    return fail('No custom script is configured.');
+  }
+
+  const scriptPath = resolve(config.filePath);
+  let scriptStats;
+  try {
+    scriptStats = statSync(scriptPath);
+  } catch {
+    return fail(`Script not found: ${scriptPath}`);
+  }
+  if (!scriptStats.isFile()) {
+    return fail(`Script path is not a file: ${scriptPath}`);
+  }
+
+  const context = normalizeCustomScriptContext(request?.context);
+  const cwd =
+    context.selectedFolderPath && existsSync(context.selectedFolderPath)
+      ? context.selectedFolderPath
+      : dirname(scriptPath);
+  const env = buildCustomScriptEnvironment(scriptPath, context);
+  const loginShell =
+    process.platform === 'darwin'
+      ? '/bin/zsh'
+      : process.platform === 'win32'
+        ? 'bash'
+        : '/bin/bash';
+  const command =
+    process.platform === 'win32'
+      ? 'exec bash "$PRODUCER_PLAYER_CUSTOM_SCRIPT_PATH"'
+      : 'exec /bin/bash "$PRODUCER_PLAYER_CUSTOM_SCRIPT_PATH"';
+
+  log.info('[producer-player:custom-script] running', {
+    name: config.name,
+    scriptPath,
+    cwd,
+  });
+
+  return new Promise<CustomScriptRunResult>((resolveRun) => {
+    let stdout = '';
+    let stderr = '';
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+    let settled = false;
+    let timedOut = false;
+
+    const child = spawn(loginShell, ['-lc', command], {
+      cwd,
+      env,
+      windowsHide: true,
+    });
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+      setTimeout(() => {
+        if (!settled) {
+          child.kill('SIGKILL');
+        }
+      }, 2_000).unref();
+    }, CUSTOM_SCRIPT_TIMEOUT_MS);
+    timeout.unref();
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      const next = appendLimitedOutput(stdout, chunk);
+      stdout = next.text;
+      stdoutTruncated = stdoutTruncated || next.truncated;
+    });
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      const next = appendLimitedOutput(stderr, chunk);
+      stderr = next.text;
+      stderrTruncated = stderrTruncated || next.truncated;
+    });
+
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolveRun({
+        ok: false,
+        exitCode: null,
+        signal: null,
+        stdout,
+        stderr,
+        stdoutTruncated,
+        stderrTruncated,
+        error: error.message,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAtDate.getTime(),
+      });
+    });
+
+    child.on('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      const error =
+        timedOut
+          ? `Script timed out after ${Math.round(CUSTOM_SCRIPT_TIMEOUT_MS / 1000)} seconds.`
+          : code === 0
+            ? null
+            : `Script exited with code ${code ?? 'unknown'}${signal ? ` (${signal})` : ''}.`;
+      resolveRun({
+        ok: error === null,
+        exitCode: code,
+        signal,
+        stdout,
+        stderr,
+        stdoutTruncated,
+        stderrTruncated,
+        error,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAtDate.getTime(),
+      });
+    });
+  });
+}
+
 function createPlaybackCacheKey(
   filePath: string,
   stats: { size: number; mtimeMs: number }
@@ -4659,6 +4937,86 @@ function createMcpControlTools(service: FileLibraryService): ProducerPlayerMcpTo
         const result = await agentUiRunJs(payload, agentUiMakeRunJsDeps(windowForUi));
         agentUiLogRunJs(payload.code, result);
         return result;
+      },
+    },
+    {
+      name: 'pp_get_custom_script',
+      description: 'Return the saved Producer Player custom toolbar script, if one is configured.',
+      inputSchema: objectSchema(),
+      handler: async () => {
+        if (!userStateService) throw new Error('User state service not initialized');
+        const state = await userStateService.readUserState();
+        return { customScript: state.customScript };
+      },
+    },
+    {
+      name: 'pp_set_custom_script',
+      description: 'Save the custom toolbar bash script that the Set Script/Run Script button and pp_run_custom_script use.',
+      inputSchema: objectSchema(
+        {
+          name: { type: 'string', description: 'Short button label for the custom script.' },
+          filePath: { type: 'string', description: 'Absolute path to a bash script file.' },
+        },
+        ['name', 'filePath'],
+      ),
+      handler: async (args) => {
+        if (!userStateService) throw new Error('User state service not initialized');
+        const customScript = normalizeCustomScriptConfig({
+          name: readMcpStringArg(args, 'name'),
+          filePath: readMcpStringArg(args, 'filePath'),
+        });
+        if (!customScript) throw new Error('Invalid custom script config.');
+        const updated = await userStateService.patchUserState({ customScript });
+        publishUserStateChanged(updated);
+        return { customScript: updated.customScript };
+      },
+    },
+    {
+      name: 'pp_clear_custom_script',
+      description: 'Remove the saved custom toolbar script.',
+      inputSchema: objectSchema(),
+      handler: async () => {
+        if (!userStateService) throw new Error('User state service not initialized');
+        const updated = await userStateService.patchUserState({ customScript: null });
+        publishUserStateChanged(updated);
+        return { customScript: null };
+      },
+    },
+    {
+      name: 'pp_run_custom_script',
+      description: 'Run the saved custom bash script, or run an explicit script path, with Producer Player album/track context env vars.',
+      inputSchema: objectSchema({
+        name: { type: 'string', description: 'Optional temporary display name if filePath is provided.' },
+        filePath: { type: 'string', description: 'Optional absolute script path. Omit to run the saved toolbar script.' },
+        context: {
+          type: 'object',
+          description: 'Optional selected folder/song/playback context to expose as environment variables.',
+          additionalProperties: true,
+        },
+      }),
+      handler: async (args) => {
+        if (!userStateService) throw new Error('User state service not initialized');
+        const explicitPath =
+          typeof args.filePath === 'string' && args.filePath.trim().length > 0
+            ? args.filePath.trim()
+            : null;
+        const state = explicitPath ? null : await userStateService.readUserState();
+        const config = explicitPath
+          ? normalizeCustomScriptConfig({
+              name:
+                typeof args.name === 'string' && args.name.trim().length > 0
+                  ? args.name.trim()
+                  : basename(explicitPath),
+              filePath: explicitPath,
+            })
+          : state?.customScript ?? null;
+        if (!config) {
+          throw new Error('No custom script is configured. Use pp_set_custom_script first or pass filePath.');
+        }
+        return runCustomScript({
+          config,
+          context: normalizeCustomScriptContext(args.context),
+        });
       },
     },
     {
@@ -5858,6 +6216,14 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(IPC_CHANNELS.PICK_PROJECT_FILE, async (_event, initialPath?: string | null) => {
     return pickProjectFile(initialPath ?? null);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PICK_CUSTOM_SCRIPT, async (_event, initialPath?: string | null) => {
+    return pickCustomScript(initialPath ?? null);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RUN_CUSTOM_SCRIPT, async (_event, request: CustomScriptRunRequest) => {
+    return runCustomScript(request);
   });
 
   // v3.189.0 — Save-copy of a song's project file. The renderer passes

@@ -77,10 +77,12 @@ UI-control primitives available to the embedded Producer Player agent:
 - pp_dom_snapshot({ rootSelector?: string, maxNodes?: number }): inspect the current renderer DOM as structured visible controls. Use this before guessing labels/selectors.
 - pp_screenshot({ region?: "window" | "visible" }): capture the current Producer Player window when visual layout matters.
 - pp_run_js({ code: string, timeoutMs?: number }): run JavaScript in the renderer to inspect or control the UI. Prefer small async IIFEs, use existing buttons/inputs/DOM events where possible, and summarize large results before returning them.
+- window.producerPlayer.runCustomScript({ config, context }): run the user's saved/custom bash script for ordinary Producer Player workflow automation when the renderer bridge is available. External host agents can use MCP tools pp_get_custom_script, pp_set_custom_script, pp_clear_custom_script, and pp_run_custom_script for the same custom-script surface.
 
 Allowed pp_run_js use:
 - Read and change UI state for the current Producer Player window, such as opening panels, clicking controls, filling inputs, toggling mastering/checklist/playback controls, or reading window.producerPlayer state needed to answer the user.
 - Use DOM selectors, data-testid attributes, and window.producerPlayer renderer APIs that affect ordinary in-app workflow state.
+- Use the saved Set Script / pp_run_custom_script workflow for user-authored album, export, checklist, metadata, or other local project-helper tasks. Treat the script as a user workflow shortcut, not as an app updater.
 
 Forbidden from inside the embedded app chat:
 - Do not update, downgrade, install, reinstall, restart, quit-and-install, or replace Producer Player.

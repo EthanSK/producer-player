@@ -18,6 +18,8 @@ import {
   type AiRecommendation,
   type AutoUpdateState,
   type AutoUpdateStateListener,
+  type CustomScriptRunRequest,
+  type CustomScriptRunResult,
   type ICloudBackupData,
   type PlaylistOrderExportV1,
   type ProducerPlayerBridge,
@@ -166,6 +168,14 @@ const bridge: ProducerPlayerBridge = {
 
   async pickProjectFile(initialPath?: string | null) {
     return ipcRenderer.invoke(IPC_CHANNELS.PICK_PROJECT_FILE, initialPath ?? null);
+  },
+
+  async pickCustomScript(initialPath?: string | null) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PICK_CUSTOM_SCRIPT, initialPath ?? null);
+  },
+
+  async runCustomScript(request: CustomScriptRunRequest): Promise<CustomScriptRunResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.RUN_CUSTOM_SCRIPT, request);
   },
 
   async saveSongProjectCopy(originalPath: string, targetVersion: number) {

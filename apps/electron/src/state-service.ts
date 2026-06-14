@@ -33,6 +33,7 @@ import type {
   AiRecommendationSet,
   AiRecommendationStatus,
   AlbumChecklistItem,
+  CustomScriptConfig,
   EqSnapshot,
   ListeningDevice,
   PersistedEqLiveState,
@@ -256,6 +257,19 @@ function parseSongDisplayTitles(value: unknown): Record<string, string> {
     return [[songId, normalizedTitle] as const];
   });
   return Object.fromEntries(entries);
+}
+
+function parseCustomScriptConfig(value: unknown): CustomScriptConfig | null {
+  if (!isRecord(value)) return null;
+  const filePath = typeof value.filePath === 'string' ? value.filePath.trim() : '';
+  if (filePath.length === 0) return null;
+  const nameRaw = typeof value.name === 'string' ? value.name.trim() : '';
+  return {
+    // Keep a non-empty label so the toolbar never renders a blank button after
+    // an import or hand-edited state file with a path but no name.
+    name: nameRaw.length > 0 ? nameRaw : 'Custom Script',
+    filePath,
+  };
 }
 
 function parseAlbumChecklists(value: unknown): Record<string, AlbumChecklistItem[]> {
@@ -735,6 +749,7 @@ export function createDefaultUserState(): ProducerPlayerUserState {
     albumTitle: 'Untitled Album',
     albumArtDataUrl: '',
     albumChecklists: {},
+    customScript: null,
     savedReferenceTracks: [],
     perSongReferenceTracks: {},
     perSongRestoreReferenceEnabled: {},
@@ -825,6 +840,7 @@ export function parseUserState(raw: unknown): ProducerPlayerUserState {
     albumTitle: typeof raw.albumTitle === 'string' && raw.albumTitle.length > 0 ? raw.albumTitle : fallback.albumTitle,
     albumArtDataUrl: typeof raw.albumArtDataUrl === 'string' ? raw.albumArtDataUrl : '',
     albumChecklists: parseAlbumChecklists(raw.albumChecklists),
+    customScript: parseCustomScriptConfig(raw.customScript),
     savedReferenceTracks: parseSavedReferenceTracks(raw.savedReferenceTracks),
     perSongReferenceTracks: parsePerSongReferenceTracks(raw.perSongReferenceTracks),
     perSongRestoreReferenceEnabled: parsePerSongRestoreReferenceEnabled(raw.perSongRestoreReferenceEnabled),

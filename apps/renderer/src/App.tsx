@@ -44,6 +44,9 @@ import type {
   AutoUpdateDowngradeResult,
   AutoUpdateRecheckResult,
   AutoUpdateState,
+  CustomScriptConfig,
+  CustomScriptRunContext,
+  CustomScriptRunResult,
   ICloudAvailabilityResult,
   ICloudBackupData,
   LibrarySnapshot,
@@ -3266,6 +3269,12 @@ export function App(): JSX.Element {
     current: number;
     total: number;
   } | null>(null);
+  const [customScript, setCustomScript] = useState<CustomScriptConfig | null>(null);
+  const [customScriptModalOpen, setCustomScriptModalOpen] = useState(false);
+  const [customScriptDraftName, setCustomScriptDraftName] = useState('');
+  const [customScriptDraftPath, setCustomScriptDraftPath] = useState('');
+  const [customScriptRunning, setCustomScriptRunning] = useState(false);
+  const [customScriptResult, setCustomScriptResult] = useState<CustomScriptRunResult | null>(null);
   const [sharedUserStateReady, setSharedUserStateReady] = useState(false);
   const [iCloudBackupEnabled, setICloudBackupEnabled] = useState<boolean>(() =>
     readICloudBackupEnabled()
@@ -5835,6 +5844,8 @@ export function App(): JSX.Element {
           });
         }
 
+        setCustomScript(userState.customScript ?? null);
+
         if (userState.savedReferenceTracks && userState.savedReferenceTracks.length > 0) {
           setSavedReferenceTracks((prev) => {
             if (prev.length > 0) return prev;
@@ -6127,6 +6138,7 @@ export function App(): JSX.Element {
         albumTitle,
         albumArtDataUrl: albumArt ?? '',
         albumChecklists,
+        customScript,
         savedReferenceTracks: savedReferenceTracks.map((t) => ({
           filePath: t.filePath,
           fileName: t.fileName,
@@ -6344,6 +6356,7 @@ export function App(): JSX.Element {
     albumTitle,
     albumArt,
     albumChecklists,
+    customScript,
     savedReferenceTracks,
     perSongReferencePrunedSignal,
     restoreReferenceToggleSignal,
@@ -6403,6 +6416,8 @@ export function App(): JSX.Element {
         setAlbumChecklists(userState.albumChecklists);
         persistAlbumChecklists(userState.albumChecklists);
       }
+
+      setCustomScript(userState.customScript ?? null);
 
       if (userState.savedReferenceTracks) {
         setSavedReferenceTracks(userState.savedReferenceTracks.map((t) => ({
@@ -12748,6 +12763,144 @@ export function App(): JSX.Element {
         ? 'Playback times reset to zero on all other tracks.'
         : 'Playback time reset to zero on all tracks.',
     });
+  }
+
+  function buildCustomScriptRunContext(): CustomScriptRunContext {
+    const selectedFolder =
+      snapshot.linkedFolders.find((folder) => folder.id === selectedFolderId) ?? null;
+    const selectedPlaybackSong = selectedPlaybackSongId
+      ? snapshot.songs.find((song) => song.id === selectedPlaybackSongId) ?? null
+      : null;
+    const uiSelectedSong = selectedSongId
+      ? snapshot.songs.find((song) => song.id === selectedSongId) ?? null
+      : null;
+    const contextSong = selectedPlaybackSong ?? uiSelectedSong;
+
+    // These env vars are the script's contract with Producer Player. They let
+    // a vibe-coded shell script know which album folder / song / audio file
+    // the user was looking at without scraping the app UI itself.
+    return {
+      selectedFolderId: selectedFolder?.id ?? null,
+      selectedFolderPath: selectedFolder?.path ?? null,
+      selectedFolderName: selectedFolder?.name ?? null,
+      selectedSongId: contextSong?.id ?? null,
+      selectedSongTitle: contextSong
+        ? getSongDisplayTitle(contextSong, songDisplayTitles)
+        : null,
+      selectedPlaybackVersionId: selectedPlaybackVersion?.id ?? null,
+      selectedPlaybackFilePath: selectedPlaybackVersion?.filePath ?? null,
+      selectedPlaybackFileName: selectedPlaybackVersion?.fileName ?? null,
+    };
+  }
+
+  function handleOpenCustomScriptModal(): void {
+    setCustomScriptDraftName(customScript?.name ?? '');
+    setCustomScriptDraftPath(customScript?.filePath ?? '');
+    setCustomScriptModalOpen(true);
+  }
+
+  async function handleChooseCustomScriptFile(): Promise<void> {
+    const selection = await window.producerPlayer.pickCustomScript(
+      customScriptDraftPath || customScript?.filePath || null,
+    );
+    if (!selection) return;
+    setCustomScriptDraftPath(selection.filePath);
+    if (customScriptDraftName.trim().length === 0) {
+      setCustomScriptDraftName(selection.fileName.replace(/\.(sh|bash|zsh|command)$/i, ''));
+    }
+  }
+
+  function readCustomScriptDraftConfig(): CustomScriptConfig | null {
+    const filePath = customScriptDraftPath.trim();
+    if (filePath.length === 0) {
+      return null;
+    }
+    return {
+      name: customScriptDraftName.trim() || 'Custom Script',
+      filePath,
+    };
+  }
+
+  function handleSaveCustomScript(): CustomScriptConfig | null {
+    const next = readCustomScriptDraftConfig();
+    if (!next) {
+      toast.show({
+        id: 'custom-script-save-missing-path',
+        kind: 'error',
+        text: 'Choose a script file first.',
+      });
+      return null;
+    }
+    setCustomScript(next);
+    setCustomScriptModalOpen(false);
+    toast.show({
+      id: 'custom-script-saved',
+      kind: 'success',
+      text: `Custom script set: ${next.name}`,
+    });
+    return next;
+  }
+
+  function handleClearCustomScript(): void {
+    setCustomScript(null);
+    setCustomScriptModalOpen(false);
+    toast.show({
+      id: 'custom-script-cleared',
+      kind: 'success',
+      text: 'Custom script cleared.',
+    });
+  }
+
+  async function runCustomScriptConfig(script: CustomScriptConfig): Promise<void> {
+    setCustomScriptRunning(true);
+    logAction('custom-script.run', {
+      name: script.name,
+      filePath: script.filePath,
+    });
+    try {
+      const result = await window.producerPlayer.runCustomScript({
+        config: script,
+        context: buildCustomScriptRunContext(),
+      });
+      setCustomScriptResult(result);
+      toast.show({
+        id: 'custom-script-run-result',
+        kind: result.ok ? 'success' : 'error',
+        text: result.ok
+          ? `${script.name} finished.`
+          : `${script.name} failed.`,
+      });
+    } catch (cause: unknown) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setCustomScriptResult({
+        ok: false,
+        exitCode: null,
+        signal: null,
+        stdout: '',
+        stderr: '',
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        error: message,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        durationMs: 0,
+      });
+      toast.show({
+        id: 'custom-script-run-error',
+        kind: 'error',
+        text: `Custom script failed: ${message}`,
+      });
+    } finally {
+      setCustomScriptRunning(false);
+    }
+  }
+
+  async function handleRunCustomScript(): Promise<void> {
+    if (!customScript) {
+      handleOpenCustomScriptModal();
+      return;
+    }
+    await runCustomScriptConfig(customScript);
   }
 
   function handleSkipSeconds(offsetSeconds: number): void {
@@ -19523,6 +19676,43 @@ export function App(): JSX.Element {
             className="reset-all-times-tooltip-anchor"
             data-testid="reset-all-times-tooltip-anchor"
           >
+            <span
+              className="custom-script-toolbar-group"
+              data-testid="custom-script-toolbar-group"
+              aria-describedby="custom-script-tooltip"
+            >
+              <button
+                type="button"
+                className={`custom-script-button${customScript ? ' is-configured' : ''}`}
+                data-testid="custom-script-button"
+                onClick={() => {
+                  void handleRunCustomScript();
+                }}
+                disabled={customScriptRunning}
+              >
+                {customScriptRunning
+                  ? 'Running script…'
+                  : customScript
+                    ? `▶ ${customScript.name}`
+                    : 'Set Script'}
+              </button>
+              {customScript ? (
+                <button
+                  type="button"
+                  className="custom-script-edit-button"
+                  data-testid="custom-script-edit-button"
+                  onClick={handleOpenCustomScriptModal}
+                  aria-label="Edit custom script"
+                >
+                  Set
+                </button>
+              ) : null}
+              <FloatingTooltip id="custom-script-tooltip" label="Set Script" placement="bottom">
+                {customScript
+                  ? 'Runs your saved custom bash script with Homebrew/npm/git PATH plus Producer Player album, song, and playback env vars. Vibe-code the script to do any custom workflow you want.'
+                  : 'Save a custom bash script here, then run it from the tracklist toolbar. Producer Player gives it a useful PATH plus current album, song, and playback env vars.'}
+              </FloatingTooltip>
+            </span>
             <button
               type="button"
               className="reset-all-times-button"
@@ -24836,6 +25026,159 @@ export function App(): JSX.Element {
               </div>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {customScriptModalOpen ? (
+        <div
+          className="custom-script-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Set custom script"
+          data-testid="custom-script-modal"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setCustomScriptModalOpen(false);
+            }
+          }}
+        >
+          <div className="custom-script-modal-card">
+            <div className="custom-script-modal-header">
+              <div>
+                <h2>Set Script <HelpTooltip text={"What this is: A single custom bash-script shortcut for Producer Player. Vibe-code any script you want, save its path here, then run it from the tracklist toolbar.\n\nHow it runs: Producer Player starts it through a login shell, adds common Homebrew/npm/git folders to PATH, and passes current album/song/playback details as PRODUCER_PLAYER_* environment variables.\n\nAgent/MCP: the in-app agent can trigger it through window.producerPlayer.runCustomScript, and the local MCP control server exposes pp_set_custom_script / pp_run_custom_script for host agents."} /></h2>
+                <p className="muted">
+                  {customScript ? customScript.filePath : 'No script set.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setCustomScriptModalOpen(false)}
+                data-testid="custom-script-modal-close"
+                title="Close"
+              >
+                Close
+              </button>
+            </div>
+            <label className="custom-script-field">
+              <span>Name</span>
+              <input
+                type="text"
+                value={customScriptDraftName}
+                onChange={(event) => setCustomScriptDraftName(event.currentTarget.value)}
+                placeholder="e.g. Prep stems"
+                data-testid="custom-script-name-input"
+              />
+            </label>
+            <label className="custom-script-field">
+              <span>Script path</span>
+              <div className="custom-script-path-row">
+                <input
+                  type="text"
+                  value={customScriptDraftPath}
+                  onChange={(event) => setCustomScriptDraftPath(event.currentTarget.value)}
+                  placeholder="/Users/ethan/scripts/producer-player-task.sh"
+                  data-testid="custom-script-path-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleChooseCustomScriptFile();
+                  }}
+                  data-testid="custom-script-choose-file"
+                  title="Choose a script file."
+                >
+                  Choose…
+                </button>
+              </div>
+            </label>
+            <div className="custom-script-modal-actions">
+              <button
+                type="button"
+                onClick={handleSaveCustomScript}
+                data-testid="custom-script-save"
+                title="Save this script shortcut."
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  const next = handleSaveCustomScript();
+                  if (next) {
+                    void runCustomScriptConfig(next);
+                  }
+                }}
+                disabled={customScriptDraftPath.trim().length === 0 || customScriptRunning}
+                data-testid="custom-script-save-run"
+                title="Save and run this script."
+              >
+                Save &amp; Run
+              </button>
+              {customScript ? (
+                <button
+                  type="button"
+                  className="ghost custom-script-clear-button"
+                  onClick={handleClearCustomScript}
+                  data-testid="custom-script-clear"
+                  title="Clear the saved script shortcut."
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {customScriptResult ? (
+        <div
+          className="custom-script-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Custom script output"
+          data-testid="custom-script-output-modal"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setCustomScriptResult(null);
+            }
+          }}
+        >
+          <div className="custom-script-modal-card custom-script-output-card">
+            <div className="custom-script-modal-header">
+              <div>
+                <h2>{customScriptResult.ok ? 'Script Finished' : 'Script Failed'}</h2>
+                <p className="muted" data-testid="custom-script-output-status">
+                  Exit {customScriptResult.exitCode ?? '—'} · {Math.round(customScriptResult.durationMs / 100) / 10}s
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setCustomScriptResult(null)}
+                data-testid="custom-script-output-close"
+                title="Close output."
+              >
+                Close
+              </button>
+            </div>
+            {customScriptResult.error ? (
+              <p className="error" data-testid="custom-script-output-error">
+                {customScriptResult.error}
+              </p>
+            ) : null}
+            <div className="custom-script-output-grid">
+              <section>
+                <h3>Output</h3>
+                <pre data-testid="custom-script-output-stdout">{`${customScriptResult.stdout || '(no stdout)'}${customScriptResult.stdoutTruncated ? '\n[truncated]' : ''}`}</pre>
+              </section>
+              <section>
+                <h3>Errors</h3>
+                <pre data-testid="custom-script-output-stderr">{`${customScriptResult.stderr || '(no stderr)'}${customScriptResult.stderrTruncated ? '\n[truncated]' : ''}`}</pre>
+              </section>
+            </div>
+          </div>
         </div>
       ) : null}
 

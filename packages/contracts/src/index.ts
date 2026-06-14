@@ -82,6 +82,43 @@ export interface ProjectFileSelection {
   fileName: string;
 }
 
+export interface CustomScriptConfig {
+  /** Button label shown after the script is configured. */
+  name: string;
+  /** Absolute path to the bash script Producer Player should run. */
+  filePath: string;
+}
+
+export interface CustomScriptRunContext {
+  selectedFolderId: string | null;
+  selectedFolderPath: string | null;
+  selectedFolderName: string | null;
+  selectedSongId: string | null;
+  selectedSongTitle: string | null;
+  selectedPlaybackVersionId: string | null;
+  selectedPlaybackFilePath: string | null;
+  selectedPlaybackFileName: string | null;
+}
+
+export interface CustomScriptRunRequest {
+  config: CustomScriptConfig;
+  context: CustomScriptRunContext;
+}
+
+export interface CustomScriptRunResult {
+  ok: boolean;
+  exitCode: number | null;
+  signal: string | null;
+  stdout: string;
+  stderr: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+}
+
 /**
  * v3.189.0 — Result of duplicating a song's linked project file with a
  * trailing version suffix. `ok=true` carries the absolute path of the
@@ -253,6 +290,8 @@ export const IPC_CHANNELS = {
   WRITE_MASTERING_ANALYSIS_CACHE: 'producer-player:write-mastering-analysis-cache',
   PICK_REFERENCE_TRACK: 'producer-player:pick-reference-track',
   PICK_PROJECT_FILE: 'producer-player:pick-project-file',
+  PICK_CUSTOM_SCRIPT: 'producer-player:pick-custom-script',
+  RUN_CUSTOM_SCRIPT: 'producer-player:run-custom-script',
   // v3.189.0 — Save a copy of the song's linked project file with the next
   // version number appended (e.g. `barber smith.als` → `barber smith v48.als`).
   // Lets producers checkpoint their DAW project alongside each export.
@@ -763,6 +802,10 @@ export interface ProducerPlayerUserState {
   albumTitle: string;
   albumArtDataUrl: string; // data URL (kept small via resize)
   albumChecklists: Record<string, AlbumChecklistItem[]>;
+  // One user-configured project helper script, surfaced in the track-list
+  // toolbar and through the in-app/MCP control surfaces. Null means the
+  // toolbar shows the setup affordance instead of a runnable script.
+  customScript: CustomScriptConfig | null;
 
   // Reference tracks
   savedReferenceTracks: SavedReferenceTrack[];
@@ -1559,6 +1602,8 @@ export interface ProducerPlayerBridge {
   ): Promise<MasteringAnalysisCacheState>;
   pickReferenceTrack(): Promise<ReferenceTrackSelection | null>;
   pickProjectFile(initialPath?: string | null): Promise<ProjectFileSelection | null>;
+  pickCustomScript(initialPath?: string | null): Promise<ProjectFileSelection | null>;
+  runCustomScript(request: CustomScriptRunRequest): Promise<CustomScriptRunResult>;
   /**
    * v3.189.0 — Duplicates the song's linked project file next to the
    * original with `v<targetVersion>` appended (stripping any existing

@@ -2730,6 +2730,47 @@ body.floating-switcher-panel-dragging * {
      linked. */
   flex-shrink: 0;
   display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.custom-script-toolbar-group {
+  flex-shrink: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.custom-script-button {
+  min-width: 82px;
+  max-width: min(190px, 24vw);
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.custom-script-button.is-configured {
+  border-color: rgba(95, 210, 143, 0.58);
+  background: rgba(95, 210, 143, 0.13);
+}
+
+.custom-script-button.is-configured:hover:not(:disabled) {
+  border-color: var(--success);
+}
+
+.custom-script-edit-button {
+  flex-shrink: 0;
+  padding: 4px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-muted);
+  background: transparent;
 }
 
 .reset-all-times-button {
@@ -6987,6 +7028,171 @@ button.checklist-play-toggle[data-playing='true'] {
 
   .checklist-find-status {
     text-align: left;
+  }
+}
+
+/* ── Custom script dialog ── */
+
+.custom-script-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 9, 15, 0.76);
+  backdrop-filter: blur(4px);
+}
+
+.custom-script-modal-card {
+  width: min(680px, 100%);
+  max-height: min(88vh, 860px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-1);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+
+.custom-script-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.custom-script-modal-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.custom-script-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.custom-script-field > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.custom-script-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-0);
+  color: var(--text-main);
+}
+
+.custom-script-field input:focus {
+  outline: 2px solid rgba(92, 167, 255, 0.45);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.custom-script-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.custom-script-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.custom-script-clear-button {
+  color: var(--danger);
+}
+
+.custom-script-output-card {
+  width: min(900px, 100%);
+}
+
+.custom-script-output-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.custom-script-output-grid section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(156, 175, 196, 0.22);
+}
+
+.custom-script-output-grid h3 {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.custom-script-output-grid pre {
+  min-height: 140px;
+  max-height: min(46vh, 420px);
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid rgba(156, 175, 196, 0.2);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-main);
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .custom-script-overlay {
+    padding: 14px;
+  }
+
+  .custom-script-modal-card {
+    padding: 16px;
+  }
+
+  .custom-script-modal-header {
+    flex-direction: column;
+  }
+
+  .custom-script-path-row,
+  .custom-script-output-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .custom-script-modal-actions {
+    justify-content: stretch;
+  }
+
+  .custom-script-modal-actions button {
+    flex: 1 1 130px;
   }
 }
 

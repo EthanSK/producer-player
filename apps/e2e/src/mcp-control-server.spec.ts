@@ -65,6 +65,17 @@ async function readDiscovery(userDataDirectory: string): Promise<McpDiscovery> {
   return JSON.parse(await fs.readFile(discoveryPath, 'utf8')) as McpDiscovery;
 }
 
+async function readRootPackageVersion(): Promise<string> {
+  const packageJsonPath = path.resolve(__dirname, '../../../package.json');
+  const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8')) as {
+    version?: unknown;
+  };
+  if (typeof packageJson.version !== 'string') {
+    throw new Error('Root package.json is missing a string version.');
+  }
+  return packageJson.version;
+}
+
 async function callMcpTool(discovery: McpDiscovery, token: string, name: string, args: unknown = {}) {
   const response = await fetch(discovery.url, {
     method: 'POST',
@@ -94,10 +105,23 @@ test.describe('Producer Player MCP-over-HTTP control server', () => {
     const dirs = await createE2ETestDirectories('mcp-control-server');
     const token = 'e2e-mcp-token';
     const recordPath = path.join(dirs.userDataDirectory, 'mcp-install-record.json');
+    const scriptPath = path.join(dirs.userDataDirectory, 'mcp-custom-script.sh');
+    const packageVersion = await readRootPackageVersion();
     const releases = [
       releaseFixture('v3.265.0', '3.265.0'),
       releaseFixture('v3.264.0', '3.264.0'),
     ];
+    await fs.writeFile(
+      scriptPath,
+      [
+        'printf "MCP_CUSTOM_SCRIPT_OK\\n"',
+        'printf "MCP_SONG=%s\\n" "$PRODUCER_PLAYER_SELECTED_SONG_TITLE"',
+        'printf "MCP_CWD=%s\\n" "$PWD"',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
     const { electronApp } = await launchProducerPlayer(dirs.userDataDirectory, {
       extraEnv: {
         PRODUCER_PLAYER_MCP_HTTP_ENABLED: 'true',
@@ -117,6 +141,10 @@ test.describe('Producer Player MCP-over-HTTP control server', () => {
           'pp_get_library_snapshot',
           'pp_dom_snapshot',
           'pp_run_js',
+          'pp_get_custom_script',
+          'pp_set_custom_script',
+          'pp_clear_custom_script',
+          'pp_run_custom_script',
           'pp_update_check',
           'pp_update_download',
           'pp_update_install_downloaded',
@@ -128,7 +156,7 @@ test.describe('Producer Player MCP-over-HTTP control server', () => {
       expect(unauthorized.status).toBe(401);
 
       const environment = await callMcpTool(discovery, token, 'pp_get_environment');
-      expect(environment.environment.appVersion.semanticVersion).toBe('3.265.0');
+      expect(environment.environment.appVersion.semanticVersion).toBe(packageVersion);
       expect(environment.mcp.port).toEqual(expect.any(Number));
 
       const domSnapshot = await callMcpTool(discovery, token, 'pp_dom_snapshot', {
@@ -142,6 +170,35 @@ test.describe('Producer Player MCP-over-HTTP control server', () => {
         code: 'document.querySelector("[data-testid=app-shell]") !== null',
       });
       expect(runJs).toEqual({ ok: true, value: true });
+
+      const savedCustomScript = await callMcpTool(discovery, token, 'pp_set_custom_script', {
+        name: 'MCP Hook',
+        filePath: scriptPath,
+      });
+      expect(savedCustomScript.customScript).toEqual({
+        name: 'MCP Hook',
+        filePath: scriptPath,
+      });
+
+      const customScript = await callMcpTool(discovery, token, 'pp_get_custom_script');
+      expect(customScript.customScript).toEqual({
+        name: 'MCP Hook',
+        filePath: scriptPath,
+      });
+
+      const scriptRun = await callMcpTool(discovery, token, 'pp_run_custom_script', {
+        context: {
+          selectedFolderPath: dirs.fixtureDirectory,
+          selectedSongTitle: 'MCP Song',
+        },
+      });
+      expect(scriptRun.ok).toBe(true);
+      expect(scriptRun.stdout).toContain('MCP_CUSTOM_SCRIPT_OK');
+      expect(scriptRun.stdout).toContain('MCP_SONG=MCP Song');
+      expect(scriptRun.stdout).toContain(`MCP_CWD=${dirs.fixtureDirectory}`);
+
+      const clearedCustomScript = await callMcpTool(discovery, token, 'pp_clear_custom_script');
+      expect(clearedCustomScript.customScript).toBeNull();
 
       const installResult = await callMcpTool(discovery, token, 'pp_install_version', {
         version: '3.264',

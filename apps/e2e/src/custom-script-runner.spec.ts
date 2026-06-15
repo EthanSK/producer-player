@@ -51,6 +51,9 @@ test.describe('custom script runner', () => {
       await page.getByTestId('custom-script-toolbar-group').hover();
       await expect(page.locator('#custom-script-tooltip')).toContainText('custom bash script');
       await expect(page.locator('#custom-script-tooltip')).toContainText('PATH');
+      // Regression pin: Set Script sits beside Reset All Times, but hovering it
+      // must not also activate Reset All Times' wrapper-owned tooltip hit area.
+      await expect(page.locator('#reset-all-times-tooltip')).toHaveCount(0);
 
       await page.getByTestId('custom-script-button').click();
       await expect(page.getByTestId('custom-script-modal')).toBeVisible();

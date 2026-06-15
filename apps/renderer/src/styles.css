@@ -2724,14 +2724,23 @@ body.floating-switcher-panel-dragging * {
   color: var(--text-muted);
 }
 
-.reset-all-times-tooltip-anchor {
-  /* The wrapper, not the button, owns the hover target so the in-app tooltip
-     still opens when the Reset All Times button is disabled before folders are
-     linked. */
+.track-order-toolbar-actions {
+  /* Keep the toolbar buttons in one right-side cluster, but do not make that
+     whole cluster a tooltip trigger. Nesting Set Script inside Reset All Times'
+     trigger caused both tooltips to appear when Ethan hovered Set Script. */
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.reset-all-times-tooltip-anchor {
+  /* The wrapper, not the disabled button, owns the hover target so the in-app
+     tooltip still opens before folders are linked, while the hit area stays
+     scoped to Reset All Times instead of the neighboring Set Script control. */
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
 }
 
 .custom-script-toolbar-group {

@@ -19875,10 +19875,7 @@ export function App(): JSX.Element {
           >
             {listHintText}
           </p>
-          <span
-            className="reset-all-times-tooltip-anchor"
-            data-testid="reset-all-times-tooltip-anchor"
-          >
+          <span className="track-order-toolbar-actions" data-testid="track-order-toolbar-actions">
             <span
               className="custom-script-toolbar-group"
               data-testid="custom-script-toolbar-group"
@@ -19916,19 +19913,24 @@ export function App(): JSX.Element {
                   : 'Save a custom bash script here, then run it from the tracklist toolbar. Producer Player gives it a useful PATH plus current album, song, and playback env vars.'}
               </FloatingTooltip>
             </span>
-            <button
-              type="button"
-              className="reset-all-times-button"
-              data-testid="reset-all-times-button"
-              onClick={handleResetAllPlaybackTimes}
-              disabled={songs.length === 0}
-              aria-describedby="reset-all-times-tooltip"
+            <span
+              className="reset-all-times-tooltip-anchor"
+              data-testid="reset-all-times-tooltip-anchor"
             >
-              Reset All Times
-            </button>
-            <FloatingTooltip id="reset-all-times-tooltip" label="Reset All Times" placement="bottom">
-              {resetAllTimesTooltip}
-            </FloatingTooltip>
+              <button
+                type="button"
+                className="reset-all-times-button"
+                data-testid="reset-all-times-button"
+                onClick={handleResetAllPlaybackTimes}
+                disabled={songs.length === 0}
+                aria-describedby="reset-all-times-tooltip"
+              >
+                Reset All Times
+              </button>
+              <FloatingTooltip id="reset-all-times-tooltip" label="Reset All Times" placement="bottom">
+                {resetAllTimesTooltip}
+              </FloatingTooltip>
+            </span>
           </span>
         </div>
 

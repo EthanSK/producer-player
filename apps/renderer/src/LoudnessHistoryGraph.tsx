@@ -38,6 +38,12 @@ const REF_LINE_SOFT_06 = 'rgba(255, 180, 84, 0.6)';
 const REF_LINE_SOFT_09 = 'rgba(255, 180, 84, 0.95)';
 const REF_LINE_FILL = 'rgba(255, 180, 84, 0.1)';
 
+/** Clipped sample overlay — shared by mix/reference graphs so red always means digital clipping. */
+const CLIP_LINE_COLOR = '#ff4d4f';
+const CLIP_LINE_GLOW = 'rgba(255, 77, 79, 0.42)';
+const CLIP_REGION_FILL = 'rgba(255, 77, 79, 0.13)';
+const CLIP_SAMPLE_THRESHOLD = 1.0;
+
 const DB_MIN = -60;
 const DB_MAX = 0;
 const PADDING_LEFT = 44;
@@ -49,6 +55,68 @@ function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+export function buildLoudnessHistoryClipFlags({
+  frameCount,
+  frameDurationSeconds,
+  durationSeconds,
+  waveformPeaks,
+}: {
+  frameCount: number;
+  frameDurationSeconds: number;
+  durationSeconds: number;
+  waveformPeaks?: ArrayLike<number> | null;
+}): boolean[] {
+  const flags = Array.from({ length: Math.max(0, frameCount) }, () => false);
+  if (
+    flags.length === 0 ||
+    !waveformPeaks ||
+    waveformPeaks.length === 0 ||
+    !Number.isFinite(frameDurationSeconds) ||
+    frameDurationSeconds <= 0 ||
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds <= 0
+  ) {
+    return flags;
+  }
+
+  const bucketDurationSeconds = durationSeconds / waveformPeaks.length;
+  if (!Number.isFinite(bucketDurationSeconds) || bucketDurationSeconds <= 0) {
+    return flags;
+  }
+
+  for (let bucketIndex = 0; bucketIndex < waveformPeaks.length; bucketIndex += 1) {
+    const peak = waveformPeaks[bucketIndex];
+    if (!Number.isFinite(peak) || Math.abs(peak) < CLIP_SAMPLE_THRESHOLD) {
+      continue;
+    }
+
+    const bucketStartSeconds = bucketIndex * bucketDurationSeconds;
+    const bucketEndSeconds = Math.min(durationSeconds, (bucketIndex + 1) * bucketDurationSeconds);
+    const firstFrameIndex = Math.max(
+      0,
+      Math.min(flags.length - 1, Math.floor(bucketStartSeconds / frameDurationSeconds))
+    );
+    // Subtract a frame-relative nudge from the open interval end so a bucket
+    // ending exactly on the next frame boundary doesn't paint an untouched
+    // frame red. A plain Number.EPSILON is too small once timestamps grow.
+    const openIntervalEndNudgeSeconds = Math.max(Number.EPSILON, frameDurationSeconds * 1e-9);
+    const lastFrameTime = Math.max(
+      bucketStartSeconds,
+      bucketEndSeconds - openIntervalEndNudgeSeconds
+    );
+    const lastFrameIndex = Math.max(
+      firstFrameIndex,
+      Math.min(flags.length - 1, Math.floor(lastFrameTime / frameDurationSeconds))
+    );
+
+    for (let frameIndex = firstFrameIndex; frameIndex <= lastFrameIndex; frameIndex += 1) {
+      flags[frameIndex] = true;
+    }
+  }
+
+  return flags;
 }
 
 export function LoudnessHistoryGraph({
@@ -120,6 +188,49 @@ export function LoudnessHistoryGraph({
     const frames = analysis.frameLoudnessDbfs;
     const frameDur = analysis.frameDurationSeconds;
     const totalDur = analysis.durationSeconds;
+    const clipFlags = buildLoudnessHistoryClipFlags({
+      frameCount: frames.length,
+      frameDurationSeconds: frameDur,
+      durationSeconds: totalDur,
+      waveformPeaks: analysis.waveformPeaks,
+    });
+    const hasClips = clipFlags.some(Boolean);
+
+    const getFramePoint = (frameIndex: number): { x: number; y: number } => {
+      const t = frameIndex * frameDur;
+      const x = PADDING_LEFT + (t / totalDur) * plotW;
+      const db = Math.max(DB_MIN, Math.min(DB_MAX, frames[frameIndex]));
+      const y = PADDING_TOP + plotH * (1 - (db - DB_MIN) / (DB_MAX - DB_MIN));
+      return { x, y };
+    };
+
+    // Clip regions sit under the grid/labels/curve. The red overlay later is
+    // precise; this translucent band is there so very short clipped bits are
+    // still visible even when the loudness curve is shallow.
+    if (hasClips) {
+      ctx.fillStyle = CLIP_REGION_FILL;
+      let clipStartIndex: number | null = null;
+
+      const paintClipRegion = (startIndex: number, endIndex: number): void => {
+        const startSeconds = startIndex * frameDur;
+        const endSeconds = Math.min(totalDur, (endIndex + 1) * frameDur);
+        const startX = PADDING_LEFT + (startSeconds / totalDur) * plotW;
+        const endX = PADDING_LEFT + (endSeconds / totalDur) * plotW;
+        ctx.fillRect(startX, PADDING_TOP, Math.max(1, endX - startX), plotH);
+      };
+
+      for (let frameIndex = 0; frameIndex < clipFlags.length; frameIndex += 1) {
+        if (clipFlags[frameIndex]) {
+          clipStartIndex ??= frameIndex;
+        } else if (clipStartIndex !== null) {
+          paintClipRegion(clipStartIndex, frameIndex - 1);
+          clipStartIndex = null;
+        }
+      }
+      if (clipStartIndex !== null) {
+        paintClipRegion(clipStartIndex, clipFlags.length - 1);
+      }
+    }
 
     // Grid lines
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
@@ -186,10 +297,7 @@ export function LoudnessHistoryGraph({
 
     let started = false;
     for (let i = 0; i < frames.length; i++) {
-      const t = i * frameDur;
-      const x = PADDING_LEFT + (t / totalDur) * plotW;
-      const db = Math.max(DB_MIN, Math.min(DB_MAX, frames[i]));
-      const y = PADDING_TOP + plotH * (1 - (db - DB_MIN) / (DB_MAX - DB_MIN));
+      const { x, y } = getFramePoint(i);
 
       if (!started) {
         ctx.moveTo(x, y);
@@ -209,6 +317,55 @@ export function LoudnessHistoryGraph({
       ctx.closePath();
       ctx.fillStyle = lineFillColor;
       ctx.fill();
+    }
+
+    if (hasClips) {
+      // The base curve remains the source/accent color; this second pass only
+      // recolors the exact sections whose waveform buckets reached 0 dBFS.
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = CLIP_LINE_GLOW;
+      ctx.lineWidth = 4.5;
+
+      const strokeClippedSegments = (): void => {
+        let segmentStarted = false;
+        for (let i = 0; i < frames.length; i++) {
+          const segmentIsClipped = clipFlags[i] || (i > 0 && clipFlags[i - 1]);
+          if (segmentIsClipped) {
+            if (!segmentStarted) {
+              const startIndex = Math.max(0, i - 1);
+              const { x, y } = getFramePoint(startIndex);
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+              segmentStarted = true;
+            }
+            const { x, y } = getFramePoint(i);
+            ctx.lineTo(x, y);
+          } else if (segmentStarted) {
+            ctx.stroke();
+            segmentStarted = false;
+          }
+        }
+        if (segmentStarted) {
+          ctx.stroke();
+        }
+      };
+
+      strokeClippedSegments();
+      ctx.strokeStyle = CLIP_LINE_COLOR;
+      ctx.lineWidth = 2.3;
+      strokeClippedSegments();
+
+      ctx.fillStyle = CLIP_LINE_COLOR;
+      for (let i = 0; i < clipFlags.length; i++) {
+        if (!clipFlags[i]) continue;
+        const { x, y } = getFramePoint(i);
+        ctx.beginPath();
+        ctx.arc(x, y, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
     }
 
     // Playback position indicator

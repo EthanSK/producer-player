@@ -1628,6 +1628,25 @@ test.describe('playback runtime deep dive', () => {
 
       await expect(firstLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(firstLaunch.page.getByTestId('album-duration-label')).toContainText('0:12');
+      await expect(firstLaunch.page.getByTestId('main-list-row-duration')).toHaveText([
+        '0:06',
+        '0:06',
+      ]);
+      const firstDurationBox = await firstLaunch.page
+        .getByTestId('main-list-row')
+        .first()
+        .getByTestId('main-list-row-duration')
+        .boundingBox();
+      const firstLufsBox = await firstLaunch.page
+        .getByTestId('main-list-row')
+        .first()
+        .getByTestId('main-list-row-integrated-lufs')
+        .boundingBox();
+      // Regression pin (voice 10320): the duration chip belongs immediately
+      // to the LEFT of LUFS in the main list, not in the secondary metadata row.
+      expect(firstDurationBox).not.toBeNull();
+      expect(firstLufsBox).not.toBeNull();
+      expect(firstDurationBox!.x + firstDurationBox!.width).toBeLessThan(firstLufsBox!.x);
       await expect(firstLaunch.page.getByTestId('support-feedback-card')).toBeVisible();
       await expect(firstLaunch.page.getByTestId('support-feedback-bug')).toBeVisible();
       await expect(firstLaunch.page.getByTestId('support-feedback-feature')).toBeVisible();
@@ -1648,6 +1667,10 @@ test.describe('playback runtime deep dive', () => {
       secondLaunch = await launchProducerPlayer(userDataDirectory);
       await expect(secondLaunch.page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(secondLaunch.page.getByTestId('album-duration-label')).toContainText('0:12');
+      await expect(secondLaunch.page.getByTestId('main-list-row-duration')).toHaveText([
+        '0:06',
+        '0:06',
+      ]);
       await expect(secondLaunch.page.getByTestId('song-rating-control').first()).toContainText('9/10');
     } finally {
       await firstLaunch?.electronApp.close();

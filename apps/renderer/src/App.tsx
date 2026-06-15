@@ -20009,6 +20009,22 @@ export function App(): JSX.Element {
                   : activeSongIntegratedLufsStatus === 'loading'
                     ? 'Loading'
                     : 'No LUFS';
+            const activeSongDurationSeconds = activeSongVersion
+              ? getDurationSecondsFromVersion(
+                  activeSongVersion,
+                  resolvedAlbumDurationSecondsByVersionId[activeSongVersion.id]
+                )
+              : null;
+            // Keep the row-level duration tied to the same active version as the
+            // LUFS chip and album-length total. If the scanner lacks duration
+            // metadata, the album-duration probe fills this in asynchronously
+            // without triggering a second media probe just for the visible pill.
+            const activeSongDurationText =
+              activeSongDurationSeconds !== null
+                ? formatTime(activeSongDurationSeconds)
+                : activeSongVersion
+                  ? 'Loading'
+                  : 'No time';
             const songRatingValue = songRatings[song.id] ?? DEFAULT_SONG_RATING;
             const songChecklistItems = songChecklists[song.id] ?? [];
             // Row badge math shares helpers with the bottom-of-list total so
@@ -20169,6 +20185,13 @@ export function App(): JSX.Element {
                         text. The capsule is still the click-to-copy-next-export
                         affordance — same handler, same testid. */}
                     <span className="main-list-row-metadata-group">
+                      <span
+                        className="main-list-row-duration"
+                        data-testid="main-list-row-duration"
+                        title="Track duration"
+                      >
+                        {activeSongDurationText}
+                      </span>
                       <span
                         className="main-list-row-lufs"
                         data-testid="main-list-row-integrated-lufs"

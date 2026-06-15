@@ -3053,6 +3053,7 @@ body.floating-switcher-panel-dragging * {
   min-width: 0;
 }
 
+.main-list-row-duration,
 .main-list-row-lufs,
 .main-list-row-metadata {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
@@ -3063,6 +3064,19 @@ body.floating-switcher-panel-dragging * {
   border-radius: 999px;
   padding: 2px 8px;
   white-space: nowrap;
+}
+
+.main-list-row-duration {
+  /* Ethan wanted duration immediately left of LUFS in the main list. Keep it
+     visually quieter than LUFS so the loudness reading remains the stronger
+     mastering cue, but use the same chip geometry so both values scan as a
+     single metadata group. */
+  min-width: 42px;
+  text-align: center;
+  color: #c7d3e0;
+  border: 1px solid rgba(154, 182, 211, 0.32);
+  background: rgba(154, 182, 211, 0.08);
+  font-variant-numeric: tabular-nums;
 }
 
 .main-list-row-lufs {
@@ -6930,6 +6944,7 @@ button.checklist-play-toggle[data-playing='true'] {
     gap: 8px;
   }
 
+  .main-list-row-duration,
   .main-list-row-lufs,
   .main-list-row-metadata,
   .song-project-button,
@@ -6941,6 +6956,10 @@ button.checklist-play-toggle[data-playing='true'] {
 
   .main-list-row-lufs {
     min-width: 60px;
+  }
+
+  .main-list-row-duration {
+    min-width: 38px;
   }
 
   .analysis-overlay {

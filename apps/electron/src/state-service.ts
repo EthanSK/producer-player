@@ -1274,6 +1274,31 @@ export class UserStateService {
   }
 
   /**
+   * Apply a partial state patch that is computed from the latest state while
+   * the write queue is held.
+   *
+   * This is for main-process tool surfaces (MCP, background workers, and
+   * future command handlers) that need to edit nested user-authored state such
+   * as `songChecklists`. Computing those nested objects before entering the
+   * queue can lose a sibling write that lands between "read" and "patch"; this
+   * helper keeps the whole read -> derive -> write sequence atomic.
+   */
+  async patchUserStateFromCurrent<T>(
+    updater: (current: ProducerPlayerUserState) => {
+      patch: Partial<ProducerPlayerUserState>;
+      result: T;
+    },
+  ): Promise<{ state: ProducerPlayerUserState; result: T }> {
+    return this.enqueueStateMutation(async () => {
+      const current = await this.readUserState();
+      const { patch, result } = updater(current);
+      const next: ProducerPlayerUserState = { ...current, ...patch };
+      const state = await this.writeUserState(next);
+      return { state, result };
+    });
+  }
+
+  /**
    * Internal: merge-and-write WITHOUT acquiring `stateWriteTail`. Callers
    * that already hold the lock (the AI-rec mutators,
    * `writeUserStatePreservingAiRecommendations`) use this to avoid

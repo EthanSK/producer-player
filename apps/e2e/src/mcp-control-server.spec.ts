@@ -5,6 +5,7 @@ import {
   cleanupE2ETestDirectories,
   createE2ETestDirectories,
   launchProducerPlayer,
+  writeFixtureFiles,
 } from './helpers/electron-app';
 
 interface McpDiscovery {
@@ -111,6 +112,12 @@ test.describe('Producer Player MCP-over-HTTP control server', () => {
       releaseFixture('v3.265.0', '3.265.0'),
       releaseFixture('v3.264.0', '3.264.0'),
     ];
+    await writeFixtureFiles(dirs.fixtureDirectory, [
+      {
+        relativePath: 'Phone Agent Demo v2.wav',
+        modifiedAtMs: Date.parse('2026-06-17T12:00:00.000Z'),
+      },
+    ]);
     await fs.writeFile(
       scriptPath,
       [
@@ -139,6 +146,10 @@ test.describe('Producer Player MCP-over-HTTP control server', () => {
         expect.arrayContaining([
           'pp_get_environment',
           'pp_get_library_snapshot',
+          'pp_create_listening_note',
+          'pp_list_listening_notes',
+          'pp_get_listening_note',
+          'pp_update_listening_note',
           'pp_dom_snapshot',
           'pp_run_js',
           'pp_get_custom_script',
@@ -158,6 +169,100 @@ test.describe('Producer Player MCP-over-HTTP control server', () => {
       const environment = await callMcpTool(discovery, token, 'pp_get_environment');
       expect(environment.environment.appVersion.semanticVersion).toBe(packageVersion);
       expect(environment.mcp.port).toEqual(expect.any(Number));
+
+      const linkedSnapshot = await callMcpTool(discovery, token, 'pp_link_folder', {
+        path: dirs.fixtureDirectory,
+      });
+      const targetSong = (
+        linkedSnapshot.songs as Array<{ id: string; title: string }>
+      ).find((song) => song.title === 'Phone Agent Demo');
+      expect(targetSong).toBeTruthy();
+      if (!targetSong) {
+        throw new Error('Expected MCP-linked fixture song to exist.');
+      }
+
+      const createdListeningNote = await callMcpTool(
+        discovery,
+        token,
+        'pp_create_listening_note',
+        {
+          songTitle: 'Phone Agent Demo',
+          text: 'Phone note: snare pokes out before chorus',
+          timestampSeconds: 42.5,
+          listeningDeviceId: null,
+        },
+      );
+      expect(createdListeningNote.note).toMatchObject({
+        songId: targetSong.id,
+        songTitle: 'Phone Agent Demo',
+        text: 'Phone note: snare pokes out before chorus',
+        timestampSeconds: 42.5,
+        versionNumber: 2,
+        listeningDeviceId: null,
+        listeningDeviceName: null,
+      });
+      const listeningNoteId = (createdListeningNote.note as { id: string }).id;
+      expect(listeningNoteId).toMatch(/^mcp-note-/);
+
+      const listedListeningNotes = await callMcpTool(
+        discovery,
+        token,
+        'pp_list_listening_notes',
+        {
+          songId: targetSong.id,
+        },
+      );
+      expect(listedListeningNotes).toMatchObject({
+        count: 1,
+        notes: [
+          expect.objectContaining({
+            id: listeningNoteId,
+            text: 'Phone note: snare pokes out before chorus',
+          }),
+        ],
+      });
+
+      const updatedListeningNote = await callMcpTool(
+        discovery,
+        token,
+        'pp_update_listening_note',
+        {
+          noteId: listeningNoteId,
+          text: 'Phone note: snare pokes out before chorus, pull 1 dB',
+          timestampSeconds: null,
+          versionNumber: null,
+        },
+      );
+      expect(updatedListeningNote.note).toMatchObject({
+        id: listeningNoteId,
+        text: 'Phone note: snare pokes out before chorus, pull 1 dB',
+        timestampSeconds: null,
+        versionNumber: null,
+      });
+
+      const fetchedListeningNote = await callMcpTool(
+        discovery,
+        token,
+        'pp_get_listening_note',
+        {
+          noteId: listeningNoteId,
+        },
+      );
+      expect(fetchedListeningNote.note).toMatchObject(updatedListeningNote.note);
+
+      // This guards the important phone-agent promise: notes are not just
+      // transient MCP responses. They land in the same unified state file that
+      // the renderer and iCloud/backup paths use for ordinary checklist notes.
+      const unifiedState = JSON.parse(
+        await fs.readFile(path.join(dirs.userDataDirectory, 'producer-player-user-state.json'), 'utf8'),
+      ) as {
+        songChecklists?: Record<string, Array<{ id: string; isNote?: boolean; text: string }>>;
+      };
+      expect(unifiedState.songChecklists?.[targetSong.id]?.[0]).toMatchObject({
+        id: listeningNoteId,
+        isNote: true,
+        text: 'Phone note: snare pokes out before chorus, pull 1 dB',
+      });
 
       const domSnapshot = await callMcpTool(discovery, token, 'pp_dom_snapshot', {
         rootSelector: '[data-testid="app-shell"]',

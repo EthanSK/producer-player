@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, protocol, safeStorage, screen, shell, systemPreferences } from 'electron';
 
@@ -1227,6 +1227,487 @@ function readMcpStringArrayArg(args: Record<string, unknown>, key: string): stri
 function readMcpNumberArg(args: Record<string, unknown>, key: string): number | undefined {
   const value = args[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function hasMcpArg(args: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(args, key);
+}
+
+function readMcpOptionalStringArg(args: Record<string, unknown>, key: string): string | undefined {
+  if (!hasMcpArg(args, key)) {
+    return undefined;
+  }
+
+  const value = args[key];
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== 'string') {
+    throw new Error(`Optional argument must be a string when provided: ${key}`);
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`Optional string argument cannot be empty: ${key}`);
+  }
+
+  return trimmed;
+}
+
+function readMcpOptionalNullableStringArg(
+  args: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  if (!hasMcpArg(args, key)) {
+    return undefined;
+  }
+
+  const value = args[key];
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw new Error(`Optional argument must be a string or null when provided: ${key}`);
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`Optional string argument cannot be empty: ${key}`);
+  }
+
+  return trimmed;
+}
+
+function readMcpOptionalNullableNumberArg(
+  args: Record<string, unknown>,
+  key: string,
+  options: { integer?: boolean; min?: number } = {},
+): number | null | undefined {
+  if (!hasMcpArg(args, key)) {
+    return undefined;
+  }
+
+  const value = args[key];
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`Optional argument must be a finite number or null when provided: ${key}`);
+  }
+
+  if (options.integer && !Number.isInteger(value)) {
+    throw new Error(`Optional numeric argument must be an integer: ${key}`);
+  }
+
+  if (typeof options.min === 'number' && value < options.min) {
+    throw new Error(`Optional numeric argument must be >= ${options.min}: ${key}`);
+  }
+
+  return value;
+}
+
+function normalizeMcpSongTitle(title: string): string {
+  return title.trim().toLowerCase();
+}
+
+function getMcpSongDisplayTitle(
+  song: SongWithVersions,
+  state: ProducerPlayerUserState,
+): string {
+  const savedTitle = state.songDisplayTitles[song.id]?.trim();
+  return savedTitle && savedTitle.length > 0 ? savedTitle : song.title;
+}
+
+function parseMcpVersionNumberFromFileName(fileName: string): number | null {
+  const stem = fileName.replace(/\.[^.]+$/, '');
+  const match = stem.match(/(?:[\s_-]?v(\d+))(?:[\s_-]*archived[\s_-]*\d+)?$/i);
+  if (!match) {
+    return null;
+  }
+
+  const versionNumber = Number.parseInt(match[1] ?? '', 10);
+  return Number.isFinite(versionNumber) && versionNumber >= 1 ? versionNumber : null;
+}
+
+function inferMcpActiveVersionNumber(song: SongWithVersions): number | null {
+  const activeVersion =
+    song.versions.find((version) => version.id === song.activeVersionId) ??
+    song.versions.find((version) => version.isActive) ??
+    [...song.versions].sort(
+      (left, right) =>
+        new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime(),
+    )[0] ??
+    null;
+
+  return activeVersion ? parseMcpVersionNumberFromFileName(activeVersion.fileName) : null;
+}
+
+function resolveMcpSongTarget(
+  args: Record<string, unknown>,
+  service: FileLibraryService,
+  state: ProducerPlayerUserState,
+): SongWithVersions {
+  const snapshot = service.getSnapshot();
+  const songId = readMcpOptionalStringArg(args, 'songId');
+  const songTitle = readMcpOptionalStringArg(args, 'songTitle');
+
+  if (songId) {
+    const song = snapshot.songs.find((entry) => entry.id === songId);
+    if (!song) {
+      throw new Error(`No linked Producer Player song found for songId: ${songId}`);
+    }
+    return song;
+  }
+
+  if (songTitle) {
+    const normalizedTitle = normalizeMcpSongTitle(songTitle);
+    const matches = snapshot.songs.filter((song) => {
+      // Agents often know the user-facing title, while the scanner stores the
+      // canonical file-derived title. Accept either so voice-note workflows do
+      // not have to care which title source is currently visible in the UI.
+      const displayTitle = normalizeMcpSongTitle(getMcpSongDisplayTitle(song, state));
+      const rawTitle = normalizeMcpSongTitle(song.title);
+      return displayTitle === normalizedTitle || rawTitle === normalizedTitle;
+    });
+
+    if (matches.length === 1) {
+      return matches[0];
+    }
+
+    if (matches.length > 1) {
+      throw new Error(`Song title is ambiguous for MCP note target: ${songTitle}`);
+    }
+
+    throw new Error(`No linked Producer Player song found for songTitle: ${songTitle}`);
+  }
+
+  throw new Error('Pass songId or songTitle so the listening note can be tied to a track.');
+}
+
+function resolveMcpOptionalSongIdFilter(
+  args: Record<string, unknown>,
+  service: FileLibraryService,
+  state: ProducerPlayerUserState,
+): string | undefined {
+  return hasMcpArg(args, 'songId') || hasMcpArg(args, 'songTitle')
+    ? resolveMcpSongTarget(args, service, state).id
+    : undefined;
+}
+
+function resolveMcpListeningDeviceId(
+  args: Record<string, unknown>,
+  state: ProducerPlayerUserState,
+): string | null {
+  const explicitListeningDeviceId = readMcpOptionalNullableStringArg(args, 'listeningDeviceId');
+
+  if (explicitListeningDeviceId === null) {
+    return null;
+  }
+
+  const targetDeviceId = explicitListeningDeviceId ?? state.activeListeningDeviceId;
+  if (!targetDeviceId) {
+    return null;
+  }
+
+  const knownDevice = state.listeningDevices.find((device) => device.id === targetDeviceId);
+  if (!knownDevice) {
+    // Historical checklist rows may reference deleted devices, but NEW MCP
+    // notes should not silently store a typo from a mobile/voice command.
+    throw new Error(`Unknown listeningDeviceId: ${targetDeviceId}`);
+  }
+
+  return knownDevice.id;
+}
+
+function resolveMcpListeningDeviceUpdate(
+  args: Record<string, unknown>,
+  state: ProducerPlayerUserState,
+): string | null | undefined {
+  if (!hasMcpArg(args, 'listeningDeviceId')) {
+    return undefined;
+  }
+
+  const explicitListeningDeviceId = readMcpOptionalNullableStringArg(args, 'listeningDeviceId');
+  if (explicitListeningDeviceId === null) {
+    return null;
+  }
+
+  if (explicitListeningDeviceId === undefined) {
+    return undefined;
+  }
+
+  const knownDevice = state.listeningDevices.find(
+    (device) => device.id === explicitListeningDeviceId,
+  );
+  if (!knownDevice) {
+    // Updates are often issued from terse phone/voice prompts. Failing fast on
+    // unknown device ids keeps a typo from rewriting a useful historical tag.
+    throw new Error(`Unknown listeningDeviceId: ${explicitListeningDeviceId}`);
+  }
+
+  return knownDevice.id;
+}
+
+function isListeningNoteItem(item: SongChecklistItem): boolean {
+  return item.isNote === true;
+}
+
+function serializeMcpListeningNote(
+  songId: string,
+  item: SongChecklistItem,
+  state: ProducerPlayerUserState,
+  service: FileLibraryService,
+): Record<string, unknown> {
+  const snapshot = service.getSnapshot();
+  const song = snapshot.songs.find((entry) => entry.id === songId) ?? null;
+  const listeningDevice = item.listeningDeviceId
+    ? state.listeningDevices.find((device) => device.id === item.listeningDeviceId) ?? null
+    : null;
+
+  return {
+    id: item.id,
+    songId,
+    songTitle: song ? getMcpSongDisplayTitle(song, state) : state.songDisplayTitles[songId] ?? null,
+    text: item.text,
+    timestampSeconds: item.timestampSeconds,
+    versionNumber: item.versionNumber,
+    listeningDeviceId: item.listeningDeviceId,
+    listeningDeviceName: listeningDevice?.name ?? null,
+    checklistItem: item,
+  };
+}
+
+function collectMcpListeningNotes(
+  state: ProducerPlayerUserState,
+  service: FileLibraryService,
+  songIdFilter?: string,
+): Record<string, unknown>[] {
+  const notes: Record<string, unknown>[] = [];
+  for (const [songId, items] of Object.entries(state.songChecklists)) {
+    if (songIdFilter && songId !== songIdFilter) {
+      continue;
+    }
+
+    for (const item of items) {
+      if (isListeningNoteItem(item)) {
+        notes.push(serializeMcpListeningNote(songId, item, state, service));
+      }
+    }
+  }
+  return notes;
+}
+
+function findMcpListeningNote(
+  state: ProducerPlayerUserState,
+  noteId: string,
+  songIdFilter?: string,
+): { songId: string; item: SongChecklistItem; index: number } | null {
+  for (const [songId, items] of Object.entries(state.songChecklists)) {
+    if (songIdFilter && songId !== songIdFilter) {
+      continue;
+    }
+
+    const index = items.findIndex((item) => item.id === noteId && isListeningNoteItem(item));
+    if (index >= 0) {
+      return { songId, item: items[index], index };
+    }
+  }
+
+  return null;
+}
+
+async function writeMcpListeningNoteState<T>(
+  updater: (state: ProducerPlayerUserState) => {
+    songChecklists: Record<string, SongChecklistItem[]>;
+    result: T;
+  },
+): Promise<T> {
+  if (!userStateService) {
+    throw new Error('User state service not initialized');
+  }
+
+  const { state: updatedState, result } = await userStateService.patchUserStateFromCurrent(
+    (state) => {
+      const { songChecklists, result: mutationResult } = updater(state);
+      return {
+        patch: { songChecklists },
+        result: mutationResult,
+      };
+    },
+  );
+
+  publishUserStateChanged(updatedState);
+
+  // The unified state file is authoritative, but the legacy shared-state file
+  // is still maintained for rollback/backward-compatibility paths. Mirror the
+  // UI's SET_USER_STATE behavior so MCP-created notes survive every existing
+  // migration and recovery route.
+  void writePersistedSharedUserState({
+    ratings: updatedState.songRatings,
+    checklists: updatedState.songChecklists,
+    projectFilePaths: updatedState.songProjectFilePaths,
+  }).catch((error: unknown) => {
+    log.warn('[producer-player:mcp] failed to mirror listening notes to shared state', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+
+  return result;
+}
+
+async function createMcpListeningNote(
+  args: Record<string, unknown>,
+  service: FileLibraryService,
+): Promise<Record<string, unknown>> {
+  return writeMcpListeningNoteState((state) => {
+    const song = resolveMcpSongTarget(args, service, state);
+    const text = readMcpStringArg(args, 'text');
+    const timestampSeconds =
+      readMcpOptionalNullableNumberArg(args, 'timestampSeconds', { min: 0 }) ?? null;
+    const explicitVersionNumber = readMcpOptionalNullableNumberArg(args, 'versionNumber', {
+      integer: true,
+      min: 1,
+    });
+    const versionNumber =
+      explicitVersionNumber === undefined
+        ? inferMcpActiveVersionNumber(song)
+        : explicitVersionNumber;
+    const listeningDeviceId = resolveMcpListeningDeviceId(args, state);
+    const note: SongChecklistItem = {
+      id: `mcp-note-${randomUUID()}`,
+      text,
+      completed: false,
+      timestampSeconds,
+      versionNumber,
+      listeningDeviceId,
+      isNote: true,
+    };
+    const currentItems = state.songChecklists[song.id] ?? [];
+    const songChecklists = {
+      ...state.songChecklists,
+      [song.id]: [note, ...currentItems],
+    };
+
+    return {
+      songChecklists,
+      result: {
+        note: serializeMcpListeningNote(song.id, note, state, service),
+        totalNotesForSong: currentItems.filter(isListeningNoteItem).length + 1,
+      },
+    };
+  });
+}
+
+async function listMcpListeningNotes(
+  args: Record<string, unknown>,
+  service: FileLibraryService,
+): Promise<Record<string, unknown>> {
+  if (!userStateService) {
+    throw new Error('User state service not initialized');
+  }
+
+  const state = await userStateService.readUserState();
+  const songIdFilter = resolveMcpOptionalSongIdFilter(args, service, state);
+  const notes = collectMcpListeningNotes(state, service, songIdFilter);
+  return { notes, count: notes.length };
+}
+
+async function getMcpListeningNote(
+  args: Record<string, unknown>,
+  service: FileLibraryService,
+): Promise<Record<string, unknown>> {
+  if (!userStateService) {
+    throw new Error('User state service not initialized');
+  }
+
+  const noteId = readMcpStringArg(args, 'noteId');
+  const state = await userStateService.readUserState();
+  const songIdFilter = resolveMcpOptionalSongIdFilter(args, service, state);
+  const found = findMcpListeningNote(state, noteId, songIdFilter);
+  if (!found) {
+    throw new Error(`No MCP listening note found for noteId: ${noteId}`);
+  }
+
+  return {
+    note: serializeMcpListeningNote(found.songId, found.item, state, service),
+  };
+}
+
+async function updateMcpListeningNote(
+  args: Record<string, unknown>,
+  service: FileLibraryService,
+): Promise<Record<string, unknown>> {
+  const noteId = readMcpStringArg(args, 'noteId');
+
+  return writeMcpListeningNoteState((state) => {
+    const songIdFilter = resolveMcpOptionalSongIdFilter(args, service, state);
+    const found = findMcpListeningNote(state, noteId, songIdFilter);
+    if (!found) {
+      throw new Error(`No MCP listening note found for noteId: ${noteId}`);
+    }
+
+    let didUpdate = false;
+    const nextItem: SongChecklistItem = {
+      ...found.item,
+      // Keep this API scoped to "listening notes" even if an old row somehow
+      // lost its note flag before being found. Todos have separate UI semantics
+      // and should not be mutated through this phone-agent note surface.
+      isNote: true,
+    };
+    const nextText = readMcpOptionalStringArg(args, 'text');
+    if (nextText !== undefined) {
+      nextItem.text = nextText;
+      didUpdate = true;
+    }
+
+    const nextTimestampSeconds = readMcpOptionalNullableNumberArg(args, 'timestampSeconds', {
+      min: 0,
+    });
+    if (nextTimestampSeconds !== undefined) {
+      nextItem.timestampSeconds = nextTimestampSeconds;
+      didUpdate = true;
+    }
+
+    const nextVersionNumber = readMcpOptionalNullableNumberArg(args, 'versionNumber', {
+      integer: true,
+      min: 1,
+    });
+    if (nextVersionNumber !== undefined) {
+      nextItem.versionNumber = nextVersionNumber;
+      didUpdate = true;
+    }
+
+    const nextListeningDeviceId = resolveMcpListeningDeviceUpdate(args, state);
+    if (nextListeningDeviceId !== undefined) {
+      nextItem.listeningDeviceId = nextListeningDeviceId;
+      didUpdate = true;
+    }
+
+    if (!didUpdate) {
+      throw new Error(
+        'Pass at least one listening-note field to update: text, timestampSeconds, versionNumber, or listeningDeviceId.',
+      );
+    }
+
+    const currentItems = state.songChecklists[found.songId] ?? [];
+    const nextItems = currentItems.map((item, index) =>
+      index === found.index ? nextItem : item,
+    );
+    const songChecklists = {
+      ...state.songChecklists,
+      [found.songId]: nextItems,
+    };
+
+    return {
+      songChecklists,
+      result: {
+        note: serializeMcpListeningNote(found.songId, nextItem, state, service),
+      },
+    };
+  });
 }
 
 function requireMcpMainWindow(): BrowserWindow {
@@ -4782,6 +5263,107 @@ function createMcpControlTools(service: FileLibraryService): ProducerPlayerMcpTo
       description: 'Return the current linked folders, songs, versions, matcher settings, and scan status.',
       inputSchema: objectSchema(),
       handler: () => service.getSnapshot(),
+    },
+    {
+      name: 'pp_create_listening_note',
+      description:
+        'Create a permanent per-song listening note from an agent/mobile prompt, optionally with timestamp, version, and listening-device metadata.',
+      inputSchema: objectSchema(
+        {
+          songId: {
+            type: 'string',
+            description: 'Optional Producer Player song id. Pass songId or songTitle.',
+          },
+          songTitle: {
+            type: 'string',
+            description: 'Optional visible/file-derived song title. Pass songId or songTitle.',
+          },
+          text: { type: 'string', description: 'Listening note text to save.' },
+          timestampSeconds: {
+            type: ['number', 'null'],
+            description: 'Optional song timestamp in seconds. Null stores an untimed note.',
+          },
+          versionNumber: {
+            type: ['number', 'null'],
+            description:
+              'Optional track version number. Omit to infer the active/newest version; null stores no version.',
+          },
+          listeningDeviceId: {
+            type: ['string', 'null'],
+            description:
+              'Optional listening-device id. Omit to use the active device; null stores no device tag.',
+          },
+        },
+        ['text'],
+      ),
+      handler: (args) => createMcpListeningNote(args, service),
+    },
+    {
+      name: 'pp_list_listening_notes',
+      description: 'List permanent listening notes, optionally filtered to one song by songId or songTitle.',
+      inputSchema: objectSchema({
+        songId: {
+          type: 'string',
+          description: 'Optional Producer Player song id filter.',
+        },
+        songTitle: {
+          type: 'string',
+          description: 'Optional visible/file-derived song title filter.',
+        },
+      }),
+      handler: (args) => listMcpListeningNotes(args, service),
+    },
+    {
+      name: 'pp_get_listening_note',
+      description: 'Fetch one saved listening note by note id, optionally scoped to a song.',
+      inputSchema: objectSchema(
+        {
+          noteId: { type: 'string', description: 'Saved listening note id.' },
+          songId: {
+            type: 'string',
+            description: 'Optional Producer Player song id filter.',
+          },
+          songTitle: {
+            type: 'string',
+            description: 'Optional visible/file-derived song title filter.',
+          },
+        },
+        ['noteId'],
+      ),
+      handler: (args) => getMcpListeningNote(args, service),
+    },
+    {
+      name: 'pp_update_listening_note',
+      description:
+        'Update an existing listening note text, timestamp, version, or listening-device tag by note id.',
+      inputSchema: objectSchema(
+        {
+          noteId: { type: 'string', description: 'Saved listening note id.' },
+          songId: {
+            type: 'string',
+            description: 'Optional Producer Player song id filter.',
+          },
+          songTitle: {
+            type: 'string',
+            description: 'Optional visible/file-derived song title filter.',
+          },
+          text: { type: 'string', description: 'Replacement note text.' },
+          timestampSeconds: {
+            type: ['number', 'null'],
+            description: 'Replacement song timestamp in seconds, or null to clear.',
+          },
+          versionNumber: {
+            type: ['number', 'null'],
+            description: 'Replacement version number, or null to clear.',
+          },
+          listeningDeviceId: {
+            type: ['string', 'null'],
+            description: 'Replacement listening-device id, or null to clear.',
+          },
+        },
+        ['noteId'],
+      ),
+      handler: (args) => updateMcpListeningNote(args, service),
     },
     {
       name: 'pp_link_folder',

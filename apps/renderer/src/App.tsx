@@ -945,6 +945,12 @@ type AutoplayMediaPreloadState = {
   status: 'loading' | 'ready' | 'error';
 };
 
+type PlaybackEventLogEntry = Record<string, unknown> & {
+  event: string;
+  perfNowMs: number;
+  timestamp: string;
+};
+
 const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
 const SONG_CHECKLISTS_STORAGE_KEY = 'producer-player.song-checklists.v1';
@@ -4217,6 +4223,11 @@ export function App(): JSX.Element {
   const targetGainLinearRef = useRef(DEFAULT_PLAYBACK_VOLUME);
   const targetTransformGainLinearRef = useRef(1);
   const playbackAnalyserNodeRef = useRef<AnalyserNode | null>(null);
+  // E2E gapless verification needs high-resolution renderer-side timings.
+  // Keep a small rolling log from the same place that writes playback console
+  // diagnostics so tests can measure media handoff latency without scraping
+  // DevTools output or changing the visible transport.
+  const playbackEventLogRef = useRef<PlaybackEventLogEntry[]>([]);
   const bandSoloFiltersRef = useRef<BiquadFilterNode[]>([]);
   const handleChecklistItemTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
     if (node) {
@@ -6980,8 +6991,9 @@ export function App(): JSX.Element {
   ): void {
     const audio = audioRef.current;
 
-    console.info('[producer-player:playback]', {
+    const playbackEvent: PlaybackEventLogEntry = {
       event,
+      perfNowMs: performance.now(),
       timestamp: new Date().toISOString(),
       selectedVersionId: selectedPlaybackVersionId,
       selectedFilePath: playbackSourceRef.current?.filePath ?? null,
@@ -6993,7 +7005,17 @@ export function App(): JSX.Element {
       networkState: audio?.networkState ?? null,
       currentSrc: audio?.currentSrc ?? null,
       ...details,
-    });
+    };
+
+    playbackEventLogRef.current.push(playbackEvent);
+    if (playbackEventLogRef.current.length > 1000) {
+      playbackEventLogRef.current.splice(
+        0,
+        playbackEventLogRef.current.length - 1000
+      );
+    }
+
+    console.info('[producer-player:playback]', playbackEvent);
   }
 
   function clearAutoplayMediaPreloadStartTimer(): void {
@@ -11742,20 +11764,83 @@ export function App(): JSX.Element {
         pendingMixSourceFilePath: string | null;
         currentPlaybackSourceFilePath: string | null;
         currentAudioSrc: string | null;
+        currentAudioTimeSeconds: number | null;
+        durationSeconds: number | null;
+        audioPaused: boolean | null;
+        audioEnded: boolean | null;
+        audioReadyState: number | null;
+        playbackSourceReady: boolean;
+        playbackAudioContextState: AudioContextState | null;
+        playbackAudioContextTimeSeconds: number | null;
+        playerGainLinear: number | null;
+        outputRmsLinear: number | null;
+        outputPeakLinear: number | null;
       };
-    }).__producerPlayerGetPlaybackHandoffState = () => ({
-      pausedUntilMs: playbackBackgroundWarmupPausedUntilRef.current,
-      cachedSourceFilePaths: Array.from(playbackSourceCacheRef.current.values()).map(
-        (source) => source.originalFilePath ?? source.filePath
-      ),
-      inFlightCacheKeys: Array.from(playbackSourceResolveInFlightRef.current.keys()),
-      preloadedSourceFilePath: autoplayMediaPreloadStateRef.current?.filePath ?? null,
-      preloadedReadyState: autoplayMediaPreloadStateRef.current?.readyState ?? null,
-      preloadedStatus: autoplayMediaPreloadStateRef.current?.status ?? null,
-      pendingMixSourceFilePath: mixPlaybackSourcePendingFilePathRef.current,
-      currentPlaybackSourceFilePath: playbackSourceRef.current?.filePath ?? null,
-      currentAudioSrc: audioRef.current?.currentSrc ?? null,
-    });
+    }).__producerPlayerGetPlaybackHandoffState = () => {
+      const audio = audioRef.current;
+      const analyser = playbackAnalyserNodeRef.current;
+      const playerGain = playbackGainNodeRef.current?.gain.value ?? null;
+      let busRmsLinear: number | null = null;
+      let busPeakLinear: number | null = null;
+
+      if (analyser) {
+        const samples = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(samples);
+
+        let sumSquares = 0;
+        let peak = 0;
+        for (const sample of samples) {
+          const centered = (sample - 128) / 128;
+          sumSquares += centered * centered;
+          peak = Math.max(peak, Math.abs(centered));
+        }
+
+        // The analyser sits just before the final player-volume gain node so
+        // meters can ignore the UI volume slider. For gapless E2E probes,
+        // multiply by the instantaneous player gain to approximate the signal
+        // actually entering the destination without inserting another node.
+        const gain = playerGain ?? 1;
+        busRmsLinear = Math.sqrt(sumSquares / samples.length) * gain;
+        busPeakLinear = peak * gain;
+      }
+
+      return {
+        pausedUntilMs: playbackBackgroundWarmupPausedUntilRef.current,
+        cachedSourceFilePaths: Array.from(playbackSourceCacheRef.current.values()).map(
+          (source) => source.originalFilePath ?? source.filePath
+        ),
+        inFlightCacheKeys: Array.from(playbackSourceResolveInFlightRef.current.keys()),
+        preloadedSourceFilePath: autoplayMediaPreloadStateRef.current?.filePath ?? null,
+        preloadedReadyState: autoplayMediaPreloadStateRef.current?.readyState ?? null,
+        preloadedStatus: autoplayMediaPreloadStateRef.current?.status ?? null,
+        pendingMixSourceFilePath: mixPlaybackSourcePendingFilePathRef.current,
+        currentPlaybackSourceFilePath: playbackSourceRef.current?.filePath ?? null,
+        currentAudioSrc: audio?.currentSrc ?? null,
+        currentAudioTimeSeconds:
+          audio && Number.isFinite(audio.currentTime) ? audio.currentTime : null,
+        durationSeconds:
+          audio && Number.isFinite(audio.duration) ? audio.duration : null,
+        audioPaused: audio?.paused ?? null,
+        audioEnded: audio?.ended ?? null,
+        audioReadyState: audio?.readyState ?? null,
+        playbackSourceReady: playbackSourceReadyRef.current,
+        playbackAudioContextState: playbackAudioContextRef.current?.state ?? null,
+        playbackAudioContextTimeSeconds:
+          playbackAudioContextRef.current?.currentTime ?? null,
+        playerGainLinear: playerGain,
+        outputRmsLinear: busRmsLinear,
+        outputPeakLinear: busPeakLinear,
+      };
+    };
+    (window as unknown as {
+      __producerPlayerGetPlaybackEventLog?: () => PlaybackEventLogEntry[];
+    }).__producerPlayerGetPlaybackEventLog = () =>
+      playbackEventLogRef.current.map((entry) => ({ ...entry }));
+    (window as unknown as {
+      __producerPlayerClearPlaybackEventLog?: () => void;
+    }).__producerPlayerClearPlaybackEventLog = () => {
+      playbackEventLogRef.current = [];
+    };
     const readWarmupState = (entries: typeof libraryActiveVersions) =>
       entries.map(({ song, version }) => {
         const cacheKey = buildMasteringCacheKey(version);
@@ -11908,6 +11993,12 @@ export function App(): JSX.Element {
       delete (window as unknown as {
         __producerPlayerGetPlaybackHandoffState?: unknown;
       }).__producerPlayerGetPlaybackHandoffState;
+      delete (window as unknown as {
+        __producerPlayerGetPlaybackEventLog?: unknown;
+      }).__producerPlayerGetPlaybackEventLog;
+      delete (window as unknown as {
+        __producerPlayerClearPlaybackEventLog?: unknown;
+      }).__producerPlayerClearPlaybackEventLog;
       delete (window as unknown as {
         __producerPlayerGetVisibleLatestWarmupState?: unknown;
       }).__producerPlayerGetVisibleLatestWarmupState;

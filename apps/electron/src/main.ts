@@ -2758,12 +2758,17 @@ function emitTransportCommand(command: TransportCommand): void {
 }
 
 function registerGlobalMediaShortcuts(): void {
-  // WHY (macOS): PR #21/v3.309 disabled this registration and Chromium's
-  // hardware-media-key handling to stop PP owning the physical play/pause key.
-  // Ethan explicitly reverted that on 2026-06-17 because his workflow relies on
-  // Producer Player responding to the hardware media keys while he is listening.
-  // Keep macOS in this global-shortcut path unless he asks for a different
-  // focus-following media-key model again.
+  // WHY (macOS): do not register Electron's exclusive global media-key grab.
+  // Codex's 2026-06-17 media-key audit found the final working shape is the
+  // same model Chrome uses: leave Chromium HardwareMediaKeyHandling enabled
+  // and let the renderer's `navigator.mediaSession` handlers own play/pause
+  // only while Producer Player is the active Now Playing app. That keeps PP
+  // responsive when Ethan is listening here, but yields cleanly to Spotify,
+  // Chrome, etc. instead of hogging the physical key globally.
+  if (process.platform === 'darwin') {
+    return;
+  }
+
   const bindings: Array<[string, TransportCommand]> = [
     ['MediaPlayPause', 'play-pause'],
     ['MediaNextTrack', 'next-track'],

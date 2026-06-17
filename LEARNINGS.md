@@ -24,12 +24,22 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-06-17T16:00:31Z
+**Trigger:** Ethan task 2026-06-17: PP hijacking hardware media key after a separate media-key tool was disabled
+**Symptom:** macOS hardware play/pause media key stuck on Producer Player; key did not follow most-recently-used media app (YouTube/Spotify) — PP held system Now Playing / media-key ownership even when backgrounded/paused
+**Root cause:** Chromium HardwareMediaKeyHandling feature + an explicit globalShortcut.register('MediaPlayPause',...) in main.ts promoted PP to the persistent GLOBAL hardware-media-key owner on macOS, locking the key to PP
+**Fix:** main.ts: appendSwitch('disable-features','HardwareMediaKeyHandling') on darwin before whenReady; registerGlobalMediaShortcuts() now early-returns on darwin (keeps the global path for Win/Linux). Renderer navigator.mediaSession Now Playing left intact = native focus-following behaviour + in-app transport unaffected
+**Commit:** b954f75
+**Guard:** vibe comments at both edit sites explaining the hijack; macOS-gated so Win/Linux behaviour unchanged
+---
+
+---
 **Date:** 2026-06-12T11:43:34Z
 **Trigger:** voice 7426 (ship) / voice 7421 (diagnosis)
 **Symptom:** Residual crackle when rapidly switching tracks (A<->B<->A) during playback or on long/large files, at v3.299 — after prior multi-threading fixes (worker analysis v3.240, 15ms crossfade, deferred kickoff) the LAST main-thread starvation source remained
 **Root cause:** extractTransferableChannels (trackAnalysisClient.ts) did a full copy.set(source) memcpy of EVERY audio channel (~170MB for a 4-min stereo 44.1k track) on the RENDERER MAIN THREAD before transferring buffers to the analysis worker. That synchronous memcpy starved WebAudio's high-res render scheduling during the deferred analysis window -> crackle.
 **Fix:** Zero-copy worker handoff: transfer getChannelData()'s underlying ArrayBuffer DIRECTLY (in the postMessage transfer list) instead of copy.set-ing into a fresh Float32Array. Detach-safety verified: the AudioBuffer + its AudioContext are discarded/close()'d immediately after analyzeAudioBufferInWorker returns (audioAnalysis.ts analyzeTrackFromUrl, sole caller; buffer is a function-local never read post-call, context.close in finally ~L226-231) so detaching the channel buffers is harmless. Correctness guard: zero-copy only when the channel view exactly spans its own ArrayBuffer (byteOffset 0, full length — always true in Chromium WebAudio); else per-channel copy fallback. Eliminates the ~170MB main-thread memcpy. Marks the (c) residual item from the voice-7421 diagnosis as RESOLVED.
-**Commit:** PENDING-PR
+**Commit:** b954f75-PR
 **Guard:** trackAnalysisClient.test.ts: new 'zero-copy transfer safety (v3.300)' describe block — (1) source-inspection test asserting analyzeTrackFromUrl never reads the AudioBuffer after the worker call (fails if someone adds a post-analysis buffer.getChannelData/numberOfChannels/return buffer), (2) zero-copy correctness test. All 500 renderer tests + typecheck + full build green.
 ---
 

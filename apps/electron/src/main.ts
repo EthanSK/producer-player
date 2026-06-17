@@ -2758,25 +2758,12 @@ function emitTransportCommand(command: TransportCommand): void {
 }
 
 function registerGlobalMediaShortcuts(): void {
-  // WHY (macOS): registering a `MediaPlayPause` (or any media) global shortcut
-  // is what made PP *hijack* and *stick* the hardware media key — it promotes
-  // PP to the global system media-key owner and holds it even when PP is
-  // backgrounded/paused, so the key stops following the most-recently-used
-  // media app (the native macOS behaviour). On macOS we therefore DON'T
-  // register these globals at all; the renderer's `navigator.mediaSession`
-  // handlers (apps/renderer/src/App.tsx) already give PP a Now Playing session
-  // that correctly responds to the hardware keys WHILE PP is the active media
-  // app and yields control back to other apps otherwise. Combined with the
-  // `disable-features=HardwareMediaKeyHandling` switch above, this restores
-  // native focus-following behaviour without losing in-app transport control.
-  //
-  // We keep the global-shortcut path for Windows/Linux, where it is the
-  // legitimate primary delivery channel for hardware media keys and does NOT
-  // have the macOS "sticky owner" problem.
-  if (process.platform === 'darwin') {
-    return;
-  }
-
+  // WHY (macOS): PR #21/v3.309 disabled this registration and Chromium's
+  // hardware-media-key handling to stop PP owning the physical play/pause key.
+  // Ethan explicitly reverted that on 2026-06-17 because his workflow relies on
+  // Producer Player responding to the hardware media keys while he is listening.
+  // Keep macOS in this global-shortcut path unless he asks for a different
+  // focus-following media-key model again.
   const bindings: Array<[string, TransportCommand]> = [
     ['MediaPlayPause', 'play-pause'],
     ['MediaNextTrack', 'next-track'],
@@ -8316,39 +8303,6 @@ function configureMacTestActivationPolicy(): void {
 }
 
 configureMacTestActivationPolicy();
-
-// ---------------------------------------------------------------------------
-// macOS hardware media-key behaviour
-// ---------------------------------------------------------------------------
-// WHY: Producer Player was *hijacking* the physical play/pause media key on
-// macOS. Once PP launched it became the persistent system "Now Playing" /
-// hardware-media-key owner and held that ownership even when backgrounded or
-// paused — so pressing the hardware ⏯ key always controlled PP and never
-// followed the most-recently-used media app (YouTube / Spotify), which is the
-// native macOS behaviour Ethan wants.
-//
-// The grab came from Chromium's `HardwareMediaKeyHandling` feature: any
-// Electron app that plays <audio> + (here) registers a `MediaPlayPause`
-// global shortcut gets promoted by Chromium to a global hardware-media-key
-// handler that *locks* the key to this process. Disabling that one Chromium
-// feature stops PP from globally capturing / sticking the hardware keys.
-//
-// IMPORTANT — this only affects the GLOBAL / system-level hardware media-key
-// capture. It does NOT touch:
-//   • PP's in-window transport controls (on-screen play/pause buttons and the
-//     in-app keyboard shortcuts handled by the renderer) — those are ordinary
-//     DOM events, unaffected by this Chromium feature flag.
-//   • The renderer's `navigator.mediaSession` Now Playing integration
-//     (apps/renderer/src/App.tsx) — MediaSession is the well-behaved,
-//     macOS-native path that correctly follows most-recently-used-app focus,
-//     so we keep it. It's the global-shortcut + HardwareMediaKeyHandling combo
-//     that broke the native behaviour, not MediaSession.
-//
-// Must be set BEFORE the app `ready` event / GPU+renderer spawn, hence here at
-// module-eval time before `app.whenReady()`.
-if (process.platform === 'darwin') {
-  app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
-}
 
 app.whenReady().then(async () => {
   log.info('App ready', {

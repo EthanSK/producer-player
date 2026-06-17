@@ -437,6 +437,27 @@ button.play-toggle {
   justify-content: center;
 }
 
+.playback-toggle-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+  overflow: visible;
+  pointer-events: none;
+  flex: 0 0 auto;
+}
+
+/* The play triangle's point makes mathematical centering look left-heavy; a
+   tiny optical nudge keeps it visually centered in every round transport. */
+.playback-toggle-icon--play {
+  transform: translateX(0.06em);
+}
+
+button.play-toggle .playback-toggle-icon {
+  width: 22px;
+  height: 22px;
+}
+
 button.play-toggle[data-playing='true'] {
   background: rgba(95, 210, 143, 0.22);
   border-color: var(--success);
@@ -1742,6 +1763,11 @@ button.analysis-overlay-transport-button:hover {
 button.analysis-overlay-play-toggle {
   min-width: 40px;
   font-size: 16px;
+}
+
+button.analysis-overlay-play-toggle .playback-toggle-icon {
+  width: 16px;
+  height: 16px;
 }
 
 button.analysis-overlay-autoplay-button {
@@ -5758,6 +5784,11 @@ button.checklist-play-toggle {
   flex-shrink: 0;
 }
 
+button.checklist-play-toggle .playback-toggle-icon {
+  width: 17px;
+  height: 17px;
+}
+
 button.checklist-play-toggle[data-playing='true'] {
   background: rgba(95, 210, 143, 0.18);
   border-color: var(--success);
@@ -9395,6 +9426,11 @@ button.reference-action.active {
   font-weight: 900;
   cursor: pointer;
   transition: filter 0.16s ease, transform 0.16s ease, background 0.16s ease;
+}
+
+.ideals-audition-play .playback-toggle-icon {
+  width: 13px;
+  height: 13px;
 }
 
 .ideals-audition-play:hover,

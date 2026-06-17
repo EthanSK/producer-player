@@ -269,6 +269,7 @@ import {
 import { ErrorDetailsDialog } from './lib/ErrorDetailsDialog';
 import { formatBytes } from './lib/formatBytes';
 import { logAction, logError, installRendererErrorHandlers } from './lib/actionLog';
+import { PlaybackToggleIcon } from './lib/PlaybackToggleIcon';
 import {
   LUFS_LINKS,
   TRUE_PEAK_LINKS,
@@ -20717,7 +20718,7 @@ export function App(): JSX.Element {
                     }}
                     title="Play or pause the selected track."
                   >
-                    <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                    <PlaybackToggleIcon isPlaying={isPlaying} />
                   </button>
                   <button
                     type="button"
@@ -22867,7 +22868,7 @@ export function App(): JSX.Element {
                         }
                       }}
                     >
-                      <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                      <PlaybackToggleIcon isPlaying={isPlaying} />
                     </button>
                     <button
                       type="button"
@@ -25229,7 +25230,7 @@ export function App(): JSX.Element {
                     void handleTogglePlayback();
                   }}
                 >
-                  <span aria-hidden="true">{isPlaying ? '⏸' : '▶︎'}</span>
+                  <PlaybackToggleIcon isPlaying={isPlaying} />
                 </button>
                 <button
                   type="button"

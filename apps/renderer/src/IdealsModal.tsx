@@ -28,6 +28,7 @@ import {
   type IdealStemAnalysisSource,
   type IdealStemSourceKind,
 } from './idealStemAnalysis';
+import { PlaybackToggleIcon } from './lib/PlaybackToggleIcon';
 
 export type { IdealStemAnalysisSource } from './idealStemAnalysis';
 
@@ -873,7 +874,7 @@ function StemAuditionPanel({
               aria-label={isPlaying ? 'Pause' : 'Play'}
               data-testid={`ideals-audition-play-${stemId}`}
             >
-              <span aria-hidden>{isPlaying ? '❚❚' : '▶'}</span>
+              <PlaybackToggleIcon isPlaying={isPlaying} />
             </button>
             <div
               className="ideals-audition-scrub"

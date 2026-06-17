@@ -24,16 +24,6 @@ Each entry looks like:
 (newest first)
 
 ---
-**Date:** 2026-06-17T16:00:31Z
-**Trigger:** Ethan task 2026-06-17: PP hijacking hardware media key after a separate media-key tool was disabled
-**Symptom:** macOS hardware play/pause media key stuck on Producer Player; key did not follow most-recently-used media app (YouTube/Spotify) — PP held system Now Playing / media-key ownership even when backgrounded/paused
-**Root cause:** Chromium HardwareMediaKeyHandling feature + an explicit globalShortcut.register('MediaPlayPause',...) in main.ts promoted PP to the persistent GLOBAL hardware-media-key owner on macOS, locking the key to PP
-**Fix:** main.ts: appendSwitch('disable-features','HardwareMediaKeyHandling') on darwin before whenReady; registerGlobalMediaShortcuts() now early-returns on darwin (keeps the global path for Win/Linux). Renderer navigator.mediaSession Now Playing left intact = native focus-following behaviour + in-app transport unaffected
-**Commit:** b954f75
-**Guard:** vibe comments at both edit sites explaining the hijack; macOS-gated so Win/Linux behaviour unchanged
----
-
----
 **Date:** 2026-06-12T11:43:34Z
 **Trigger:** voice 7426 (ship) / voice 7421 (diagnosis)
 **Symptom:** Residual crackle when rapidly switching tracks (A<->B<->A) during playback or on long/large files, at v3.299 — after prior multi-threading fixes (worker analysis v3.240, 15ms crossfade, deferred kickoff) the LAST main-thread starvation source remained
@@ -102,4 +92,3 @@ Each entry looks like:
 **Commit:** 97c2365
 **Guard:** agentChatSelection.test.ts pins the helpers (truncate cap, blockquote format, append-no-overwrite, tooltip position math incl. viewport-edge + container clamp)
 ---
-

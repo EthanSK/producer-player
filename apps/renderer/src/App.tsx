@@ -41,6 +41,7 @@ import type {
   AiRecommendationStatus,
   AlbumChecklistItem,
   AudioFileAnalysis,
+  AudioMetadataProbeResult,
   AutoUpdateDowngradeResult,
   AutoUpdateRecheckResult,
   AutoUpdateState,
@@ -94,6 +95,7 @@ import {
   // so the LUFS display is no longer gated on bit-depth presence
   // (Ethan voice 7225 — "all LUFS stuck on loading").
   isMasteringCacheEntryMissingBitDepth,
+  isMasteringCacheEntryMissingBpm,
   parseVersionModifiedAtMs,
 } from './masteringAnalysisCache';
 import {
@@ -1188,6 +1190,9 @@ interface InspectorVersionSampleRateState {
   // don't have a PCM bit depth.
   bitDepth: number | null;
   sampleFormat: string | null;
+  // Undefined lives only on legacy MasteringCacheEntry objects. Once a row's
+  // Inspector state is hydrated, `null` means "BPM probe ran, no tag found".
+  bpm: number | null;
   error: string | null;
 }
 
@@ -1207,6 +1212,7 @@ function toAgentStaticAnalysis(measured: AudioFileAnalysis): AgentStaticAnalysis
     // bit-depth/sample-rate pair semantically together (Ethan voice 7201).
     bitDepth: measured.bitDepth ?? null,
     sampleFormat: measured.sampleFormat ?? null,
+    bpm: measured.bpm ?? null,
   };
 }
 
@@ -1230,6 +1236,26 @@ function toAgentPlatformNormalization(
         explanation: preview?.explanation ?? '',
       };
     }),
+  };
+}
+
+function withBpmOnMasteringCacheEntry(
+  entry: MasteringCacheEntry,
+  bpm: number | null
+): MasteringCacheEntry {
+  const normalizedBpm = bpm !== null && Number.isFinite(bpm) ? bpm : null;
+
+  return {
+    ...entry,
+    analyzedAt: new Date().toISOString(),
+    measuredAnalysis: {
+      ...entry.measuredAnalysis,
+      bpm: normalizedBpm,
+    },
+    staticAnalysis: {
+      ...entry.staticAnalysis,
+      bpm: normalizedBpm,
+    },
   };
 }
 
@@ -1443,6 +1469,50 @@ function runMeasuredAnalysis(
       startDelayMs: options.startDelayMs,
       // v3.195 — Mark as cancellable so the queue may abort+requeue this
       // task when a USER-priority click arrives during cold-launch warmup.
+      cancellable: true,
+    }
+  );
+}
+
+function runAudioMetadataProbe(
+  filePath: string,
+  options: RunMeasuredAnalysisOptions = {}
+): Promise<AudioMetadataProbeResult> {
+  return MEASURED_ANALYSIS_QUEUE.enqueue(
+    async (signal) => {
+      const requestId = `meta-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const handleAbort = (): void => {
+        // Metadata probes share the same main-process child tracking as full
+        // ffmpeg analysis, so the existing cancel API can also SIGKILL this
+        // ffprobe-only BPM read when a USER-selected track needs the lane.
+        try {
+          void window.producerPlayer.cancelAnalyzeAudioFile?.(requestId);
+        } catch {
+          // Older preload in dev; safe to ignore.
+        }
+      };
+
+      if (signal.aborted) {
+        handleAbort();
+      } else {
+        signal.addEventListener('abort', handleAbort, { once: true });
+      }
+
+      try {
+        return await window.producerPlayer.probeAudioMetadata(filePath, requestId);
+      } finally {
+        signal.removeEventListener('abort', handleAbort);
+      }
+    },
+    {
+      priority: options.priority ?? ANALYSIS_PRIORITY_BACKGROUND,
+      // Keep metadata probes distinct from full measured-analysis jobs for the
+      // same file. The queue's key de-dupe returns the first promise for a key,
+      // so sharing the plain cacheKey could make a BPM-only caller receive a
+      // full AudioFileAnalysis object or vice versa.
+      key: options.cacheKey ? `${options.cacheKey}::metadata:bpm` : undefined,
+      label: options.label ?? `${getFileNameFromPath(filePath)} — BPM metadata`,
+      startDelayMs: options.startDelayMs,
       cancellable: true,
     }
   );
@@ -1877,6 +1947,24 @@ function formatSampleRateHz(sampleRateHz: number | null | undefined): string {
     : roundedKilohertz.toFixed(1);
 
   return `${formattedKilohertz} kHz`;
+}
+
+function formatBpm(bpm: number | null | undefined): string {
+  if (bpm === null || bpm === undefined || !Number.isFinite(bpm)) {
+    return '—';
+  }
+
+  const roundedBpm = Math.round(bpm * 10) / 10;
+  const formattedBpm = Number.isInteger(roundedBpm)
+    ? roundedBpm.toFixed(0)
+    : roundedBpm.toFixed(1);
+
+  return `${formattedBpm} BPM`;
+}
+
+function formatBpmSegment(bpm: number | null | undefined): string | null {
+  const formatted = formatBpm(bpm);
+  return formatted === '—' ? null : formatted;
 }
 
 // v3.269 — Bit-depth formatter (Ethan voice 7201, 2026-05-29).
@@ -3832,6 +3920,11 @@ export function App(): JSX.Element {
   // session-only ref because the cache itself is session-only — a real
   // file change still invalidates via cacheKey mismatch (path/size/mtime).
   const masteringCacheBitDepthRefreshedVersionIdsRef = useRef<Set<string>>(new Set());
+  // Same one-shot guard for BPM metadata. A fresh legacy cache entry has
+  // `bpm === undefined`; after a metadata probe, `null` is a legitimate
+  // "no embedded BPM tag" answer. If the probe errors, this guard prevents a
+  // quiet background loop from re-burning ffprobe budget on every warmup pass.
+  const masteringCacheBpmRefreshedVersionIdsRef = useRef<Set<string>>(new Set());
   const latestTrackWarmupKnownActiveVersionKeysRef = useRef<Map<string, string>>(new Map());
   const latestTrackWarmupDetectedVersionIdsRef = useRef<Set<string>>(new Set());
   // v3.259 — The selected-track effect deliberately waits before enqueueing its
@@ -8081,6 +8174,7 @@ export function App(): JSX.Element {
         // through the same cache hydration path (Ethan voice 7201).
         const cachedBitDepth = cachedStaticAnalysis?.bitDepth ?? null;
         const cachedSampleFormat = cachedStaticAnalysis?.sampleFormat ?? null;
+        const cachedBpm = cachedStaticAnalysis?.bpm ?? null;
 
         if (cachedStaticAnalysis) {
           if (
@@ -8091,6 +8185,7 @@ export function App(): JSX.Element {
             existing.integratedLufs !== cachedIntegratedLufs ||
             existing.bitDepth !== cachedBitDepth ||
             existing.sampleFormat !== cachedSampleFormat ||
+            existing.bpm !== cachedBpm ||
             existing.error !== null
           ) {
             next[version.id] = {
@@ -8109,6 +8204,10 @@ export function App(): JSX.Element {
                   ? cachedBitDepth
                   : null,
               sampleFormat: cachedSampleFormat,
+              bpm:
+                cachedBpm !== null && Number.isFinite(cachedBpm)
+                  ? cachedBpm
+                  : null,
               error: null,
             };
             changed = true;
@@ -8124,6 +8223,7 @@ export function App(): JSX.Element {
             integratedLufs: null,
             bitDepth: null,
             sampleFormat: null,
+            bpm: null,
             error: null,
           };
           changed = true;
@@ -8201,7 +8301,11 @@ export function App(): JSX.Element {
         const isMissingBitDepth =
           !masteringCacheBitDepthRefreshedVersionIdsRef.current.has(version.id) &&
           isMasteringCacheEntryMissingBitDepth(cachedEntry, version);
-        if (isFresh && !isMissingBitDepth) {
+        const isMissingBpm =
+          !masteringCacheBpmRefreshedVersionIdsRef.current.has(version.id) &&
+          isMasteringCacheEntryMissingBpm(cachedEntry, version);
+        const needsMetadataRefresh = isMissingBitDepth || isMissingBpm;
+        if (isFresh && !needsMetadataRefresh) {
           return;
         }
 
@@ -8220,8 +8324,8 @@ export function App(): JSX.Element {
         if (
           statusState &&
           statusState.cacheKey === cacheKey &&
-          (statusState.status === 'loading' ||
-            (statusState.status === 'ready' && !isMissingBitDepth))
+            (statusState.status === 'loading' ||
+            (statusState.status === 'ready' && !needsMetadataRefresh))
         ) {
           return;
         }
@@ -8258,6 +8362,7 @@ export function App(): JSX.Element {
                   // loading/ready/error state machine (Ethan voice 7201).
                   bitDepth: null,
                   sampleFormat: null,
+                  bpm: null,
                   error: null,
                 },
               };
@@ -8284,6 +8389,37 @@ export function App(): JSX.Element {
         // in `finally`, which blocked retries after an abort.
         let probeYieldedResult = false;
         try {
+          if (isFresh && isMissingBpm && !isMissingBitDepth && cachedEntry) {
+            const metadata = await runAudioMetadataProbe(version.filePath, {
+              priority: ANALYSIS_PRIORITY_BACKGROUND,
+              cacheKey,
+              label: `${version.fileName} — BPM metadata`,
+            });
+
+            const entryWithBpm = withBpmOnMasteringCacheEntry(cachedEntry, metadata.bpm);
+            upsertMasteringCacheEntry(entryWithBpm);
+            probeYieldedResult = true;
+
+            setInspectorVersionSampleRateByVersionId((previous) => {
+              const existing = previous[version.id];
+              if (!existing || existing.cacheKey !== cacheKey) {
+                return previous;
+              }
+
+              return {
+                ...previous,
+                [version.id]: {
+                  ...existing,
+                  status: 'ready',
+                  bpm: metadata.bpm,
+                  error: null,
+                },
+              };
+            });
+
+            return;
+          }
+
           const measured = await runMeasuredAnalysis(version.filePath, {
             priority: ANALYSIS_PRIORITY_BACKGROUND,
             cacheKey,
@@ -8360,6 +8496,12 @@ export function App(): JSX.Element {
                     ? measured.bitDepth
                     : null,
                 sampleFormat: measured.sampleFormat ?? null,
+                bpm:
+                  measured.bpm !== null &&
+                  measured.bpm !== undefined &&
+                  Number.isFinite(measured.bpm)
+                    ? measured.bpm
+                    : null,
                 error: null,
               },
             };
@@ -8373,6 +8515,15 @@ export function App(): JSX.Element {
           if (isAnalysisAbortError(error)) {
             // Do NOT mark probeYieldedResult — the requeued retry deserves
             // another shot at the bit-depth refresh (v3.273).
+            return;
+          }
+          if (isFresh && isMissingBpm && !isMissingBitDepth) {
+            // BPM-only refresh is intentionally silent: the existing LUFS /
+            // sample-rate cache entry is still valid, so a transient ffprobe
+            // metadata failure should not turn the row into "Unavailable".
+            // Mark the attempt as definitive for this session so we do not
+            // burn a low-priority metadata probe on every render.
+            probeYieldedResult = true;
             return;
           }
           // v3.121 (Concern 4) — same fix as the success branch. Bailing on
@@ -8401,6 +8552,7 @@ export function App(): JSX.Element {
                 // success doesn't bleed into a failed re-analysis.
                 bitDepth: null,
                 sampleFormat: null,
+                bpm: null,
                 error:
                   isTimeout
                     ? 'Analysis timed out. Try selecting this version again.'
@@ -8420,6 +8572,9 @@ export function App(): JSX.Element {
           // rationale; the abort-error branch deliberately does NOT mark.
           if (probeYieldedResult) {
             masteringCacheBitDepthRefreshedVersionIdsRef.current.add(version.id);
+            if (isMissingBpm) {
+              masteringCacheBpmRefreshedVersionIdsRef.current.add(version.id);
+            }
           }
         }
       });
@@ -8778,6 +8933,11 @@ export function App(): JSX.Element {
         isFresh &&
         !masteringCacheBitDepthRefreshedVersionIdsRef.current.has(version.id) &&
         isMasteringCacheEntryMissingBitDepth(cachedEntry, version);
+      const isMissingBpm =
+        isFresh &&
+        !masteringCacheBpmRefreshedVersionIdsRef.current.has(version.id) &&
+        isMasteringCacheEntryMissingBpm(cachedEntry, version);
+      const needsMetadataRefresh = isMissingBitDepth || isMissingBpm;
 
       if (isFresh) {
         latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
@@ -8792,7 +8952,7 @@ export function App(): JSX.Element {
         // the status stays 'fresh' (LUFS keeps showing) and the upsert
         // at the end will overwrite the entry with the bit-depth-filled
         // version.
-        if (!isMissingBitDepth) {
+        if (!needsMetadataRefresh) {
           return;
         }
       }
@@ -8824,8 +8984,23 @@ export function App(): JSX.Element {
       // because `finally` always runs even on early `return`.
       let probeYieldedResult = false;
       try {
+        if (isFresh && isMissingBpm && !isMissingBitDepth && cachedEntry) {
+          const metadata = await runAudioMetadataProbe(version.filePath, {
+            priority: ANALYSIS_PRIORITY_BACKGROUND,
+            cacheKey,
+            label: `${song.title} — ${version.fileName} — BPM metadata`,
+          });
+
+          upsertMasteringCacheEntry(withBpmOnMasteringCacheEntry(cachedEntry, metadata.bpm));
+          probeYieldedResult = true;
+          return;
+        }
+
         const measured = await runMeasuredAnalysis(version.filePath, {
-          priority: ANALYSIS_PRIORITY_NEIGHBOR,
+          priority:
+            isFresh && isMissingBpm && !isMissingBitDepth
+              ? ANALYSIS_PRIORITY_BACKGROUND
+              : ANALYSIS_PRIORITY_NEIGHBOR,
           cacheKey,
           label: `${song.title} — ${version.fileName}`,
         });
@@ -8853,6 +9028,13 @@ export function App(): JSX.Element {
         if (isAnalysisAbortError(error)) {
           // Do NOT set probeYieldedResult — the requeued retry needs
           // another shot at the bit-depth refresh.
+          return;
+        }
+        if (isFresh && isMissingBpm && !isMissingBitDepth) {
+          // BPM-only probes should never poison the visible LUFS status. The
+          // cached mastering entry is still fresh; this just means we failed
+          // to enrich it with an optional embedded tempo tag this session.
+          probeYieldedResult = true;
           return;
         }
         // v3.121 (Concern 4) — let errors flow through even after the
@@ -8892,6 +9074,9 @@ export function App(): JSX.Element {
         // infinite-redispatch loop if the predicate stays true.
         if (probeYieldedResult) {
           masteringCacheBitDepthRefreshedVersionIdsRef.current.add(version.id);
+          if (isMissingBpm) {
+            masteringCacheBpmRefreshedVersionIdsRef.current.add(version.id);
+          }
         }
       }
     }
@@ -8972,6 +9157,14 @@ export function App(): JSX.Element {
       : cachedSelectedMixPlaybackSource;
   const referencePlaybackKey = getReferencePlaybackKey(referenceTrack);
   const isRefMode = playbackPreviewMode === 'reference' && referenceTrack !== null;
+  const selectedPlaybackFreshStaticAnalysis =
+    selectedPlaybackVersion &&
+    isMasteringCacheEntryFresh(
+      masteringCacheByVersionId[selectedPlaybackVersion.id],
+      selectedPlaybackVersion
+    )
+      ? masteringCacheByVersionId[selectedPlaybackVersion.id].staticAnalysis
+      : null;
   const selectedNormalizationPlatform = getNormalizationPlatformProfile(
     selectedNormalizationPlatformId
   );
@@ -18090,7 +18283,18 @@ export function App(): JSX.Element {
           : 'Select a track to preview platform loudness.';
   const selectedPlaybackSampleRateText = buildAnalysisValue(
     measuredAnalysisStatus,
-    formatSampleRateHz(measuredAnalysis?.sampleRateHz),
+    formatSampleRateHz(
+      selectedPlaybackFreshStaticAnalysis?.sampleRateHz ?? measuredAnalysis?.sampleRateHz
+    ),
+    {
+      loading: 'Loading…',
+      error: 'Error',
+      empty: '—',
+    }
+  );
+  const selectedPlaybackBpmText = buildAnalysisValue(
+    measuredAnalysisStatus,
+    formatBpm(selectedPlaybackFreshStaticAnalysis?.bpm ?? measuredAnalysis?.bpm),
     {
       loading: 'Loading…',
       error: 'Error',
@@ -18107,16 +18311,14 @@ export function App(): JSX.Element {
   const inspectorVersionSampleRateTextByVersionId = useMemo(() => {
     const byVersionId: Record<string, string> = {};
 
-    // Helper to compose "48 kHz · 24-bit" from a sample rate value and an
-    // optional bit-depth segment. If bit depth is unavailable, render the
-    // sample rate alone — no trailing separator or "—-bit".
+    // Helper to compose "48 kHz · 24-bit · 128 BPM". Bit depth and BPM are
+    // optional enrichment segments: omit missing values entirely so mp3/AAC or
+    // untagged files stay tidy instead of rendering fake "— BPM" suffixes.
     const composeSampleRateLine = (
       sampleRateText: string,
-      bitDepthText: string | null
-    ): string =>
-      bitDepthText !== null && bitDepthText.length > 0
-        ? `${sampleRateText} · ${bitDepthText}`
-        : sampleRateText;
+      bitDepthText: string | null,
+      bpmText: string | null
+    ): string => [sampleRateText, bitDepthText, bpmText].filter(Boolean).join(' · ');
 
     for (const version of inspectorVersions) {
       const cachedEntry = masteringCacheByVersionId[version.id];
@@ -18126,11 +18328,13 @@ export function App(): JSX.Element {
       const cachedSampleRateHz = cachedStaticAnalysis?.sampleRateHz ?? null;
       const cachedBitDepth = cachedStaticAnalysis?.bitDepth ?? null;
       const cachedSampleFormat = cachedStaticAnalysis?.sampleFormat ?? null;
+      const cachedBpm = cachedStaticAnalysis?.bpm ?? null;
 
       if (cachedSampleRateHz !== null && Number.isFinite(cachedSampleRateHz)) {
         byVersionId[version.id] = composeSampleRateLine(
           formatSampleRateHz(cachedSampleRateHz),
-          formatBitDepth(cachedBitDepth, cachedSampleFormat)
+          formatBitDepth(cachedBitDepth, cachedSampleFormat),
+          formatBpmSegment(cachedBpm)
         );
         continue;
       }
@@ -18152,8 +18356,12 @@ export function App(): JSX.Element {
         statusState?.status === 'ready'
           ? formatBitDepth(statusState.bitDepth, statusState.sampleFormat)
           : null;
+      const bpmText =
+        statusState?.status === 'ready'
+          ? formatBpmSegment(statusState.bpm)
+          : null;
 
-      byVersionId[version.id] = composeSampleRateLine(sampleRateText, bitDepthText);
+      byVersionId[version.id] = composeSampleRateLine(sampleRateText, bitDepthText, bpmText);
     }
 
     return byVersionId;
@@ -18295,6 +18503,7 @@ export function App(): JSX.Element {
           format: selectedPlaybackVersion.extension,
           durationSeconds: (selectedPlaybackVersion.durationMs ?? 0) / 1000,
           sampleRateHz: measuredAnalysis?.sampleRateHz ?? null,
+          bpm: measuredAnalysis?.bpm ?? null,
           albumName:
             snapshot.linkedFolders.find((f) => f.id === selectedFolderId)?.name ?? null,
           albumTrackCount: albumSongs.length,
@@ -18314,6 +18523,7 @@ export function App(): JSX.Element {
           maxMomentaryLufs: measuredAnalysis.maxMomentaryLufs,
           maxShortTermLufs: measuredAnalysis.maxShortTermLufs,
           sampleRateHz: measuredAnalysis.sampleRateHz,
+          bpm: measuredAnalysis.bpm ?? null,
         }
       : null;
 
@@ -18369,6 +18579,7 @@ export function App(): JSX.Element {
                 maxMomentaryLufs: referenceTrack.measuredAnalysis.maxMomentaryLufs,
                 maxShortTermLufs: referenceTrack.measuredAnalysis.maxShortTermLufs,
                 sampleRateHz: referenceTrack.measuredAnalysis.sampleRateHz,
+                bpm: referenceTrack.measuredAnalysis.bpm ?? null,
               }
             : null,
           webAudio: referenceTrack.previewAnalysis
@@ -20856,9 +21067,14 @@ export function App(): JSX.Element {
             <section className="inspector-card">
               <h3 data-testid="inspector-song-title">{getSongDisplayFileName(selectedSong)}</h3>
               <p className="muted">Latest export: {formatDate(selectedSong.latestExportAt)}</p>
-              <p className="muted" data-testid="inspector-song-sample-rate">
-                Sample rate: {selectedPlaybackSampleRateText}
-              </p>
+              <div className="inspector-song-meta-strip" aria-label="Selected track technical metadata">
+                <span className="muted" data-testid="inspector-song-sample-rate">
+                  Sample rate: {selectedPlaybackSampleRateText}
+                </span>
+                <span className="muted" data-testid="inspector-song-bpm">
+                  BPM: {selectedPlaybackBpmText}
+                </span>
+              </div>
             </section>
           ) : (
             <section className="inspector-card empty-state">

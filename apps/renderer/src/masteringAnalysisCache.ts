@@ -175,3 +175,25 @@ export function isMasteringCacheEntryMissingBitDepth(
   // null is legitimate for the source type.
   return false;
 }
+
+export function isMasteringCacheEntryMissingBpm(
+  entry: MasteringCacheEntry | undefined,
+  version: SongVersion
+): boolean {
+  if (!isMasteringCacheEntryFresh(entry, version)) {
+    return false;
+  }
+
+  if (!entry || !entry.staticAnalysis) {
+    return false;
+  }
+
+  // BPM has a three-state cache contract:
+  //   undefined → legacy entry, BPM probing did not exist yet
+  //   null      → the metadata-only probe ran and found no usable tempo tag
+  //   number    → embedded tempo tag found
+  //
+  // Only `undefined` should trigger background work. `null` is final for this
+  // cache key; otherwise albums with no BPM tags would probe forever.
+  return entry.staticAnalysis.bpm === undefined;
+}

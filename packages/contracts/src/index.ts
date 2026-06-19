@@ -69,6 +69,19 @@ export interface AudioFileAnalysis {
   // formatter can render "32-bit float" instead of just "32-bit".
   bitDepth?: number | null;
   sampleFormat?: string | null;
+  // BPM comes from embedded audio metadata tags (`TBPM`, `BPM`, `tempo`, etc.)
+  // rather than beat detection. `undefined` means an older cache entry was
+  // created before BPM probing existed; `null` means the probe ran and the file
+  // simply did not advertise a usable tempo.
+  bpm?: number | null;
+}
+
+export interface AudioMetadataProbeResult {
+  filePath: string;
+  probedWith: 'ffprobe-tags';
+  // Null is a definitive "no embedded BPM tag found" result. Renderer code
+  // uses that to avoid repeatedly probing the same unchanged file forever.
+  bpm: number | null;
 }
 
 export interface ReferenceTrackSelection {
@@ -280,6 +293,7 @@ export const IPC_CHANNELS = {
   TO_FILE_URL: 'producer-player:to-file-url',
   RESOLVE_PLAYBACK_SOURCE: 'producer-player:resolve-playback-source',
   ANALYZE_AUDIO_FILE: 'producer-player:analyze-audio-file',
+  PROBE_AUDIO_METADATA: 'producer-player:probe-audio-metadata',
   // v3.195 — Cancel an in-flight ffmpeg analysis by request id. The
   // renderer-side AnalysisQueue's preemption pathway invokes this when a
   // USER-priority click arrives while a NEIGHBOR/BG analysis is mid-flight,
@@ -1294,6 +1308,7 @@ export interface AgentTrackInfo {
   format: string;
   durationSeconds: number;
   sampleRateHz: number | null;
+  bpm: number | null;
   albumName: string | null;
   albumTrackCount: number;
   referenceTrack: { fileName: string; filePath: string } | null;
@@ -1314,6 +1329,10 @@ export interface AgentStaticAnalysis {
   // sneak-through against 24-bit masters at a glance.
   bitDepth?: number | null;
   sampleFormat?: string | null;
+  // See AudioFileAnalysis.bpm: undefined means legacy cache, null means probed
+  // but no embedded tempo tag. This distinction lets the renderer do one
+  // low-priority background metadata read without invalidating LUFS display.
+  bpm?: number | null;
 }
 
 export interface AgentWebAudioAnalysis {
@@ -1589,6 +1608,10 @@ export interface ProducerPlayerBridge {
     filePath: string,
     requestId?: string
   ): Promise<AudioFileAnalysis>;
+  probeAudioMetadata(
+    filePath: string,
+    requestId?: string
+  ): Promise<AudioMetadataProbeResult>;
   /**
    * v3.195 — Cancel an in-flight `analyzeAudioFile` call by its requestId.
    * The main process SIGKILLs any ffmpeg/ffprobe child processes associated

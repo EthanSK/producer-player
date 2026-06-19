@@ -147,6 +147,14 @@ const bridge: ProducerPlayerBridge = {
     );
   },
 
+  async probeAudioMetadata(filePath: string, requestId?: string) {
+    return ipcRenderer.invoke(
+      IPC_CHANNELS.PROBE_AUDIO_METADATA,
+      filePath,
+      requestId ?? null
+    );
+  },
+
   async cancelAnalyzeAudioFile(requestId: string) {
     await ipcRenderer.invoke(
       IPC_CHANNELS.CANCEL_ANALYZE_AUDIO_FILE,

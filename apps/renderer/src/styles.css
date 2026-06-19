@@ -5915,6 +5915,18 @@ button.checklist-play-toggle[data-playing='true'] {
   font-size: 14px;
 }
 
+.inspector-song-meta-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.inspector-song-meta-strip .muted {
+  white-space: nowrap;
+}
+
 .version-list {
   display: grid;
   gap: 8px;

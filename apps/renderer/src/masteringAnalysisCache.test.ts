@@ -5,6 +5,7 @@ import {
   buildMasteringCacheKey,
   isMasteringCacheEntryFresh,
   isMasteringCacheEntryMissingBitDepth,
+  isMasteringCacheEntryMissingBpm,
   parseVersionModifiedAtMs,
 } from './masteringAnalysisCache';
 
@@ -61,6 +62,7 @@ function makeEntry(
       sampleRateHz: 48000,
       bitDepth: 24,
       sampleFormat: 's32',
+      bpm: 128,
     },
     staticAnalysis: {
       integratedLufs: -14,
@@ -73,6 +75,7 @@ function makeEntry(
       sampleRateHz: 48000,
       bitDepth: 24,
       sampleFormat: 's32',
+      bpm: 128,
       ...staticAnalysisOverrides,
     },
     platformNormalization: { platforms: [] },
@@ -199,6 +202,60 @@ describe('mastering analysis session cache keys', () => {
       const differentVersion = makeVersion({ sizeBytes: 99999 });
       expect(isMasteringCacheEntryFresh(entry, differentVersion)).toBe(false);
       expect(isMasteringCacheEntryMissingBitDepth(entry, differentVersion)).toBe(false);
+    });
+  });
+
+  describe('BPM-missing refresh signal', () => {
+    it('keeps legacy fresh entries readable while flagging BPM for background metadata probe', () => {
+      const version = makeVersion();
+      const entry = makeEntry(version, { bpm: undefined }, {
+        measuredAnalysis: {
+          ...makeEntry(version).measuredAnalysis,
+          bpm: undefined,
+        },
+      });
+
+      expect(isMasteringCacheEntryFresh(entry, version)).toBe(true);
+      expect(isMasteringCacheEntryMissingBpm(entry, version)).toBe(true);
+    });
+
+    it('does not re-probe when BPM is a concrete metadata value', () => {
+      const version = makeVersion();
+      const entry = makeEntry(version, { bpm: 127.5 }, {
+        measuredAnalysis: {
+          ...makeEntry(version).measuredAnalysis,
+          bpm: 127.5,
+        },
+      });
+
+      expect(isMasteringCacheEntryFresh(entry, version)).toBe(true);
+      expect(isMasteringCacheEntryMissingBpm(entry, version)).toBe(false);
+    });
+
+    it('does not re-probe when BPM was tried and no tag exists', () => {
+      const version = makeVersion();
+      const entry = makeEntry(version, { bpm: null }, {
+        measuredAnalysis: {
+          ...makeEntry(version).measuredAnalysis,
+          bpm: null,
+        },
+      });
+
+      expect(isMasteringCacheEntryFresh(entry, version)).toBe(true);
+      expect(isMasteringCacheEntryMissingBpm(entry, version)).toBe(false);
+    });
+
+    it('does NOT flag BPM refresh when the cache entry is not fresh', () => {
+      const version = makeVersion();
+      const entry = makeEntry(version, { bpm: undefined }, {
+        measuredAnalysis: {
+          ...makeEntry(version).measuredAnalysis,
+          bpm: undefined,
+        },
+      });
+
+      expect(isMasteringCacheEntryFresh(entry, makeVersion({ sizeBytes: 99999 }))).toBe(false);
+      expect(isMasteringCacheEntryMissingBpm(entry, makeVersion({ sizeBytes: 99999 }))).toBe(false);
     });
   });
 });

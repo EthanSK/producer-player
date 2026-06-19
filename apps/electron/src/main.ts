@@ -87,6 +87,7 @@ import type {
   AgentRespondApprovalPayload,
   AiRecommendation,
   AudioFileAnalysis,
+  AudioMetadataProbeResult,
   AutoUpdateDowngradeResult,
   AutoUpdateInstallVersionResult,
   AutoUpdateRecheckResult,
@@ -3955,6 +3956,63 @@ async function analyzeAudioFile(
   }
 }
 
+async function probeAudioMetadata(
+  filePath: string,
+  requestId: string | null = null
+): Promise<AudioMetadataProbeResult> {
+  try {
+    return await probeAudioMetadataInternal(filePath, requestId);
+  } finally {
+    // Reuse the same cancellation registry as full measured analysis. A BPM
+    // metadata probe is just an ffprobe child process, so the existing
+    // cancel-analyze IPC can kill it when USER-priority work arrives.
+    clearCancelledRequestId(requestId);
+  }
+}
+
+async function probeAudioMetadataInternal(
+  filePath: string,
+  requestId: string | null
+): Promise<AudioMetadataProbeResult> {
+  const resolvedPath = resolve(filePath);
+  const stats = await fs.stat(resolvedPath);
+
+  if (!stats.isFile()) {
+    throw new Error(`Cannot probe metadata for a non-file path: ${resolvedPath}`);
+  }
+
+  if (isAnalysisRequestCancelled(requestId)) {
+    throw new AnalysisAbortError(requestId ?? '<no-id>');
+  }
+
+  const ffprobeCommand = getBinaryCommandPath('ffprobe');
+  const probeResult = await runProcessCapture(ffprobeCommand, [
+    '-v',
+    'error',
+    '-select_streams',
+    'a:0',
+    // Metadata-only BPM path: no audio decode, no ebur128 pass, and no header
+    // parsing. This is what lets legacy fresh cache entries fill BPM in the
+    // very lowest-priority background lane without hiding their cached LUFS.
+    '-show_entries',
+    'stream_tags:format_tags',
+    '-of',
+    'json',
+    resolvedPath,
+  ], { requestId });
+
+  if (isAnalysisRequestCancelled(requestId)) {
+    throw new AnalysisAbortError(requestId ?? '<no-id>');
+  }
+
+  const parsed = JSON.parse(probeResult.stdout) as FfprobeMetadataTagsPayload;
+  return {
+    filePath: resolvedPath,
+    probedWith: 'ffprobe-tags',
+    bpm: extractBpmFromFfprobePayload(parsed),
+  };
+}
+
 async function analyzeAudioFileInternal(
   filePath: string,
   requestId: string | null
@@ -4039,7 +4097,7 @@ async function analyzeAudioFileInternal(
           '-select_streams',
           'a:0',
           '-show_entries',
-          'stream=sample_rate,bits_per_raw_sample,bits_per_sample,sample_fmt,codec_name',
+          'stream=sample_rate,bits_per_raw_sample,bits_per_sample,sample_fmt,codec_name:stream_tags:format_tags',
           '-of',
           'json',
           resolvedPath,
@@ -4052,7 +4110,11 @@ async function analyzeAudioFileInternal(
             bits_per_sample?: unknown;
             sample_fmt?: unknown;
             codec_name?: unknown;
+            tags?: Record<string, unknown>;
           }>;
+          format?: {
+            tags?: Record<string, unknown>;
+          };
         };
         const stream = Array.isArray(parsed.streams) ? parsed.streams[0] : undefined;
         if (!stream) {
@@ -4074,6 +4136,7 @@ async function analyzeAudioFileInternal(
               : null,
           codecName:
             typeof stream.codec_name === 'string' ? stream.codec_name : null,
+          bpm: extractBpmFromFfprobePayload(parsed),
         };
       } catch {
         return null;
@@ -4141,6 +4204,7 @@ async function analyzeAudioFileInternal(
   );
   const bitDepth: number | null = bitDepthResolution.bitDepth;
   const sampleFormat: string | null = probedAudioFormat?.sampleFormat ?? null;
+  const bpm: number | null = probedAudioFormat?.bpm ?? null;
 
   // Light-touch telemetry: only log when a NON-TRIVIAL fallback fires
   // (step 3+) OR when every step failed. Steady-state happy-path wins
@@ -4219,6 +4283,7 @@ async function analyzeAudioFileInternal(
     // version-history row (Ethan voice 7201).
     bitDepth,
     sampleFormat,
+    bpm,
   };
 }
 
@@ -4674,6 +4739,95 @@ function parseInteger(value: unknown): number | null {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) {
       return Math.trunc(parsed);
+    }
+  }
+
+  return null;
+}
+
+interface FfprobeMetadataTagsPayload {
+  streams?: Array<{
+    tags?: Record<string, unknown>;
+  }>;
+  format?: {
+    tags?: Record<string, unknown>;
+  };
+}
+
+const BPM_TAG_PRIORITY = [
+  'tbpm',
+  'bpm',
+  'tempo',
+  'beatsperminute',
+  'beats_per_minute',
+  'initialkeybpm',
+] as const;
+
+function parseBpmTagValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return normalizeBpm(value);
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  // Tag values are annoyingly inconsistent across exporters: common shapes
+  // include "128", "128.0", "128 BPM", and occasionally "128/1". Grab the
+  // first numeric token but keep a realistic producer-tempo range so random
+  // metadata text cannot become a bogus BPM display.
+  const match = value.trim().match(/\d+(?:\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+
+  return normalizeBpm(Number(match[0]));
+}
+
+function normalizeBpm(value: number): number | null {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const rounded = Math.round(value * 10) / 10;
+  if (rounded < 20 || rounded > 400) {
+    return null;
+  }
+
+  return rounded;
+}
+
+function extractBpmFromTags(tags: Record<string, unknown> | undefined): number | null {
+  if (!tags) {
+    return null;
+  }
+
+  const tagsByLowerKey = new Map<string, unknown>();
+  for (const [rawKey, rawValue] of Object.entries(tags)) {
+    tagsByLowerKey.set(rawKey.toLowerCase().replace(/[\s_-]+/g, ''), rawValue);
+  }
+
+  for (const key of BPM_TAG_PRIORITY) {
+    const parsed = parseBpmTagValue(tagsByLowerKey.get(key.replace(/[\s_-]+/g, '')));
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function extractBpmFromFfprobePayload(payload: FfprobeMetadataTagsPayload): number | null {
+  const streamTags = Array.isArray(payload.streams)
+    ? payload.streams.map((stream) => stream.tags)
+    : [];
+
+  // Format tags usually carry ID3/iTunes-style TBPM metadata; stream tags are
+  // the fallback for containers that attach tags directly to the audio stream.
+  for (const tags of [payload.format?.tags, ...streamTags]) {
+    const bpm = extractBpmFromTags(tags);
+    if (bpm !== null) {
+      return bpm;
     }
   }
 
@@ -6773,6 +6927,13 @@ function registerIpcHandlers(service: FileLibraryService): void {
     IPC_CHANNELS.ANALYZE_AUDIO_FILE,
     async (_event, filePath: string, requestId: string | null = null) => {
       return analyzeAudioFile(filePath, requestId);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PROBE_AUDIO_METADATA,
+    async (_event, filePath: string, requestId: string | null = null) => {
+      return probeAudioMetadata(filePath, requestId);
     }
   );
 

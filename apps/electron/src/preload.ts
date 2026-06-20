@@ -139,19 +139,21 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.RESOLVE_PLAYBACK_SOURCE, filePath);
   },
 
-  async analyzeAudioFile(filePath: string, requestId?: string) {
+  async analyzeAudioFile(filePath: string, requestId?: string, projectFilePath?: string | null) {
     return ipcRenderer.invoke(
       IPC_CHANNELS.ANALYZE_AUDIO_FILE,
       filePath,
-      requestId ?? null
+      requestId ?? null,
+      projectFilePath ?? null
     );
   },
 
-  async probeAudioMetadata(filePath: string, requestId?: string) {
+  async probeAudioMetadata(filePath: string, requestId?: string, projectFilePath?: string | null) {
     return ipcRenderer.invoke(
       IPC_CHANNELS.PROBE_AUDIO_METADATA,
       filePath,
-      requestId ?? null
+      requestId ?? null,
+      projectFilePath ?? null
     );
   },
 

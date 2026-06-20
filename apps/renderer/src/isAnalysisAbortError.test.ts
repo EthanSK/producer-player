@@ -48,6 +48,17 @@ describe('isAnalysisAbortError', () => {
     expect(isAnalysisAbortError(err)).toBe(true);
   });
 
+  it('returns true for the metadata-probe IPC AbortError shape', () => {
+    // BPM-only probes use a separate IPC channel from full measured analysis,
+    // but cancellation has the same meaning: do not mark the one-shot BPM
+    // refresh as definitively failed just because a user click preempted it.
+    const err = new Error(
+      "Error invoking remote method 'producer-player:probe-audio-metadata': " +
+        'AbortError: Analysis request meta-1234-abc was aborted'
+    );
+    expect(isAnalysisAbortError(err)).toBe(true);
+  });
+
   it('returns false for an Electron-IPC-mangled error that is NOT an AbortError', () => {
     // Genuine ffmpeg failure should still surface as error in the UI.
     const err = new Error(

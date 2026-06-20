@@ -245,6 +245,46 @@ describe('mastering analysis session cache keys', () => {
       expect(isMasteringCacheEntryMissingBpm(entry, version)).toBe(false);
     });
 
+    it('re-probes null BPM once a linked Ableton project can provide a DAW tempo fallback', () => {
+      const version = makeVersion();
+      const entry = makeEntry(version, { bpm: null }, {
+        measuredAnalysis: {
+          ...makeEntry(version).measuredAnalysis,
+          bpm: null,
+        },
+      });
+
+      // v3.313 only knew about embedded tags, so `null` could mean "the WAV had
+      // no tag" rather than "every supported source was exhausted." A linked
+      // `.als` gives the v3.314 low-priority probe one more real source: Ableton's
+      // project tempo.
+      expect(
+        isMasteringCacheEntryMissingBpm(
+          entry,
+          version,
+          '/mixes/Alpha Project/Alpha.als'
+        )
+      ).toBe(true);
+    });
+
+    it('does not re-probe null BPM for non-Ableton linked projects', () => {
+      const version = makeVersion();
+      const entry = makeEntry(version, { bpm: null }, {
+        measuredAnalysis: {
+          ...makeEntry(version).measuredAnalysis,
+          bpm: null,
+        },
+      });
+
+      expect(
+        isMasteringCacheEntryMissingBpm(
+          entry,
+          version,
+          '/mixes/Alpha Project/Alpha.logicx'
+        )
+      ).toBe(false);
+    });
+
     it('does NOT flag BPM refresh when the cache entry is not fresh', () => {
       const version = makeVersion();
       const entry = makeEntry(version, { bpm: undefined }, {

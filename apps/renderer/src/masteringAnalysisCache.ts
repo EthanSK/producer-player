@@ -178,7 +178,8 @@ export function isMasteringCacheEntryMissingBitDepth(
 
 export function isMasteringCacheEntryMissingBpm(
   entry: MasteringCacheEntry | undefined,
-  version: SongVersion
+  version: SongVersion,
+  projectFilePath?: string | null
 ): boolean {
   if (!isMasteringCacheEntryFresh(entry, version)) {
     return false;
@@ -190,10 +191,24 @@ export function isMasteringCacheEntryMissingBpm(
 
   // BPM has a three-state cache contract:
   //   undefined → legacy entry, BPM probing did not exist yet
-  //   null      → the metadata-only probe ran and found no usable tempo tag
-  //   number    → embedded tempo tag found
+  //   null      → the probe ran and found no usable embedded/project tempo
+  //   number    → embedded tag or linked-project tempo found
   //
-  // Only `undefined` should trigger background work. `null` is final for this
-  // cache key; otherwise albums with no BPM tags would probe forever.
-  return entry.staticAnalysis.bpm === undefined;
+  // v3.314 exception: a v3.313 cache may have stored `null` after checking only
+  // audio tags. If the song is linked to Ableton, the `.als` project is new
+  // evidence and deserves one low-priority retry so Ethan's untagged WAV bounces
+  // can still fill BPM from the DAW tempo.
+  if (entry.staticAnalysis.bpm === undefined) {
+    return true;
+  }
+
+  if (entry.staticAnalysis.bpm === null && isLinkedAbletonProject(projectFilePath)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isLinkedAbletonProject(projectFilePath: string | null | undefined): boolean {
+  return typeof projectFilePath === 'string' && /\.als$/i.test(projectFilePath.trim());
 }

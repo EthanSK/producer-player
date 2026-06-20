@@ -1361,6 +1361,12 @@ interface RunMeasuredAnalysisOptions {
   /** Human-readable label shown in the Status jobs popover while running. */
   label?: string;
   /**
+   * Optional linked DAW project for the same song. WAV/AIFF exports usually do
+   * not carry BPM tags, so the main process can fall back to a cheap `.als`
+   * tempo read without decoding audio.
+   */
+  projectFilePath?: string | null;
+  /**
    * Delay applied after the queue has reserved a slot. Selected-track analysis
    * uses this so USER priority pauses warmup immediately, while ffmpeg waits
    * a beat for playback startup to settle before doing CPU-heavy work.
@@ -1407,7 +1413,10 @@ export function isAnalysisAbortError(error: unknown): boolean {
   if (typeof message === 'string') {
     // Be strict — only match the exact prefix produced by Electron's IPC
     // bridge for our `AnalysisAbortError` (whose `name = 'AbortError'`).
-    if (message.includes("'producer-player:analyze-audio-file': AbortError:")) {
+    if (
+      message.includes("'producer-player:analyze-audio-file': AbortError:") ||
+      message.includes("'producer-player:probe-audio-metadata': AbortError:")
+    ) {
       return true;
     }
     // Renderer-side analyzeTrackFromUrl decode path may also report
@@ -1457,7 +1466,11 @@ function runMeasuredAnalysis(
         signal.addEventListener('abort', handleAbort, { once: true });
       }
       try {
-        return await window.producerPlayer.analyzeAudioFile(filePath, requestId);
+        return await window.producerPlayer.analyzeAudioFile(
+          filePath,
+          requestId,
+          options.projectFilePath ?? null
+        );
       } finally {
         signal.removeEventListener('abort', handleAbort);
       }
@@ -1499,7 +1512,11 @@ function runAudioMetadataProbe(
       }
 
       try {
-        return await window.producerPlayer.probeAudioMetadata(filePath, requestId);
+        return await window.producerPlayer.probeAudioMetadata(
+          filePath,
+          requestId,
+          options.projectFilePath ?? null
+        );
       } finally {
         signal.removeEventListener('abort', handleAbort);
       }
@@ -4673,6 +4690,9 @@ export function App(): JSX.Element {
     const selectedVersion =
       snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
     const analysisFilePath = selectedVersion?.filePath ?? null;
+    const selectedVersionProjectFilePath = selectedVersion
+      ? songProjectFilePaths[selectedVersion.songId] ?? null
+      : null;
 
     if (!selectedPlaybackVersionId || !selectedVersion || !analysisFilePath) {
       // v3.190 — clearing the selection also clears any stale USER_SELECTED
@@ -4830,6 +4850,7 @@ export function App(): JSX.Element {
         priority: ANALYSIS_PRIORITY_USER_SELECTED,
         cacheKey: measuredKey,
         label: measuredLabel,
+        projectFilePath: selectedVersionProjectFilePath,
         startDelayMs: selectedMeasuredJobDelayMs,
       })
         .then((measuredResult) => {
@@ -4902,6 +4923,7 @@ export function App(): JSX.Element {
     mixPlaybackSource?.url,
     mixPlaybackSourceSelectedFilePath,
     selectedPlaybackVersionId,
+    songProjectFilePaths,
     snapshot.songs,
     snapshot.versions,
     upsertMasteringCacheEntry,
@@ -8286,6 +8308,9 @@ export function App(): JSX.Element {
         }
 
         const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
+        const projectFilePath = selectedSong
+          ? songProjectFilePaths[selectedSong.id] ?? null
+          : null;
         // v3.272 — Two reasons to skip dispatch:
         //   (a) entry is fresh AND bit-depth is present → nothing to do.
         //   (b) entry is fresh BUT bit-depth is missing on a lossless
@@ -8303,7 +8328,7 @@ export function App(): JSX.Element {
           isMasteringCacheEntryMissingBitDepth(cachedEntry, version);
         const isMissingBpm =
           !masteringCacheBpmRefreshedVersionIdsRef.current.has(version.id) &&
-          isMasteringCacheEntryMissingBpm(cachedEntry, version);
+          isMasteringCacheEntryMissingBpm(cachedEntry, version, projectFilePath);
         const needsMetadataRefresh = isMissingBitDepth || isMissingBpm;
         if (isFresh && !needsMetadataRefresh) {
           return;
@@ -8394,6 +8419,7 @@ export function App(): JSX.Element {
               priority: ANALYSIS_PRIORITY_BACKGROUND,
               cacheKey,
               label: `${version.fileName} — BPM metadata`,
+              projectFilePath,
             });
 
             const entryWithBpm = withBpmOnMasteringCacheEntry(cachedEntry, metadata.bpm);
@@ -8424,6 +8450,7 @@ export function App(): JSX.Element {
             priority: ANALYSIS_PRIORITY_BACKGROUND,
             cacheKey,
             label: `${version.fileName} — version history`,
+            projectFilePath,
           });
 
           // v3.272 — Mirror the warmup path: ALSO upsert the freshly-measured
@@ -8590,7 +8617,14 @@ export function App(): JSX.Element {
     // 220031d). Callbacks are stable (`useCallback([])`); selectedSong
     // is the parent of inspectorVersions so any change already retriggers
     // the effect, but list them explicitly for exhaustive-deps clarity.
-  }, [inspectorVersions, selectedSong, songs, upsertMasteringCacheEntry, createMasteringCacheEntry]);
+  }, [
+    inspectorVersions,
+    selectedSong,
+    songProjectFilePaths,
+    songs,
+    upsertMasteringCacheEntry,
+    createMasteringCacheEntry,
+  ]);
 
   const albumActiveVersions = useMemo(
     () =>
@@ -8916,6 +8950,7 @@ export function App(): JSX.Element {
       cacheKey: string
     ): Promise<void> {
       const { song, version } = entry;
+      const projectFilePath = songProjectFilePaths[song.id] ?? null;
       const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
       const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
       // v3.272 — Even if the entry is fresh, we may want to refresh it in
@@ -8936,7 +8971,7 @@ export function App(): JSX.Element {
       const isMissingBpm =
         isFresh &&
         !masteringCacheBpmRefreshedVersionIdsRef.current.has(version.id) &&
-        isMasteringCacheEntryMissingBpm(cachedEntry, version);
+        isMasteringCacheEntryMissingBpm(cachedEntry, version, projectFilePath);
       const needsMetadataRefresh = isMissingBitDepth || isMissingBpm;
 
       if (isFresh) {
@@ -8962,11 +8997,12 @@ export function App(): JSX.Element {
       }
 
       masteringCachePendingVersionIdsRef.current.add(version.id);
-      if (!cancelled && !isMissingBitDepth) {
+      if (!cancelled && !needsMetadataRefresh) {
         // Only flip to 'pending' when we have NO cached LUFS to show —
         // the 'pending' state surfaces "Loading" in the row badge. For
-        // bit-depth-only background refreshes, leave the status at
-        // 'fresh' so the row stays calm (voice 7225).
+        // metadata-only background refreshes (bit depth or linked-project
+        // BPM), leave the status at 'fresh' so the row stays calm while the
+        // enrichment probe runs.
         setMasteringCacheStatusByVersionId((previous) => ({
           ...previous,
           [version.id]: {
@@ -8989,6 +9025,7 @@ export function App(): JSX.Element {
             priority: ANALYSIS_PRIORITY_BACKGROUND,
             cacheKey,
             label: `${song.title} — ${version.fileName} — BPM metadata`,
+            projectFilePath,
           });
 
           upsertMasteringCacheEntry(withBpmOnMasteringCacheEntry(cachedEntry, metadata.bpm));
@@ -9003,6 +9040,7 @@ export function App(): JSX.Element {
               : ANALYSIS_PRIORITY_NEIGHBOR,
           cacheKey,
           label: `${song.title} — ${version.fileName}`,
+          projectFilePath,
         });
 
         // Always upsert to the global cache — idempotent under cacheKey.
@@ -9143,6 +9181,7 @@ export function App(): JSX.Element {
     // so newly-visible rows are promoted to NEIGHBOR priority.
     visibleActiveVersionAnalysisKey,
     visibleActiveVersions,
+    songProjectFilePaths,
     createMasteringCacheEntry,
     upsertMasteringCacheEntry,
   ]);

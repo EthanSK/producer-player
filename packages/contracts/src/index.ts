@@ -70,16 +70,17 @@ export interface AudioFileAnalysis {
   bitDepth?: number | null;
   sampleFormat?: string | null;
   // BPM comes from embedded audio metadata tags (`TBPM`, `BPM`, `tempo`, etc.)
-  // rather than beat detection. `undefined` means an older cache entry was
-  // created before BPM probing existed; `null` means the probe ran and the file
-  // simply did not advertise a usable tempo.
+  // or, for songs linked to Ableton, the `.als` global tempo. `undefined` means
+  // an older cache entry was created before BPM probing existed; `null` means
+  // the probe ran and no supported metadata/project source advertised a usable
+  // tempo.
   bpm?: number | null;
 }
 
 export interface AudioMetadataProbeResult {
   filePath: string;
   probedWith: 'ffprobe-tags';
-  // Null is a definitive "no embedded BPM tag found" result. Renderer code
+  // Null is a definitive "no supported BPM source found" result. Renderer code
   // uses that to avoid repeatedly probing the same unchanged file forever.
   bpm: number | null;
 }
@@ -1330,8 +1331,9 @@ export interface AgentStaticAnalysis {
   bitDepth?: number | null;
   sampleFormat?: string | null;
   // See AudioFileAnalysis.bpm: undefined means legacy cache, null means probed
-  // but no embedded tempo tag. This distinction lets the renderer do one
-  // low-priority background metadata read without invalidating LUFS display.
+  // but no embedded / linked-project tempo source. This distinction lets the
+  // renderer do one low-priority background metadata read without invalidating
+  // LUFS display.
   bpm?: number | null;
 }
 
@@ -1606,11 +1608,13 @@ export interface ProducerPlayerBridge {
   resolvePlaybackSource(filePath: string): Promise<PlaybackSourceInfo>;
   analyzeAudioFile(
     filePath: string,
-    requestId?: string
+    requestId?: string,
+    projectFilePath?: string | null
   ): Promise<AudioFileAnalysis>;
   probeAudioMetadata(
     filePath: string,
-    requestId?: string
+    requestId?: string,
+    projectFilePath?: string | null
   ): Promise<AudioMetadataProbeResult>;
   /**
    * v3.195 — Cancel an in-flight `analyzeAudioFile` call by its requestId.

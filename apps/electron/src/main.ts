@@ -188,6 +188,10 @@ import {
   type BitDepthResolution,
 } from './bit-depth-fallback';
 import {
+  extractAbletonTempoBpmFromProjectBuffer,
+  isAbletonProjectPath,
+} from './ableton-tempo';
+import {
   buildUiZoomState,
   getNextUiZoomPreference,
   sanitizeUiZoomPreference,
@@ -213,6 +217,7 @@ const MASTERING_CACHE_SCHEMA_VERSION = 1;
 const FFMPEG_BINARY_DIRECTORY = 'bin';
 const AIFF_LIKE_EXTENSIONS = new Set(['aiff', 'aif', 'aifc']);
 const IS_MAC_APP_STORE_SANDBOX = process.mas === true;
+const LINKED_PROJECT_BPM_CACHE = new Map<string, Promise<number | null>>();
 
 const ICLOUD_DRIVE_DIRECTORY_NAME = 'Producer Player';
 const ICLOUD_CHECKLISTS_FILE = 'checklists.json';
@@ -3943,10 +3948,11 @@ async function runProcessCapture(
 
 async function analyzeAudioFile(
   filePath: string,
-  requestId: string | null = null
+  requestId: string | null = null,
+  projectFilePath: string | null = null
 ): Promise<AudioFileAnalysis> {
   try {
-    return await analyzeAudioFileInternal(filePath, requestId);
+    return await analyzeAudioFileInternal(filePath, requestId, projectFilePath);
   } finally {
     // v3.200 — Always clear cancellation bookkeeping for this requestId
     // once the whole call has unwound, regardless of how it ended (success,
@@ -3958,10 +3964,11 @@ async function analyzeAudioFile(
 
 async function probeAudioMetadata(
   filePath: string,
-  requestId: string | null = null
+  requestId: string | null = null,
+  projectFilePath: string | null = null
 ): Promise<AudioMetadataProbeResult> {
   try {
-    return await probeAudioMetadataInternal(filePath, requestId);
+    return await probeAudioMetadataInternal(filePath, requestId, projectFilePath);
   } finally {
     // Reuse the same cancellation registry as full measured analysis. A BPM
     // metadata probe is just an ffprobe child process, so the existing
@@ -3972,7 +3979,8 @@ async function probeAudioMetadata(
 
 async function probeAudioMetadataInternal(
   filePath: string,
-  requestId: string | null
+  requestId: string | null,
+  projectFilePath: string | null
 ): Promise<AudioMetadataProbeResult> {
   const resolvedPath = resolve(filePath);
   const stats = await fs.stat(resolvedPath);
@@ -3986,36 +3994,54 @@ async function probeAudioMetadataInternal(
   }
 
   const ffprobeCommand = getBinaryCommandPath('ffprobe');
-  const probeResult = await runProcessCapture(ffprobeCommand, [
-    '-v',
-    'error',
-    '-select_streams',
-    'a:0',
-    // Metadata-only BPM path: no audio decode, no ebur128 pass, and no header
-    // parsing. This is what lets legacy fresh cache entries fill BPM in the
-    // very lowest-priority background lane without hiding their cached LUFS.
-    '-show_entries',
-    'stream_tags:format_tags',
-    '-of',
-    'json',
-    resolvedPath,
-  ], { requestId });
+  let taggedBpm: number | null = null;
+  try {
+    const probeResult = await runProcessCapture(ffprobeCommand, [
+      '-v',
+      'error',
+      '-select_streams',
+      'a:0',
+      // Metadata-only BPM path: no audio decode, no ebur128 pass, and no header
+      // parsing. This is what lets legacy fresh cache entries fill BPM in the
+      // very lowest-priority background lane without hiding their cached LUFS.
+      '-show_entries',
+      'stream_tags:format_tags',
+      '-of',
+      'json',
+      resolvedPath,
+    ], { requestId });
 
-  if (isAnalysisRequestCancelled(requestId)) {
-    throw new AnalysisAbortError(requestId ?? '<no-id>');
+    if (isAnalysisRequestCancelled(requestId)) {
+      throw new AnalysisAbortError(requestId ?? '<no-id>');
+    }
+
+    const parsed = JSON.parse(probeResult.stdout) as FfprobeMetadataTagsPayload;
+    taggedBpm = extractBpmFromFfprobePayload(parsed);
+  } catch (error: unknown) {
+    if (error instanceof AnalysisAbortError) {
+      throw error;
+    }
+
+    // v3.314 — The metadata-only path must still try the linked DAW project if
+    // ffprobe itself is unavailable or rejects an odd file. Otherwise a missing
+    // ffprobe binary would permanently cache "no BPM" even when the `.als`
+    // already has the tempo.
+    log.info('[producer-player:analysis] audio-tag BPM probe unavailable', {
+      filePath: resolvedPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
-
-  const parsed = JSON.parse(probeResult.stdout) as FfprobeMetadataTagsPayload;
   return {
     filePath: resolvedPath,
     probedWith: 'ffprobe-tags',
-    bpm: extractBpmFromFfprobePayload(parsed),
+    bpm: taggedBpm ?? (await probeLinkedProjectBpm(projectFilePath)),
   };
 }
 
 async function analyzeAudioFileInternal(
   filePath: string,
-  requestId: string | null
+  requestId: string | null,
+  projectFilePath: string | null
 ): Promise<AudioFileAnalysis> {
   const resolvedPath = resolve(filePath);
   const stats = await fs.stat(resolvedPath);
@@ -4204,7 +4230,8 @@ async function analyzeAudioFileInternal(
   );
   const bitDepth: number | null = bitDepthResolution.bitDepth;
   const sampleFormat: string | null = probedAudioFormat?.sampleFormat ?? null;
-  const bpm: number | null = probedAudioFormat?.bpm ?? null;
+  const bpm: number | null =
+    probedAudioFormat?.bpm ?? (await probeLinkedProjectBpm(projectFilePath));
 
   // Light-touch telemetry: only log when a NON-TRIVIAL fallback fires
   // (step 3+) OR when every step failed. Steady-state happy-path wins
@@ -4832,6 +4859,53 @@ function extractBpmFromFfprobePayload(payload: FfprobeMetadataTagsPayload): numb
   }
 
   return null;
+}
+
+async function probeLinkedProjectBpm(projectFilePath: string | null | undefined): Promise<number | null> {
+  const resolvedProjectPath =
+    typeof projectFilePath === 'string' && projectFilePath.trim().length > 0
+      ? resolve(projectFilePath)
+      : null;
+
+  if (!resolvedProjectPath || !isAbletonProjectPath(resolvedProjectPath)) {
+    return null;
+  }
+
+  try {
+    const stats = await fs.stat(resolvedProjectPath);
+    if (!stats.isFile()) {
+      return null;
+    }
+
+    const cacheKey = `${resolvedProjectPath}::${stats.size}::${stats.mtimeMs}`;
+    const cachedProbe = LINKED_PROJECT_BPM_CACHE.get(cacheKey);
+    if (cachedProbe) {
+      return cachedProbe;
+    }
+
+    const probe = (async () => {
+      // Linked Ableton projects are the practical fallback for Ethan's album
+      // exports: the WAVs usually have no BPM tag, but the `.als` global tempo is
+      // available without decoding audio or running beat detection. Cache the
+      // read/decompress by path+mtime because one song can have dozens of exported
+      // versions pointing at the same project file.
+      return extractAbletonTempoBpmFromProjectBuffer(await fs.readFile(resolvedProjectPath));
+    })().catch((error: unknown) => {
+      log.info('[producer-player:analysis] linked project BPM probe unavailable', {
+        projectFilePath: resolvedProjectPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+    LINKED_PROJECT_BPM_CACHE.set(cacheKey, probe);
+    return await probe;
+  } catch (error: unknown) {
+    log.info('[producer-player:analysis] linked project BPM probe unavailable', {
+      projectFilePath: resolvedProjectPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 function parseSampleRateHzFromDiagnostics(diagnostics: string): number | null {
@@ -6925,15 +6999,25 @@ function registerIpcHandlers(service: FileLibraryService): void {
 
   ipcMain.handle(
     IPC_CHANNELS.ANALYZE_AUDIO_FILE,
-    async (_event, filePath: string, requestId: string | null = null) => {
-      return analyzeAudioFile(filePath, requestId);
+    async (
+      _event,
+      filePath: string,
+      requestId: string | null = null,
+      projectFilePath: string | null = null
+    ) => {
+      return analyzeAudioFile(filePath, requestId, projectFilePath);
     }
   );
 
   ipcMain.handle(
     IPC_CHANNELS.PROBE_AUDIO_METADATA,
-    async (_event, filePath: string, requestId: string | null = null) => {
-      return probeAudioMetadata(filePath, requestId);
+    async (
+      _event,
+      filePath: string,
+      requestId: string | null = null,
+      projectFilePath: string | null = null
+    ) => {
+      return probeAudioMetadata(filePath, requestId, projectFilePath);
     }
   );
 

@@ -229,4 +229,18 @@ await build({
   logLevel: 'warning',
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/auto-update-downgrade.test.cjs + dist/mcp-control-server.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs + dist/actionLog.test.cjs + dist/bit-depth-fallback.test.cjs');
+// v3.314 — Ableton `.als` tempo fallback for BPM display. Kept as a pure
+// module so the parser can be locked with tiny gzipped fixtures instead of
+// launching Electron or Ableton.
+await build({
+  entryPoints: [resolve(appDir, 'src/ableton-tempo.ts')],
+  outfile: resolve(appDir, 'dist/ableton-tempo.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+});
+
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/auto-update-downgrade.test.cjs + dist/mcp-control-server.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs + dist/actionLog.test.cjs + dist/bit-depth-fallback.test.cjs + dist/ableton-tempo.test.cjs');

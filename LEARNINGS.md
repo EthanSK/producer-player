@@ -24,6 +24,16 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-06-22T00:35:00Z
+**Trigger:** Ethan Telegram screenshot (Inspector Version History buttons clipped: "Open in Find...")
+**Symptom:** In the compact inline Inspector (310px right column), Version History action buttons extended past the right edge of the panel. Because `.panel` has `overflow: hidden`, the visible labels were chopped at the window edge even though the buttons themselves still existed in the DOM.
+**Root cause:** `.version-list` was a CSS grid with an implicit auto column. That implicit track sized from the version rows' max-content width (long album-style filenames plus the fixed-width action column), so the entire `.version-row` became wider than the inspector card/panel. The row's right side then overflowed into the panel clip area.
+**Fix:** `apps/renderer/src/styles.css`: pin `.version-list` to `grid-template-columns: minmax(0, 1fr)` and keep `.version-row { min-width: 0 }` so the row flex layout must fit inside the compact panel instead of asking the grid for more horizontal space.
+**Commit:** this change (shipped as v3.315)
+**Guard:** `apps/e2e/src/inspector-floating-tooltip.spec.ts` smoke test `version action buttons stay inside the compact inline inspector` opens a 1360x820 Electron window with `Engineering\Alignment` filenames and asserts Cue / Use as reference / Open in Finder all fit inside the inspector panel.
+---
+
+---
 **Date:** 2026-06-12T11:43:34Z
 **Trigger:** voice 7426 (ship) / voice 7421 (diagnosis)
 **Symptom:** Residual crackle when rapidly switching tracks (A<->B<->A) during playback or on long/large files, at v3.299 — after prior multi-threading fixes (worker analysis v3.240, 15ms crossfade, deferred kickoff) the LAST main-thread starvation source remained

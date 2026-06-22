@@ -7,6 +7,22 @@ import {
   launchProducerPlayer,
 } from './helpers/electron-app';
 
+async function setWindowContentSize(
+  electronApp: Awaited<ReturnType<typeof launchProducerPlayer>>['electronApp'],
+  width: number,
+  height: number
+): Promise<void> {
+  await electronApp.evaluate(({ BrowserWindow }, size) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) return;
+
+    // Electron E2Es care about the renderer's inner dimensions, not the outer
+    // frame. `setContentSize` drives the same CSS breakpoints Ethan hits in the
+    // real desktop window, including the compact 310px inspector column.
+    window.setContentSize(size.width, size.height);
+  }, { width, height });
+}
+
 async function writeTestWav(filePath: string, frequencyHz: number): Promise<void> {
   const sampleRate = 44_100;
   const durationMs = 350;
@@ -56,6 +72,66 @@ async function writeTestWav(filePath: string, frequencyHz: number): Promise<void
 }
 
 test.describe('Inspector floating tooltips @smoke', () => {
+  test('version action buttons stay inside the compact inline inspector @smoke', async () => {
+    const directories = await createE2ETestDirectories('producer-player-inspector-actions');
+
+    // The screenshot regression happened with real album-style names and the
+    // compact 310px inline inspector column. A backslash in the filename keeps
+    // the left column realistically stubborn while the action column proves it
+    // still fits inside the panel instead of being clipped by `.panel`.
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Engineering\\Alignment v1.wav'), 440);
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Engineering\\Alignment v2.wav'), 554.37);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+    try {
+      await setWindowContentSize(electronApp, 1360, 820);
+
+      await page.evaluate(async (folderPath) => {
+        await (
+          window as unknown as {
+            producerPlayer: { linkFolder: (folder: string) => Promise<void> };
+          }
+        ).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1, { timeout: 15_000 });
+      await page.getByTestId('main-list-row').first().click();
+
+      await expect(page.getByTestId('inspector-version-row')).toHaveCount(2);
+
+      const panelBox = await page.getByTestId('inspector-drawer').boundingBox();
+      expect(panelBox).not.toBeNull();
+
+      for (const testId of [
+        'inspector-version-cue-button',
+        'inspector-version-use-as-reference-button',
+        'inspector-version-reveal-button',
+      ]) {
+        const button = page.getByTestId(testId).first();
+        await expect(button).toBeVisible();
+
+        const buttonBox = await button.boundingBox();
+        expect(buttonBox).not.toBeNull();
+
+        // Regression guard for Ethan's cropped-button screenshot: the grid list
+        // used to size its only column from max-content, so the row's DOM box
+        // extended past the panel and `.panel { overflow: hidden }` chopped the
+        // visible label ("Open in Find..."). The button must fit inside the
+        // inspector panel before any text-fit checks matter.
+        expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(
+          panelBox!.x + panelBox!.width - 1
+        );
+
+        await expect(
+          button.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
+        ).resolves.toBe(true);
+      }
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('version action tooltip is portalled so drawer overflow cannot clip it @smoke', async () => {
     const directories = await createE2ETestDirectories('producer-player-inspector-tooltip');
 

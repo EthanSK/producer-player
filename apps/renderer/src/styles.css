@@ -5930,6 +5930,16 @@ button.checklist-play-toggle[data-playing='true'] {
 .version-list {
   display: grid;
   gap: 8px;
+  /* Bug fix 2026-06-22: the implicit grid column was sizing itself from the
+   * rows' max-content width, so long version names + the 110px action column
+   * made rows wider than the compact 310px inspector panel. `.panel` clips
+   * overflow, which chopped labels like "Open in Finder" at the window edge.
+   * Pin the list to one shrinkable track so the row flexbox has to solve
+   * within the panel instead of asking the grid for more horizontal room. */
+  grid-template-columns: minmax(0, 1fr);
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .version-row {
@@ -5940,6 +5950,7 @@ button.checklist-play-toggle[data-playing='true'] {
   justify-content: space-between;
   gap: 8px;
   align-items: center;
+  min-width: 0;
 }
 
 /* v3.270 — Inspector version-row left-hand text column. Was previously

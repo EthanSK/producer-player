@@ -284,6 +284,17 @@ test.describe('audio-analysis USER interrupt @smoke', () => {
       await expect(page.getByTestId('measured-analysis-error')).toHaveCount(0);
       await expect(page.getByTestId('measured-analysis-overlay-error')).toHaveCount(0);
 
+      // v3.317 — Background/latest-track analysis deliberately waits while
+      // playback is audible. Pause before asserting a full warmup drain so this
+      // smoke test proves the backlog resumes after listening, not during it.
+      if ((await page.getByTestId('player-play-toggle').getAttribute('aria-label')) === 'Pause') {
+        await page.getByTestId('player-play-toggle').click();
+        await expect(page.getByTestId('player-play-toggle')).toHaveAttribute(
+          'aria-label',
+          'Play'
+        );
+      }
+
       await expect
         .poll(async () => {
           const dump = await readMeasuredQueueDump(page);
@@ -298,13 +309,19 @@ test.describe('audio-analysis USER interrupt @smoke', () => {
         }, { timeout: 45_000 })
         .toBe(0);
 
-      const warmupState = await readLibraryWarmupState(page);
-      expect(warmupState).toHaveLength(tracks.length);
-      expect(
-        warmupState
-          .filter((entry) => !entry.measuredReady)
-          .map((entry) => `${entry.songTitle} / ${entry.fileName}`)
-      ).toEqual([]);
+      // The warmup runner may need one extra idle tick after the queue first
+      // drains to mark a row ready or dispatch the next deferred item.
+      await expect
+        .poll(
+          async () =>
+            (await readLibraryWarmupState(page))
+              .filter((entry) => !entry.measuredReady)
+              .map((entry) => `${entry.songTitle} / ${entry.fileName}`),
+          { timeout: 45_000, intervals: [250, 500, 1000] }
+        )
+        .toEqual([]);
+
+      await expect.poll(async () => (await readLibraryWarmupState(page)).length).toBe(tracks.length);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

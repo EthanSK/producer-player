@@ -710,6 +710,17 @@ test.describe('Track-switch precompute cache @smoke', () => {
         timeout: 15_000,
       });
 
+      // v3.317 — Startup cache-fill is intentionally idle-only once audio is
+      // actually playing. This test is about the cache invariant, so make the
+      // transport quiet before waiting for the selected-track/warmup analysis.
+      if ((await page.getByTestId('player-play-toggle').getAttribute('aria-label')) === 'Pause') {
+        await page.getByTestId('player-play-toggle').click();
+        await expect(page.getByTestId('player-play-toggle')).toHaveAttribute(
+          'aria-label',
+          'Play'
+        );
+      }
+
       // Wait for the integrated-LUFS readout on the first selected song to
       // resolve — confirms the selected-track measured-analysis path is ready.
       await expect(page.getByTestId('analysis-integrated-stat')).not.toContainText(

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   shouldAutoplayOnTransportSwitch,
   shouldAttemptPlaybackOutputRecovery,
+  shouldDeferNonEssentialAnalysisDuringPlayback,
   shouldRestoreAudiblePlaybackGain,
 } from './audioPlaybackResilience';
 
@@ -103,6 +104,72 @@ describe('shouldAutoplayOnTransportSwitch', () => {
         playOnNextLoad: false,
         playbackIntentPlaying: false,
         reactIsPlaying: false,
+      })
+    ).toBe(false);
+  });
+});
+
+describe('shouldDeferNonEssentialAnalysisDuringPlayback', () => {
+  it('defers uncached, non-explicit analysis while playback is audibly active', () => {
+    expect(
+      shouldDeferNonEssentialAnalysisDuringPlayback({
+        audioPaused: false,
+        playOnNextLoad: false,
+        playbackIntentPlaying: false,
+        reactIsPlaying: false,
+        cachedAnalysisReady: false,
+        explicitAnalysisRequested: false,
+      })
+    ).toBe(true);
+  });
+
+  it('allows cached reads and explicit analysis surfaces even during playback', () => {
+    const playingInput = {
+      audioPaused: false,
+      playOnNextLoad: false,
+      playbackIntentPlaying: false,
+      reactIsPlaying: true,
+    };
+
+    expect(
+      shouldDeferNonEssentialAnalysisDuringPlayback({
+        ...playingInput,
+        cachedAnalysisReady: true,
+        explicitAnalysisRequested: false,
+      })
+    ).toBe(false);
+
+    expect(
+      shouldDeferNonEssentialAnalysisDuringPlayback({
+        ...playingInput,
+        cachedAnalysisReady: false,
+        explicitAnalysisRequested: true,
+      })
+    ).toBe(false);
+  });
+
+  it('allows cold analysis while playback is idle', () => {
+    expect(
+      shouldDeferNonEssentialAnalysisDuringPlayback({
+        audioPaused: true,
+        playOnNextLoad: false,
+        playbackIntentPlaying: false,
+        reactIsPlaying: false,
+        cachedAnalysisReady: false,
+        explicitAnalysisRequested: false,
+      })
+    ).toBe(false);
+  });
+
+  it('allows cold analysis while playback is only queued for a transport handoff', () => {
+    expect(
+      shouldDeferNonEssentialAnalysisDuringPlayback({
+        audioPaused: true,
+        playOnNextLoad: true,
+        playbackIntentPlaying: true,
+        reactIsPlaying: false,
+        cachedAnalysisReady: false,
+        explicitAnalysisRequested: false,
       })
     ).toBe(false);
   });

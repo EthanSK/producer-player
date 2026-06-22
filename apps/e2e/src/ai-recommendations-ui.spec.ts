@@ -106,6 +106,17 @@ test.describe('AI recommendations fullscreen UI @smoke', () => {
       await expect(page.getByTestId('main-list-row')).toHaveCount(1);
       await page.getByTestId('main-list-row').first().click();
 
+      // v3.317 — Non-essential analysis now waits while audio is audible, so
+      // pause the transport before this UI-only test waits for the analysis
+      // fingerprint used to seed recommendations.
+      if ((await page.getByTestId('player-play-toggle').getAttribute('aria-label')) === 'Pause') {
+        await page.getByTestId('player-play-toggle').click();
+        await expect(page.getByTestId('player-play-toggle')).toHaveAttribute(
+          'aria-label',
+          'Play',
+        );
+      }
+
       // --- Disable the auto-run gate so the seeded recs aren't overwritten
       // --- by a Phase 4 real agent call that happens to fire mid-test.
       // --- Then wait until the renderer has computed an analysisVersion for

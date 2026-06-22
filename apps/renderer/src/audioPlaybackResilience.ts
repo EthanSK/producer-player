@@ -45,3 +45,28 @@ export function shouldAutoplayOnTransportSwitch(input: PlaybackAutoplayIntentInp
   );
 }
 
+export interface NonEssentialAnalysisPlaybackGateInput extends PlaybackAutoplayIntentInput {
+  /**
+   * True when the result is already cached. Cached data is just a React read, not
+   * a new decode/ffmpeg job, so playback protection must never hide it.
+   */
+  cachedAnalysisReady: boolean;
+  /**
+   * True when Ethan explicitly asked for a surface that needs the analysis now
+   * (for example full-screen mastering or an audible preview transform).
+   */
+  explicitAnalysisRequested: boolean;
+}
+
+export function shouldDeferNonEssentialAnalysisDuringPlayback(
+  input: NonEssentialAnalysisPlaybackGateInput
+): boolean {
+  if (input.cachedAnalysisReady || input.explicitAnalysisRequested) {
+    return false;
+  }
+
+  // This gate is narrower than `shouldAutoplayOnTransportSwitch`: a queued
+  // transport handoff is allowed to keep warming metadata during the load-settle
+  // window, but once audio is actually moving, non-essential analysis backs off.
+  return !input.audioPaused || input.reactIsPlaying;
+}

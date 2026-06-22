@@ -122,6 +122,7 @@ import { computePlaybackGainState } from './playbackGainModel';
 import {
   shouldAutoplayOnTransportSwitch,
   shouldAttemptPlaybackOutputRecovery,
+  shouldDeferNonEssentialAnalysisDuringPlayback,
   shouldRestoreAudiblePlaybackGain,
   type PlaybackContextState,
 } from './audioPlaybackResilience';
@@ -1372,6 +1373,12 @@ interface RunMeasuredAnalysisOptions {
    * a beat for playback startup to settle before doing CPU-heavy work.
    */
   startDelayMs?: number;
+  /**
+   * Caller-owned cancellation for jobs that become non-essential before their
+   * delayed body starts. The queue still owns preemption; this lets the playback
+   * UI abort "nice to have" selected-track work when the user starts listening.
+   */
+  signal?: AbortSignal;
 }
 
 function getFileNameFromPath(filePath: string): string {
@@ -1460,12 +1467,28 @@ function runMeasuredAnalysis(
           // The preload API may be older in dev; ignore.
         }
       };
+      const throwIfAborted = (): void => {
+        if (signal.aborted || options.signal?.aborted) {
+          throw new DOMException('The analysis request was aborted.', 'AbortError');
+        }
+      };
       if (signal.aborted) {
         handleAbort();
       } else {
         signal.addEventListener('abort', handleAbort, { once: true });
       }
+      if (options.signal?.aborted) {
+        handleAbort();
+      } else {
+        options.signal?.addEventListener('abort', handleAbort, { once: true });
+      }
       try {
+        // v3.317 — If playback became active while this USER_SELECTED job was
+        // sitting in the queue's post-admit delay, bail before launching ffmpeg.
+        // The old path still spawned analysis after Ethan had started listening,
+        // so a "background" LUFS read could compete with the audible file even
+        // when no Spotify/platform gain was being previewed.
+        throwIfAborted();
         return await window.producerPlayer.analyzeAudioFile(
           filePath,
           requestId,
@@ -1473,6 +1496,7 @@ function runMeasuredAnalysis(
         );
       } finally {
         signal.removeEventListener('abort', handleAbort);
+        options.signal?.removeEventListener('abort', handleAbort);
       }
     },
     {
@@ -1504,14 +1528,28 @@ function runAudioMetadataProbe(
           // Older preload in dev; safe to ignore.
         }
       };
+      const throwIfAborted = (): void => {
+        if (signal.aborted || options.signal?.aborted) {
+          throw new DOMException('The metadata probe was aborted.', 'AbortError');
+        }
+      };
 
       if (signal.aborted) {
         handleAbort();
       } else {
         signal.addEventListener('abort', handleAbort, { once: true });
       }
+      if (options.signal?.aborted) {
+        handleAbort();
+      } else {
+        options.signal?.addEventListener('abort', handleAbort, { once: true });
+      }
 
       try {
+        // Metadata-only enrichment is still ffprobe/IPC work. If playback has
+        // become active since the queue admitted this background job, leave the
+        // audio path alone and let the caller retry after the transport idles.
+        throwIfAborted();
         return await window.producerPlayer.probeAudioMetadata(
           filePath,
           requestId,
@@ -1519,6 +1557,7 @@ function runAudioMetadataProbe(
         );
       } finally {
         signal.removeEventListener('abort', handleAbort);
+        options.signal?.removeEventListener('abort', handleAbort);
       }
     },
     {
@@ -4274,6 +4313,11 @@ export function App(): JSX.Element {
   // previous cache key here (rather than diffing prev-state) lets us demote
   // exactly the right key when the effect re-runs.
   const previousUserSelectedAnalysisCacheKeyRef = useRef<string | null>(null);
+  // v3.317 — Selected-track analysis is allowed to keep filling caches across
+  // ordinary React effect churn, but playback-start can abort the current
+  // non-essential selected jobs before they launch ffmpeg/decode work.
+  const selectedPreviewAnalysisAbortControllerRef = useRef<AbortController | null>(null);
+  const selectedMeasuredAnalysisAbortControllerRef = useRef<AbortController | null>(null);
   const queueMoveTargetSongIdRef = useRef<string | null>(null);
   const checklistHighlightTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
@@ -4703,6 +4747,10 @@ export function App(): JSX.Element {
         demotePreviewAnalysis(previousKey, ANALYSIS_PRIORITY_NEIGHBOR);
         previousUserSelectedAnalysisCacheKeyRef.current = null;
       }
+      selectedPreviewAnalysisAbortControllerRef.current?.abort();
+      selectedPreviewAnalysisAbortControllerRef.current = null;
+      selectedMeasuredAnalysisAbortControllerRef.current?.abort();
+      selectedMeasuredAnalysisAbortControllerRef.current = null;
       setAnalysis(null);
       setMeasuredAnalysis(null);
       setAnalysisStatus('idle');
@@ -4746,13 +4794,44 @@ export function App(): JSX.Element {
     );
 
     let cancelled = false;
+    const analysisGateTransport = getPlaybackAnalysisGateTransportInput();
+    const shouldDeferPreviewAnalysis =
+      !cached.previewAnalysis &&
+      shouldDeferNonEssentialAnalysisDuringPlayback({
+        ...analysisGateTransport,
+        cachedAnalysisReady: false,
+        // Full-screen mastering is an explicit request for the heavier graph
+        // payload. The compact panel can stay calm while Ethan is simply
+        // listening; that avoids the renderer fetch/decode + huge React graph
+        // commit landing on the audible playback path.
+        explicitAnalysisRequested: analysisExpanded,
+      });
+    const shouldDeferMeasuredAnalysis =
+      !cached.measuredAnalysis &&
+      shouldDeferNonEssentialAnalysisDuringPlayback({
+        ...analysisGateTransport,
+        cachedAnalysisReady: false,
+        // Measured LUFS/true-peak is scalar data, but it still launches ffmpeg
+        // and disk reads. Run it during playback only when it is actually needed
+        // for an explicit audible/analysis action; otherwise wait for pause.
+        explicitAnalysisRequested:
+          analysisExpanded ||
+          normalizationPreviewEnabled ||
+          (playbackPreviewMode === 'reference' && referenceLevelMatchEnabled),
+      });
 
     setAnalysis(cached.previewAnalysis);
     setMeasuredAnalysis(cached.measuredAnalysis);
     setAnalysisStatus(
-      cached.previewAnalysis ? 'ready' : selectedPlaybackSourceUrl ? 'loading' : 'idle'
+      cached.previewAnalysis
+        ? 'ready'
+        : selectedPlaybackSourceUrl && !shouldDeferPreviewAnalysis
+          ? 'loading'
+          : 'idle'
     );
-    setMeasuredAnalysisStatus(cached.measuredAnalysis ? 'ready' : 'loading');
+    setMeasuredAnalysisStatus(
+      cached.measuredAnalysis ? 'ready' : shouldDeferMeasuredAnalysis ? 'idle' : 'loading'
+    );
     setAnalysisError(null);
     setMeasuredAnalysisError(null);
 
@@ -4779,8 +4858,10 @@ export function App(): JSX.Element {
     // never hold those scalar readouts hostage. Both paths still share the
     // same cache key and queue in-flight de-dupe, so repeated A↔B↔A switching
     // does not rerun unchanged work.
-    promoteMeasuredAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
-    if (selectedPlaybackSourceUrl) {
+    if (!shouldDeferMeasuredAnalysis) {
+      promoteMeasuredAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
+    }
+    if (selectedPlaybackSourceUrl && !shouldDeferPreviewAnalysis) {
       promotePreviewAnalysis(analysisCacheKey, ANALYSIS_PRIORITY_USER_SELECTED);
     }
 
@@ -4791,12 +4872,33 @@ export function App(): JSX.Element {
     // slot now makes the scheduler abort/pause lower-priority work immediately;
     // startDelayMs still keeps ffmpeg/WebAudio off the playback-start hot path.
 
-    if (!cached.previewAnalysis && selectedPlaybackSourceUrl) {
+    if (shouldDeferPreviewAnalysis || shouldDeferMeasuredAnalysis) {
+      logPlaybackEvent('analysis-deferred-during-playback', {
+        previewDeferred: shouldDeferPreviewAnalysis,
+        measuredDeferred: shouldDeferMeasuredAnalysis,
+        selectedPlaybackVersionId,
+        analysisExpanded,
+        normalizationPreviewEnabled,
+        playbackPreviewMode,
+      });
+    }
+    if (shouldDeferPreviewAnalysis) {
+      selectedPreviewAnalysisAbortControllerRef.current?.abort();
+      selectedPreviewAnalysisAbortControllerRef.current = null;
+    }
+    if (shouldDeferMeasuredAnalysis) {
+      selectedMeasuredAnalysisAbortControllerRef.current?.abort();
+      selectedMeasuredAnalysisAbortControllerRef.current = null;
+    }
+
+    if (!cached.previewAnalysis && selectedPlaybackSourceUrl && !shouldDeferPreviewAnalysis) {
       const previewSourceUrl = selectedPlaybackSourceUrl;
       const previewKey = analysisCacheKey;
       const previewLabel = selectedVersion.fileName;
       const previewCachedFallback = cached.previewAnalysis;
-      void analyzeTrackFromUrl(previewSourceUrl, undefined, {
+      const previewAbortController = new AbortController();
+      selectedPreviewAnalysisAbortControllerRef.current = previewAbortController;
+      void analyzeTrackFromUrl(previewSourceUrl, previewAbortController.signal, {
         priority: ANALYSIS_PRIORITY_USER_SELECTED,
         key: previewKey,
         label: previewLabel,
@@ -4816,6 +4918,9 @@ export function App(): JSX.Element {
           setAnalysis(previewResult);
           setAnalysisStatus('ready');
           setAnalysisError(null);
+          if (selectedPreviewAnalysisAbortControllerRef.current === previewAbortController) {
+            selectedPreviewAnalysisAbortControllerRef.current = null;
+          }
         })
         .catch((analysisIssue: unknown) => {
           if (cancelled) {
@@ -4838,20 +4943,28 @@ export function App(): JSX.Element {
               ? analysisIssue.message
               : 'Could not analyse this track preview.'
           );
+        })
+        .finally(() => {
+          if (selectedPreviewAnalysisAbortControllerRef.current === previewAbortController) {
+            selectedPreviewAnalysisAbortControllerRef.current = null;
+          }
         });
     }
 
-    if (!cached.measuredAnalysis) {
+    if (!cached.measuredAnalysis && !shouldDeferMeasuredAnalysis) {
       const measuredFilePath = analysisFilePath;
       const measuredKey = analysisCacheKey;
       const measuredLabel = selectedVersion.fileName;
       const measuredCachedFallback = cached.measuredAnalysis;
+      const measuredAbortController = new AbortController();
+      selectedMeasuredAnalysisAbortControllerRef.current = measuredAbortController;
       void runMeasuredAnalysis(measuredFilePath, {
         priority: ANALYSIS_PRIORITY_USER_SELECTED,
         cacheKey: measuredKey,
         label: measuredLabel,
         projectFilePath: selectedVersionProjectFilePath,
         startDelayMs: selectedMeasuredJobDelayMs,
+        signal: measuredAbortController.signal,
       })
         .then((measuredResult) => {
           // Always populate the measured session cache and mastering entry,
@@ -4887,6 +5000,9 @@ export function App(): JSX.Element {
           setMeasuredAnalysis(measuredResult);
           setMeasuredAnalysisStatus('ready');
           setMeasuredAnalysisError(null);
+          if (selectedMeasuredAnalysisAbortControllerRef.current === measuredAbortController) {
+            selectedMeasuredAnalysisAbortControllerRef.current = null;
+          }
         })
         .catch((analysisIssue: unknown) => {
           if (cancelled) {
@@ -4911,6 +5027,11 @@ export function App(): JSX.Element {
                 ? analysisIssue.message
                 : 'Could not analyse this track yet.'
           );
+        })
+        .finally(() => {
+          if (selectedMeasuredAnalysisAbortControllerRef.current === measuredAbortController) {
+            selectedMeasuredAnalysisAbortControllerRef.current = null;
+          }
         });
     }
 
@@ -4918,10 +5039,15 @@ export function App(): JSX.Element {
       cancelled = true;
     };
   }, [
+    analysisExpanded,
     createMasteringCacheEntry,
     getCachedMasteringAnalysisForVersion,
+    isPlaying,
     mixPlaybackSource?.url,
     mixPlaybackSourceSelectedFilePath,
+    normalizationPreviewEnabled,
+    playbackPreviewMode,
+    referenceLevelMatchEnabled,
     selectedPlaybackVersionId,
     songProjectFilePaths,
     snapshot.songs,
@@ -7480,6 +7606,100 @@ export function App(): JSX.Element {
     }, delayMs);
   }
 
+  function getPlaybackAnalysisGateTransportInput(): {
+    audioPaused: boolean;
+    playOnNextLoad: boolean;
+    playbackIntentPlaying: boolean;
+    reactIsPlaying: boolean;
+  } {
+    const audio = audioRef.current;
+    return {
+      // If the <audio> element has not mounted yet, React's `isPlaying` mirror
+      // is the best available truth. Once mounted, the element's paused flag
+      // catches the tiny window before React receives `play`/`pause` events.
+      audioPaused: audio ? audio.paused : !isPlayingRef.current,
+      playOnNextLoad: playOnNextLoadRef.current,
+      playbackIntentPlaying: playbackIntentPlayingRef.current,
+      reactIsPlaying: isPlayingRef.current,
+    };
+  }
+
+  function isAudiblePlaybackActiveForAnalysis(): boolean {
+    return shouldDeferNonEssentialAnalysisDuringPlayback({
+      ...getPlaybackAnalysisGateTransportInput(),
+      cachedAnalysisReady: false,
+      explicitAnalysisRequested: false,
+    });
+  }
+
+  async function waitForNonEssentialAnalysisWindow(
+    isCancelled: () => boolean
+  ): Promise<boolean> {
+    while (!isCancelled() && isAudiblePlaybackActiveForAnalysis()) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, PLAYBACK_DEFERRED_METADATA_PROBE_POLL_MS);
+      });
+    }
+
+    return !isCancelled();
+  }
+
+  function watchPlaybackForNonEssentialAnalysis(): {
+    signal: AbortSignal;
+    stop: () => void;
+  } {
+    const controller = new AbortController();
+    const abortIfPlaybackStarts = (): void => {
+      if (isAudiblePlaybackActiveForAnalysis() && !controller.signal.aborted) {
+        controller.abort();
+      }
+    };
+    const intervalId = window.setInterval(
+      abortIfPlaybackStarts,
+      PLAYBACK_DEFERRED_METADATA_PROBE_POLL_MS
+    );
+
+    // Check immediately too, so a job admitted by the queue during the same
+    // render tick as play-start never gets as far as spawning ffmpeg/ffprobe.
+    abortIfPlaybackStarts();
+
+    return {
+      signal: controller.signal,
+      stop: () => window.clearInterval(intervalId),
+    };
+  }
+
+  async function runNonEssentialAudioAnalysisWhenIdle<T>(
+    isCancelled: () => boolean,
+    run: (signal: AbortSignal) => Promise<T>
+  ): Promise<T | null> {
+    for (;;) {
+      const idleWindowAvailable = await waitForNonEssentialAnalysisWindow(isCancelled);
+      if (!idleWindowAvailable) {
+        return null;
+      }
+
+      const playbackWatch = watchPlaybackForNonEssentialAnalysis();
+      try {
+        return await run(playbackWatch.signal);
+      } catch (error) {
+        // v3.317 — Background LUFS/metadata work should not keep fighting the
+        // transport if Ethan presses play mid-probe. Abort the active child,
+        // wait for the player to go idle, then retry the same background item.
+        if (
+          isAnalysisAbortError(error) &&
+          !isCancelled() &&
+          playbackWatch.signal.aborted
+        ) {
+          continue;
+        }
+        throw error;
+      } finally {
+        playbackWatch.stop();
+      }
+    }
+  }
+
   function clearPlaybackLoadTimeout(): void {
     if (!loadTimeoutRef.current) {
       return;
@@ -8415,12 +8635,20 @@ export function App(): JSX.Element {
         let probeYieldedResult = false;
         try {
           if (isFresh && isMissingBpm && !isMissingBitDepth && cachedEntry) {
-            const metadata = await runAudioMetadataProbe(version.filePath, {
-              priority: ANALYSIS_PRIORITY_BACKGROUND,
-              cacheKey,
-              label: `${version.fileName} — BPM metadata`,
-              projectFilePath,
-            });
+            const metadata = await runNonEssentialAudioAnalysisWhenIdle(
+              () => cancelled,
+              (signal) =>
+                runAudioMetadataProbe(version.filePath, {
+                  priority: ANALYSIS_PRIORITY_BACKGROUND,
+                  cacheKey,
+                  label: `${version.fileName} — BPM metadata`,
+                  projectFilePath,
+                  signal,
+                })
+            );
+            if (!metadata) {
+              return;
+            }
 
             const entryWithBpm = withBpmOnMasteringCacheEntry(cachedEntry, metadata.bpm);
             upsertMasteringCacheEntry(entryWithBpm);
@@ -8446,12 +8674,20 @@ export function App(): JSX.Element {
             return;
           }
 
-          const measured = await runMeasuredAnalysis(version.filePath, {
-            priority: ANALYSIS_PRIORITY_BACKGROUND,
-            cacheKey,
-            label: `${version.fileName} — version history`,
-            projectFilePath,
-          });
+          const measured = await runNonEssentialAudioAnalysisWhenIdle(
+            () => cancelled,
+            (signal) =>
+              runMeasuredAnalysis(version.filePath, {
+                priority: ANALYSIS_PRIORITY_BACKGROUND,
+                cacheKey,
+                label: `${version.fileName} — version history`,
+                projectFilePath,
+                signal,
+              })
+          );
+          if (!measured) {
+            return;
+          }
 
           // v3.272 — Mirror the warmup path: ALSO upsert the freshly-measured
           // analysis into the global session cache. Previously the inspector
@@ -8922,7 +9158,13 @@ export function App(): JSX.Element {
       // v3.141 — only measured user-selected jobs can pause startup measured
       // warmup. Preview decode is graph/UI work; letting it pause LUFS/stat
       // warmup would reintroduce the exact coupling Ethan rejected.
+      //
+      // v3.317 — Also pause *all* latest-track warmup while audible playback
+      // is active. These jobs are useful cache fills, not something the player
+      // must do to sound correct. Letting them start mid-listen was exactly the
+      // "analysis jobs loaded in and I hear a crackle" failure mode.
       return (
+        isAudiblePlaybackActiveForAnalysis() ||
         playbackSettling ||
         measured.activeByPriority.user > 0 ||
         measured.userBypassActive > 0 ||
@@ -9021,27 +9263,43 @@ export function App(): JSX.Element {
       let probeYieldedResult = false;
       try {
         if (isFresh && isMissingBpm && !isMissingBitDepth && cachedEntry) {
-          const metadata = await runAudioMetadataProbe(version.filePath, {
-            priority: ANALYSIS_PRIORITY_BACKGROUND,
-            cacheKey,
-            label: `${song.title} — ${version.fileName} — BPM metadata`,
-            projectFilePath,
-          });
+          const metadata = await runNonEssentialAudioAnalysisWhenIdle(
+            () => cancelled,
+            (signal) =>
+              runAudioMetadataProbe(version.filePath, {
+                priority: ANALYSIS_PRIORITY_BACKGROUND,
+                cacheKey,
+                label: `${song.title} — ${version.fileName} — BPM metadata`,
+                projectFilePath,
+                signal,
+              })
+          );
+          if (!metadata) {
+            return;
+          }
 
           upsertMasteringCacheEntry(withBpmOnMasteringCacheEntry(cachedEntry, metadata.bpm));
           probeYieldedResult = true;
           return;
         }
 
-        const measured = await runMeasuredAnalysis(version.filePath, {
-          priority:
-            isFresh && isMissingBpm && !isMissingBitDepth
-              ? ANALYSIS_PRIORITY_BACKGROUND
-              : ANALYSIS_PRIORITY_NEIGHBOR,
-          cacheKey,
-          label: `${song.title} — ${version.fileName}`,
-          projectFilePath,
-        });
+        const measured = await runNonEssentialAudioAnalysisWhenIdle(
+          () => cancelled,
+          (signal) =>
+            runMeasuredAnalysis(version.filePath, {
+              priority:
+                isFresh && isMissingBpm && !isMissingBitDepth
+                  ? ANALYSIS_PRIORITY_BACKGROUND
+                  : ANALYSIS_PRIORITY_NEIGHBOR,
+              cacheKey,
+              label: `${song.title} — ${version.fileName}`,
+              projectFilePath,
+              signal,
+            })
+        );
+        if (!measured) {
+          return;
+        }
 
         // Always upsert to the global cache — idempotent under cacheKey.
         upsertMasteringCacheEntry(
@@ -9441,11 +9699,15 @@ export function App(): JSX.Element {
     if (
       !referenceLevelMatchEnabled ||
       playbackPreviewMode !== 'reference' ||
-      !analysis ||
       !referenceTrack
     ) {
       return 0;
     }
+    // v3.317 — Level Match is an audible transform derived from measured LUFS,
+    // so it must not depend on the renderer preview/graph decode being ready.
+    // That preview decode is now allowed to wait during playback; keeping this
+    // guard tied to `analysis` would silently turn A/B level matching into 0 dB
+    // until a non-essential graph job finished.
     const mixLufs = measuredAnalysis?.integratedLufs;
     const refLufs = referenceTrack.measuredAnalysis.integratedLufs;
     if (mixLufs == null || refLufs == null || !Number.isFinite(mixLufs) || !Number.isFinite(refLufs)) return 0;

@@ -76,11 +76,18 @@ test.describe('Inspector floating tooltips @smoke', () => {
     const directories = await createE2ETestDirectories('producer-player-inspector-actions');
 
     // The screenshot regression happened with real album-style names and the
-    // compact 310px inline inspector column. A backslash in the filename keeps
-    // the left column realistically stubborn while the action column proves it
-    // still fits inside the panel instead of being clipped by `.panel`.
-    await writeTestWav(path.join(directories.fixtureDirectory, 'Engineering\\Alignment v1.wav'), 440);
-    await writeTestWav(path.join(directories.fixtureDirectory, 'Engineering\\Alignment v2.wav'), 554.37);
+    // compact 310px inline inspector column. Use a long unbroken stem here so
+    // Windows, macOS, and Linux all get the same stubborn left-column pressure
+    // without relying on slash/backslash characters that are path separators on
+    // some platforms.
+    await writeTestWav(
+      path.join(directories.fixtureDirectory, 'EngineeringAlignmentClipGuard v1.wav'),
+      440
+    );
+    await writeTestWav(
+      path.join(directories.fixtureDirectory, 'EngineeringAlignmentClipGuard v2.wav'),
+      554.37
+    );
 
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
     try {

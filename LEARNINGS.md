@@ -30,7 +30,7 @@ Each entry looks like:
 **Root cause:** `.version-list` was a CSS grid with an implicit auto column. That implicit track sized from the version rows' max-content width (long album-style filenames plus the fixed-width action column), so the entire `.version-row` became wider than the inspector card/panel. The row's right side then overflowed into the panel clip area.
 **Fix:** `apps/renderer/src/styles.css`: pin `.version-list` to `grid-template-columns: minmax(0, 1fr)` and keep `.version-row { min-width: 0 }` so the row flex layout must fit inside the compact panel instead of asking the grid for more horizontal space.
 **Commit:** this change (shipped as v3.315)
-**Guard:** `apps/e2e/src/inspector-floating-tooltip.spec.ts` smoke test `version action buttons stay inside the compact inline inspector` opens a 1360x820 Electron window with `Engineering\Alignment` filenames and asserts Cue / Use as reference / Open in Finder all fit inside the inspector panel.
+**Guard:** `apps/e2e/src/inspector-floating-tooltip.spec.ts` smoke test `version action buttons stay inside the compact inline inspector` opens a 1360x820 Electron window with long `EngineeringAlignmentClipGuard` filenames and asserts Cue / Use as reference / Open in Finder all fit inside the inspector panel.
 ---
 
 ---

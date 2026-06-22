@@ -923,6 +923,59 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('natural autoplay from an older cued version advances from that song slot', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-older-version-autoplay-next-song'
+    );
+    for (const [trackTitle, baseFrequency] of [
+      ['Track A', 260],
+      ['Track B', 420],
+      ['Track C', 700],
+    ] as const) {
+      await writeTestWav(path.join(directories.fixtureDirectory, `${trackTitle} v1.wav`), {
+        durationMs: 1_700,
+        frequencyHz: baseFrequency,
+      });
+      await writeTestWav(path.join(directories.fixtureDirectory, `${trackTitle} v2.wav`), {
+        durationMs: 1_700,
+        frequencyHz: baseFrequency + 90,
+      });
+    }
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(3);
+
+      const queueTitles = (await page.getByTestId('main-list-row-title').allTextContents()).map((title) =>
+        title.trim()
+      );
+      const [firstSongTitle, olderVersionSongTitle, expectedNextSongTitle] = queueTitles;
+      expect(firstSongTitle).toBeTruthy();
+      expect(olderVersionSongTitle).toBeTruthy();
+      expect(expectedNextSongTitle).toBeTruthy();
+
+      // The bug Ethan hit only appears when the cued older version is not part
+      // of the latest-version album queue. Pick the second visible song so a bad
+      // "-1 means start at the beginning" fallback is distinguishable from the
+      // correct next-song advance.
+      await cueSongVersion(
+        page,
+        olderVersionSongTitle,
+        `${olderVersionSongTitle} v1.wav`
+      );
+      await page.getByTestId('player-play-toggle').click();
+
+      await expect
+        .poll(async () => (await page.getByTestId('player-track-name').textContent()) ?? '')
+        .toContain(`${expectedNextSongTitle} v2.wav`);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('natural autoplay prefetches the next source and reserves a quiet handoff window', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-autoplay-handoff-prefetch'

@@ -11064,12 +11064,24 @@ export function App(): JSX.Element {
   }, [playbackQueue, resolvedAlbumDurationSecondsByVersionId]);
 
   const currentQueueIndex = useMemo(() => {
-    if (!selectedPlaybackVersionId) {
+    if (!selectedPlaybackVersion) {
       return -1;
     }
 
-    return playbackQueue.findIndex((version) => version.id === selectedPlaybackVersionId);
-  }, [playbackQueue, selectedPlaybackVersionId]);
+    const exactVersionIndex = playbackQueue.findIndex(
+      (version) => version.id === selectedPlaybackVersion.id
+    );
+    if (exactVersionIndex !== -1) {
+      return exactVersionIndex;
+    }
+
+    // Regression guard for older-version auditioning: Ethan often cues an older
+    // bounce from Version History, but the album queue intentionally contains
+    // only each song's latest/active version. Treat that older bounce as sitting
+    // in its song's album slot so autoplay/next-track advances to the following
+    // song instead of falling back to queue index 0.
+    return playbackQueue.findIndex((version) => version.songId === selectedPlaybackVersion.songId);
+  }, [playbackQueue, selectedPlaybackVersion]);
 
   const nextAutoplayPlaybackVersion = useMemo(
     () =>

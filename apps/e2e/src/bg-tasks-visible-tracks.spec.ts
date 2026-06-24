@@ -25,13 +25,16 @@ import {
  * never silently regress.
  */
 
-async function writeTestWav(filePath: string): Promise<void> {
-  // Tiny 0.5s 440 Hz sine — just enough that ffmpeg actually has audio
-  // to analyze; we deliberately keep it short so CI doesn't spend time
-  // measuring full-length files.
+async function writeTestWav(
+  filePath: string,
+  options: { durationMs?: number; frequencyHz?: number } = {}
+): Promise<void> {
+  // Default to a tiny 0.5s sine — just enough that ffmpeg actually has
+  // audio to analyze. Individual playback-sensitive tests can request a
+  // longer duration so the transport does not naturally finish mid-assertion.
   const sampleRate = 44_100;
-  const durationMs = 500;
-  const frequencyHz = 440;
+  const durationMs = options.durationMs ?? 500;
+  const frequencyHz = options.frequencyHz ?? 440;
   const sampleCount = Math.floor((sampleRate * durationMs) / 1000);
 
   const channels = 1;
@@ -345,7 +348,8 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
     );
 
     await writeTestWav(
-      path.join(directories.fixtureDirectory, 'NewVersion Alpha v1.wav')
+      path.join(directories.fixtureDirectory, 'NewVersion Alpha v1.wav'),
+      { durationMs: 15_000, frequencyHz: 440 }
     );
     await writeTestWav(
       path.join(directories.fixtureDirectory, 'NewVersion Bravo v1.wav')
@@ -356,6 +360,20 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
     );
 
     try {
+      await page.addStyleTag({
+        content: `
+          /*
+           * This regression is about background LUFS warmup, not Producey Boy.
+           * On narrow CI viewports the first-launch agent panel can auto-open
+           * after the warmup wait and sit above the track row, turning a product
+           * regression test into a pointer-interception test.
+           */
+          [data-testid="agent-chat-panel"] {
+            pointer-events: none !important;
+          }
+        `,
+      });
+
       await page.evaluate(async (folderPath) => {
         await (
           window as unknown as {
@@ -396,7 +414,8 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       // warmup so the newly active row sat on Loading while the status pill
       // showed a planned backlog.
       await writeTestWav(
-        path.join(directories.fixtureDirectory, 'NewVersion Alpha v2.wav')
+        path.join(directories.fixtureDirectory, 'NewVersion Alpha v2.wav'),
+        { durationMs: 15_000, frequencyHz: 520 }
       );
       await page.getByTestId('rescan-button').click();
 

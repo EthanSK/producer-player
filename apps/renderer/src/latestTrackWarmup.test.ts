@@ -159,4 +159,41 @@ describe('runSequentialLatestTrackWarmup', () => {
 
     expect(events).toEqual(['wait:0', 'wait:25']);
   });
+
+  it('passes the next entry into the urgent-work gate so detected versions can bypass paused backlog', async () => {
+    const events: string[] = [];
+    let urgentChecksRemaining = 2;
+
+    await runSequentialLatestTrackWarmup({
+      entries: ['detected-new-version', 'ordinary-backlog'],
+      isCancelled: () => false,
+      hasUrgentWork: (entry) => entry !== 'detected-new-version' && urgentChecksRemaining > 0,
+      wait: async (ms) => {
+        events.push(`wait:${ms}`);
+        if (ms > 0 && urgentChecksRemaining > 0) {
+          urgentChecksRemaining -= 1;
+          events.push('urgent-work-tick');
+        }
+      },
+      onUrgentPause: () => {
+        events.push('paused-for-ordinary-backlog');
+      },
+      processEntry: async (entry) => {
+        events.push(`process:${entry}`);
+      },
+      urgentPollMs: 25,
+    });
+
+    expect(events).toEqual([
+      'wait:0',
+      'process:detected-new-version',
+      'wait:0',
+      'paused-for-ordinary-backlog',
+      'wait:25',
+      'urgent-work-tick',
+      'wait:25',
+      'urgent-work-tick',
+      'process:ordinary-backlog',
+    ]);
+  });
 });

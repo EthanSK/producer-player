@@ -2975,16 +2975,15 @@ body.floating-switcher-panel-dragging * {
 .main-list-row-title-edit-zone {
   min-width: 0;
   max-width: 100%;
-  width: fit-content;
+  width: 100%;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
 }
 
 .main-list-row-title {
   display: block;
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3008,18 +3007,6 @@ body.floating-switcher-panel-dragging * {
   pointer-events: none;
   transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease,
     background 120ms ease;
-}
-
-/* Keep Ethan's edit affordance tied to the visible track name, not the
- * entire row. The wrapper shrink-wraps short titles, so passing over empty
- * row space no longer flashes the pencil into view; focus-within keeps the
- * button usable for keyboard/edit states once the user intentionally targets
- * the title area.
- */
-.main-list-row-title-edit-zone:hover .main-list-row-title-edit,
-.main-list-row-title-edit-zone:focus-within .main-list-row-title-edit {
-  opacity: 1;
-  pointer-events: auto;
 }
 
 .main-list-row-title-edit:hover,
@@ -3052,10 +3039,18 @@ body.floating-switcher-panel-dragging * {
   gap: 10px;
 }
 
+.main-list-row-bottom-primary {
+  min-width: 0;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .main-list-row-secondary {
   margin: 0;
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3175,6 +3170,21 @@ body.floating-switcher-panel-dragging * {
    edge of the pill, not the right. */
 .main-list-row-metadata--inline {
   flex-shrink: 0;
+}
+
+.main-list-row-title-edit--metadata {
+  /* v3.319 — Move the display-title pencil down beside the version/format
+     capsule so it is still discoverable but no longer sits in the primary
+     title click path Ethan uses to select tracks. */
+  width: 20px;
+  height: 20px;
+  opacity: 0.72;
+  pointer-events: auto;
+}
+
+.main-list-row-title-edit--metadata:hover,
+.main-list-row-title-edit--metadata:focus-visible {
+  opacity: 1;
 }
 
 .main-list-row-metadata--inline .main-list-row-metadata-popover {
@@ -5492,9 +5502,9 @@ body.is-dragging-checklist-timestamp * {
   min-height: 22px;
   padding: 0 6px;
   border-radius: 6px;
-  border: 1px solid rgba(176, 121, 255, 0.32);
-  background: rgba(123, 82, 255, 0.08);
-  color: rgba(215, 192, 255, 0.8);
+  border: 1px solid rgba(255, 104, 84, 0.34);
+  background: rgba(191, 38, 38, 0.1);
+  color: rgba(255, 201, 190, 0.84);
   font: inherit;
   font-size: 13px;
   font-weight: 800;
@@ -5520,17 +5530,20 @@ body.is-dragging-checklist-timestamp * {
 
 .checklist-item-priority-toggle:hover,
 .checklist-item-priority-toggle:focus-visible {
-  border-color: rgba(206, 165, 255, 0.72);
-  color: #f5eeff;
-  background: rgba(145, 92, 255, 0.18);
-  box-shadow: 0 0 0 2px rgba(168, 100, 255, 0.16);
+  border-color: rgba(255, 129, 104, 0.78);
+  color: #fff1ec;
+  background: rgba(214, 45, 38, 0.22);
+  box-shadow: 0 0 0 2px rgba(255, 82, 61, 0.18);
 }
 
 .checklist-item-priority-toggle.is-high-priority {
-  border-color: rgba(231, 171, 255, 0.82);
-  background: linear-gradient(135deg, rgba(120, 70, 255, 0.96), rgba(212, 84, 255, 0.88));
+  border-color: rgba(255, 171, 130, 0.88);
+  /* v3.319 — High priority should feel like the app is mad at you until
+     you handle it. Keep this in the red/orange danger family rather than
+     the old purple treatment, which read too playful/premium. */
+  background: linear-gradient(135deg, rgba(212, 36, 36, 0.96), rgba(255, 112, 48, 0.9));
   color: #ffffff;
-  box-shadow: 0 0 14px rgba(180, 83, 255, 0.32);
+  box-shadow: 0 0 15px rgba(255, 69, 46, 0.34);
 }
 
 /* Row-level wontFix tint — slightly desaturated so the item reads as
@@ -5544,21 +5557,21 @@ body.is-dragging-checklist-timestamp * {
   background: rgba(150, 160, 170, 0.09);
 }
 
-/* High-priority row tint — intentionally more visible than Won't Fix's muted
-   slate state, because the point is to make the urgent row jump out while
+/* High-priority row tint — red/orange on purpose. Purple read too "sexy";
+   this state is supposed to feel urgent and slightly accusatory, while still
    preserving the checklist's dark console styling. The left inset bar survives
    overlap with completed / Won't Fix text styling and also makes drag-overlay
    previews read as high priority. */
 .checklist-item-row--high-priority {
-  background: linear-gradient(135deg, rgba(111, 70, 255, 0.22), rgba(211, 85, 255, 0.14) 52%, rgba(255, 255, 255, 0.035));
-  border-color: rgba(205, 144, 255, 0.44);
-  box-shadow: inset 3px 0 0 rgba(226, 156, 255, 0.86), 0 0 0 1px rgba(164, 92, 255, 0.12), 0 10px 24px rgba(85, 41, 170, 0.18);
+  background: linear-gradient(135deg, rgba(155, 23, 30, 0.28), rgba(224, 65, 45, 0.18) 52%, rgba(255, 154, 74, 0.09));
+  border-color: rgba(255, 104, 84, 0.5);
+  box-shadow: inset 3px 0 0 rgba(255, 74, 55, 0.9), 0 0 0 1px rgba(255, 82, 61, 0.14), 0 10px 24px rgba(145, 28, 24, 0.2);
 }
 
 .checklist-item-row--high-priority:hover,
 .checklist-item-row--high-priority:focus-within {
-  background: linear-gradient(135deg, rgba(127, 82, 255, 0.27), rgba(222, 93, 255, 0.18) 52%, rgba(255, 255, 255, 0.05));
-  border-color: rgba(222, 166, 255, 0.6);
+  background: linear-gradient(135deg, rgba(178, 28, 35, 0.34), rgba(238, 77, 52, 0.23) 52%, rgba(255, 168, 86, 0.12));
+  border-color: rgba(255, 119, 94, 0.68);
 }
 
 /* Won't-Fix text is struck through + dimmed so the visual delta from a

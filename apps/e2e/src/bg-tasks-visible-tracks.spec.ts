@@ -338,4 +338,83 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       await cleanupE2ETestDirectories(directories);
     }
   });
+
+  test('new latest export warms LUFS even while playback keeps ordinary backlog paused @smoke', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-bg-tasks-new-version-during-playback'
+    );
+
+    await writeTestWav(
+      path.join(directories.fixtureDirectory, 'NewVersion Alpha v1.wav')
+    );
+    await writeTestWav(
+      path.join(directories.fixtureDirectory, 'NewVersion Bravo v1.wav')
+    );
+
+    const { electronApp, page } = await launchProducerPlayer(
+      directories.userDataDirectory
+    );
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (
+          window as unknown as {
+            producerPlayer: { linkFolder: (folder: string) => Promise<void> };
+          }
+        ).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2, {
+        timeout: 15_000,
+      });
+
+      await page.waitForFunction(
+        () =>
+          typeof (
+            window as unknown as {
+              __producerPlayerGetVisibleLatestWarmupState?: () => unknown;
+            }
+          ).__producerPlayerGetVisibleLatestWarmupState === 'function',
+        null,
+        { timeout: 10_000 }
+      );
+
+      await expect
+        .poll(async () => {
+          const state = await readVisibleWarmupState(page);
+          return state.every((entry) => entry.measuredReady);
+        }, { timeout: 30_000, intervals: [250, 500, 1000] })
+        .toBe(true);
+
+      const alphaRow = page.getByTestId('main-list-row').filter({ hasText: 'NewVersion Alpha' }).first();
+      await alphaRow.click();
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      // Simulate the real watched-folder path: a fresh bounce lands while the
+      // older version is still playing. Pre-v3.319, playback paused all latest
+      // warmup so the newly active row sat on Loading while the status pill
+      // showed a planned backlog.
+      await writeTestWav(
+        path.join(directories.fixtureDirectory, 'NewVersion Alpha v2.wav')
+      );
+      await page.getByTestId('rescan-button').click();
+
+      await expect(alphaRow.getByTestId('main-list-row-metadata')).toContainText('v2', {
+        timeout: 10_000,
+      });
+      await expect(alphaRow.getByTestId('main-list-row-integrated-lufs')).not.toContainText(
+        'Loading',
+        { timeout: 30_000 }
+      );
+      await expect(alphaRow.getByTestId('main-list-row-integrated-lufs')).toHaveAttribute(
+        'data-status',
+        'ready'
+      );
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
 });

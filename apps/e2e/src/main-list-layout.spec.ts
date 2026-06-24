@@ -8,13 +8,12 @@ import {
 
 test.describe('Main list row layout', () => {
   // v3.108 — version capsule moved from the top-right of the row down to
-  // the bottom row (replacing the plain "N versions" text). The top row
-  // now contains: <title> ... <integrated-LUFS pill>. The bottom row
-  // contains: <version·format pill | "Matched versions" text> ...
-  // <project / checklist / date footer>. The title still stretches to
-  // fill the available top-row space, but the right-side companion is
-  // now the LUFS pill, not the metadata pill.
-  test('title stretches across the top row until the LUFS pill, and the V·format pill renders in the bottom row', async () => {
+  // the bottom row (replacing the plain "N versions" text).
+  // v3.319 — the edit pencil also moved to that bottom metadata row, so
+  // the top row is now purely: <title> ... <duration + integrated-LUFS>.
+  // Measure against the whole right metadata group, not only the LUFS pill,
+  // because the duration chip intentionally occupies the space before LUFS.
+  test('title stretches across the top row until the right metadata group, and the V·format pill renders in the bottom row', async () => {
     const directories = await createE2ETestDirectories('producer-player-main-list-row-layout');
 
     await writeFixtureFiles(directories.fixtureDirectory, [
@@ -43,15 +42,19 @@ test.describe('Main list row layout', () => {
         const topRow = rowNode.querySelector('.main-list-row-top');
         const bottomRow = rowNode.querySelector('.main-list-row-bottom');
         const title = rowNode.querySelector('[data-testid="main-list-row-title"]');
+        const topMetadataGroup = rowNode.querySelector('.main-list-row-metadata-group');
         const lufs = rowNode.querySelector('[data-testid="main-list-row-integrated-lufs"]');
         const metadata = rowNode.querySelector('[data-testid="main-list-row-metadata"]');
+        const editButton = rowNode.querySelector('[data-testid="main-list-row-title-edit-button"]');
 
         if (
           !(topRow instanceof HTMLElement) ||
           !(bottomRow instanceof HTMLElement) ||
           !(title instanceof HTMLElement) ||
+          !(topMetadataGroup instanceof HTMLElement) ||
           !(lufs instanceof HTMLElement) ||
-          !(metadata instanceof HTMLElement)
+          !(metadata instanceof HTMLElement) ||
+          !(editButton instanceof HTMLElement)
         ) {
           return null;
         }
@@ -59,29 +62,37 @@ test.describe('Main list row layout', () => {
         const topRect = topRow.getBoundingClientRect();
         const bottomRect = bottomRow.getBoundingClientRect();
         const titleRect = title.getBoundingClientRect();
+        const topMetadataGroupRect = topMetadataGroup.getBoundingClientRect();
         const lufsRect = lufs.getBoundingClientRect();
         const metadataRect = metadata.getBoundingClientRect();
+        const editRect = editButton.getBoundingClientRect();
 
-        const availableTitleWidth = lufsRect.left - titleRect.left;
+        const availableTitleWidth = topMetadataGroupRect.left - titleRect.left;
         const fillRatio = availableTitleWidth > 0 ? titleRect.width / availableTitleWidth : 0;
 
         return {
           titleStartsAtRowStart: Math.abs(titleRect.left - topRect.left) <= 3,
           lufsStaysRightAligned: Math.abs(lufsRect.right - topRect.right) <= 3,
-          titleStopsAtLufs: titleRect.right <= lufsRect.left + 1,
+          titleStopsAtTopMetadataGroup: titleRect.right <= topMetadataGroupRect.left + 1,
           titleFillRatio: fillRatio,
           metadataInBottomRow:
             metadataRect.top >= bottomRect.top - 1 &&
             metadataRect.bottom <= bottomRect.bottom + 1,
+          editButtonInBottomRow:
+            editRect.top >= bottomRect.top - 1 &&
+            editRect.bottom <= bottomRect.bottom + 1,
+          editButtonSitsAfterMetadata: editRect.left >= metadataRect.right - 1,
         };
       });
 
       expect(layout).not.toBeNull();
       expect(layout?.titleStartsAtRowStart).toBe(true);
       expect(layout?.lufsStaysRightAligned).toBe(true);
-      expect(layout?.titleStopsAtLufs).toBe(true);
+      expect(layout?.titleStopsAtTopMetadataGroup).toBe(true);
       expect(layout?.titleFillRatio ?? 0).toBeGreaterThan(0.85);
       expect(layout?.metadataInBottomRow).toBe(true);
+      expect(layout?.editButtonInBottomRow).toBe(true);
+      expect(layout?.editButtonSitsAfterMetadata).toBe(true);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);
@@ -116,18 +127,7 @@ test.describe('Main list row layout', () => {
       await expect(firstRow.getByTestId('main-list-row-title')).toHaveText('Original File Name');
 
       const editButton = firstRow.getByTestId('main-list-row-title-edit-button');
-      const rowBox = await firstRow.boundingBox();
-      expect(rowBox).not.toBeNull();
-
-      // The edit affordance should not flicker in just because the pointer
-      // crossed the row; Ethan wanted it reserved for direct title intent.
-      if (rowBox) {
-        await firstLaunch.page.mouse.move(rowBox.x + rowBox.width - 8, rowBox.y + 8);
-      }
-      await expect(editButton).toHaveCSS('opacity', '0');
-
-      await firstRow.getByTestId('main-list-row-title').hover();
-      await expect(editButton).toHaveCSS('opacity', '1');
+      await expect(editButton).toBeVisible();
       await editButton.click();
       await firstRow.getByTestId('main-list-row-title-input').fill('Display Title');
       await firstRow.getByTestId('main-list-row-title-input').press('Enter');

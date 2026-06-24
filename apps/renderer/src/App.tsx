@@ -3992,7 +3992,7 @@ export function App(): JSX.Element {
   const latestTrackWarmupDebugRef = useRef<{
     runId: number;
     activeVersionId: string | null;
-    plannedEntries: Array<{ versionId: string; label: string }>;
+    plannedEntries: Array<{ versionId: string; cacheKey: string; label: string; detected: boolean }>;
     startedVersionIds: string[];
     completedVersionIds: string[];
     pausedForUrgentCount: number;
@@ -4008,20 +4008,52 @@ export function App(): JSX.Element {
   const getLatestWarmupPlanDump = useCallback(() => {
     const debug = latestTrackWarmupDebugRef.current;
     const completed = new Set(debug.completedVersionIds);
-    const activeVersionId = debug.activeVersionId;
+    const isEntryComplete = (entry: (typeof debug.plannedEntries)[number]): boolean => {
+      if (completed.has(entry.versionId)) {
+        return true;
+      }
+
+      const cachedEntry = masteringCacheByVersionIdRef.current[entry.versionId];
+      if (cachedEntry?.cacheKey === entry.cacheKey) {
+        return true;
+      }
+
+      return masteringCacheStatusByVersionIdRef.current[entry.versionId]?.status === 'error';
+    };
+    const incompleteEntries = debug.plannedEntries.filter((entry) => !isEntryComplete(entry));
+    const hasDetectedWorkWaiting = incompleteEntries.some((entry) => entry.detected);
+
+    // v3.319 — When playback is active, the ordinary library-wide warmup is
+    // deliberately paused to keep the transport clean. Do not keep showing a
+    // scary "0 / 12 pending" status pill for that paused opportunistic backlog;
+    // still surface detected-new-version work because Ethan is waiting on that
+    // newly bounced row's LUFS/info to become usable.
+    if (incompleteEntries.length > 0 && !hasDetectedWorkWaiting && isAudiblePlaybackActiveForAnalysis()) {
+      return {
+        total: 0,
+        completed: 0,
+        activeLabel: null,
+        nextLabels: [],
+      };
+    }
+
+    const activeVersionId =
+      debug.activeVersionId && incompleteEntries.some((entry) => entry.versionId === debug.activeVersionId)
+        ? debug.activeVersionId
+        : null;
     const activeEntry = activeVersionId
-      ? debug.plannedEntries.find((entry) => entry.versionId === activeVersionId)
+      ? incompleteEntries.find((entry) => entry.versionId === activeVersionId)
       : null;
-    const nextLabels = debug.plannedEntries
+    const nextLabels = incompleteEntries
       .filter(
-        (entry) => entry.versionId !== activeVersionId && !completed.has(entry.versionId)
+        (entry) => entry.versionId !== activeVersionId
       )
       .slice(0, 3)
       .map((entry) => entry.label);
 
     return {
       total: debug.plannedEntries.length,
-      completed: completed.size,
+      completed: debug.plannedEntries.length - incompleteEntries.length,
       activeLabel: activeEntry?.label ?? null,
       nextLabels,
     };
@@ -9118,7 +9150,9 @@ export function App(): JSX.Element {
       ...latestTrackWarmupDebugRef.current,
       plannedEntries: orderedPreloadEntries.map(({ song, version }) => ({
         versionId: version.id,
+        cacheKey: buildMasteringCacheKey(version),
         label: `${song.title} — ${version.fileName}`,
+        detected: latestTrackWarmupDetectedVersionIdsRef.current.has(version.id),
       })),
     };
 
@@ -9146,8 +9180,11 @@ export function App(): JSX.Element {
       };
     };
 
-    const hasUrgentAnalysisWork = (): boolean => {
+    const hasUrgentAnalysisWork = (entry: (typeof orderedPreloadEntries)[number]): boolean => {
       const measured = MEASURED_ANALYSIS_QUEUE.dump();
+      const isDetectedVersionWarmup = latestTrackWarmupDetectedVersionIdsRef.current.has(
+        entry.version.id
+      );
 
       // v3.259 — The selected-track jobs are intentionally delayed so they do
       // not hit the renderer exactly as playback starts. During that same delay,
@@ -9163,8 +9200,13 @@ export function App(): JSX.Element {
       // is active. These jobs are useful cache fills, not something the player
       // must do to sound correct. Letting them start mid-listen was exactly the
       // "analysis jobs loaded in and I hear a crackle" failure mode.
+      //
+      // v3.319 — Exception: a newly detected latest export is not anonymous
+      // backlog. Ethan is looking at that row as the new bounce, so let its one
+      // LUFS/info job jump the playback pause while still respecting actual
+      // USER_SELECTED queue work below.
       return (
-        isAudiblePlaybackActiveForAnalysis() ||
+        (!isDetectedVersionWarmup && isAudiblePlaybackActiveForAnalysis()) ||
         playbackSettling ||
         measured.activeByPriority.user > 0 ||
         measured.userBypassActive > 0 ||
@@ -9215,6 +9257,9 @@ export function App(): JSX.Element {
         !masteringCacheBpmRefreshedVersionIdsRef.current.has(version.id) &&
         isMasteringCacheEntryMissingBpm(cachedEntry, version, projectFilePath);
       const needsMetadataRefresh = isMissingBitDepth || isMissingBpm;
+      const isDetectedVersionWarmup = latestTrackWarmupDetectedVersionIdsRef.current.has(
+        version.id
+      );
 
       if (isFresh) {
         latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
@@ -9283,20 +9328,28 @@ export function App(): JSX.Element {
           return;
         }
 
-        const measured = await runNonEssentialAudioAnalysisWhenIdle(
-          () => cancelled,
-          (signal) =>
-            runMeasuredAnalysis(version.filePath, {
-              priority:
-                isFresh && isMissingBpm && !isMissingBitDepth
-                  ? ANALYSIS_PRIORITY_BACKGROUND
-                  : ANALYSIS_PRIORITY_NEIGHBOR,
-              cacheKey,
-              label: `${song.title} — ${version.fileName}`,
-              projectFilePath,
-              signal,
-            })
-        );
+        const runWarmupMeasuredAnalysis = (signal?: AbortSignal) =>
+          runMeasuredAnalysis(version.filePath, {
+            priority:
+              isFresh && isMissingBpm && !isMissingBitDepth
+                ? ANALYSIS_PRIORITY_BACKGROUND
+                : ANALYSIS_PRIORITY_NEIGHBOR,
+            cacheKey,
+            label: `${song.title} — ${version.fileName}`,
+            projectFilePath,
+            signal,
+          });
+        // v3.319 — New latest exports are the one warmup case that should not
+        // wait behind audible playback. The rest of the album backlog stays
+        // transport-friendly, but the just-bounced row needs its LUFS/info now
+        // so it does not sit on "Loading" with a misleading planned-job count.
+        const measured =
+          isDetectedVersionWarmup && !isFresh
+            ? await runWarmupMeasuredAnalysis()
+            : await runNonEssentialAudioAnalysisWhenIdle(
+                () => cancelled,
+                (signal) => runWarmupMeasuredAnalysis(signal)
+              );
         if (!measured) {
           return;
         }
@@ -12247,7 +12300,7 @@ export function App(): JSX.Element {
       __producerPlayerGetLatestWarmupDebugState?: () => {
         runId: number;
         activeVersionId: string | null;
-        plannedEntries: Array<{ versionId: string; label: string }>;
+        plannedEntries: Array<{ versionId: string; cacheKey: string; label: string; detected: boolean }>;
         startedVersionIds: string[];
         completedVersionIds: string[];
         pausedForUrgentCount: number;
@@ -20777,21 +20830,6 @@ export function App(): JSX.Element {
                           <strong className="main-list-row-title" data-testid="main-list-row-title">
                             {songRowTitle}
                           </strong>
-                          <button
-                            type="button"
-                            className="main-list-row-title-edit"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleSongDisplayTitleStartEdit(song);
-                            }}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            draggable={false}
-                            data-testid="main-list-row-title-edit-button"
-                            aria-label={`Edit display title for ${songRowTitle}`}
-                            title="Edit display title"
-                          >
-                            ✎
-                          </button>
                         </span>
                       )}
                     </div>
@@ -20818,49 +20856,68 @@ export function App(): JSX.Element {
                     </span>
                   </div>
                   <div className="main-list-row-bottom">
-                    {showMatchedVersions ? (
-                      <p className="muted main-list-row-secondary">{secondaryRowText}</p>
-                    ) : (
-                      <span
-                        className="main-list-row-metadata main-list-row-metadata--inline"
-                        data-testid="main-list-row-metadata"
-                        role="button"
-                        tabIndex={activeSongVersion ? 0 : -1}
-                        aria-label={songRowMetadataAriaLabel}
-                        aria-describedby={songRowMetadataPopoverId}
-                        draggable={false}
-                        onClick={(event) => {
-                          if (!activeSongVersion) {
-                            return;
-                          }
-                          handleCopyNextVersionExportFileName(event, activeSongVersion);
-                        }}
-                        onKeyDown={(event) => {
-                          if (!activeSongVersion) {
-                            return;
-                          }
-                          if (event.key === 'Enter' || event.key === ' ') {
+                    <span className="main-list-row-bottom-primary">
+                      {showMatchedVersions ? (
+                        <p className="muted main-list-row-secondary">{secondaryRowText}</p>
+                      ) : (
+                        <span
+                          className="main-list-row-metadata main-list-row-metadata--inline"
+                          data-testid="main-list-row-metadata"
+                          role="button"
+                          tabIndex={activeSongVersion ? 0 : -1}
+                          aria-label={songRowMetadataAriaLabel}
+                          aria-describedby={songRowMetadataPopoverId}
+                          draggable={false}
+                          onClick={(event) => {
+                            if (!activeSongVersion) {
+                              return;
+                            }
                             handleCopyNextVersionExportFileName(event, activeSongVersion);
-                          }
-                        }}
-                      >
-                        {songRowMetadataLabel}
-                        {activeSongNextExportFileName && songRowMetadataPopoverId ? (
-                          <span
-                            id={songRowMetadataPopoverId}
-                            className="main-list-row-metadata-popover"
-                            role="tooltip"
-                          >
-                            <span className="main-list-row-metadata-popover-label">
-                              Click to copy new export filename
+                          }}
+                          onKeyDown={(event) => {
+                            if (!activeSongVersion) {
+                              return;
+                            }
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              handleCopyNextVersionExportFileName(event, activeSongVersion);
+                            }
+                          }}
+                        >
+                          {songRowMetadataLabel}
+                          {activeSongNextExportFileName && songRowMetadataPopoverId ? (
+                            <span
+                              id={songRowMetadataPopoverId}
+                              className="main-list-row-metadata-popover"
+                              role="tooltip"
+                            >
+                              <span className="main-list-row-metadata-popover-label">
+                                Click to copy new export filename
+                              </span>
+                              <span className="main-list-row-metadata-popover-filename">
+                                {activeSongNextExportFileName}
+                              </span>
                             </span>
-                            <span className="main-list-row-metadata-popover-filename">
-                              {activeSongNextExportFileName}
-                            </span>
-                          </span>
-                        ) : null}
-                      </span>
-                    )}
+                          ) : null}
+                        </span>
+                      )}
+                      {songDisplayTitleEditingId === song.id ? null : (
+                        <button
+                          type="button"
+                          className="main-list-row-title-edit main-list-row-title-edit--metadata"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleSongDisplayTitleStartEdit(song);
+                          }}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          draggable={false}
+                          data-testid="main-list-row-title-edit-button"
+                          aria-label={`Edit display title for ${songRowTitle}`}
+                          title="Edit display title"
+                        >
+                          ✎
+                        </button>
+                      )}
+                    </span>
                     <div className="main-list-row-meta-footer">
                       {songProjectFilePath ? (
                         <div className="song-project-controls">
@@ -22653,7 +22710,7 @@ export function App(): JSX.Element {
                               }
                               placement="right"
                             >
-                              Adds the purple high-priority treatment to this checklist
+                              Adds the angry red high-priority treatment to this checklist
                               row without changing done counts, Won't Fix state, or
                               timestamps.
                             </FloatingTooltip>
@@ -23708,7 +23765,7 @@ export function App(): JSX.Element {
                               }
                               placement="right"
                             >
-                              Adds the purple high-priority treatment to this checklist
+                              Adds the angry red high-priority treatment to this checklist
                               row without changing done counts or Won't Fix state.
                             </FloatingTooltip>
                           </button>

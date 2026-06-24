@@ -3,7 +3,7 @@ export const DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS = 25;
 export interface RunSequentialLatestTrackWarmupOptions<TEntry> {
   entries: readonly TEntry[];
   isCancelled: () => boolean;
-  hasUrgentWork: () => boolean;
+  hasUrgentWork: (entry: TEntry, index: number) => boolean;
   wait: (ms: number) => Promise<void>;
   processEntry: (entry: TEntry, index: number) => Promise<void>;
   onUrgentPause?: () => void;
@@ -77,13 +77,13 @@ export async function runSequentialLatestTrackWarmup<TEntry>(
     Math.floor(options.urgentPollMs ?? DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS)
   );
 
-  async function pauseForUrgentWork(): Promise<void> {
+  async function pauseForUrgentWork(entry: TEntry, index: number): Promise<void> {
     // Yield once so a just-fired click/effect can enqueue USER_SELECTED work
     // before the warmup decides whether it is safe to start another track.
     await options.wait(0);
 
     let reportedPause = false;
-    while (!options.isCancelled() && options.hasUrgentWork()) {
+    while (!options.isCancelled() && options.hasUrgentWork(entry, index)) {
       if (!reportedPause) {
         reportedPause = true;
         options.onUrgentPause?.();
@@ -93,12 +93,13 @@ export async function runSequentialLatestTrackWarmup<TEntry>(
   }
 
   for (let index = 0; index < options.entries.length; index += 1) {
-    await pauseForUrgentWork();
+    const entry = options.entries[index];
+    await pauseForUrgentWork(entry, index);
     if (options.isCancelled()) {
       break;
     }
 
     // eslint-disable-next-line no-await-in-loop -- sequential warmup is the point
-    await options.processEntry(options.entries[index], index);
+    await options.processEntry(entry, index);
   }
 }

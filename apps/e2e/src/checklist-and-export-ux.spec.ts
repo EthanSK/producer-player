@@ -67,7 +67,7 @@ test.describe('Checklist and export UX improvements', () => {
     }
   });
 
-  test('high-priority checklist button tints song and album rows purple', async () => {
+  test('high-priority checklist button tints song and album rows urgent red', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-high-priority'
     );
@@ -105,11 +105,12 @@ test.describe('Checklist and export UX improvements', () => {
         };
       });
       // The class assertion proves the state toggle landed; the paint check
-      // catches accidental "class only, no visible purple treatment" regressions.
+      // catches accidental "class only, no visible angry-priority treatment"
+      // regressions. Ethan explicitly rejected the old purple as too playful.
       // We read while the row is still hovered from clicking the stacked
       // priority button, so the brighter hover border is the expected state.
       expect(songPriorityPaint.backgroundImage).toContain('linear-gradient');
-      expect(songPriorityPaint.borderColor).toBe('rgba(222, 166, 255, 0.6)');
+      expect(songPriorityPaint.borderColor).toBe('rgba(255, 119, 94, 0.68)');
 
       await page.getByTestId('song-checklist-done-header').click();
       await page.getByTestId('album-checklist-button').click();

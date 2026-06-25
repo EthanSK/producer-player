@@ -75,6 +75,21 @@ await build({
   logLevel: 'warning',
 });
 
+// Text-editing context-menu template generation is pure; keeping it in a unit
+// bundle makes the right-click paste path testable without needing a native
+// Electron menu popup in CI.
+await build({
+  entryPoints: [resolve(appDir, 'src/context-menu.ts')],
+  outfile: resolve(appDir, 'dist/context-menu.test.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: ['node20'],
+  sourcemap: 'inline',
+  logLevel: 'warning',
+  external: ['electron'],
+});
+
 // Auto-update signature gate: tiny pure helper; bundle for hermetic Node tests.
 await build({
   entryPoints: [resolve(appDir, 'src/auto-update-signature.ts')],
@@ -243,4 +258,4 @@ await build({
   logLevel: 'warning',
 });
 
-console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/auto-update-downgrade.test.cjs + dist/mcp-control-server.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs + dist/actionLog.test.cjs + dist/bit-depth-fallback.test.cjs + dist/ableton-tempo.test.cjs');
+console.info('[producer-player/electron] Built dist/state-service.test.cjs + dist/plugin-host-service.test.cjs + dist/plugin-preset-library.test.cjs + dist/ui-zoom.test.cjs + dist/context-menu.test.cjs + dist/auto-update-signature.test.cjs + dist/release-assets.test.cjs + dist/auto-update-downgrade.test.cjs + dist/mcp-control-server.test.cjs + dist/file-open.test.cjs + dist/agent-ui-control.test.cjs + dist/agent-service.test.cjs + dist/actionLog.test.cjs + dist/bit-depth-fallback.test.cjs + dist/ableton-tempo.test.cjs');

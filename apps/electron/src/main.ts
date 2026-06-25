@@ -61,6 +61,7 @@ import { Readable } from 'node:stream';
 import log from 'electron-log/main';
 import { autoUpdater } from 'electron-updater';
 import { shouldVerifyInstallerSignature } from './auto-update-signature';
+import { buildTextEditingContextMenuTemplate } from './context-menu';
 import {
   GITHUB_RELEASES_API_URL,
   parseGithubReleaseListPayload,
@@ -2753,6 +2754,23 @@ function buildApplicationMenu(): void {
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
+}
+
+function installTextEditingContextMenu(targetWindow: BrowserWindow): void {
+  targetWindow.webContents.on('context-menu', (_event, params) => {
+    const template = buildTextEditingContextMenuTemplate({
+      isEditable: params.isEditable,
+      selectionText: params.selectionText,
+      editFlags: params.editFlags,
+    });
+
+    if (template.length === 0) {
+      return;
+    }
+
+    const menu = Menu.buildFromTemplate(template);
+    menu.popup({ window: targetWindow });
+  });
 }
 
 function emitTransportCommand(command: TransportCommand): void {
@@ -6237,6 +6255,7 @@ async function createMainWindow(): Promise<void> {
   }
 
   applyUiZoomStateToWindow(mainWindow, initialUiZoomState);
+  installTextEditingContextMenu(mainWindow);
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 

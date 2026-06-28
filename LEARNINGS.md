@@ -24,6 +24,16 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-06-28T00:26:26Z
+**Trigger:** MBP-CC bridge relay 2026-06-28, cafe lool stuck processing/inspector unload
+**Symptom:** Track 'cafe lool' stuck 'processing' repeating over and over; all tracks stuck loading/'unloading' in the inspector during playback
+**Root cause:** BPM-only metadata refresh branch (inspector dispatch ~8669 + warmup dispatch ~9310 in App.tsx) exited via 'if (!metadata) return' when runNonEssentialAudioAnalysisWhenIdle returned null (idle-window wait cancelled — happens constantly during playback as the effect re-runs and flips cancelled), WITHOUT setting the once-per-session guard masteringCacheBpmRefreshedVersionIdsRef. isMasteringCacheEntryMissingBpm returns true FOREVER for an .als-linked entry whose bpm settled to null (v3.314 null+.als rule re-flags it every render), so the in-memory session guard was the only thing bounding re-dispatch; bypassing it on every cancellation caused an unbounded re-probe loop.
+**Fix:** Claim the once-per-session BPM-refresh slot (masteringCacheBpmRefreshedVersionIdsRef.current.add(version.id)) BEFORE awaiting the probe in BOTH dispatch sites, so a cancelled/aborted probe defers to next session instead of re-dispatching. Enforces intended at-most-once-per-session BPM retry; useRef resets next launch so genuinely-missing BPM retries then.
+**Commit:** a0e2f73
+**Guard:** apps/renderer/src/masteringAnalysisCache.test.ts tripwire 'keeps flagging an .als-linked null-BPM entry as missing on every call (cafe lool loop tripwire)' pins the permanent-missing contract that makes the App.tsx session guard load-bearing; thorough inline comments at both fix sites
+---
+
+---
 **Date:** 2026-06-22T00:35:00Z
 **Trigger:** Ethan Telegram screenshot (Inspector Version History buttons clipped: "Open in Find...")
 **Symptom:** In the compact inline Inspector (310px right column), Version History action buttons extended past the right edge of the panel. Because `.panel` has `overflow: hidden`, the visible labels were chopped at the window edge even though the buttons themselves still existed in the DOM.

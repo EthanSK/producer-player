@@ -285,6 +285,32 @@ describe('mastering analysis session cache keys', () => {
       ).toBe(false);
     });
 
+    it('keeps flagging an .als-linked null-BPM entry as missing on every call (cafe lool loop tripwire)', () => {
+      // Regression tripwire for the 2026-06-28 "cafe lool stuck processing /
+      // inspector unloading" loop. For an Ableton-linked song whose bounce has
+      // no resolvable tempo, this predicate stays TRUE indefinitely even AFTER
+      // a probe has run and re-written bpm=null (the v3.314 `null + .als` rule
+      // re-flags it). That is by design — but it means the caller MUST hold a
+      // once-per-session in-memory guard to stop re-dispatching the BPM probe,
+      // otherwise the inspector/warmup effects re-probe forever during playback.
+      // If this assertion ever flips to false you can relax the App.tsx session
+      // guard; while it stays true, that guard is load-bearing — do NOT remove
+      // the `masteringCacheBpmRefreshedVersionIdsRef.current.add(...)` calls.
+      const version = makeVersion();
+      const entry = makeEntry(version, { bpm: null }, {
+        measuredAnalysis: {
+          ...makeEntry(version).measuredAnalysis,
+          bpm: null,
+        },
+      });
+
+      const alsPath = '/mixes/cafe lool/cafe lool.als';
+      // Called repeatedly the way the render loop would — it never "settles".
+      expect(isMasteringCacheEntryMissingBpm(entry, version, alsPath)).toBe(true);
+      expect(isMasteringCacheEntryMissingBpm(entry, version, alsPath)).toBe(true);
+      expect(isMasteringCacheEntryMissingBpm(entry, version, alsPath)).toBe(true);
+    });
+
     it('does NOT flag BPM refresh when the cache entry is not fresh', () => {
       const version = makeVersion();
       const entry = makeEntry(version, { bpm: undefined }, {

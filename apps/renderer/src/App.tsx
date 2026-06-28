@@ -8667,6 +8667,37 @@ export function App(): JSX.Element {
         let probeYieldedResult = false;
         try {
           if (isFresh && isMissingBpm && !isMissingBitDepth && cachedEntry) {
+            // BUGFIX 2026-06-28 ("cafe lool" stuck processing / inspector
+            // unloading loop): claim the once-per-session BPM-refresh slot
+            // for this version *before* we await the probe.
+            //
+            // Why this is load-bearing: isMasteringCacheEntryMissingBpm()
+            // returns TRUE FOREVER for an Ableton-linked (.als) song whose
+            // WAV bounce has no embedded tempo tag AND whose project tempo
+            // can't be resolved — because the entry's bpm settles to `null`
+            // and the v3.314 rule re-flags `null + .als` as "missing" on
+            // every render. The in-memory session guard
+            // (masteringCacheBpmRefreshedVersionIdsRef) is therefore the
+            // ONLY thing that bounds re-dispatch.
+            //
+            // The old code only added that guard in `finally` when
+            // `probeYieldedResult === true`. But runNonEssentialAudioAnalysisWhenIdle
+            // returns null (→ the `if (!metadata) return` below) whenever the
+            // idle-window wait is cancelled — which happens constantly during
+            // playback, because this inspector effect re-runs (cleanup sets
+            // `cancelled = true`) as its deps churn. Each re-run re-dispatched
+            // the same BPM probe, which got cancelled again, never marked the
+            // guard, and re-dispatched again: an unbounded loop that pinned the
+            // track on "processing" and left the inspector version rows stuck
+            // perpetually loading/"unloading".
+            //
+            // Marking the guard up-front converts this into the intended
+            // "at most one low-priority BPM retry per session" (the guard is a
+            // useRef, so it resets on next app launch and a genuinely-missing
+            // BPM gets a fresh attempt then). A cancelled or aborted probe now
+            // simply defers to next session instead of spinning. If the probe
+            // DOES complete this session, BPM still gets written below.
+            masteringCacheBpmRefreshedVersionIdsRef.current.add(version.id);
             const metadata = await runNonEssentialAudioAnalysisWhenIdle(
               () => cancelled,
               (signal) =>
@@ -9308,6 +9339,16 @@ export function App(): JSX.Element {
       let probeYieldedResult = false;
       try {
         if (isFresh && isMissingBpm && !isMissingBitDepth && cachedEntry) {
+          // BUGFIX 2026-06-28 — same unbounded-redispatch loop as the inspector
+          // dispatch above (see the long comment there). Claim the once-per-
+          // session BPM-refresh slot BEFORE awaiting the probe so a cancelled
+          // idle-window wait (constant during playback, as this warmup effect
+          // re-runs and flips `cancelled`) can't leave the guard unset and
+          // re-dispatch the same .als-linked null-BPM probe forever. This pins
+          // the BPM refresh to the intended at-most-once-per-session behavior;
+          // the guard ref resets on next launch so a still-missing BPM retries
+          // then.
+          masteringCacheBpmRefreshedVersionIdsRef.current.add(version.id);
           const metadata = await runNonEssentialAudioAnalysisWhenIdle(
             () => cancelled,
             (signal) =>

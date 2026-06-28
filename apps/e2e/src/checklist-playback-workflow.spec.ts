@@ -218,11 +218,11 @@ test.describe('checklist playback workflow', () => {
       await linkFixtureFolder(page, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        "Total checklist items remaining: 0 out of 0 · Won't Fix: 0 · Notes: 0"
+        "Total checklist items remaining: 0 out of 0 · High priority left: 0 · Won't Fix: 0 · Notes: 0"
       );
       await expect(page.getByTestId('main-list-checklist-total')).toHaveAttribute(
         'aria-label',
-        "0 of 0 checklist items remaining across all tracks; 0 Won't Fix; 0 notes"
+        "0 of 0 checklist items remaining across all tracks; 0 high priority remaining; 0 Won't Fix; 0 notes"
       );
 
       await page
@@ -238,7 +238,7 @@ test.describe('checklist playback workflow', () => {
       );
       await page.getByTestId('song-checklist-done-header').click();
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        "Total checklist items remaining: 1 out of 1 · Won't Fix: 0 · Notes: 0"
+        "Total checklist items remaining: 1 out of 1 · High priority left: 0 · Won't Fix: 0 · Notes: 0"
       );
 
       await page
@@ -255,6 +255,17 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('song-checklist-add').click();
       await page.getByTestId('song-checklist-input').fill('Track B note item');
       await page.getByTestId('song-checklist-add').click();
+
+      // High priority only counts while the item is still actionable. Mark one
+      // open row urgent so the footer proves Ethan's "high priority left" number
+      // is driven by unresolved todo work, not notes or already-resolved rows.
+      const highPriorityRemainingRow = page
+        .getByTestId('song-checklist-item-row')
+        .filter({ hasText: 'Track B remaining item' });
+      await highPriorityRemainingRow.hover();
+      await highPriorityRemainingRow
+        .getByTestId('song-checklist-item-high-priority-toggle')
+        .click();
 
       // Completed items should drop out of the footer total just like they drop
       // out of each per-track "remaining/total" checklist badge.
@@ -285,11 +296,11 @@ test.describe('checklist playback workflow', () => {
       await page.getByTestId('song-checklist-done-header').click();
 
       await expect(page.getByTestId('main-list-checklist-total')).toHaveText(
-        "Total checklist items remaining: 2 out of 4 · Won't Fix: 1 · Notes: 1"
+        "Total checklist items remaining: 2 out of 4 · High priority left: 1 · Won't Fix: 1 · Notes: 1"
       );
       await expect(page.getByTestId('main-list-checklist-total')).toHaveAttribute(
         'aria-label',
-        "2 of 4 checklist items remaining across all tracks; 1 Won't Fix; 1 note"
+        "2 of 4 checklist items remaining across all tracks; 1 high priority remaining; 1 Won't Fix; 1 note"
       );
     } finally {
       await electronApp.close();

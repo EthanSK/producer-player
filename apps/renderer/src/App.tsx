@@ -1806,6 +1806,18 @@ function countRemainingSongChecklistTodos(items: readonly SongChecklistItem[]): 
   return items.filter(isSongChecklistTodoRemaining).length;
 }
 
+function countRemainingHighPrioritySongChecklistTodos(
+  items: readonly SongChecklistItem[]
+): number {
+  // Ethan asked for the bottom-of-track-list total to show urgent work left,
+  // not every historical priority flag. Keep this tied to the existing
+  // "remaining todo" helper so completed, Won't Fix, and note rows never
+  // inflate the high-priority-left number.
+  return items.filter(
+    (item) => isSongChecklistTodoRemaining(item) && item.highPriority === true
+  ).length;
+}
+
 function countSongChecklistNotes(items: readonly SongChecklistItem[]): number {
   // Notes are reference/context rows. Keeping this as a named helper makes the
   // footer/header math explicit instead of re-deriving "items minus todos" in
@@ -8391,6 +8403,16 @@ export function App(): JSX.Element {
     () =>
       albumSongs.reduce(
         (total, song) => total + countSongChecklistWontFixes(songChecklists[song.id] ?? []),
+        0
+      ),
+    [albumSongs, songChecklists]
+  );
+
+  const totalRemainingHighPrioritySongChecklistTodoCount = useMemo(
+    () =>
+      albumSongs.reduce(
+        (total, song) =>
+          total + countRemainingHighPrioritySongChecklistTodos(songChecklists[song.id] ?? []),
         0
       ),
     [albumSongs, songChecklists]
@@ -21124,15 +21146,23 @@ export function App(): JSX.Element {
             <li
               className="main-list-checklist-total"
               data-testid="main-list-checklist-total"
-              aria-label={`${totalRemainingSongChecklistTodoCount} of ${totalSongChecklistTodoCount} checklist item${totalSongChecklistTodoCount === 1 ? '' : 's'} remaining across all tracks; ${totalSongChecklistWontFixCount} Won't Fix; ${totalSongChecklistNoteCount} note${totalSongChecklistNoteCount === 1 ? '' : 's'}`}
+              aria-label={`${totalRemainingSongChecklistTodoCount} of ${totalSongChecklistTodoCount} checklist item${totalSongChecklistTodoCount === 1 ? '' : 's'} remaining across all tracks; ${totalRemainingHighPrioritySongChecklistTodoCount} high priority remaining; ${totalSongChecklistWontFixCount} Won't Fix; ${totalSongChecklistNoteCount} note${totalSongChecklistNoteCount === 1 ? '' : 's'}`}
             >
               {/* Footer summary now surfaces the resolved-without-action and
-                  reference-note totals beside the existing todo progress. That
-                  keeps Ethan's scan point at the bottom of the tracklist
-                  complete without changing the per-row checklist badges. */}
+                  reference-note totals beside the existing todo progress. The
+                  high-priority count deliberately reports only still-open
+                  priority todos, matching the phrase "items left" rather than
+                  every historical priority flag. */}
               <span>
                 Total checklist items remaining: {totalRemainingSongChecklistTodoCount} out of{' '}
                 {totalSongChecklistTodoCount}
+              </span>
+              {' · '}
+              <span
+                className="main-list-checklist-total-segment"
+                data-testid="main-list-high-priority-total"
+              >
+                High priority left: {totalRemainingHighPrioritySongChecklistTodoCount}
               </span>
               {' · '}
               <span className="main-list-checklist-total-segment" data-testid="main-list-wontfix-total">

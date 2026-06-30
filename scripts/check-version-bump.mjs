@@ -13,6 +13,10 @@ const SEMVER_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.
 const IGNORE_PREFIXES = [
   '.github/',
   'docs/',
+  // The mobile companion lives in its own experimental workspace for planning
+  // and spike code. Ethan explicitly scoped it as non-shipping so those commits
+  // should not force a desktop Producer Player release/version bump.
+  'experimental-mobile-app/',
   'references/',
 ];
 

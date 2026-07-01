@@ -13,6 +13,27 @@ on:
     branches:
       - main
       - master
+    # Release Desktop should follow shipping app changes, not planning/docs or
+    # workflow-maintenance commits. Without this guard, an experimental mobile
+    # architecture note at the existing package version can mint a redundant
+    # `vX.Y-build.N` desktop release that users should never see.
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - 'experimental-mobile-app/**'
+      - 'references/**'
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'PLAN.md'
+      - 'CHANGELOG.md'
+      - 'LEARNINGS.md'
+      - 'site/version.json'
+      - 'scripts/check-version-consistency.mjs'
+      - 'scripts/check-version-bump.mjs'
+      - 'scripts/sync-version.mjs'
+      - 'scripts/install-git-hooks.mjs'
+      - 'scripts/run-pre-push-version-check.mjs'
     tags:
       - 'v*'
 

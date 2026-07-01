@@ -12,6 +12,26 @@ on:
     branches:
       - main
       - master
+    # Match the release workflow's non-shipping guard: docs, experimental
+    # mobile planning, and workflow-maintenance commits should not burn the
+    # full desktop CI matrix. Pull requests still run CI normally.
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - 'experimental-mobile-app/**'
+      - 'references/**'
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'PLAN.md'
+      - 'CHANGELOG.md'
+      - 'LEARNINGS.md'
+      - 'site/version.json'
+      - 'scripts/check-version-consistency.mjs'
+      - 'scripts/check-version-bump.mjs'
+      - 'scripts/sync-version.mjs'
+      - 'scripts/install-git-hooks.mjs'
+      - 'scripts/run-pre-push-version-check.mjs'
   pull_request:
 
 jobs:

@@ -11,10 +11,12 @@ Mac app as closely as possible.
 
 ## Recommendation
 
-Build an **iOS-first React Native app with Expo dev-client/bare native modules**.
-Reuse `packages/contracts` and `packages/domain`; use native audio and native
-file-provider integration where the desktop app currently relies on Electron,
-Node, Chromium, Web Audio, or ffmpeg.
+Build an **iOS-first SwiftUI app with AVFoundation playback** for v1. Treat it
+as a native companion that shares Producer Player's state format and scanner
+rules, not as a direct port of the Electron renderer. React Native/Expo remains
+the best cross-platform runner-up, but the first version's risky work is native
+iOS file access, security-scoped bookmarks, iCloud coordination, background
+audio, and lock-screen playback.
 
 The first useful version should be a companion, not a mobile mastering suite:
 
@@ -29,29 +31,36 @@ The first useful version should be a companion, not a mobile mastering suite:
 
 ## Stack Decision
 
-### Pick: React Native + Expo Dev Client
+### Pick: SwiftUI + AVFoundation
 
-Use React Native for the app shell, with an Expo dev-client/bare workflow so the
-project can include the native modules needed for real playback and iCloud file
-coordination. This gives us the best mix of code reuse and real iOS behavior.
+Use SwiftUI for the app shell, AVFoundation/AVAudioSession for playback, and
+Foundation/UIKit document APIs for iCloud/Files integration. This gives v1 the
+least abstraction over the APIs that matter most: file-provider URLs, security
+scoped bookmarks, coordinated reads/writes, cloud placeholder downloads,
+background audio, route changes, interruptions, and Control Center metadata.
 
 Use:
 
-- `react-native-track-player` for playback queues, background audio, lock-screen
-  metadata, Control Center integration, interruptions, and route changes.
-- Swift native modules for iCloud Drive/document-container discovery, security
-  scoped bookmarks, `NSFileCoordinator`, `NSMetadataQuery`, and conflict
-  handling.
-- Google Sign-In plus Google Drive REST v3 for Drive browsing and file download.
+- `AVPlayer`/`AVQueuePlayer` for local cached-file playback, with a small
+  coordinator layer for queue/autoplay and now-playing metadata.
+- `AVAudioSession` in playback mode for background audio, route changes, and
+  interruption recovery.
+- `UIDocumentPickerViewController`, security-scoped URLs, `NSFileCoordinator`,
+  `NSMetadataQuery`, and `NSFileVersion` for iCloud/Files state and source
+  access.
+- The Google Drive app's Files-provider integration first, then Google Sign-In
+  plus Drive REST v3 only if native Files-provider UX is too limited.
 - Local sandbox/cache copies as the actual playback surface. Cloud providers are
   sources; the app's local storage is what audio playback reads.
 
-### Why not SwiftUI first
+### React Native/Expo Runner-Up
 
-SwiftUI and AVFoundation would give the strongest native audio/file-provider
-control, but it would throw away most TypeScript reuse and lock the experiment
-to iOS. It is a good fallback only if React Native audio or file-provider
-constraints become a real blocker.
+React Native/Expo would reuse TypeScript concepts more directly and keeps
+Android open. It is still credible if cross-platform matters soon. For this v1,
+though, React Native still needs native modules for the exact hard parts:
+durable folder bookmarks, coordinated iCloud writes, file-provider edge cases,
+background audio, and reliable large-file playback. That makes it a second
+abstraction layer over the most failure-prone parts of the app.
 
 ### Why not Capacitor/Ionic
 
@@ -69,16 +78,20 @@ rewrite.
 
 ## What Can Actually Be Reused
 
-Strong reuse:
+Strong reuse as **source of truth/specification**:
 
 - `packages/contracts/src/index.ts` for `ProducerPlayerUserState`,
   `SongChecklistItem`, `SongVersion`, and the rest of the shared data model.
+  The Swift app should mirror these fields with Codable models and golden
+  fixture tests, while preserving unknown JSON fields for forward compatibility.
 - `packages/domain/src/song-model.ts` for version suffix parsing, title
-  normalization, song grouping, and stable ID generation.
+  normalization, song grouping, and stable ID generation. The logic is small
+  enough to port to Swift deliberately, then test against shared fixtures.
 - `packages/domain/src/file-library-service.ts` concepts for scanning top-level
   files plus `old/`, applying album order, and preserving folder/song identity.
 - Pure arithmetic such as platform normalization previews if kept free of
-  browser/Electron assumptions.
+  browser/Electron assumptions. If this becomes more than a few functions, keep
+  a shared fixture suite so Swift and TypeScript stay behaviorally aligned.
 
 Limited or no reuse:
 
@@ -225,8 +238,12 @@ local cache before reliable playback.
 
 ### Google Drive
 
-Use Google Sign-In for auth and Drive REST v3 for browsing/download. Treat Drive
-as an import/source provider rather than a live filesystem:
+Use the Google Drive app's Files-provider integration first. That lets v1 import
+Drive-hosted tracks through the same document-picker/cache flow as iCloud,
+without adding OAuth, quota handling, or a separate Drive browser. Add Google
+Sign-In and Drive REST v3 later if Files-provider UX is too clunky.
+
+Treat Drive as an import/source provider rather than a live filesystem:
 
 - Browse folders/files through Drive metadata.
 - Download chosen audio files into the mobile sandbox/cache.
@@ -250,7 +267,8 @@ The mobile app needs a folder/source mapping layer:
 
 ## Playback Plan
 
-Use `react-native-track-player` as the playback engine. Configure:
+Use a small Swift playback coordinator around `AVPlayer`/`AVQueuePlayer` as the
+playback engine. Configure:
 
 - iOS `AVAudioSession` playback category.
 - Background audio mode.
@@ -336,28 +354,28 @@ Future mobile analysis should be foreground-only and explicit:
 
 ### Phase 0: Experimental Scaffold
 
-- Create `experimental-mobile-app/` as an npm workspace only once it contains
-  runnable code.
-- Add Expo dev-client/bare setup.
-- Configure TypeScript path/workspace imports for `packages/contracts` and
-  `packages/domain`.
+- Create a SwiftUI/Xcode project under `experimental-mobile-app/`.
+- Add a small Swift package/module for shared model, state, scanner, and sync
+  logic so it can be unit-tested outside the UI target.
+- Add Codable mirrors for the desktop state schema, with an unknown-field
+  preservation layer so unsupported desktop fields survive mobile writes.
 - Add minimal navigation: Library, Track, Now Playing, Settings.
 - Prove the app boots in the local iPhone simulator.
 
 Exit criteria:
 
-- `npm install` remains clean from repo root.
+- The desktop npm workspace remains unaffected.
 - Mobile app boots in simulator.
-- Domain/contracts compile in mobile build.
+- Swift unit tests load real-ish desktop state fixtures.
 - No desktop app build/release path changes.
 
 ### Phase 1: Import and Playback
 
 - Implement iCloud document picker import.
 - Copy selected files into local cache.
-- Use domain scanner/grouping logic against cached file metadata.
+- Port the domain scanner/grouping rules against cached file metadata.
 - Build a minimal library list and track detail screen.
-- Wire `react-native-track-player` playback.
+- Wire AVFoundation playback.
 - Add background mode and lock-screen metadata.
 
 Exit criteria:
@@ -370,7 +388,7 @@ Exit criteria:
 
 - Locate/select the Producer Player cloud folder.
 - Read `producer-player-user-state.json`.
-- Parse through the shared contract layer.
+- Parse through Swift Codable mirrors of the shared contract layer.
 - Round-trip unknown fields without loss.
 - Apply mobile-owned field patches.
 - Rebase before write.
@@ -399,8 +417,8 @@ Exit criteria:
 
 ### Phase 4: Google Drive and Polish
 
-- Add Google Sign-In.
-- Add Drive folder picker/browser.
+- Add Google Sign-In and a native Drive browser only if the Files-provider path
+  is not good enough.
 - Download/cache selected files.
 - Keep Drive metadata for refresh.
 - Add cache management and stale-file indicators.
@@ -417,7 +435,7 @@ Exit criteria:
 
 - Golden fixtures for current monolithic `producer-player-user-state.json`.
 - Golden fixtures for split `state/global.json` + `state/tracks/*.json`.
-- Parser tests for current and older state files.
+- Swift parser tests for current and older state files.
 - Whitelisted mobile patch tests.
 - Unknown-field preservation tests.
 - Desktop-owned-field preservation tests.
@@ -509,14 +527,12 @@ Before or during the mobile scaffold, make these small desktop-side changes:
 
 ## External References
 
-- [Expo development builds](https://docs.expo.dev/develop/development-builds/introduction/)
-- [React Native Track Player](https://rntp.dev/)
-- [React Native Track Player background mode](https://rntp.dev/docs/basics/background-mode)
 - [Apple iCloud documents](https://developer.apple.com/documentation/foundation/icloud)
 - [NSFileCoordinator](https://developer.apple.com/documentation/foundation/nsfilecoordinator)
 - [NSMetadataQuery](https://developer.apple.com/documentation/foundation/nsmetadataquery)
 - [NSFileVersion](https://developer.apple.com/documentation/foundation/nsfileversion)
 - [UIDocumentPickerViewController](https://developer.apple.com/documentation/uikit/uidocumentpickerviewcontroller)
+- [Security-scoped resource URLs](https://developer.apple.com/documentation/foundation/url/startaccessingsecurityscopedresource())
 - [AVAudioSession](https://developer.apple.com/documentation/avfaudio/avaudiosession)
 - [Configuring media playback](https://developer.apple.com/documentation/avfoundation/configuring-your-app-for-media-playback)
 - [App Store Review Guidelines](https://developer.apple.com/app-store/review/guidelines/)

@@ -12823,6 +12823,42 @@ export function App(): JSX.Element {
     }
   }, [canReorderSongs]);
 
+  useEffect(() => {
+    if (dragSongId === null) {
+      return;
+    }
+
+    const clearCancelledDragState = () => {
+      clearDragState();
+    };
+
+    const clearAfterDropHandlersRun = () => {
+      // The row/list `onDrop` handlers still need the current `dragSongId`
+      // during the same event turn. If the native drop lands outside React's
+      // row/list targets, this timeout clears the amber drag-source wash that
+      // otherwise looks like a bogus song/checklist status after title edits.
+      window.setTimeout(clearCancelledDragState, 0);
+    };
+
+    const clearIfEscapeCancelsDrag = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        clearCancelledDragState();
+      }
+    };
+
+    window.addEventListener('dragend', clearCancelledDragState, true);
+    window.addEventListener('drop', clearAfterDropHandlersRun, true);
+    window.addEventListener('blur', clearCancelledDragState);
+    window.addEventListener('keyup', clearIfEscapeCancelsDrag, true);
+
+    return () => {
+      window.removeEventListener('dragend', clearCancelledDragState, true);
+      window.removeEventListener('drop', clearAfterDropHandlersRun, true);
+      window.removeEventListener('blur', clearCancelledDragState);
+      window.removeEventListener('keyup', clearIfEscapeCancelsDrag, true);
+    };
+  }, [dragSongId]);
+
   async function runSnapshotTask(task: () => Promise<LibrarySnapshot>): Promise<void> {
     setError(null);
     try {

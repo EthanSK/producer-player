@@ -4,6 +4,11 @@ All notable changes to Producer Player are documented in this file.
 
 This project follows a date-based release cadence with semantic version labels.
 
+## [3.324] - 2026-07-01
+
+### Bug fixes
+- Track rows no longer get stuck with the amber drag-source background after a cancelled reorder gesture. The stranded state could make a recently renamed track look like it had gained a strange yellow/gold status even though the saved song/checklist data was normal.
+
 ## [3.256] - 2026-05-24
 
 ### Bug fixes

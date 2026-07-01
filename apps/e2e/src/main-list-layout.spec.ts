@@ -178,4 +178,52 @@ test.describe('Main list row layout', () => {
       await cleanupE2ETestDirectories(directories);
     }
   });
+
+  test('cancelled track drag clears the amber drag-source row state', async () => {
+    const directories = await createE2ETestDirectories('producer-player-main-list-drag-cancel');
+
+    await writeFixtureFiles(directories.fixtureDirectory, [
+      { relativePath: 'Drag Source v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:10.000Z') },
+      { relativePath: 'Drag Target v1.wav', modifiedAtMs: Date.parse('2026-01-01T00:00:11.000Z') },
+    ]);
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await page.evaluate(async (folderPath) => {
+        await (
+          window as typeof window & {
+            producerPlayer: { linkFolder: (path: string) => Promise<unknown> };
+          }
+        ).producerPlayer.linkFolder(folderPath);
+      }, directories.fixtureDirectory);
+
+      const firstRow = page.getByTestId('main-list-row').filter({ hasText: 'Drag Source' }).first();
+      await expect(firstRow).toBeVisible();
+
+      await firstRow.evaluate((rowNode) => {
+        const event = new DragEvent('dragstart', {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: new DataTransfer(),
+        });
+
+        rowNode.dispatchEvent(event);
+      });
+
+      await expect(firstRow).toHaveClass(/drag-source/);
+
+      await page.evaluate(() => {
+        // Regression for Ethan's 2026-07-01 screenshot: a native drag that
+        // gets cancelled outside the row can strand the amber drag-source
+        // class, making a renamed track look like it gained a weird status.
+        window.dispatchEvent(new DragEvent('dragend', { bubbles: true }));
+      });
+
+      await expect(firstRow).not.toHaveClass(/drag-source/);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
 });

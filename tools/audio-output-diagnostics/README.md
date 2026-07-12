@@ -82,3 +82,18 @@ older samples and can sound like a restart even while the media element's clock
 is perfectly monotonic. Any repair to that bridge must keep dry fallbacks and
 processed results tied to the same source block, and this external capture is
 the final proof.
+
+## Normal-track startup guard
+
+Native plug-in prewarming is song-scoped. If a plug-in constructor is already
+running for song B while the listener starts ordinary song A, A must not await
+B's prewarm. Compare `canplay` with `play` in the playback event log when
+investigating a slow start: a ready zero-plug-in track should proceed
+immediately, while only the exact song that owns an enabled plug-in may wait for
+its native instance. The renderer regression helper is
+`shouldWaitForPluginNativePrewarm`.
+
+The fixed plug-in output timeline is intentionally continuous across song
+generations. Do not clear it at a normal album boundary: that would discard its
+queued tail and shorten the outgoing track. The unit test named “preserves the
+exact block count and boundary across an album handoff” protects this invariant.

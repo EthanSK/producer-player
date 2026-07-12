@@ -186,6 +186,7 @@ import {
   getPluginSlotOutputGain,
   interleaveStereoSamples,
   PluginAudioOutputTimeline,
+  shouldWaitForPluginNativePrewarm,
   writeInterleavedStereoSamples,
 } from './pluginAudioPipeline';
 import { EqGainSliders, EQ_GAIN_DEFAULT_DB } from './EqGainSliders';
@@ -4241,7 +4242,11 @@ export function App(): JSX.Element {
   const loadedInstanceIdsRef = useRef<ReadonlySet<string>>(new Set());
   const pluginChainsBySongIdRef = useRef<Map<string, TrackPluginChain>>(new Map());
   const prewarmedPluginSongIdsRef = useRef<Set<string>>(new Set());
-  const pluginNativePrewarmInFlightRef = useRef<Promise<unknown> | null>(null);
+  const pluginNativePrewarmInFlightRef = useRef<{
+    songId: string;
+    requiredForPlayback: boolean;
+    promise: Promise<unknown>;
+  } | null>(null);
   const activePluginAudioRouteRef = useRef<ActivePluginAudioRoute>({
     songId: '',
     signature: '',
@@ -8033,6 +8038,8 @@ export function App(): JSX.Element {
 
       logPlaybackEvent('ended', {
         repeatMode: mode,
+        currentTimeSeconds: Number.isFinite(audio.currentTime) ? audio.currentTime : null,
+        durationSeconds: Number.isFinite(audio.duration) ? audio.duration : null,
       });
 
       if (mode === 'one') {
@@ -10986,12 +10993,31 @@ export function App(): JSX.Element {
 
   async function resumePlaybackContextIfNeeded(): Promise<void> {
     const nativePrewarm = pluginNativePrewarmInFlightRef.current;
-    if (nativePrewarm && audioRef.current?.paused) {
+    const playbackSongId = lastLoadedSongIdRef.current;
+    if (
+      nativePrewarm &&
+      shouldWaitForPluginNativePrewarm({
+        audioPaused: audioRef.current?.paused === true,
+        playbackSongId,
+        prewarmSongId: nativePrewarm.songId,
+        prewarmRequiredForPlayback: nativePrewarm.requiredForPlayback,
+      })
+    ) {
       // A native bundle that is already being instantiated cannot be safely
-      // cancelled mid-constructor. Let that short, bounded load finish before
-      // starting the audible clock, then yield one frame so React can install
-      // the stable bridge while the element is still silent.
-      await nativePrewarm.catch(() => undefined);
+      // cancelled mid-constructor. Wait only when this exact playback song
+      // needs it; an unrelated song's idle prewarm is never on the critical
+      // path for ordinary zero-plug-in playback.
+      const waitStartedAt = performance.now();
+      logPlaybackEvent('plugin-native-prewarm-wait-started', {
+        songId: nativePrewarm.songId,
+      });
+      await nativePrewarm.promise.catch(() => undefined);
+      logPlaybackEvent('plugin-native-prewarm-wait-finished', {
+        songId: nativePrewarm.songId,
+        durationMs: Math.max(0, performance.now() - waitStartedAt),
+      });
+      // Yield one frame so React can install the stable bridge while the
+      // element is still silent.
       await new Promise<void>((resolve) => {
         let settled = false;
         const finish = () => {
@@ -11002,6 +11028,12 @@ export function App(): JSX.Element {
         };
         const fallbackTimer = window.setTimeout(finish, 50);
         window.requestAnimationFrame(finish);
+      });
+    } else if (nativePrewarm && audioRef.current?.paused) {
+      logPlaybackEvent('plugin-native-prewarm-not-blocking-playback', {
+        playbackSongId,
+        prewarmSongId: nativePrewarm.songId,
+        prewarmRequiredForPlayback: nativePrewarm.requiredForPlayback,
       });
     }
     const playbackAudioContext = playbackAudioContextRef.current;
@@ -15236,7 +15268,12 @@ export function App(): JSX.Element {
                 reconcilePlugins: true,
                 waitForPlugins: true,
               });
-              pluginNativePrewarmInFlightRef.current = prewarmPromise;
+              const inFlight = {
+                songId: song.id,
+                requiredForPlayback: chain.items.some((item) => item.enabled),
+                promise: prewarmPromise,
+              };
+              pluginNativePrewarmInFlightRef.current = inFlight;
               try {
                 const next = await prewarmPromise;
                 if (signal.aborted) {
@@ -15244,7 +15281,7 @@ export function App(): JSX.Element {
                 }
                 return next;
               } finally {
-                if (pluginNativePrewarmInFlightRef.current === prewarmPromise) {
+                if (pluginNativePrewarmInFlightRef.current === inFlight) {
                   pluginNativePrewarmInFlightRef.current = null;
                 }
               }

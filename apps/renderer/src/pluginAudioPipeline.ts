@@ -34,6 +34,13 @@ export interface PluginAudioTimelineOutput extends PluginAudioTimelineBlock {
   usedProcessedAudio: boolean;
 }
 
+export interface PluginNativePrewarmPlaybackDecision {
+  audioPaused: boolean;
+  playbackSongId: string | null;
+  prewarmSongId: string | null;
+  prewarmRequiredForPlayback: boolean;
+}
+
 interface PendingPluginAudioTimelineBlock extends PluginAudioTimelineBlock {
   processedSamples: Float32Array | null;
 }
@@ -122,6 +129,23 @@ export class PluginAudioOutputTimeline {
     this.pending.length = 0;
     this.bySequence.clear();
   }
+}
+
+/**
+ * A native plug-in constructor cannot be cancelled safely once it has begun.
+ * Playback should wait for it only when that exact song needs the plug-in for
+ * its audible route. An unrelated song's idle prewarm must never delay normal
+ * zero-plug-in playback.
+ */
+export function shouldWaitForPluginNativePrewarm(
+  decision: PluginNativePrewarmPlaybackDecision,
+): boolean {
+  return Boolean(
+    decision.audioPaused &&
+      decision.prewarmRequiredForPlayback &&
+      decision.playbackSongId &&
+      decision.prewarmSongId === decision.playbackSongId,
+  );
 }
 
 export function clampPluginSlotGainLinear(value: unknown): number {

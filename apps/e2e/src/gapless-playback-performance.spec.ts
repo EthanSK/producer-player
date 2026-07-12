@@ -29,6 +29,8 @@ type PlaybackEventLogEntry = {
   filePath?: string | null;
   readyState?: number | null;
   currentSrc?: string | null;
+  currentTimeSeconds?: number | null;
+  durationSeconds?: number | null;
 };
 
 type OutputSample = {
@@ -414,6 +416,7 @@ test.describe('gapless playback performance', () => {
 
       const samples = await stopOutputSampler(page);
       const events = await readPlaybackEvents(page);
+      const endedEvents = events.filter((entry) => entry.event === 'ended');
       const measurements = measureTransitions(events, samples);
       const outputMeasurements = measurements.filter(
         (entry) => entry.endedToFirstOutputSampleMs !== null
@@ -421,6 +424,14 @@ test.describe('gapless playback performance', () => {
 
       expect(measurements).toHaveLength(TRACK_COUNT - 1);
       expect(outputMeasurements).toHaveLength(TRACK_COUNT - 1);
+      expect(endedEvents).toHaveLength(TRACK_COUNT - 1);
+      for (const ended of endedEvents) {
+        expect(ended.currentTimeSeconds).not.toBeNull();
+        expect(ended.durationSeconds).not.toBeNull();
+        expect(
+          Math.abs((ended.currentTimeSeconds ?? 0) - (ended.durationSeconds ?? 0)),
+        ).toBeLessThanOrEqual(1 / SAMPLE_RATE);
+      }
 
       const summary = {
         environment: {

@@ -131,6 +131,8 @@ import {
   extendPlaybackSettleUntil,
   getAutoplayMediaPreloadDelayMs,
   getNextPlaybackQueueVersion,
+  shouldApplyPlaybackSeek,
+  shouldSynchronizeChecklistTypingSeek,
 } from './playbackHandoff';
 import {
   mergeLegacyAndSharedUserState,
@@ -13808,9 +13810,24 @@ export function App(): JSX.Element {
     audio.pause();
   }
 
-  function handleSeek(nextTimeSeconds: number): void {
+  function handleSeek(nextTimeSeconds: number, origin = 'unknown'): void {
     const audio = audioRef.current;
     if (!audio || !Number.isFinite(nextTimeSeconds)) {
+      return;
+    }
+
+    const previousTimeSeconds = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+    if (
+      !shouldApplyPlaybackSeek({
+        currentTimeSeconds: previousTimeSeconds,
+        targetTimeSeconds: nextTimeSeconds,
+      })
+    ) {
+      logPlaybackEvent('seek-skipped-redundant', {
+        origin,
+        fromSeconds: previousTimeSeconds,
+        toSeconds: nextTimeSeconds,
+      });
       return;
     }
 
@@ -13822,6 +13839,11 @@ export function App(): JSX.Element {
 
     rememberSongPlayhead(lastLoadedSongIdRef.current, nextTimeSeconds, {
       durationSeconds: Number.isFinite(audio.duration) ? audio.duration : undefined,
+    });
+    logPlaybackEvent('seek-applied', {
+      origin,
+      fromSeconds: previousTimeSeconds,
+      toSeconds: nextTimeSeconds,
     });
   }
 
@@ -14042,7 +14064,7 @@ export function App(): JSX.Element {
 
     const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
     const nextTime = Math.max(0, Math.min(audio.currentTime + offsetSeconds, duration));
-    handleSeek(nextTime);
+    handleSeek(nextTime, 'skip-seconds');
     logPlaybackEvent('skip-seconds', {
       offsetSeconds,
       fromSeconds: audio.currentTime,
@@ -14070,7 +14092,7 @@ export function App(): JSX.Element {
       // icon is now a one-arrow start icon. Ethan called out that ◀◀ reads as
       // the direct opposite of the ▶▶ next-track button, so ◀◀ now belongs to
       // previous-track jump.
-      handleSeek(0);
+      handleSeek(0, 'transport-rewind');
       logPlaybackEvent('transport-rewind-current-track', {
         currentTimeSeconds: currentTime,
       });
@@ -16490,7 +16512,28 @@ export function App(): JSX.Element {
     setChecklistCapturedTimestamp(timestamp);
 
     if (options?.syncPlaybackToCapturedTimestamp) {
-      handleSeek(timestamp);
+      const audio = audioRef.current;
+      const currentPlaybackSeconds =
+        audio && Number.isFinite(audio.currentTime)
+          ? audio.currentTime
+          : currentTimeSecondsRef.current;
+      const playbackSettling = getPlaybackSettleRemainingMs() > 0;
+
+      if (
+        shouldSynchronizeChecklistTypingSeek({
+          currentTimeSeconds: currentPlaybackSeconds,
+          targetTimeSeconds: timestamp,
+          playbackSettling,
+        })
+      ) {
+        handleSeek(timestamp, 'checklist-typing-lookback');
+      } else {
+        logPlaybackEvent('checklist-typing-lookback-capture-only', {
+          currentTimeSeconds: currentPlaybackSeconds,
+          capturedTimestampSeconds: timestamp,
+          playbackSettling,
+        });
+      }
     }
   }
 
@@ -17188,7 +17231,7 @@ export function App(): JSX.Element {
       return;
     }
 
-    handleSeek(seconds);
+    handleSeek(seconds, 'checklist-timestamp');
 
     if (audio.paused) {
       void resumePlaybackContextIfNeeded()
@@ -17353,6 +17396,11 @@ export function App(): JSX.Element {
 
   function handleChecklistDraftTextChange(nextText: string): void {
     const wasEmpty = checklistDraftTextRef.current.trim().length === 0;
+    // Update the event-time mirror synchronously. React may batch several
+    // rapid textarea changes before the effect below runs; leaving the ref
+    // stale made the first two or three keystrokes each issue the same
+    // three-second playback seek.
+    checklistDraftTextRef.current = nextText;
     setChecklistDraftText(nextText);
 
     if (nextText.trim().length === 0) {
@@ -21798,7 +21846,9 @@ export function App(): JSX.Element {
                 step={0.1}
                 value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
                 disabled={durationSeconds <= 0}
-                onChange={(event) => handleSeek(Number(event.target.value))}
+                onChange={(event) =>
+                  handleSeek(Number(event.target.value), 'main-scrubber')
+                }
                 data-testid="player-scrubber"
                 title="Scrub through the selected track."
               />
@@ -23714,7 +23764,9 @@ export function App(): JSX.Element {
                     step={0.1}
                     value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
                     disabled={durationSeconds <= 0}
-                    onChange={(event) => handleSeek(Number(event.target.value))}
+                    onChange={(event) =>
+                      handleSeek(Number(event.target.value), 'checklist-scrubber')
+                    }
                     data-testid="song-checklist-mini-player-scrubber"
                     title="Scrub through the selected track while the checklist is open."
                   />
@@ -26290,7 +26342,9 @@ export function App(): JSX.Element {
                   step={0.1}
                   value={Math.min(currentTimeSeconds, durationSeconds > 0 ? durationSeconds : 0)}
                   disabled={durationSeconds <= 0}
-                  onChange={(event) => handleSeek(Number(event.target.value))}
+                  onChange={(event) =>
+                    handleSeek(Number(event.target.value), 'analysis-scrubber')
+                  }
                   data-testid="analysis-overlay-scrubber"
                   title="Scrub through the track"
                 />

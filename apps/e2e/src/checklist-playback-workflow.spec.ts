@@ -143,6 +143,132 @@ test.describe('checklist playback workflow', () => {
     }
   });
 
+  test('checklist typing cannot restart a newly autoplayed track @smoke', async () => {
+    const directories = await createE2ETestDirectories(
+      'producer-player-checklist-autoplay-typing-settle'
+    );
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
+      durationMs: 2_400,
+      frequencyHz: 330,
+    });
+    await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
+      durationMs: 6_000,
+      frequencyHz: 550,
+    });
+
+    const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
+
+    try {
+      await linkFixtureFolder(page, directories.fixtureDirectory);
+      await expect(page.getByTestId('main-list-row')).toHaveCount(2);
+      await cueSongVersion(page, 'Track A', 'Track A v1.wav');
+
+      await page.getByTestId('transport-checklist-button').click();
+      await expect(page.getByTestId('song-checklist-modal')).toBeVisible();
+      await page.evaluate(() => {
+        (window as unknown as {
+          __producerPlayerClearPlaybackEventLog?: () => void;
+        }).__producerPlayerClearPlaybackEventLog?.();
+      });
+
+      await page.getByTestId('song-checklist-play-toggle').click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Track B v1.wav', {
+        timeout: 12_000,
+      });
+
+      const readPlaybackSeconds = () =>
+        page.evaluate(() => {
+          const state = (window as unknown as {
+            __producerPlayerGetPlaybackHandoffState?: () => {
+              currentAudioTimeSeconds: number | null;
+              audioPaused: boolean | null;
+            };
+          }).__producerPlayerGetPlaybackHandoffState?.();
+          return state?.audioPaused === false ? state.currentAudioTimeSeconds ?? 0 : -1;
+        });
+
+      await expect
+        .poll(readPlaybackSeconds, { timeout: 5_000 })
+        .toBeGreaterThan(0.2);
+      const beforeTypingSeconds = await readPlaybackSeconds();
+      expect(beforeTypingSeconds).toBeLessThan(3);
+
+      // Dispatch the first three textarea values in one renderer task. This
+      // reproduces the React batching window from the production trace where
+      // the draft ref still looked empty for several rapid keystrokes.
+      await page.getByTestId('song-checklist-input').evaluate((node) => {
+        if (!(node instanceof HTMLTextAreaElement)) {
+          throw new Error('Checklist composer is not a textarea');
+        }
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          'value'
+        )?.set;
+        if (!valueSetter) {
+          throw new Error('Native textarea value setter unavailable');
+        }
+        for (const value of ['a', 'ab', 'abc']) {
+          valueSetter.call(node, value);
+          node.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      });
+      await expect
+        .poll(readPlaybackSeconds, { timeout: 3_000 })
+        .toBeGreaterThan(beforeTypingSeconds + 0.35);
+
+      const events = await page.evaluate(() =>
+        ((window as unknown as {
+          __producerPlayerGetPlaybackEventLog?: () => Array<{
+            event: string;
+            perfNowMs: number;
+            reason?: string;
+            origin?: string;
+            filePath?: string;
+            selectedFilePath?: string;
+          }>;
+        }).__producerPlayerGetPlaybackEventLog?.() ?? []).map((entry) => ({ ...entry }))
+      );
+      const trackBSource = events.find(
+        (entry) => entry.event === 'source-selected' && entry.filePath?.endsWith('Track B v1.wav')
+      );
+      expect(trackBSource).toBeTruthy();
+      const afterTrackBSource = events.filter(
+        (entry) => entry.perfNowMs >= (trackBSource?.perfNowMs ?? Number.POSITIVE_INFINITY)
+      );
+      const firstTrackBPlaying = afterTrackBSource.find(
+        (entry) => entry.event === 'playing' && entry.selectedFilePath?.endsWith('Track B v1.wav')
+      );
+      expect(firstTrackBPlaying).toBeTruthy();
+
+      expect(
+        afterTrackBSource.filter(
+          (entry) =>
+            entry.event === 'seek-applied' && entry.origin === 'checklist-typing-lookback'
+        )
+      ).toHaveLength(0);
+      expect(
+        afterTrackBSource.filter(
+          (entry) => entry.event === 'plugin-audio-route-activated' && entry.reason === 'seek'
+        )
+      ).toHaveLength(0);
+      expect(
+        afterTrackBSource.filter(
+          (entry) => entry.event === 'checklist-typing-lookback-capture-only'
+        )
+      ).toHaveLength(1);
+      expect(
+        afterTrackBSource.filter(
+          (entry) =>
+            entry.event === 'waiting' &&
+            entry.perfNowMs > (firstTrackBPlaying?.perfNowMs ?? Number.POSITIVE_INFINITY)
+        )
+      ).toHaveLength(0);
+    } finally {
+      await electronApp.close();
+      await cleanupE2ETestDirectories(directories);
+    }
+  });
+
   test('set now captures checklist timestamp and matching items pulse with a long tail when playback reaches them', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-checklist-set-now-highlight'

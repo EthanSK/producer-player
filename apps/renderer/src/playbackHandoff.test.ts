@@ -4,6 +4,8 @@ import {
   extendPlaybackSettleUntil,
   getAutoplayMediaPreloadDelayMs,
   getNextPlaybackQueueVersion,
+  shouldApplyPlaybackSeek,
+  shouldSynchronizeChecklistTypingSeek,
 } from './playbackHandoff';
 
 describe('buildPlaybackSourceCacheKey', () => {
@@ -34,6 +36,54 @@ describe('extendPlaybackSettleUntil', () => {
   it('ignores invalid or empty durations', () => {
     expect(extendPlaybackSettleUntil(1_000, 2_000, 0)).toBe(1_000);
     expect(extendPlaybackSettleUntil(1_000, 2_000, Number.NaN)).toBe(1_000);
+  });
+});
+
+describe('shouldApplyPlaybackSeek', () => {
+  it('rejects duplicate currentTime assignments that would retrigger media waiting', () => {
+    expect(
+      shouldApplyPlaybackSeek({
+        currentTimeSeconds: 0,
+        targetTimeSeconds: 0,
+      })
+    ).toBe(false);
+    expect(
+      shouldApplyPlaybackSeek({
+        currentTimeSeconds: 12.5,
+        targetTimeSeconds: 12.51,
+      })
+    ).toBe(false);
+  });
+
+  it('allows a real user seek', () => {
+    expect(
+      shouldApplyPlaybackSeek({
+        currentTimeSeconds: 12.5,
+        targetTimeSeconds: 9.5,
+      })
+    ).toBe(true);
+  });
+});
+
+describe('shouldSynchronizeChecklistTypingSeek', () => {
+  it('keeps checklist typing from restarting a newly handed-off song', () => {
+    expect(
+      shouldSynchronizeChecklistTypingSeek({
+        currentTimeSeconds: 2.45,
+        targetTimeSeconds: 0,
+        playbackSettling: true,
+      })
+    ).toBe(false);
+  });
+
+  it('preserves the intentional three-second rewind after playback settles', () => {
+    expect(
+      shouldSynchronizeChecklistTypingSeek({
+        currentTimeSeconds: 12,
+        targetTimeSeconds: 9,
+        playbackSettling: false,
+      })
+    ).toBe(true);
   });
 });
 

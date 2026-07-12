@@ -37,6 +37,51 @@ export function extendPlaybackSettleUntil(
   return Math.max(currentPausedUntilMs, nowMs + Math.floor(durationMs));
 }
 
+/**
+ * Avoid assigning HTMLMediaElement.currentTime when the requested position is
+ * already effectively current. Chromium treats even an identical assignment
+ * as a new seek on some WAV sources, producing a waiting/canplay/playing cycle.
+ */
+export function shouldApplyPlaybackSeek(options: {
+  currentTimeSeconds: number;
+  targetTimeSeconds: number;
+  epsilonSeconds?: number;
+}): boolean {
+  if (
+    !Number.isFinite(options.currentTimeSeconds) ||
+    !Number.isFinite(options.targetTimeSeconds)
+  ) {
+    return false;
+  }
+
+  const epsilonSeconds = Number.isFinite(options.epsilonSeconds)
+    ? Math.max(0, options.epsilonSeconds ?? 0)
+    : 0.025;
+
+  return Math.abs(options.targetTimeSeconds - options.currentTimeSeconds) > epsilonSeconds;
+}
+
+/**
+ * Checklist typing normally rewinds by three seconds so the producer can
+ * immediately re-hear what prompted a note. During an album handoff, though,
+ * that same behavior clamps to 0:00 and restarts the new song inside its first
+ * protected seconds. Capture the timestamp but leave the audible transport
+ * alone until the handoff settle window has closed.
+ */
+export function shouldSynchronizeChecklistTypingSeek(options: {
+  currentTimeSeconds: number;
+  targetTimeSeconds: number;
+  playbackSettling: boolean;
+}): boolean {
+  return (
+    !options.playbackSettling &&
+    shouldApplyPlaybackSeek({
+      currentTimeSeconds: options.currentTimeSeconds,
+      targetTimeSeconds: options.targetTimeSeconds,
+    })
+  );
+}
+
 export function getNextPlaybackQueueVersion<TVersion>(
   queue: readonly TVersion[],
   currentIndex: number,

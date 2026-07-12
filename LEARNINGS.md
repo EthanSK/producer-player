@@ -24,6 +24,16 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-07-12T20:12:00Z
+**Trigger:** Ethan live report immediately after installing v3.326: Café Lool stuttered and restarted two or three times at its opening
+**Symptom:** The Amazone → Café Lool autoplay handoff began successfully, then Café visibly/audibly jumped back and cycled through buffering several times about 2.5 seconds into the song.
+**Root cause:** The production renderer ring buffer proved that Café reached `playing` at 19:56:31.374Z, then received three `handleSeek` calls at 19:56:33.827/33.842/34.005Z. Every redundant `audio.currentTime = 0` forced Chromium through `waiting → canplay → playing`. The checklist composer intentionally applies a three-second “just heard it” lookback on the first typed character; inside a new track's three-second settle window that clamps to 0:00 and restarts the intro. `checklistDraftTextRef` was updated only by a post-render effect, so React-batched rapid keystrokes each still observed an empty draft and repeated the seek. v3.326 additionally forced a plug-in processing generation reset on every seek, making the duplicate cycle more severe on Café's enabled Nectar chain. Background version-history work was not the cause: it remained deferred through the audible transition and resumed only after pause.
+**Fix:** Checklist typing still captures its lookback timestamp, but cannot synchronize the audible playhead during the protected handoff settle window. The draft ref now updates synchronously in the input event so only the empty→non-empty transition can request lookback. All seeks now reject effectively identical `currentTime` assignments before Chromium buffering or plug-in generation reset, and playback events record seek origin/from/to for future diagnosis.
+**Commit:** this change (shipped as v3.327)
+**Guard:** `playbackHandoff.test.ts` pins settle-window suppression and redundant-seek rejection. `checklist-playback-workflow.spec.ts` adds a remote `@smoke` reproduction with a natural two-track autoplay handoff plus three React-batched first keystrokes; it requires monotonic playback, exactly one capture-only event, zero checklist seeks, zero seek route resets, and zero post-start `waiting` events.
+---
+
+---
 **Date:** 2026-07-12T19:30:00Z
 **Trigger:** Ethan report: The Amazone → Café Lool clicks/stutters about 1–2 seconds after the new song begins
 **Symptom:** Album playback could begin cleanly, then click or glitch shortly after a natural track transition; Café Lool reproduced it most reliably.

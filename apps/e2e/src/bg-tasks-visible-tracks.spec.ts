@@ -437,7 +437,9 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
         'data-status',
         'ready'
       );
-      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      // Background analysis becoming ready must not change transport intent:
+      // the user paused above, so playback stays paused.
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

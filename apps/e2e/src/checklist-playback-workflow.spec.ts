@@ -161,7 +161,8 @@ test.describe('checklist playback workflow', () => {
     try {
       await linkFixtureFolder(page, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-      await cueSongVersion(page, 'Track A', 'Track A v1.wav');
+      await page.getByTestId('main-list-row').filter({ hasText: 'Track A' }).first().click();
+      await expect(page.getByTestId('player-track-name')).toContainText('Track A v1.wav');
 
       await page.getByTestId('transport-checklist-button').click();
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();

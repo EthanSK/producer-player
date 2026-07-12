@@ -8743,7 +8743,9 @@ app.on('before-quit', () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  // Producer Player is intentionally a single-window app with no user-facing
+  // menu-bar or background mode. Keeping the process alive after the last
+  // window closes is therefore invisible and surprising on macOS, so use the
+  // same orderly quit path as Cmd+Q on every platform.
+  app.quit();
 });

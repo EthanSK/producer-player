@@ -43,4 +43,35 @@ test.describe('Producer Player runtime smoke @smoke', () => {
       await cleanupE2ETestDirectories(dirs);
     }
   });
+
+  test('quits when its final window closes @smoke', async () => {
+    const dirs = await createE2ETestDirectories('runtime-smoke-window-close');
+    const { electronApp } = await launchProducerPlayer(dirs.userDataDirectory);
+    const electronProcess = electronApp.process();
+
+    const applicationClosed = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Producer Player remained running after its final window closed.'));
+      }, 10_000);
+      electronApp.once('close', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+
+    try {
+      await electronApp.evaluate(({ BrowserWindow }) => {
+        const finalWindow = BrowserWindow.getAllWindows()[0];
+        setImmediate(() => finalWindow?.close());
+      });
+
+      await applicationClosed;
+      expect(electronProcess.exitCode).toBe(0);
+    } finally {
+      if (electronProcess.exitCode === null) {
+        await electronApp.close();
+      }
+      await cleanupE2ETestDirectories(dirs);
+    }
+  });
 });

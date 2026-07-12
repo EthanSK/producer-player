@@ -148,11 +148,11 @@ test.describe('checklist playback workflow', () => {
       'producer-player-checklist-autoplay-typing-settle'
     );
     await writeTestWav(path.join(directories.fixtureDirectory, 'Track A v1.wav'), {
-      durationMs: 2_400,
+      durationMs: 6_000,
       frequencyHz: 330,
     });
     await writeTestWav(path.join(directories.fixtureDirectory, 'Track B v1.wav'), {
-      durationMs: 6_000,
+      durationMs: 2_400,
       frequencyHz: 550,
     });
 
@@ -161,8 +161,8 @@ test.describe('checklist playback workflow', () => {
     try {
       await linkFixtureFolder(page, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-      await page.getByTestId('main-list-row').filter({ hasText: 'Track A' }).first().dblclick();
-      await expect(page.getByTestId('player-track-name')).toContainText('Track A v1.wav');
+      await page.getByTestId('main-list-row').filter({ hasText: 'Track B' }).first().dblclick();
+      await expect(page.getByTestId('player-track-name')).toContainText('Track B v1.wav');
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
       await page.getByTestId('player-play-toggle').click();
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
@@ -176,7 +176,7 @@ test.describe('checklist playback workflow', () => {
       });
 
       await page.getByTestId('song-checklist-play-toggle').click();
-      await expect(page.getByTestId('player-track-name')).toContainText('Track B v1.wav', {
+      await expect(page.getByTestId('player-track-name')).toContainText('Track A v1.wav', {
         timeout: 12_000,
       });
 
@@ -232,39 +232,39 @@ test.describe('checklist playback workflow', () => {
           }>;
         }).__producerPlayerGetPlaybackEventLog?.() ?? []).map((entry) => ({ ...entry }))
       );
-      const trackBSource = events.find(
-        (entry) => entry.event === 'source-selected' && entry.filePath?.endsWith('Track B v1.wav')
+      const trackASource = events.find(
+        (entry) => entry.event === 'source-selected' && entry.filePath?.endsWith('Track A v1.wav')
       );
-      expect(trackBSource).toBeTruthy();
-      const afterTrackBSource = events.filter(
-        (entry) => entry.perfNowMs >= (trackBSource?.perfNowMs ?? Number.POSITIVE_INFINITY)
+      expect(trackASource).toBeTruthy();
+      const afterTrackASource = events.filter(
+        (entry) => entry.perfNowMs >= (trackASource?.perfNowMs ?? Number.POSITIVE_INFINITY)
       );
-      const firstTrackBPlaying = afterTrackBSource.find(
-        (entry) => entry.event === 'playing' && entry.selectedFilePath?.endsWith('Track B v1.wav')
+      const firstTrackAPlaying = afterTrackASource.find(
+        (entry) => entry.event === 'playing' && entry.selectedFilePath?.endsWith('Track A v1.wav')
       );
-      expect(firstTrackBPlaying).toBeTruthy();
+      expect(firstTrackAPlaying).toBeTruthy();
 
       expect(
-        afterTrackBSource.filter(
+        afterTrackASource.filter(
           (entry) =>
             entry.event === 'seek-applied' && entry.origin === 'checklist-typing-lookback'
         )
       ).toHaveLength(0);
       expect(
-        afterTrackBSource.filter(
+        afterTrackASource.filter(
           (entry) => entry.event === 'plugin-audio-route-activated' && entry.reason === 'seek'
         )
       ).toHaveLength(0);
       expect(
-        afterTrackBSource.filter(
+        afterTrackASource.filter(
           (entry) => entry.event === 'checklist-typing-lookback-capture-only'
         )
       ).toHaveLength(1);
       expect(
-        afterTrackBSource.filter(
+        afterTrackASource.filter(
           (entry) =>
             entry.event === 'waiting' &&
-            entry.perfNowMs > (firstTrackBPlaying?.perfNowMs ?? Number.POSITIVE_INFINITY)
+            entry.perfNowMs > (firstTrackAPlaying?.perfNowMs ?? Number.POSITIVE_INFINITY)
         )
       ).toHaveLength(0);
     } finally {

@@ -6,6 +6,13 @@ import type {
 
 export const PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE = 4096;
 /**
+ * The native plug-in sidecar replies asynchronously. Hold a small, fixed
+ * timeline so a processed reply can only replace the exact dry block that
+ * produced it. Two 4096-frame blocks are about 171 ms at 48 kHz: enough for a
+ * warm Audio Unit round-trip without ever replaying an older block later.
+ */
+export const PLUGIN_AUDIO_OUTPUT_LATENCY_BLOCKS = 2;
+/**
  * Per-plugin I/O gain (Ableton-style sandwich) — `inputGainLinear` /
  * `outputGainLinear`. Linear multipliers; 1 = unity (default), 0 = silent,
  * 2 = +6 dB. Anything outside [MIN..MAX] gets clamped.
@@ -14,6 +21,108 @@ export const PLUGIN_SLOT_GAIN_DEFAULT = 1;
 export const PLUGIN_SLOT_GAIN_MIN = 0;
 export const PLUGIN_SLOT_GAIN_MAX = 2;
 const BASE64_CHUNK_SIZE = 0x8000;
+
+export interface PluginAudioTimelineBlock {
+  sequence: number;
+  generation: number;
+  expectsProcessedAudio: boolean;
+  drySamples: Float32Array;
+}
+
+export interface PluginAudioTimelineOutput extends PluginAudioTimelineBlock {
+  samples: Float32Array;
+  usedProcessedAudio: boolean;
+}
+
+interface PendingPluginAudioTimelineBlock extends PluginAudioTimelineBlock {
+  processedSamples: Float32Array | null;
+}
+
+/**
+ * Sequence-lock asynchronous plug-in replies to the source block that created
+ * them. A late reply is discarded after its block's output deadline; it can
+ * never be shifted into a later callback and sound like a restart/stutter.
+ *
+ * The timeline remains continuous across song generations. That is important:
+ * the delayed tail of track A must be emitted before the first block of track B
+ * during a natural album handoff.
+ */
+export class PluginAudioOutputTimeline {
+  private readonly pending: PendingPluginAudioTimelineBlock[] = [];
+  private readonly bySequence = new Map<number, PendingPluginAudioTimelineBlock>();
+  private nextSequence = 1;
+
+  constructor(
+    readonly latencyBlocks: number = PLUGIN_AUDIO_OUTPUT_LATENCY_BLOCKS,
+  ) {
+    if (!Number.isInteger(latencyBlocks) || latencyBlocks < 1) {
+      throw new Error('Plugin audio output latency must be at least one block.');
+    }
+  }
+
+  enqueue(options: {
+    generation: number;
+    expectsProcessedAudio: boolean;
+    drySamples: Float32Array;
+  }): PluginAudioTimelineBlock {
+    const block: PendingPluginAudioTimelineBlock = {
+      sequence: this.nextSequence,
+      generation: options.generation,
+      expectsProcessedAudio: options.expectsProcessedAudio,
+      drySamples: options.drySamples,
+      processedSamples: null,
+    };
+    this.nextSequence += 1;
+    this.pending.push(block);
+    this.bySequence.set(block.sequence, block);
+    return block;
+  }
+
+  attachProcessed(options: {
+    sequence: number;
+    generation: number;
+    samples: Float32Array;
+  }): boolean {
+    const block = this.bySequence.get(options.sequence);
+    if (
+      !block ||
+      block.generation !== options.generation ||
+      options.samples.length < block.drySamples.length
+    ) {
+      return false;
+    }
+    block.processedSamples = options.samples;
+    return true;
+  }
+
+  takeOutput(): PluginAudioTimelineOutput | null {
+    if (this.pending.length <= this.latencyBlocks) {
+      return null;
+    }
+    const block = this.pending.shift();
+    if (!block) return null;
+    this.bySequence.delete(block.sequence);
+    const usedProcessedAudio =
+      block.expectsProcessedAudio && block.processedSamples !== null;
+    return {
+      sequence: block.sequence,
+      generation: block.generation,
+      expectsProcessedAudio: block.expectsProcessedAudio,
+      drySamples: block.drySamples,
+      samples: usedProcessedAudio ? block.processedSamples! : block.drySamples,
+      usedProcessedAudio,
+    };
+  }
+
+  get queueDepth(): number {
+    return this.pending.length;
+  }
+
+  clear(): void {
+    this.pending.length = 0;
+    this.bySequence.clear();
+  }
+}
 
 export function clampPluginSlotGainLinear(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {

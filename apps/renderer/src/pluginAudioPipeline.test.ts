@@ -8,6 +8,7 @@ import {
   getPluginSlotInputGain,
   getPluginSlotOutputGain,
   interleaveStereoSamples,
+  PluginAudioOutputTimeline,
   writeInterleavedStereoSamples,
 } from './pluginAudioPipeline';
 import type { TrackPluginChain } from '@producer-player/contracts';
@@ -111,5 +112,121 @@ describe('pluginAudioPipeline', () => {
     expect(writeInterleavedStereoSamples(decoded, outL, outR, 2)).toBe(true);
     expect(Array.from(outL)).toEqual([0.25, -0.5]);
     expect(Array.from(outR)).toEqual([1, -1]);
+  });
+
+  it('never emits a late processed block during a later callback', () => {
+    const timeline = new PluginAudioOutputTimeline(2);
+    const first = timeline.enqueue({
+      generation: 1,
+      expectsProcessedAudio: true,
+      drySamples: new Float32Array([1, 1]),
+    });
+    timeline.enqueue({
+      generation: 1,
+      expectsProcessedAudio: true,
+      drySamples: new Float32Array([2, 2]),
+    });
+    timeline.enqueue({
+      generation: 1,
+      expectsProcessedAudio: true,
+      drySamples: new Float32Array([3, 3]),
+    });
+
+    const output = timeline.takeOutput();
+    expect(output?.sequence).toBe(first.sequence);
+    expect(output?.usedProcessedAudio).toBe(false);
+    expect(Array.from(output?.samples ?? [])).toEqual([1, 1]);
+
+    expect(
+      timeline.attachProcessed({
+        sequence: first.sequence,
+        generation: 1,
+        samples: new Float32Array([99, 99]),
+      }),
+    ).toBe(false);
+
+    timeline.enqueue({
+      generation: 1,
+      expectsProcessedAudio: true,
+      drySamples: new Float32Array([4, 4]),
+    });
+    expect(Array.from(timeline.takeOutput()?.samples ?? [])).toEqual([2, 2]);
+  });
+
+  it('uses a processed reply only for its matching sequence and generation', () => {
+    const timeline = new PluginAudioOutputTimeline(1);
+    const first = timeline.enqueue({
+      generation: 7,
+      expectsProcessedAudio: true,
+      drySamples: new Float32Array([1, 1]),
+    });
+    timeline.enqueue({
+      generation: 8,
+      expectsProcessedAudio: false,
+      drySamples: new Float32Array([2, 2]),
+    });
+
+    expect(
+      timeline.attachProcessed({
+        sequence: first.sequence,
+        generation: 8,
+        samples: new Float32Array([8, 8]),
+      }),
+    ).toBe(false);
+    expect(
+      timeline.attachProcessed({
+        sequence: first.sequence,
+        generation: 7,
+        samples: new Float32Array([7, 7]),
+      }),
+    ).toBe(true);
+
+    const output = timeline.takeOutput();
+    expect(output?.generation).toBe(7);
+    expect(output?.usedProcessedAudio).toBe(true);
+    expect(Array.from(output?.samples ?? [])).toEqual([7, 7]);
+  });
+
+  it('rejects a processed reply that cannot fill its matching output block', () => {
+    const timeline = new PluginAudioOutputTimeline(1);
+    const first = timeline.enqueue({
+      generation: 9,
+      expectsProcessedAudio: true,
+      drySamples: new Float32Array([1, 1, 1, 1]),
+    });
+    timeline.enqueue({
+      generation: 9,
+      expectsProcessedAudio: true,
+      drySamples: new Float32Array([2, 2, 2, 2]),
+    });
+    expect(
+      timeline.attachProcessed({
+        sequence: first.sequence,
+        generation: 9,
+        samples: new Float32Array([9, 9]),
+      }),
+    ).toBe(false);
+    expect(Array.from(timeline.takeOutput()?.samples ?? [])).toEqual([1, 1, 1, 1]);
+  });
+
+  it('keeps album handoff generations in source order', () => {
+    const timeline = new PluginAudioOutputTimeline(1);
+    timeline.enqueue({
+      generation: 20,
+      expectsProcessedAudio: false,
+      drySamples: new Float32Array([20, 20]),
+    });
+    timeline.enqueue({
+      generation: 21,
+      expectsProcessedAudio: true,
+      drySamples: new Float32Array([21, 21]),
+    });
+    expect(timeline.takeOutput()?.generation).toBe(20);
+    timeline.enqueue({
+      generation: 21,
+      expectsProcessedAudio: true,
+      drySamples: new Float32Array([22, 22]),
+    });
+    expect(timeline.takeOutput()?.generation).toBe(21);
   });
 });

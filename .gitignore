@@ -18,8 +18,11 @@ apps/e2e/test-results/
 windows-playwright-artifacts/
 /artifacts/
 /release/
+/diagnostics/audio-output/
 *.tsbuildinfo
 *.log
+__pycache__/
+*.pyc
 
 # Claude Code worktrees
 .claude/worktrees/

@@ -53,6 +53,9 @@
     "release:desktop:mac": "npm run build:mac",
     "release:desktop:linux": "node ./scripts/build-linux.mjs",
     "release:desktop:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "diagnose:audio:capture": "./tools/audio-output-diagnostics/capture.sh",
+    "diagnose:audio:compare": "python3 ./tools/audio-output-diagnostics/compare_capture.py",
+    "diagnose:audio:test": "python3 ./tools/audio-output-diagnostics/test_compare_capture.py",
     "icon:build": "./scripts/generate-app-icon.sh",
     "plan:audit": "python3 scripts/plan_verbatim_audit.py --session \"$SESSION_JSONL\" --plan PLAN.md",
     "plan:audit:append": "python3 scripts/plan_verbatim_audit.py --session \"$SESSION_JSONL\" --plan PLAN.md --append-missing"

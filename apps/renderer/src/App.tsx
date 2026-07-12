@@ -185,6 +185,7 @@ import {
   getPluginSlotInputGain,
   getPluginSlotOutputGain,
   interleaveStereoSamples,
+  PluginAudioOutputTimeline,
   writeInterleavedStereoSamples,
 } from './pluginAudioPipeline';
 import { EqGainSliders, EQ_GAIN_DEFAULT_DB } from './EqGainSliders';
@@ -968,6 +969,38 @@ type ActivePluginAudioRoute = {
   processChain: PluginProcessBlockItem[];
   generation: number;
 };
+
+type PluginAudioBridgeDiagnostics = {
+  generation: number;
+  queueDepth: number;
+  submittedBlocks: number;
+  processedReplies: number;
+  wetOutputBlocks: number;
+  dryOutputBlocks: number;
+  deadlineMisses: number;
+  lateRepliesDiscarded: number;
+  lastRoundTripMs: number | null;
+  maximumRoundTripMs: number;
+  routeMode: 'inactive' | 'pending' | 'wet' | 'dry-fallback';
+};
+
+function createPluginAudioBridgeDiagnostics(
+  generation = 0,
+): PluginAudioBridgeDiagnostics {
+  return {
+    generation,
+    queueDepth: 0,
+    submittedBlocks: 0,
+    processedReplies: 0,
+    wetOutputBlocks: 0,
+    dryOutputBlocks: 0,
+    deadlineMisses: 0,
+    lateRepliesDiscarded: 0,
+    lastRoundTripMs: null,
+    maximumRoundTripMs: 0,
+    routeMode: 'inactive',
+  };
+}
 
 const DEFAULT_SONG_RATING = 5;
 const SONG_RATINGS_STORAGE_KEY = 'producer-player.song-ratings.v1';
@@ -4215,6 +4248,9 @@ export function App(): JSX.Element {
     processChain: [],
     generation: 0,
   });
+  const pluginAudioBridgeDiagnosticsRef = useRef<PluginAudioBridgeDiagnostics>(
+    createPluginAudioBridgeDiagnostics(),
+  );
   // Once a native insert has been prepared at a silent boundary, keep one
   // stable bridge in the graph for the rest of the session. Route changes then
   // happen inside the bridge instead of disconnecting/reconnecting Web Audio.
@@ -10615,12 +10651,15 @@ export function App(): JSX.Element {
     let outputNode: AudioNode = transformGainNode;
     let pluginProcessorStopped = false;
     if (pluginAudioBridgeEnabled) {
-      const processedQueue: Array<{ generation: number; samples: Float32Array }> = [];
+      const outputTimeline = new PluginAudioOutputTimeline();
       let pendingBlocks = 0;
       let processingTail = Promise.resolve();
       let lastProcessErrorLogAt = 0;
-      let observedRouteGeneration = activePluginAudioRouteRef.current.generation;
-      let outputWasWet = false;
+      const routeModeByGeneration = new Map<number, 'pending' | 'wet' | 'dry-fallback'>();
+      let lastRenderedGeneration: number | null = null;
+      let lastRenderedWet = false;
+      let lastOutputLeft = 0;
+      let lastOutputRight = 0;
       const processor = audioContext.createScriptProcessor(
         PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE,
         2,
@@ -10637,48 +10676,144 @@ export function App(): JSX.Element {
         const outputL = event.outputBuffer.getChannelData(0);
         const outputR = event.outputBuffer.getChannelData(1);
         const route = activePluginAudioRouteRef.current;
-        if (route.generation !== observedRouteGeneration) {
-          observedRouteGeneration = route.generation;
-          processedQueue.length = 0;
-          outputWasWet = false;
+        if (pluginAudioBridgeDiagnosticsRef.current.generation !== route.generation) {
+          pluginAudioBridgeDiagnosticsRef.current = createPluginAudioBridgeDiagnostics(
+            route.generation,
+          );
         }
         const routeIsActive =
           route.processChain.length > 0 &&
           route.songId === lastLoadedSongIdRef.current;
-        while (
-          processedQueue.length > 0 &&
-          processedQueue[0]?.generation !== route.generation
-        ) {
-          processedQueue.shift();
-        }
-        const queued = routeIsActive ? processedQueue.shift() : undefined;
-
-        if (!queued || queued.samples.length < frames * 2) {
-          outputL.set(inputL);
-          outputR.set(inputR);
-          outputWasWet = false;
-        } else if (!outputWasWet) {
-          // The sidecar reply is asynchronous, so the first wet block arrives
-          // after one or more dry callbacks. Fade over the entire block instead
-          // of making an instantaneous dry→delayed-wet discontinuity.
-          for (let frame = 0; frame < frames; frame += 1) {
-            const wet = (frame + 1) / frames;
-            const dry = 1 - wet;
-            outputL[frame] = inputL[frame]! * dry + queued.samples[frame * 2]! * wet;
-            outputR[frame] = inputR[frame]! * dry + queued.samples[frame * 2 + 1]! * wet;
+        if (!routeModeByGeneration.has(route.generation)) {
+          routeModeByGeneration.set(route.generation, routeIsActive ? 'pending' : 'dry-fallback');
+          if (routeModeByGeneration.size > 12) {
+            const oldestGeneration = routeModeByGeneration.keys().next().value;
+            if (typeof oldestGeneration === 'number') {
+              routeModeByGeneration.delete(oldestGeneration);
+            }
           }
-          outputWasWet = true;
-        } else {
-          writeInterleavedStereoSamples(queued.samples, outputL, outputR, frames);
         }
 
-        if (!routeIsActive || pendingBlocks >= 4) return;
+        const scheduled = outputTimeline.enqueue({
+          generation: route.generation,
+          expectsProcessedAudio: routeIsActive,
+          drySamples: interleaveStereoSamples(inputL, inputR, frames),
+        });
+        const readyOutput = outputTimeline.takeOutput();
+        const diagnostics = pluginAudioBridgeDiagnosticsRef.current;
+        diagnostics.queueDepth = outputTimeline.queueDepth;
+
+        outputL.fill(0);
+        outputR.fill(0);
+        if (readyOutput) {
+          const outputMatchesCurrentDiagnostics =
+            readyOutput.generation === diagnostics.generation;
+          let routeMode = routeModeByGeneration.get(readyOutput.generation) ?? 'dry-fallback';
+          if (readyOutput.expectsProcessedAudio && routeMode === 'pending') {
+            routeMode = readyOutput.usedProcessedAudio ? 'wet' : 'dry-fallback';
+            routeModeByGeneration.set(readyOutput.generation, routeMode);
+            if (routeMode === 'dry-fallback') {
+              if (outputMatchesCurrentDiagnostics) {
+                diagnostics.deadlineMisses += 1;
+                diagnostics.routeMode = 'dry-fallback';
+              }
+              logPlaybackEvent('plugin-audio-output-deadline-missed', {
+                generation: readyOutput.generation,
+                sequence: readyOutput.sequence,
+                queueDepth: outputTimeline.queueDepth,
+                pendingBlocks,
+              });
+            } else {
+              if (outputMatchesCurrentDiagnostics) diagnostics.routeMode = 'wet';
+              logPlaybackEvent('plugin-audio-output-wet-started', {
+                generation: readyOutput.generation,
+                sequence: readyOutput.sequence,
+                queueDepth: outputTimeline.queueDepth,
+                lastRoundTripMs: diagnostics.lastRoundTripMs,
+                maximumRoundTripMs: diagnostics.maximumRoundTripMs,
+              });
+            }
+          }
+          if (
+            readyOutput.expectsProcessedAudio &&
+            routeMode === 'wet' &&
+            !readyOutput.usedProcessedAudio
+          ) {
+            routeMode = 'dry-fallback';
+            routeModeByGeneration.set(readyOutput.generation, routeMode);
+            if (outputMatchesCurrentDiagnostics) {
+              diagnostics.deadlineMisses += 1;
+              diagnostics.routeMode = 'dry-fallback';
+            }
+            logPlaybackEvent('plugin-audio-output-deadline-missed', {
+              generation: readyOutput.generation,
+              sequence: readyOutput.sequence,
+              queueDepth: outputTimeline.queueDepth,
+              pendingBlocks,
+              afterWetOutput: true,
+            });
+          }
+
+          const useProcessedAudio =
+            routeMode === 'wet' && readyOutput.usedProcessedAudio;
+          const samples = useProcessedAudio
+            ? readyOutput.samples
+            : readyOutput.drySamples;
+          writeInterleavedStereoSamples(samples, outputL, outputR, frames);
+
+          // If a native processor misses a deadline after wet output has begun,
+          // fail open to the matching dry block and remove only the boundary
+          // click. Never hold or replay the previous block.
+          if (
+            lastRenderedGeneration === readyOutput.generation &&
+            lastRenderedWet &&
+            !useProcessedAudio
+          ) {
+            const smoothingFrames = Math.min(128, frames);
+            const leftCorrection = lastOutputLeft - (outputL[0] ?? 0);
+            const rightCorrection = lastOutputRight - (outputR[0] ?? 0);
+            for (let frame = 0; frame < smoothingFrames; frame += 1) {
+              const remaining = 1 - (frame + 1) / smoothingFrames;
+              outputL[frame] = (outputL[frame] ?? 0) + leftCorrection * remaining;
+              outputR[frame] = (outputR[frame] ?? 0) + rightCorrection * remaining;
+            }
+          }
+
+          lastRenderedGeneration = readyOutput.generation;
+          lastRenderedWet = useProcessedAudio;
+          lastOutputLeft = outputL[frames - 1] ?? lastOutputLeft;
+          lastOutputRight = outputR[frames - 1] ?? lastOutputRight;
+          if (outputMatchesCurrentDiagnostics) {
+            if (useProcessedAudio) diagnostics.wetOutputBlocks += 1;
+            else diagnostics.dryOutputBlocks += 1;
+            if (!readyOutput.expectsProcessedAudio) diagnostics.routeMode = 'inactive';
+          }
+        }
+
+        const currentRouteMode = routeModeByGeneration.get(route.generation);
+        if (!routeIsActive || currentRouteMode === 'dry-fallback') return;
+        if (pendingBlocks >= 4) {
+          routeModeByGeneration.set(route.generation, 'dry-fallback');
+          diagnostics.routeMode = 'dry-fallback';
+          diagnostics.deadlineMisses += 1;
+          logPlaybackEvent('plugin-audio-output-overrun-bypassed', {
+            generation: route.generation,
+            sequence: scheduled.sequence,
+            pendingBlocks,
+            queueDepth: outputTimeline.queueDepth,
+          });
+          return;
+        }
         const submittedGeneration = route.generation;
+        const submittedSequence = scheduled.sequence;
         const submittedChain = route.processChain;
         const bufferBase64 = float32InterleavedToBase64(
-          interleaveStereoSamples(inputL, inputR, frames),
+          scheduled.drySamples,
         );
+        const submittedAt = performance.now();
         pendingBlocks += 1;
+        diagnostics.submittedBlocks += 1;
+        diagnostics.routeMode = currentRouteMode === 'wet' ? 'wet' : 'pending';
         processingTail = processingTail
           .then(() => {
             if (
@@ -10707,8 +10842,30 @@ export function App(): JSX.Element {
               return;
             }
             const processed = base64ToFloat32Interleaved(result.bufferBase64);
-            if (processedQueue.length >= 6) processedQueue.shift();
-            processedQueue.push({ generation: submittedGeneration, samples: processed });
+            const roundTripMs = Math.max(0, performance.now() - submittedAt);
+            const currentDiagnostics = pluginAudioBridgeDiagnosticsRef.current;
+            currentDiagnostics.processedReplies += 1;
+            currentDiagnostics.lastRoundTripMs = roundTripMs;
+            currentDiagnostics.maximumRoundTripMs = Math.max(
+              currentDiagnostics.maximumRoundTripMs,
+              roundTripMs,
+            );
+            const attached = outputTimeline.attachProcessed({
+              sequence: submittedSequence,
+              generation: submittedGeneration,
+              samples: processed,
+            });
+            if (!attached) {
+              currentDiagnostics.lateRepliesDiscarded += 1;
+              if (currentDiagnostics.lateRepliesDiscarded === 1) {
+                logPlaybackEvent('plugin-audio-output-late-reply-discarded', {
+                  generation: submittedGeneration,
+                  sequence: submittedSequence,
+                  roundTripMs,
+                  queueDepth: outputTimeline.queueDepth,
+                });
+              }
+            }
           })
           .catch((err) => {
             const now = Date.now();
@@ -10790,6 +10947,7 @@ export function App(): JSX.Element {
 
     return () => {
       pluginProcessorStopped = true;
+      pluginAudioBridgeDiagnosticsRef.current.queueDepth = 0;
       if (pluginAudioProcessorRef.current) {
         try { pluginAudioProcessorRef.current.disconnect(); } catch { /* ignore */ }
         pluginAudioProcessorRef.current.onaudioprocess = null;
@@ -12580,6 +12738,7 @@ export function App(): JSX.Element {
         playerGainLinear: number | null;
         outputRmsLinear: number | null;
         outputPeakLinear: number | null;
+        pluginAudioBridge: PluginAudioBridgeDiagnostics;
       };
     }).__producerPlayerGetPlaybackHandoffState = () => {
       const audio = audioRef.current;
@@ -12635,6 +12794,7 @@ export function App(): JSX.Element {
         playerGainLinear: playerGain,
         outputRmsLinear: busRmsLinear,
         outputPeakLinear: busPeakLinear,
+        pluginAudioBridge: { ...pluginAudioBridgeDiagnosticsRef.current },
       };
     };
     (window as unknown as {

@@ -161,8 +161,11 @@ test.describe('checklist playback workflow', () => {
     try {
       await linkFixtureFolder(page, directories.fixtureDirectory);
       await expect(page.getByTestId('main-list-row')).toHaveCount(2);
-      await page.getByTestId('main-list-row').filter({ hasText: 'Track A' }).first().click();
+      await page.getByTestId('main-list-row').filter({ hasText: 'Track A' }).first().dblclick();
       await expect(page.getByTestId('player-track-name')).toContainText('Track A v1.wav');
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
 
       await page.getByTestId('transport-checklist-button').click();
       await expect(page.getByTestId('song-checklist-modal')).toBeVisible();

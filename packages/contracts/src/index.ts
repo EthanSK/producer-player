@@ -644,6 +644,13 @@ export interface TrackPluginChain {
   items: PluginChainItem[];
 }
 
+export interface TrackPluginChainReadOptions {
+  /** Skip native loading when the renderer only needs persisted chain data. */
+  reconcilePlugins?: boolean;
+  /** Resolve only after native instances/state are ready (used by idle prewarm). */
+  waitForPlugins?: boolean;
+}
+
 export interface PluginProcessBlockItem {
   instanceId: string;
   enabled: boolean;
@@ -1723,7 +1730,10 @@ export interface ProducerPlayerBridge {
   getPluginScanSettings(): Promise<PluginScanSettings>;
   setPluginScanPaths(paths: string[]): Promise<PluginScanSettings>;
   pickPluginScanPaths(): Promise<string[] | null>;
-  getTrackPluginChain(songId: string): Promise<TrackPluginChain>;
+  getTrackPluginChain(
+    songId: string,
+    options?: TrackPluginChainReadOptions,
+  ): Promise<TrackPluginChain>;
   setTrackPluginChain(songId: string, chain: TrackPluginChain): Promise<TrackPluginChain>;
   addPluginToChain(songId: string, pluginId: string): Promise<TrackPluginChain>;
   removePluginFromChain(songId: string, instanceId: string): Promise<TrackPluginChain>;

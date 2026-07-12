@@ -121,6 +121,7 @@ import type {
   UpdateCheckResult,
   SongWithVersions,
   TrackPluginChain,
+  TrackPluginChainReadOptions,
   TransportCommand,
   UiZoomState,
   WindowBounds,
@@ -7855,22 +7856,22 @@ function registerIpcHandlers(service: FileLibraryService): void {
    * stall the UI's add/remove round-trip.
    *
    * Empty chains still go through reconcile so any previously-loaded
-   * instances for this song get unloaded (the diff treats every loaded
-   * id as unreferenced when `items` is empty). Ethan's "no plugins →
+   * instances owned by this song get unloaded. Prewarmed instances owned by
+   * other songs remain cached for later album transitions. Ethan's "no plugins →
    * no effect" invariant is enforced separately in the renderer's
    * audio-routing fast-path (zero IPC for empty/all-disabled chains)
    * and in the sidecar's `handleProcessBlock` (memcpy passthrough).
    *
    * Errors are logged, never thrown.
    */
-  const reconcileChainIfPossible = (chain: TrackPluginChain): void => {
+  const reconcileChainIfPossible = (chain: TrackPluginChain): Promise<void> => {
     if (!pluginHostService) pluginHostService = new PluginHostService();
     ensurePluginHostForwarders(pluginHostService);
-    if (!pluginHostService.isAvailable()) return; // sidecar not built yet
+    if (!pluginHostService.isAvailable()) return Promise.resolve(); // sidecar not built yet
     const service = pluginHostService;
-    // Detached promise on purpose — don't `await` the IPC reply, but still
-    // attach a .catch so an unhandled-rejection never crashes the host.
-    void Promise.resolve()
+    // Callers normally detach this promise; idle prewarming can explicitly
+    // await it so the next album transition knows the chain is ready.
+    return Promise.resolve()
       .then(async () => {
         if (userStateService) {
           service.rememberLibrary(await userStateService.getPluginLibrary());
@@ -7890,19 +7891,33 @@ function registerIpcHandlers(service: FileLibraryService): void {
       });
   };
 
-  ipcMain.handle(IPC_CHANNELS.PLUGIN_GET_TRACK_CHAIN, async (_event, songId: string) => {
-    if (!userStateService) throw new Error('User state service not initialized');
-    const chain = await userStateService.getTrackPluginChain(songId);
-    reconcileChainIfPossible(chain);
-    return chain;
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.PLUGIN_GET_TRACK_CHAIN,
+    async (
+      _event,
+      songId: string,
+      options?: TrackPluginChainReadOptions,
+    ) => {
+      if (!userStateService) throw new Error('User state service not initialized');
+      const chain = await userStateService.getTrackPluginChain(songId);
+      if (options?.reconcilePlugins !== false) {
+        const reconciliation = reconcileChainIfPossible(chain);
+        if (options?.waitForPlugins === true) {
+          await reconciliation;
+        } else {
+          void reconciliation;
+        }
+      }
+      return chain;
+    },
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.PLUGIN_SET_TRACK_CHAIN,
     async (_event, songId: string, chain: Parameters<UserStateService['setTrackPluginChain']>[1]) => {
       if (!userStateService) throw new Error('User state service not initialized');
       const next = await userStateService.setTrackPluginChain(songId, chain);
-      reconcileChainIfPossible(next);
+      void reconcileChainIfPossible(next);
       return next;
     },
   );
@@ -7912,7 +7927,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
     async (_event, songId: string, pluginId: string) => {
       if (!userStateService) throw new Error('User state service not initialized');
       const next = await userStateService.addPluginToChain(songId, pluginId);
-      reconcileChainIfPossible(next);
+      void reconcileChainIfPossible(next);
       return next;
     },
   );
@@ -7922,7 +7937,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
     async (_event, songId: string, instanceId: string) => {
       if (!userStateService) throw new Error('User state service not initialized');
       const next = await userStateService.removePluginFromChain(songId, instanceId);
-      reconcileChainIfPossible(next);
+      void reconcileChainIfPossible(next);
       return next;
     },
   );
@@ -7987,6 +8002,12 @@ function registerIpcHandlers(service: FileLibraryService): void {
             .map((item) => ({
               instanceId: item.instanceId,
               enabled: Boolean(item.enabled),
+              ...(typeof item.inputGainLinear === 'number' && Number.isFinite(item.inputGainLinear)
+                ? { inputGainLinear: item.inputGainLinear }
+                : {}),
+              ...(typeof item.outputGainLinear === 'number' && Number.isFinite(item.outputGainLinear)
+                ? { outputGainLinear: item.outputGainLinear }
+                : {}),
             }))
         : [];
       if (chain.every((item) => !item.enabled)) return fallback;

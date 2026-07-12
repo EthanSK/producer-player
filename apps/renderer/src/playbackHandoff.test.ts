@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPlaybackSourceCacheKey,
   extendPlaybackSettleUntil,
+  getAutoplayMediaPreloadDelayMs,
   getNextPlaybackQueueVersion,
 } from './playbackHandoff';
 
@@ -48,5 +49,47 @@ describe('getNextPlaybackQueueVersion', () => {
 
   it('primes from the start when no current queue entry is selected yet', () => {
     expect(getNextPlaybackQueueVersion(['a', 'b'], -1, { wrap: false })).toBe('a');
+  });
+});
+
+describe('getAutoplayMediaPreloadDelayMs', () => {
+  it('keeps next-track decoding out of the opening seconds of a long song', () => {
+    expect(
+      getAutoplayMediaPreloadDelayMs({
+        currentTimeSeconds: 1,
+        durationSeconds: 201,
+        settleDelayMs: 0,
+      })
+    ).toBe(185_000);
+  });
+
+  it('starts when a long song reaches the closing lead window', () => {
+    expect(
+      getAutoplayMediaPreloadDelayMs({
+        currentTimeSeconds: 186,
+        durationSeconds: 201,
+        settleDelayMs: 0,
+      })
+    ).toBe(0);
+  });
+
+  it('preserves early preloading for short interludes', () => {
+    expect(
+      getAutoplayMediaPreloadDelayMs({
+        currentTimeSeconds: 1,
+        durationSeconds: 12,
+        settleDelayMs: 900,
+      })
+    ).toBe(900);
+  });
+
+  it('waits for duration metadata instead of guessing that a track is short', () => {
+    expect(
+      getAutoplayMediaPreloadDelayMs({
+        currentTimeSeconds: 0,
+        durationSeconds: 0,
+        settleDelayMs: 900,
+      })
+    ).toBeNull();
   });
 });

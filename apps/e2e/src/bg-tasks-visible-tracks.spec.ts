@@ -342,7 +342,7 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
     }
   });
 
-  test('new latest export warms LUFS even while playback keeps ordinary backlog paused @smoke', async () => {
+  test('new latest export waits for paused playback before warming LUFS @smoke', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-bg-tasks-new-version-during-playback'
     );
@@ -410,9 +410,8 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
 
       // Simulate the real watched-folder path: a fresh bounce lands while the
-      // older version is still playing. Pre-v3.319, playback paused all latest
-      // warmup so the newly active row sat on Loading while the status pill
-      // showed a planned backlog.
+      // older version is still playing. Analysis is useful, but the audible
+      // transport owns the machine until the user pauses it.
       await writeTestWav(
         path.join(directories.fixtureDirectory, 'NewVersion Alpha v2.wav'),
         { durationMs: 15_000, frequencyHz: 520 }
@@ -422,6 +421,14 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       await expect(alphaRow.getByTestId('main-list-row-metadata')).toContainText('v2', {
         timeout: 10_000,
       });
+      await page.waitForTimeout(1_500);
+      await expect(alphaRow.getByTestId('main-list-row-integrated-lufs')).toContainText(
+        'Loading'
+      );
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+
+      await page.getByTestId('player-play-toggle').click();
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
       await expect(alphaRow.getByTestId('main-list-row-integrated-lufs')).not.toContainText(
         'Loading',
         { timeout: 30_000 }

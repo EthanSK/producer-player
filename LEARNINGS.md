@@ -24,6 +24,16 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-07-12T19:30:00Z
+**Trigger:** Ethan report: The Amazone → Café Lool clicks/stutters about 1–2 seconds after the new song begins
+**Symptom:** Album playback could begin cleanly, then click or glitch shortly after a natural track transition; Café Lool reproduced it most reliably.
+**Root cause:** Production timing traces showed three jobs converging on the new track's opening: (1) Café Lool is the only album song with an enabled iZotope Nectar insert, and selecting plugin-free songs globally unloaded that instance; returning to Café cold-loaded Nectar after audio was already audible, then `onPluginInstanceLoaded` changed React state and disconnected/reconnected the Web Audio graph. The renderer also built a process chain before the instance was actually loaded because `requireLoaded` was omitted. (2) `AnalysisQueue.enqueue` created an externally returned Promise plus a hidden keyed-dedupe Promise and rejected both, producing one uncaught AbortError per cancelled version-history job at the handoff. (3) the hidden next-track `<audio>` decoder always started 900 ms into every song, even when the following file was not needed for minutes. Version-history analysis also fanned every version out concurrently, album-duration/reference probes resumed after a fixed settle timeout during audible playback, and the v3.319 new-export exception still allowed ffmpeg while music played.
+**Fix:** Native plugin instances are now owned/reconciled per song and prewarmed sequentially while idle; chain reads do not implicitly cold-load; playback waits for an already-started native prewarm; persisted state is restored before the loaded event; and one stable plugin bridge routes only fully loaded chains at source/pause boundaries, discards stale blocks on source/repeat/seek boundaries, and fades the first asynchronous wet block. AnalysisQueue stores/returns one keyed Promise. Version history is serial. Long-track media preload waits until the final 15 seconds (short interludes retain early preload). Album-duration, auto-reference, latest-export, and other nonessential probes wait for pause and abort/retry if playback starts.
+**Commit:** this change (shipped as v3.325)
+**Guard:** `audioAnalysisQueue.test.ts` pins exact Promise identity and single rejection ownership; `plugin-host-service.test.cjs` pins cross-song retention, same-song pruning, and state-before-ready ordering; `playbackHandoff.test.ts` pins long-track closing-window vs short-track preload timing; playback-priority E2E now requires new-export LUFS work to remain Loading until pause.
+---
+
+---
 **Date:** 2026-06-28T00:26:26Z
 **Trigger:** MBP-CC bridge relay 2026-06-28, cafe lool stuck processing/inspector unload
 **Symptom:** Track 'cafe lool' stuck 'processing' repeating over and over; all tracks stuck loading/'unloading' in the inspector during playback

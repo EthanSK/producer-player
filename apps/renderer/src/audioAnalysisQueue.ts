@@ -444,48 +444,42 @@ export class AnalysisQueue {
       this.totalEnqueuedByPriority.background += 1;
     }
 
-    return new Promise<T>((resolve, reject) => {
-      const queued: QueuedTask<T> = {
-        key,
-        priority,
-        label,
-        insertionOrder: this.nextInsertionOrder++,
-        startDelayMs,
-        // Wrap legacy 0-arg tasks so they ignore the signal silently.
-        task: task as (signal: AbortSignal) => Promise<T>,
-        resolve,
-        reject,
-        cancellable,
-        abortController: null,
-        preempted: false,
-        releasedForPreemption: false,
-        releaseForPreemption: null,
-      };
-
-      this.pending.push(queued as QueuedTask<unknown>);
-
-      if (key !== null) {
-        // Track the externally-visible promise so a duplicate enqueue can
-        // dedupe to the SAME promise (this Promise we're inside of right now).
-        // We do this by stashing the resolver via a tiny helper promise.
-        const dedupePromise = new Promise<T>((dedupeResolve, dedupeReject) => {
-          // Replace resolve/reject with multi-cast wrappers.
-          const originalResolve = queued.resolve;
-          const originalReject = queued.reject;
-          queued.resolve = (value) => {
-            originalResolve(value);
-            dedupeResolve(value);
-          };
-          queued.reject = (reason) => {
-            originalReject(reason);
-            dedupeReject(reason);
-          };
-        });
-        this.inflightByKey.set(key, dedupePromise as Promise<unknown>);
-      }
-
-      this.maybeStart();
+    let resolvePromise!: (value: T | PromiseLike<T>) => void;
+    let rejectPromise!: (reason?: unknown) => void;
+    const promise = new Promise<T>((resolve, reject) => {
+      resolvePromise = resolve;
+      rejectPromise = reject;
     });
+
+    const queued: QueuedTask<T> = {
+      key,
+      priority,
+      label,
+      insertionOrder: this.nextInsertionOrder++,
+      startDelayMs,
+      // Wrap legacy 0-arg tasks so they ignore the signal silently.
+      task: task as (signal: AbortSignal) => Promise<T>,
+      resolve: resolvePromise,
+      reject: rejectPromise,
+      cancellable,
+      abortController: null,
+      preempted: false,
+      releasedForPreemption: false,
+      releaseForPreemption: null,
+    };
+
+    this.pending.push(queued as QueuedTask<unknown>);
+
+    if (key !== null) {
+      // Store the one externally-visible promise. The previous implementation
+      // created a second internal promise and rejected both; when there was no
+      // duplicate caller, that hidden rejection surfaced as an uncaught
+      // AbortError storm exactly as a new track began playing.
+      this.inflightByKey.set(key, promise as Promise<unknown>);
+    }
+
+    this.maybeStart();
+    return promise;
   }
 
   /**
@@ -957,11 +951,10 @@ export class AnalysisQueue {
         // we MUST keep its inflightByKey entry alive across the cancel so
         // that a rapid second enqueue for the same key dedupes to the SAME
         // (still-pending) caller promise instead of spawning a parallel
-        // duplicate. The dedupePromise's resolve/reject wrappers are still
-        // wired to this queued task's resolve/reject, which the requeued
-        // run will eventually call. The dedupe entry gets cleared on the
-        // next settle (when the requeued task finally completes — at that
-        // point next.preempted has been reset to false by requeue).
+        // duplicate. The one caller promise remains attached to the requeued
+        // task and the entry gets cleared on the next settle (when that task
+        // finally completes — at that point next.preempted has been reset to
+        // false by requeue).
         if (!next.preempted) {
           this.inflightByKey.delete(next.key);
         }

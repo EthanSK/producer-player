@@ -173,11 +173,30 @@ describe('AnalysisQueue', () => {
     const p1 = queue.enqueue(taskFn, { key: 'track-A' });
     const p2 = queue.enqueue(taskFn, { key: 'track-A' });
 
+    expect(p2).toBe(p1);
     await Promise.all([p1, p2]);
 
     expect(taskFn).toHaveBeenCalledTimes(1);
     await expect(p1).resolves.toBe('result');
     await expect(p2).resolves.toBe('result');
+  });
+
+  it('uses the caller promise as the keyed rejection promise', async () => {
+    const queue = new AnalysisQueue({ concurrency: 1 });
+    const failure = new DOMException('playback started', 'AbortError');
+
+    const p1 = queue.enqueue(async () => {
+      throw failure;
+    }, { key: 'cancelled-track' });
+    const p2 = queue.enqueue(async () => 'should-not-run', {
+      key: 'cancelled-track',
+    });
+
+    // Catching the returned promise must catch the queue's only rejection;
+    // there must not be a second, ownerless dedupe promise left to become an
+    // unhandled rejection on the next event-loop turn.
+    expect(p2).toBe(p1);
+    await expect(p1).rejects.toBe(failure);
   });
 
   it('promotes a queued task to a higher priority', async () => {
@@ -1433,7 +1452,7 @@ describe('AnalysisQueue', () => {
         );
 
         await flushMicrotasks();
-        expect(selectedPromise).not.toBe(warmupPromise);
+        expect(selectedPromise).toBe(warmupPromise);
         expect(aborts).toBe(1);
         expect(queue.dump().activeByPriority.user).toBe(1);
         expect(runs).toBe(1);

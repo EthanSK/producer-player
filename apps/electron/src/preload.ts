@@ -482,8 +482,8 @@ const bridge: ProducerPlayerBridge = {
   async pickPluginScanPaths() {
     return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_PICK_SCAN_PATHS);
   },
-  async getTrackPluginChain(songId: string) {
-    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_GET_TRACK_CHAIN, songId);
+  async getTrackPluginChain(songId, options) {
+    return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_GET_TRACK_CHAIN, songId, options);
   },
   async setTrackPluginChain(songId, chain) {
     return ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SET_TRACK_CHAIN, songId, chain);

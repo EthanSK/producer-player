@@ -129,6 +129,7 @@ import {
 import {
   buildPlaybackSourceCacheKey,
   extendPlaybackSettleUntil,
+  getAutoplayMediaPreloadDelayMs,
   getNextPlaybackQueueVersion,
 } from './playbackHandoff';
 import {
@@ -240,6 +241,7 @@ import type {
   AgentStaticAnalysis,
   MasteringCacheEntry,
   PluginPresetEntry,
+  PluginProcessBlockItem,
   PluginScanProgress,
   PluginScanSettings,
   ScannedPluginLibrary,
@@ -912,6 +914,8 @@ const PLAYBACK_BACKGROUND_WARMUP_GRACE_MS = PLAYBACK_SELECTED_PREVIEW_JOB_DELAY_
 // enough for the audible handoff to settle, while preserving prefetch benefits
 // for short songs.
 const PLAYBACK_MEDIA_PRELOAD_SETTLE_DELAY_MS = PLAYBACK_SELECTED_MEASURED_JOB_DELAY_MS;
+const AUTOPLAY_MEDIA_PRELOAD_LEAD_SECONDS = 15;
+const AUTOPLAY_SHORT_TRACK_EARLY_PRELOAD_MAX_DURATION_SECONDS = 30;
 const PLAYBACK_DEFERRED_METADATA_PROBE_POLL_MS = 250;
 // Any audible track switch has a stricter invariant than ordinary UI work: the
 // first seconds of the new song must be click-free, even if LUFS/waveform stats
@@ -927,6 +931,7 @@ function buildPluginAudioChainSignature(
   const slotById = new Map(chain.items.map((item) => [item.instanceId, item] as const));
   return getEnabledPluginProcessChain(chain, loadedInstanceIds, {
     referencePlayback: options.referencePlayback,
+    requireLoaded: true,
   })
     .map((slot) => {
       const item = slotById.get(slot.instanceId);
@@ -953,6 +958,13 @@ type PlaybackEventLogEntry = Record<string, unknown> & {
   event: string;
   perfNowMs: number;
   timestamp: string;
+};
+
+type ActivePluginAudioRoute = {
+  songId: string;
+  signature: string;
+  processChain: PluginProcessBlockItem[];
+  generation: number;
 };
 
 const DEFAULT_SONG_RATING = 5;
@@ -4191,6 +4203,22 @@ export function App(): JSX.Element {
   const [loadedInstanceIds, setLoadedInstanceIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const loadedInstanceIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const pluginChainsBySongIdRef = useRef<Map<string, TrackPluginChain>>(new Map());
+  const prewarmedPluginSongIdsRef = useRef<Set<string>>(new Set());
+  const pluginNativePrewarmInFlightRef = useRef<Promise<unknown> | null>(null);
+  const activePluginAudioRouteRef = useRef<ActivePluginAudioRoute>({
+    songId: '',
+    signature: '',
+    processChain: [],
+    generation: 0,
+  });
+  // Once a native insert has been prepared at a silent boundary, keep one
+  // stable bridge in the graph for the rest of the session. Route changes then
+  // happen inside the bridge instead of disconnecting/reconnecting Web Audio.
+  const [pluginAudioBridgeEnabled, setPluginAudioBridgeEnabled] = useState(false);
+  const pluginAudioBridgePendingEnableRef = useRef(false);
+  const [pluginPrewarmRetrySignal, setPluginPrewarmRetrySignal] = useState(0);
   const [instanceLatencies, setInstanceLatencies] = useState<Record<string, number>>({});
   // v3.42 Phase 3 — per-slot native-editor open state. Keyed by instanceId.
   // The sidecar is the source of truth; we add on successful open_editor
@@ -4203,6 +4231,9 @@ export function App(): JSX.Element {
   selectedSongIdForPluginChainRef.current = selectedSongId;
   const pluginChainRef = useRef<TrackPluginChain>(pluginChain);
   const commitPluginChain = useCallback((chain: TrackPluginChain) => {
+    if (chain.songId) {
+      pluginChainsBySongIdRef.current.set(chain.songId, chain);
+    }
     if (chain.songId !== (selectedSongIdForPluginChainRef.current ?? '')) return;
     pluginChainRef.current = chain;
     setPluginChain(chain);
@@ -7340,24 +7371,6 @@ export function App(): JSX.Element {
     return Math.max(0, playbackBackgroundWarmupPausedUntilRef.current - Date.now());
   }
 
-  async function waitForPlaybackSidecarMediaSettle(
-    shouldCancel: () => boolean
-  ): Promise<void> {
-    while (!shouldCancel()) {
-      const remainingSettleMs = getPlaybackSettleRemainingMs();
-      if (remainingSettleMs <= 0) {
-        return;
-      }
-
-      await new Promise<void>((resolve) => {
-        window.setTimeout(
-          resolve,
-          Math.min(remainingSettleMs, PLAYBACK_DEFERRED_METADATA_PROBE_POLL_MS)
-        );
-      });
-    }
-  }
-
   function getAutoplayMediaPreloadAudio(): HTMLAudioElement {
     if (autoplayMediaPreloadAudioRef.current) {
       return autoplayMediaPreloadAudioRef.current;
@@ -7614,6 +7627,7 @@ export function App(): JSX.Element {
 
     if (intendsPlayback && audio.paused && hasSource && sourceReady) {
       try {
+        await resumePlaybackContextIfNeeded();
         await audio.play();
       } catch (cause: unknown) {
         const message = cause instanceof Error ? cause.message : String(cause);
@@ -7965,6 +7979,11 @@ export function App(): JSX.Element {
 
     const onPause = () => {
       setIsPlaying(false);
+      if (pluginAudioBridgePendingEnableRef.current) {
+        pluginAudioBridgePendingEnableRef.current = false;
+        setPluginAudioBridgeEnabled(true);
+      }
+      activatePluginAudioRouteForSong(lastLoadedSongIdRef.current, 'pause-boundary');
       logPlaybackEvent('pause', {
         currentTimeSeconds: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
       });
@@ -7979,6 +7998,9 @@ export function App(): JSX.Element {
       });
 
       if (mode === 'one') {
+        activatePluginAudioRouteForSong(lastLoadedSongIdRef.current, 'repeat-one-rewind', {
+          forceBoundaryReset: true,
+        });
         audio.currentTime = 0;
         void resumePlaybackContextIfNeeded()
           .then(() => audio.play())
@@ -8576,7 +8598,7 @@ export function App(): JSX.Element {
         return;
       }
 
-      const tasks = inspectorVersions.map(async (version) => {
+      const processVersion = async (version: SongVersion): Promise<void> => {
         if (cancelled) {
           return;
         }
@@ -8610,6 +8632,26 @@ export function App(): JSX.Element {
 
         const cacheKey = buildMasteringCacheKey(version);
         const statusState = inspectorVersionSampleRateByVersionIdRef.current[version.id];
+        const resetLoadingRowToIdle = (): void => {
+          setInspectorVersionSampleRateByVersionId((previous) => {
+            const existing = previous[version.id];
+            if (
+              !existing ||
+              existing.cacheKey !== cacheKey ||
+              existing.status !== 'loading'
+            ) {
+              return previous;
+            }
+            return {
+              ...previous,
+              [version.id]: {
+                ...existing,
+                status: 'idle',
+                error: null,
+              },
+            };
+          });
+        };
 
         // v3.273 — The previous skip-when-ready-or-loading guard had a
         // hole: a row already hydrated from cache as 'ready' (matching
@@ -8771,6 +8813,7 @@ export function App(): JSX.Element {
               })
           );
           if (!measured) {
+            if (!isFresh) resetLoadingRowToIdle();
             return;
           }
 
@@ -8856,13 +8899,13 @@ export function App(): JSX.Element {
           });
         } catch (error: unknown) {
           // v3.198 — Same defensive AbortError guard as warmMeasuredAnalysis.
-          // A USER-click preempt from v3.195 cancels the running NEIGHBOR
-          // ffmpeg child; leave the row in `loading` so the requeued task
-          // can complete it rather than flipping to a misleading "error"
-          // badge in the version-history inspector.
+          // A USER-click preempt from v3.195 cancels the running background
+          // ffmpeg child. Return the row to idle so a cancelled serial pass
+          // cannot strand it on Loading; a later pass/cache hit can retry.
           if (isAnalysisAbortError(error)) {
             // Do NOT mark probeYieldedResult — the requeued retry deserves
             // another shot at the bit-depth refresh (v3.273).
+            if (!isFresh) resetLoadingRowToIdle();
             return;
           }
           if (isFresh && isMissingBpm && !isMissingBitDepth) {
@@ -8925,9 +8968,21 @@ export function App(): JSX.Element {
             }
           }
         }
-      });
+      };
 
-      await Promise.allSettled(tasks);
+      // Version-history enrichment is entirely secondary. Dispatching every
+      // row at once created one watcher and one cancellation rejection per
+      // version when playback began. Walk the list serially so transport start
+      // has at most one background probe to stop.
+      for (const version of inspectorVersions) {
+        if (cancelled) break;
+        try {
+          await processVersion(version);
+        } catch {
+          // processVersion owns its row-level error state. Keep walking if a
+          // defensive/unexpected rejection escapes that handler.
+        }
+      }
     })();
 
     return () => {
@@ -9233,11 +9288,8 @@ export function App(): JSX.Element {
       };
     };
 
-    const hasUrgentAnalysisWork = (entry: (typeof orderedPreloadEntries)[number]): boolean => {
+    const hasUrgentAnalysisWork = (_entry: (typeof orderedPreloadEntries)[number]): boolean => {
       const measured = MEASURED_ANALYSIS_QUEUE.dump();
-      const isDetectedVersionWarmup = latestTrackWarmupDetectedVersionIdsRef.current.has(
-        entry.version.id
-      );
 
       // v3.259 — The selected-track jobs are intentionally delayed so they do
       // not hit the renderer exactly as playback starts. During that same delay,
@@ -9254,12 +9306,8 @@ export function App(): JSX.Element {
       // must do to sound correct. Letting them start mid-listen was exactly the
       // "analysis jobs loaded in and I hear a crackle" failure mode.
       //
-      // v3.319 — Exception: a newly detected latest export is not anonymous
-      // backlog. Ethan is looking at that row as the new bounce, so let its one
-      // LUFS/info job jump the playback pause while still respecting actual
-      // USER_SELECTED queue work below.
       return (
-        (!isDetectedVersionWarmup && isAudiblePlaybackActiveForAnalysis()) ||
+        isAudiblePlaybackActiveForAnalysis() ||
         playbackSettling ||
         measured.activeByPriority.user > 0 ||
         measured.userBypassActive > 0 ||
@@ -9310,9 +9358,6 @@ export function App(): JSX.Element {
         !masteringCacheBpmRefreshedVersionIdsRef.current.has(version.id) &&
         isMasteringCacheEntryMissingBpm(cachedEntry, version, projectFilePath);
       const needsMetadataRefresh = isMissingBitDepth || isMissingBpm;
-      const isDetectedVersionWarmup = latestTrackWarmupDetectedVersionIdsRef.current.has(
-        version.id
-      );
 
       if (isFresh) {
         latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
@@ -9402,17 +9447,13 @@ export function App(): JSX.Element {
             projectFilePath,
             signal,
           });
-        // v3.319 — New latest exports are the one warmup case that should not
-        // wait behind audible playback. The rest of the album backlog stays
-        // transport-friendly, but the just-bounced row needs its LUFS/info now
-        // so it does not sit on "Loading" with a misleading planned-job count.
-        const measured =
-          isDetectedVersionWarmup && !isFresh
-            ? await runWarmupMeasuredAnalysis()
-            : await runNonEssentialAudioAnalysisWhenIdle(
-                () => cancelled,
-                (signal) => runWarmupMeasuredAnalysis(signal)
-              );
+        // Even a newly detected export is secondary once the transport is
+        // audible. Its row may say Loading until pause; it must never launch
+        // ffmpeg in the middle of album playback.
+        const measured = await runNonEssentialAudioAnalysisWhenIdle(
+          () => cancelled,
+          (signal) => runWarmupMeasuredAnalysis(signal)
+        );
         if (!measured) {
           return;
         }
@@ -10478,13 +10519,62 @@ export function App(): JSX.Element {
     applyPlaybackGain(volume, appliedNormalizationGainDb);
   }, [appliedNormalizationGainDb, applyPlaybackGain, volume]);
 
-  const pluginAudioChainSignature = useMemo(
-    () =>
-      buildPluginAudioChainSignature(pluginChain, loadedInstanceIds, {
-        referencePlayback: playbackPreviewMode === 'reference',
-      }),
-    [loadedInstanceIds, playbackPreviewMode, pluginChain]
-  );
+  function activatePluginAudioRouteForSong(
+    songId: string | null,
+    reason: string,
+    options: { forceBoundaryReset?: boolean } = {},
+  ): void {
+    const normalizedSongId = playbackPreviewMode === 'reference' ? '' : songId ?? '';
+    const chain = normalizedSongId
+      ? pluginChainsBySongIdRef.current.get(normalizedSongId) ?? {
+          songId: normalizedSongId,
+          items: [],
+        }
+      : { songId: '', items: [] };
+    const loadedIds = loadedInstanceIdsRef.current;
+    const signature = buildPluginAudioChainSignature(chain, loadedIds, {
+      referencePlayback: normalizedSongId.length === 0,
+    });
+    const slotById = new Map(
+      chain.items.map((item) => [item.instanceId, item] as const)
+    );
+    const processChain = getEnabledPluginProcessChain(chain, loadedIds, {
+      referencePlayback: normalizedSongId.length === 0,
+      requireLoaded: true,
+    }).map((slot) => {
+      const item = slotById.get(slot.instanceId);
+      return {
+        ...slot,
+        inputGainLinear: item ? getPluginSlotInputGain(item) : 1,
+        outputGainLinear: item ? getPluginSlotOutputGain(item) : 1,
+      };
+    });
+
+    const previous = activePluginAudioRouteRef.current;
+    if (
+      options.forceBoundaryReset !== true &&
+      previous.songId === normalizedSongId &&
+      previous.signature === signature
+    ) {
+      return;
+    }
+
+    activePluginAudioRouteRef.current = {
+      songId: normalizedSongId,
+      signature,
+      processChain,
+      generation: previous.generation + 1,
+    };
+    if (processChain.length > 0) {
+      setPluginAudioBridgeEnabled(true);
+    }
+    logPlaybackEvent('plugin-audio-route-activated', {
+      reason,
+      songId: normalizedSongId || null,
+      slotCount: processChain.length,
+      generation: previous.generation + 1,
+    });
+  }
 
   // Consolidated playback chain:
   // preview gain → [plugin chain] → [mid/side processor] → [EQ filters]
@@ -10522,29 +10612,13 @@ export function App(): JSX.Element {
     // --- Determine the node that feeds into the live analyser/player volume ---
     let outputNode: AudioNode = transformGainNode;
     let pluginProcessorStopped = false;
-    const activePluginChain = pluginChainRef.current;
-    const pluginProcessChain = getEnabledPluginProcessChain(activePluginChain, loadedInstanceIds, {
-      referencePlayback: playbackPreviewMode === 'reference',
-    });
-    // v3.186 — decorate the wire chain with per-slot Ableton-style I/O
-    // gains. The sidecar applies them around each plugin's processBlock;
-    // missing values default to 1.0 in C++. Unity slots skip the
-    // multiplication entirely.
-    const slotById = new Map(activePluginChain.items.map((item) => [item.instanceId, item] as const));
-    const pluginProcessChainWithGains = pluginProcessChain.map((slot) => {
-      const item = slotById.get(slot.instanceId);
-      return {
-        ...slot,
-        inputGainLinear: item ? getPluginSlotInputGain(item) : 1,
-        outputGainLinear: item ? getPluginSlotOutputGain(item) : 1,
-      };
-    });
-
-    if (pluginProcessChain.length > 0) {
-      const processedQueue: Float32Array[] = [];
+    if (pluginAudioBridgeEnabled) {
+      const processedQueue: Array<{ generation: number; samples: Float32Array }> = [];
       let pendingBlocks = 0;
       let processingTail = Promise.resolve();
       let lastProcessErrorLogAt = 0;
+      let observedRouteGeneration = activePluginAudioRouteRef.current.generation;
+      let outputWasWet = false;
       const processor = audioContext.createScriptProcessor(
         PLUGIN_AUDIO_PROCESSOR_BUFFER_SIZE,
         2,
@@ -10560,36 +10634,79 @@ export function App(): JSX.Element {
             : inputL;
         const outputL = event.outputBuffer.getChannelData(0);
         const outputR = event.outputBuffer.getChannelData(1);
-        const queued = processedQueue.shift();
+        const route = activePluginAudioRouteRef.current;
+        if (route.generation !== observedRouteGeneration) {
+          observedRouteGeneration = route.generation;
+          processedQueue.length = 0;
+          outputWasWet = false;
+        }
+        const routeIsActive =
+          route.processChain.length > 0 &&
+          route.songId === lastLoadedSongIdRef.current;
+        while (
+          processedQueue.length > 0 &&
+          processedQueue[0]?.generation !== route.generation
+        ) {
+          processedQueue.shift();
+        }
+        const queued = routeIsActive ? processedQueue.shift() : undefined;
 
-        if (!queued || !writeInterleavedStereoSamples(queued, outputL, outputR, frames)) {
+        if (!queued || queued.samples.length < frames * 2) {
           outputL.set(inputL);
           outputR.set(inputR);
+          outputWasWet = false;
+        } else if (!outputWasWet) {
+          // The sidecar reply is asynchronous, so the first wet block arrives
+          // after one or more dry callbacks. Fade over the entire block instead
+          // of making an instantaneous dry→delayed-wet discontinuity.
+          for (let frame = 0; frame < frames; frame += 1) {
+            const wet = (frame + 1) / frames;
+            const dry = 1 - wet;
+            outputL[frame] = inputL[frame]! * dry + queued.samples[frame * 2]! * wet;
+            outputR[frame] = inputR[frame]! * dry + queued.samples[frame * 2 + 1]! * wet;
+          }
+          outputWasWet = true;
+        } else {
+          writeInterleavedStereoSamples(queued.samples, outputL, outputR, frames);
         }
 
-        if (pendingBlocks >= 4) return;
+        if (!routeIsActive || pendingBlocks >= 4) return;
+        const submittedGeneration = route.generation;
+        const submittedChain = route.processChain;
         const bufferBase64 = float32InterleavedToBase64(
           interleaveStereoSamples(inputL, inputR, frames),
         );
         pendingBlocks += 1;
         processingTail = processingTail
-          .then(() =>
-            window.producerPlayer.processPluginAudioBlock({
-              chain: pluginProcessChainWithGains,
+          .then(() => {
+            if (
+              pluginProcessorStopped ||
+              activePluginAudioRouteRef.current.generation !== submittedGeneration
+            ) {
+              return null;
+            }
+            return window.producerPlayer.processPluginAudioBlock({
+              chain: submittedChain,
               bufferBase64,
               frames,
               channels: 2,
               sampleRate: audioContext.sampleRate,
               blockSize: frames,
-            }),
-          )
+            });
+          })
           .then((result) => {
-            if (pluginProcessorStopped || result.processedSlots <= 0 || !result.bufferBase64) {
+            if (
+              !result ||
+              pluginProcessorStopped ||
+              activePluginAudioRouteRef.current.generation !== submittedGeneration ||
+              result.processedSlots <= 0 ||
+              !result.bufferBase64
+            ) {
               return;
             }
             const processed = base64ToFloat32Interleaved(result.bufferBase64);
             if (processedQueue.length >= 6) processedQueue.shift();
-            processedQueue.push(processed);
+            processedQueue.push({ generation: submittedGeneration, samples: processed });
           })
           .catch((err) => {
             const now = Date.now();
@@ -10704,11 +10821,29 @@ export function App(): JSX.Element {
     // exactly the kind of audible click Ethan hears, so only rebuild when the
     // processing chain itself changes.
     playbackPreviewMode,
-    pluginAudioChainSignature,
-    loadedInstanceIds,
+    pluginAudioBridgeEnabled,
   ]);
 
   async function resumePlaybackContextIfNeeded(): Promise<void> {
+    const nativePrewarm = pluginNativePrewarmInFlightRef.current;
+    if (nativePrewarm && audioRef.current?.paused) {
+      // A native bundle that is already being instantiated cannot be safely
+      // cancelled mid-constructor. Let that short, bounded load finish before
+      // starting the audible clock, then yield one frame so React can install
+      // the stable bridge while the element is still silent.
+      await nativePrewarm.catch(() => undefined);
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(fallbackTimer);
+          resolve();
+        };
+        const fallbackTimer = window.setTimeout(finish, 50);
+        window.requestAnimationFrame(finish);
+      });
+    }
     const playbackAudioContext = playbackAudioContextRef.current;
     if (!playbackAudioContext || playbackAudioContext.state === 'running') {
       return;
@@ -10947,6 +11082,12 @@ export function App(): JSX.Element {
     const commitSourceSwitch = () => {
       audio.pause();
       lastLoadedSongIdRef.current = activeSourceKey;
+      // Route at the silent source boundary. If a cold plugin finishes later,
+      // its loaded event is deliberately staged until the next pause instead
+      // of reconnecting or changing processing under audible samples.
+      activatePluginAudioRouteForSong(activeSourceKey, 'source-switch', {
+        forceBoundaryReset: true,
+      });
       audio.removeAttribute('src');
       audio.src = activeSource.url;
 
@@ -11075,23 +11216,41 @@ export function App(): JSX.Element {
 
     let cancelled = false;
 
-    const probeDurationFromUrl = (url: string): Promise<number | null> => {
-      return new Promise((resolve) => {
+    const probeDurationFromUrl = (
+      url: string,
+      signal: AbortSignal
+    ): Promise<number | null> => {
+      return new Promise((resolve, reject) => {
         const probe = new Audio();
         probe.preload = 'metadata';
+        let settled = false;
 
         const cleanup = () => {
+          signal.removeEventListener('abort', onAbort);
           probe.pause();
           probe.removeAttribute('src');
           probe.load();
+        };
+
+        const settle = (value: number | null) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(value);
+        };
+
+        const onAbort = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new DOMException('Playback started', 'AbortError'));
         };
 
         probe.addEventListener(
           'loadedmetadata',
           () => {
             const nextDuration = Number.isFinite(probe.duration) && probe.duration > 0 ? probe.duration : null;
-            cleanup();
-            resolve(nextDuration);
+            settle(nextDuration);
           },
           { once: true }
         );
@@ -11099,12 +11258,16 @@ export function App(): JSX.Element {
         probe.addEventListener(
           'error',
           () => {
-            cleanup();
-            resolve(null);
+            settle(null);
           },
           { once: true }
         );
 
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
         probe.src = url;
         probe.load();
       });
@@ -11115,16 +11278,16 @@ export function App(): JSX.Element {
 
       for (const version of versionsNeedingDuration) {
         try {
-          await waitForPlaybackSidecarMediaSettle(() => cancelled);
-          if (cancelled) {
-            return;
-          }
-          const source = await resolvePlaybackSourceForVersion(version);
-          await waitForPlaybackSidecarMediaSettle(() => cancelled);
-          if (cancelled) {
-            return;
-          }
-          const resolvedSeconds = await probeDurationFromUrl(source.url);
+          const resolvedSeconds = await runNonEssentialAudioAnalysisWhenIdle(
+            () => cancelled,
+            async (signal) => {
+              const source = await resolvePlaybackSourceForVersion(version);
+              if (signal.aborted) {
+                throw new DOMException('Playback started', 'AbortError');
+              }
+              return probeDurationFromUrl(source.url, signal);
+            }
+          );
 
           if (cancelled || resolvedSeconds === null) {
             continue;
@@ -11206,6 +11369,15 @@ export function App(): JSX.Element {
       }),
     [currentQueueIndex, playbackQueue, repeatMode]
   );
+  const autoplayMediaPreloadWindowOpen =
+    getAutoplayMediaPreloadDelayMs({
+      currentTimeSeconds,
+      durationSeconds,
+      settleDelayMs: 0,
+      leadTimeSeconds: AUTOPLAY_MEDIA_PRELOAD_LEAD_SECONDS,
+      shortTrackMaxDurationSeconds:
+        AUTOPLAY_SHORT_TRACK_EARLY_PRELOAD_MAX_DURATION_SECONDS,
+    }) === 0;
 
   useEffect(() => {
     if (!autoplayNextEnabled || playbackPreviewMode !== 'mix' || !nextAutoplayPlaybackVersion) {
@@ -11217,6 +11389,13 @@ export function App(): JSX.Element {
       isPlayingRef.current || playbackIntentPlayingRef.current || playOnNextLoadRef.current;
     if (!intendsPlayback) {
       clearAutoplayMediaPreload('playback-not-intended');
+      return;
+    }
+    if (!autoplayMediaPreloadWindowOpen) {
+      // currentTime still re-renders the component, but this boolean changes
+      // only once when a long track enters its closing lead window. That keeps
+      // us from cancelling/recreating a minutes-long timer (and logging it)
+      // four times per second throughout playback.
       return;
     }
 
@@ -11277,6 +11456,7 @@ export function App(): JSX.Element {
     };
   }, [
     autoplayNextEnabled,
+    autoplayMediaPreloadWindowOpen,
     isPlaying,
     nextAutoplayPlaybackVersion,
     playbackPreviewMode,
@@ -13635,6 +13815,9 @@ export function App(): JSX.Element {
     }
 
     audio.currentTime = nextTimeSeconds;
+    activatePluginAudioRouteForSong(lastLoadedSongIdRef.current, 'seek', {
+      forceBoundaryReset: true,
+    });
     setCurrentTimeSeconds(nextTimeSeconds);
 
     rememberSongPlayhead(lastLoadedSongIdRef.current, nextTimeSeconds, {
@@ -13687,6 +13870,9 @@ export function App(): JSX.Element {
       try {
         if (audio) {
           audio.currentTime = 0;
+          activatePluginAudioRouteForSong(lastLoadedSongIdRef.current, 'reset-playhead', {
+            forceBoundaryReset: true,
+          });
         }
       } catch {
         // Ignore transient seek errors while metadata is still settling.
@@ -14198,14 +14384,6 @@ export function App(): JSX.Element {
     setReferenceError(null);
 
     try {
-      if (options.silentOnMissing) {
-        await waitForPlaybackSidecarMediaSettle(isStale);
-        if (isStale()) return;
-        logPlaybackEvent('reference-auto-restore-deferred-until-playback-settle', {
-          filePath: selection.filePath,
-        });
-      }
-
       // C4 note: Reference-track cache is keyed by bare filePath, unlike the
       // mix-source cache which uses buildMasteringCacheKey(version) including
       // sizeBytes and modifiedAtMs. Adding file stat data here would require
@@ -14217,24 +14395,39 @@ export function App(): JSX.Element {
       // fresh. Worst case: a re-exported reference at the same path with different
       // content serves stale analysis until the next app restart or manual re-load.
       const cached = getCachedMasteringAnalysis(selection.filePath);
-      const previewAnalysis =
-        options.previewAnalysis ??
-        cached.previewAnalysis ??
-        (await analyzeTrackFromUrl(selection.playbackSource.url, undefined, {
-          priority: ANALYSIS_PRIORITY_USER_SELECTED,
-          key: `reference::${selection.filePath}`,
-          label: `Reference — ${selection.fileName}`,
-        }));
+      let previewAnalysis = options.previewAnalysis ?? cached.previewAnalysis ?? null;
+      if (!previewAnalysis) {
+        const runPreview = (signal?: AbortSignal) =>
+          analyzeTrackFromUrl(selection.playbackSource.url, signal, {
+            priority: options.silentOnMissing
+              ? ANALYSIS_PRIORITY_BACKGROUND
+              : ANALYSIS_PRIORITY_USER_SELECTED,
+            key: `reference::${selection.filePath}`,
+            label: `Reference — ${selection.fileName}`,
+          });
+        previewAnalysis = options.silentOnMissing
+          ? await runNonEssentialAudioAnalysisWhenIdle(isStale, runPreview)
+          : await runPreview();
+        if (!previewAnalysis) return;
+      }
       if (isStale()) return;
 
-      const nextMeasuredAnalysis =
-        options.measuredAnalysis ??
-        cached.measuredAnalysis ??
-        (await runMeasuredAnalysis(selection.filePath, {
-          priority: ANALYSIS_PRIORITY_USER_SELECTED,
-          cacheKey: `reference::${selection.filePath}`,
-          label: `Reference — ${selection.fileName}`,
-        }));
+      let nextMeasuredAnalysis = options.measuredAnalysis ?? cached.measuredAnalysis ?? null;
+      if (!nextMeasuredAnalysis) {
+        const runMeasured = (signal?: AbortSignal) =>
+          runMeasuredAnalysis(selection.filePath, {
+            priority: options.silentOnMissing
+              ? ANALYSIS_PRIORITY_BACKGROUND
+              : ANALYSIS_PRIORITY_USER_SELECTED,
+            cacheKey: `reference::${selection.filePath}`,
+            label: `Reference — ${selection.fileName}`,
+            signal,
+          });
+        nextMeasuredAnalysis = options.silentOnMissing
+          ? await runNonEssentialAudioAnalysisWhenIdle(isStale, runMeasured)
+          : await runMeasured();
+        if (!nextMeasuredAnalysis) return;
+      }
       if (isStale()) return;
 
       cacheMasteringAnalysis(selection.filePath, previewAnalysis, nextMeasuredAnalysis);
@@ -14781,13 +14974,23 @@ export function App(): JSX.Element {
     }
     if (selectedSongId === pluginChainLoadedForSongIdRef.current) return;
     pluginChainLoadedForSongIdRef.current = selectedSongId;
-    commitPluginChain({ songId: selectedSongId, items: [] });
+    // Clear only the visible strip while the persisted chain is read. Do not
+    // overwrite the prewarmed route cache with this temporary placeholder.
+    const pendingChain: TrackPluginChain = { songId: selectedSongId, items: [] };
+    pluginChainRef.current = pendingChain;
+    setPluginChain(pendingChain);
     let cancelled = false;
     void window.producerPlayer
-      .getTrackPluginChain(selectedSongId)
+      // Reading UI state must never cold-load a native bundle while a song is
+      // already audible. The idle prewarm pass below owns reconciliation.
+      .getTrackPluginChain(selectedSongId, { reconcilePlugins: false })
       .then((chain) => {
         if (cancelled) return;
         commitPluginChain(chain);
+        const audio = audioRef.current;
+        if (audio?.paused && lastLoadedSongIdRef.current === chain.songId) {
+          activatePluginAudioRouteForSong(chain.songId, 'selected-chain-read-while-paused');
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -14796,12 +14999,101 @@ export function App(): JSX.Element {
           '[plugin-chain] getTrackPluginChain failed',
           { error: String(err) },
         );
-        commitPluginChain({ songId: selectedSongId, items: [] });
+        pluginChainRef.current = pendingChain;
+        setPluginChain(pendingChain);
       });
     return () => {
       cancelled = true;
     };
   }, [commitPluginChain, selectedSongId]);
+
+  // Preload persisted native chains one song at a time, but only while the
+  // transport is idle. Per-song ownership in PluginHostService keeps these
+  // instances warm across selections, so an album transition never needs to
+  // cold-load Nectar (or rebuild the audible Web Audio graph) after the next
+  // song has begun.
+  useEffect(() => {
+    if (albumSongs.length === 0) return;
+    let cancelled = false;
+
+    void (async () => {
+      for (const song of albumSongs) {
+        if (cancelled) return;
+
+        let chain = pluginChainsBySongIdRef.current.get(song.id) ?? null;
+        if (!chain) {
+          try {
+            chain = await window.producerPlayer.getTrackPluginChain(song.id, {
+              reconcilePlugins: false,
+            });
+            if (cancelled) return;
+            pluginChainsBySongIdRef.current.set(song.id, chain);
+            if (selectedSongIdForPluginChainRef.current === song.id) {
+              commitPluginChain(chain);
+            }
+          } catch (err) {
+            void window.producerPlayer.rendererLog(
+              'warn',
+              '[plugin-chain] idle prewarm state read failed',
+              { songId: song.id, error: String(err) },
+            );
+            continue;
+          }
+        }
+
+        if (chain.items.length === 0 || prewarmedPluginSongIdsRef.current.has(song.id)) {
+          prewarmedPluginSongIdsRef.current.add(song.id);
+          continue;
+        }
+
+        try {
+          const warmedChain = await runNonEssentialAudioAnalysisWhenIdle(
+            () => cancelled,
+            async (signal) => {
+              const prewarmPromise = window.producerPlayer.getTrackPluginChain(song.id, {
+                reconcilePlugins: true,
+                waitForPlugins: true,
+              });
+              pluginNativePrewarmInFlightRef.current = prewarmPromise;
+              try {
+                const next = await prewarmPromise;
+                if (signal.aborted) {
+                  throw new DOMException('Playback started', 'AbortError');
+                }
+                return next;
+              } finally {
+                if (pluginNativePrewarmInFlightRef.current === prewarmPromise) {
+                  pluginNativePrewarmInFlightRef.current = null;
+                }
+              }
+            },
+          );
+          if (!warmedChain || cancelled) return;
+          pluginChainsBySongIdRef.current.set(song.id, warmedChain);
+          prewarmedPluginSongIdsRef.current.add(song.id);
+          if (selectedSongIdForPluginChainRef.current === song.id) {
+            commitPluginChain(warmedChain);
+          }
+          const audio = audioRef.current;
+          if (audio?.paused && lastLoadedSongIdRef.current === song.id) {
+            activatePluginAudioRouteForSong(song.id, 'idle-prewarm-complete');
+          }
+        } catch (err) {
+          if (!cancelled) {
+            void window.producerPlayer.rendererLog(
+              'warn',
+              '[plugin-chain] idle native prewarm failed',
+              { songId: song.id, error: String(err) },
+            );
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [albumSongs, commitPluginChain, pluginPrewarmRetrySignal]);
 
   // v3.45 — Plugin library bootstrap: only load the CACHED library from
   // disk at startup. Do NOT trigger a background scan here.
@@ -14935,7 +15227,19 @@ export function App(): JSX.Element {
       setPluginChainUnstable(false);
       void window.producerPlayer
         .removePluginFromChain(selectedSongId, instanceId)
-        .then((chain) => commitPluginChain(chain))
+        .then((chain) => {
+          const nextLoadedIds = new Set(loadedInstanceIdsRef.current);
+          nextLoadedIds.delete(instanceId);
+          loadedInstanceIdsRef.current = nextLoadedIds;
+          setLoadedInstanceIds(nextLoadedIds);
+          setInstanceLatencies((previous) => {
+            if (!(instanceId in previous)) return previous;
+            const next = { ...previous };
+            delete next[instanceId];
+            return next;
+          });
+          commitPluginChain(chain);
+        })
         .catch((err) => {
           const message = err instanceof Error ? err.message : String(err);
           setError(`Could not remove plugin: ${message}`);
@@ -15195,22 +15499,41 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const unsubscribeLoaded = window.producerPlayer.onPluginInstanceLoaded((payload) => {
-      setLoadedInstanceIds((prev) => {
-        if (prev.has(payload.instanceId)) return prev;
-        const next = new Set(prev);
-        next.add(payload.instanceId);
-        return next;
-      });
+      const nextLoadedIds = new Set(loadedInstanceIdsRef.current);
+      nextLoadedIds.add(payload.instanceId);
+      loadedInstanceIdsRef.current = nextLoadedIds;
+      setLoadedInstanceIds(nextLoadedIds);
       setInstanceLatencies((prev) => ({
         ...prev,
         [payload.instanceId]: payload.reportedLatencySamples,
       }));
+      const audio = audioRef.current;
+      if (audio?.paused) {
+        pluginAudioBridgePendingEnableRef.current = false;
+        setPluginAudioBridgeEnabled(true);
+        activatePluginAudioRouteForSong(
+          lastLoadedSongIdRef.current,
+          'native-instance-loaded-while-paused',
+        );
+      } else {
+        pluginAudioBridgePendingEnableRef.current = true;
+        logPlaybackEvent('plugin-audio-activation-deferred', {
+          instanceId: payload.instanceId,
+          until: 'pause-boundary',
+        });
+      }
     });
     const unsubscribeExited = window.producerPlayer.onPluginSidecarExited((info) => {
       if (info.expected) return;
-      setLoadedInstanceIds(new Set<string>());
+      const noLoadedIds = new Set<string>();
+      loadedInstanceIdsRef.current = noLoadedIds;
+      setLoadedInstanceIds(noLoadedIds);
+      pluginAudioBridgePendingEnableRef.current = false;
+      prewarmedPluginSongIdsRef.current.clear();
+      setPluginPrewarmRetrySignal((value) => value + 1);
       setInstanceLatencies({});
       setOpenEditorInstanceIds(new Set<string>());
+      activatePluginAudioRouteForSong(lastLoadedSongIdRef.current, 'plugin-host-exited');
 
       // v3.186 — auto-restart hardening. Track crashes in a sliding 30s
       // window; if we see >= 2 unexpected exits we mark the chain as
@@ -15292,27 +15615,12 @@ export function App(): JSX.Element {
   }, [pluginChain.items, openEditorInstanceIds]);
 
   useEffect(() => {
-    const liveIds = new Set(pluginChain.items.map((item) => item.instanceId));
-    setLoadedInstanceIds((prev) => {
-      if (prev.size === 0) return prev;
-      let changed = false;
-      const next = new Set<string>();
-      for (const id of prev) {
-        if (liveIds.has(id)) next.add(id);
-        else changed = true;
-      }
-      return changed ? next : prev;
-    });
-    setInstanceLatencies((prev) => {
-      let changed = false;
-      const next: Record<string, number> = {};
-      for (const [id, latency] of Object.entries(prev)) {
-        if (liveIds.has(id)) next[id] = latency;
-        else changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [pluginChain.items]);
+    if (!pluginChain.songId) return;
+    const audio = audioRef.current;
+    if (audio?.paused && lastLoadedSongIdRef.current === pluginChain.songId) {
+      activatePluginAudioRouteForSong(pluginChain.songId, 'chain-change-while-paused');
+    }
+  }, [pluginChain]);
 
   const handlePluginSetScanPaths = useCallback((paths: string[]) => {
     void window.producerPlayer

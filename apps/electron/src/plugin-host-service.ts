@@ -456,6 +456,8 @@ export class PluginHostService {
   private spawnFn: SpawnFn;
   /** Instance ids currently live inside the sidecar. */
   private loadedInstances = new Set<string>();
+  /** Owning song for each reconciled instance, so other songs stay prewarmed. */
+  private instanceSongIds = new Map<string, string>();
   /** Cached plugin library, set by `rememberLibrary` so the service can resolve pluginId → path without a round-trip. */
   private cachedLibrary: ScannedPluginLibrary | null = null;
   private reconciliationTail: Promise<void> = Promise.resolve();
@@ -552,6 +554,7 @@ export class PluginHostService {
       // All sidecar-owned state is gone; the diff logic will reload next
       // time the renderer asks for a processed block / reconciles a chain.
       this.loadedInstances.clear();
+      this.instanceSongIds.clear();
       this.instanceLatencies.clear();
       // Surface "editor is no longer open" for every tracked editor so the
       // renderer doesn't get stuck with an open-state badge pointing at a
@@ -904,6 +907,7 @@ export class PluginHostService {
   async unloadPlugin(instanceId: string): Promise<void> {
     await this.send('unload_plugin', { instanceId }, { timeoutMs: 10_000 });
     this.loadedInstances.delete(instanceId);
+    this.instanceSongIds.delete(instanceId);
     this.instanceLatencies.delete(instanceId);
     // The sidecar also closes any open editor for this instance and emits
     // an editor_closed event, which clears openEditorIds via handleLine.
@@ -940,7 +944,30 @@ export class PluginHostService {
     chain: TrackPluginChain,
     opts: { sampleRate?: number; blockSize?: number } = {},
   ): Promise<{ loaded: string[]; unloaded: string[]; failed: Array<{ instanceId: string; error: string }> }> {
-    const plan = diffChainReconciliation(this.loadedInstances, chain.items);
+    // Reconciliation is per song, not a declaration of every plugin the
+    // sidecar may retain. The old global diff unloaded Café Lool's Nectar as
+    // soon as a plugin-free song was selected, guaranteeing another cold load
+    // during the next album transition.
+    const ownedInstances = new Set<string>();
+    for (const [instanceId, songId] of this.instanceSongIds) {
+      if (songId === chain.songId && this.loadedInstances.has(instanceId)) {
+        ownedInstances.add(instanceId);
+      }
+    }
+    // Direct loadPlugin callers predate ownership tracking. If a desired slot
+    // is already live and unowned, claim it rather than redundantly loading it.
+    for (const item of chain.items) {
+      if (
+        item.instanceId &&
+        this.loadedInstances.has(item.instanceId) &&
+        !this.instanceSongIds.has(item.instanceId)
+      ) {
+        this.instanceSongIds.set(item.instanceId, chain.songId);
+        ownedInstances.add(item.instanceId);
+      }
+    }
+
+    const plan = diffChainReconciliation(ownedInstances, chain.items);
     const failed: Array<{ instanceId: string; error: string }> = [];
     const loadedOk: string[] = [];
     const unloadedOk: string[] = [];
@@ -961,6 +988,7 @@ export class PluginHostService {
         failed.push({ instanceId, error: `pluginId ${pluginId} not found in cached library — re-scan required` });
         continue;
       }
+      let loadedInThisAttempt = false;
       try {
         const loaded = await this.loadPlugin({
           instanceId,
@@ -969,6 +997,14 @@ export class PluginHostService {
           sampleRate: opts.sampleRate,
           blockSize: opts.blockSize,
         });
+        loadedInThisAttempt = true;
+        // v3.43 Phase 4 — rehydrate persisted preset/plugin state after a
+        // cold load so recalled presets survive app relaunches.
+        if (typeof state === 'string') await this.setPluginState(instanceId, state);
+        this.instanceSongIds.set(instanceId, chain.songId);
+        // A slot is not renderer-ready until its persisted state is restored.
+        // Emitting earlier allowed playback to begin against plugin defaults
+        // while set_plugin_state was still in flight.
         for (const listener of this.instanceLoadedListeners) {
           try {
             listener({
@@ -979,11 +1015,15 @@ export class PluginHostService {
             log.warn('[plugin-host] instance loaded listener threw', err);
           }
         }
-        // v3.43 Phase 4 — rehydrate persisted preset/plugin state after a
-        // cold load so recalled presets survive app relaunches.
-        if (typeof state === 'string') await this.setPluginState(instanceId, state);
         loadedOk.push(instanceId);
       } catch (err) {
+        if (loadedInThisAttempt) {
+          try {
+            await this.unloadPlugin(instanceId);
+          } catch {
+            // Preserve the original load/state failure below.
+          }
+        }
         failed.push({ instanceId, error: err instanceof Error ? err.message : String(err) });
       }
     }
@@ -1141,6 +1181,7 @@ export class PluginHostService {
         this.child = null;
       }
       this.loadedInstances.clear();
+      this.instanceSongIds.clear();
       this.instanceLatencies.clear();
       this.notifyTrackedEditorsClosed('during stop');
     }

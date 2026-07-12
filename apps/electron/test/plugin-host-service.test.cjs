@@ -707,6 +707,7 @@ test('reconcileTrackChain: loads new slots, unloads removed ones', async () => {
 
 test('reconcileTrackChain: applies persisted plugin state after loading a slot', async () => {
   const calls = { load: [], setState: [] };
+  const readinessOrder = [];
   const fake = makeFakeChild({
     replies: {
       load_plugin: (req) => {
@@ -714,6 +715,7 @@ test('reconcileTrackChain: applies persisted plugin state after loading a slot',
         return { instanceId: req.params.instanceId };
       },
       set_plugin_state: (req) => {
+        readinessOrder.push('state-restored');
         calls.setState.push({
           instanceId: req.params.instanceId,
           stateBase64: req.params.stateBase64,
@@ -724,6 +726,7 @@ test('reconcileTrackChain: applies persisted plugin state after loading a slot',
   });
   const service = new PluginHostService('/fake/path', () => fake);
   service.rememberLibrary(makeLibrary());
+  service.onInstanceLoaded(() => readinessOrder.push('renderer-notified'));
 
   const result = await service.reconcileTrackChain({
     songId: 'song-1',
@@ -742,11 +745,12 @@ test('reconcileTrackChain: applies persisted plugin state after loading a slot',
   assert.deepEqual(calls.setState, [
     { instanceId: 'with-state', stateBase64: 'saved-plugin-state' },
   ]);
+  assert.deepEqual(readinessOrder, ['state-restored', 'renderer-notified']);
   assert.deepEqual(result.loaded, ['with-state']);
   assert.deepEqual(result.failed, []);
 });
 
-test('reconcileTrackChain: empty chain unloads all instances (invariant: no plugins → no effect)', async () => {
+test('reconcileTrackChain: empty chain unloads instances owned by that song', async () => {
   const calls = { load: [], unload: [] };
   const fake = makeFakeChild({
     replies: {
@@ -756,12 +760,51 @@ test('reconcileTrackChain: empty chain unloads all instances (invariant: no plug
   });
   const service = new PluginHostService('/fake/path', () => fake);
   service.rememberLibrary(makeLibrary());
-  await service.loadPlugin({ instanceId: 'a', pluginPath: '/p', format: 'vst3' });
-  await service.loadPlugin({ instanceId: 'b', pluginPath: '/p', format: 'vst3' });
+  await service.reconcileTrackChain({
+    songId: 's',
+    items: [
+      { instanceId: 'a', pluginId: 'vst3:abc', enabled: true, order: 0 },
+      { instanceId: 'b', pluginId: 'au:def', enabled: true, order: 1 },
+    ],
+  });
+  calls.load.length = 0;
 
   await service.reconcileTrackChain({ songId: 's', items: [] });
   assert.deepEqual(calls.unload.sort(), ['a', 'b']);
   assert.deepEqual(service.getLoadedInstanceIds(), []);
+});
+
+test('reconcileTrackChain: retains other songs while pruning only the requested song', async () => {
+  const calls = { load: [], unload: [] };
+  const fake = makeFakeChild({
+    replies: {
+      load_plugin: (req) => {
+        calls.load.push(req.params.instanceId);
+        return { instanceId: req.params.instanceId };
+      },
+      unload_plugin: (req) => {
+        calls.unload.push(req.params.instanceId);
+        return { instanceId: req.params.instanceId, wasLoaded: true };
+      },
+    },
+  });
+  const service = new PluginHostService('/fake/path', () => fake);
+  service.rememberLibrary(makeLibrary());
+
+  await service.reconcileTrackChain({
+    songId: 'song-a',
+    items: [{ instanceId: 'a-slot', pluginId: 'vst3:abc', enabled: true, order: 0 }],
+  });
+  await service.reconcileTrackChain({
+    songId: 'song-b',
+    items: [{ instanceId: 'b-slot', pluginId: 'au:def', enabled: true, order: 0 }],
+  });
+  calls.unload.length = 0;
+
+  await service.reconcileTrackChain({ songId: 'song-a', items: [] });
+
+  assert.deepEqual(calls.unload, ['a-slot']);
+  assert.deepEqual(service.getLoadedInstanceIds(), ['b-slot']);
 });
 
 test('reconcileTrackChain: missing cached library → slot flagged as failed, chain still advances', async () => {

@@ -2182,6 +2182,31 @@ button.analysis-overlay-skip-button.analysis-overlay-skip-button-small:hover {
   background: rgba(92, 167, 255, 0.2);
 }
 
+/* Tracks with saved inserts must never disappear into an ordinary-looking
+ * switcher row. Purple is the quick visual cue; the always-visible PLUGINS
+ * count and per-slot state symbols carry the same meaning without colour.
+ */
+.quick-switcher-item.has-plugin-chain {
+  box-shadow: inset 3px 0 0 rgba(196, 138, 255, 0.92);
+  background: linear-gradient(90deg, rgba(151, 78, 219, 0.17), rgba(151, 78, 219, 0.04));
+}
+
+.quick-switcher-item.has-plugin-chain:hover {
+  background: linear-gradient(90deg, rgba(151, 78, 219, 0.25), rgba(92, 167, 255, 0.08));
+}
+
+.quick-switcher-item.has-plugin-chain-attention {
+  box-shadow: inset 3px 0 0 rgba(255, 184, 92, 0.95);
+}
+
+.quick-switcher-item-title-group {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .quick-switcher-item-title {
   flex: 1 1 auto;
   min-width: 0;
@@ -2939,6 +2964,39 @@ body.floating-switcher-panel-dragging * {
   box-shadow: 0 0 0 1px rgba(92, 167, 255, 0.48), 0 0 16px rgba(92, 167, 255, 0.18);
 }
 
+/* Permanent insert-chain treatment. The inset rail and lavender wash make a
+ * configured track pop at album scale, while the explicit badge below makes
+ * the warning robust for colour-blind users and screenshots/low-contrast UI.
+ */
+.main-list-row.has-plugin-chain {
+  border-color: rgba(190, 126, 255, 0.72);
+  background:
+    linear-gradient(90deg, rgba(151, 78, 219, 0.2), rgba(151, 78, 219, 0.05) 58%),
+    var(--bg-2);
+  box-shadow: inset 4px 0 0 rgba(196, 138, 255, 0.95);
+}
+
+.main-list-row.has-plugin-chain:hover {
+  border-color: rgba(211, 169, 255, 0.95);
+  background:
+    linear-gradient(90deg, rgba(151, 78, 219, 0.27), rgba(151, 78, 219, 0.08) 58%),
+    var(--bg-2);
+}
+
+.main-list-row.has-plugin-chain.selected {
+  background:
+    linear-gradient(90deg, rgba(151, 78, 219, 0.25), rgba(92, 167, 255, 0.17) 66%),
+    var(--bg-2);
+}
+
+/* Amber means the chain needs inspection (all bypassed and/or unavailable),
+ * but the visible status text/icons remain the source of truth.
+ */
+.main-list-row.has-plugin-chain-attention {
+  border-color: rgba(255, 184, 92, 0.76);
+  box-shadow: inset 4px 0 0 rgba(255, 184, 92, 0.95);
+}
+
 @keyframes main-list-row-analyzing-shimmer {
   0% {
     background-position: 100% 0;
@@ -2970,6 +3028,158 @@ body.floating-switcher-panel-dragging * {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.track-plugin-indicator {
+  min-width: 0;
+  max-width: min(58%, 390px);
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #f2e7ff;
+  white-space: nowrap;
+}
+
+.track-plugin-count-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 21px;
+  padding: 2px 7px 2px 4px;
+  border: 1px solid rgba(211, 169, 255, 0.78);
+  border-radius: 999px;
+  background: rgba(111, 47, 171, 0.58);
+  color: #fbf7ff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.track-plugin-indicator.has-attention .track-plugin-count-badge {
+  border-color: rgba(255, 202, 128, 0.9);
+  background: rgba(151, 91, 19, 0.64);
+  color: #fff4df;
+}
+
+.track-plugin-count-badge-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 8px;
+  letter-spacing: 0;
+}
+
+.track-plugin-icons {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.track-plugin-icon {
+  min-width: 0;
+  max-width: 118px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  border: 1px solid rgba(159, 226, 183, 0.56);
+  border-radius: 5px;
+  background: rgba(31, 113, 69, 0.32);
+  color: #d9ffe7;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.track-plugin-icon::before {
+  content: '●';
+  color: #70e99c;
+  font-size: 8px;
+}
+
+.track-plugin-icon.is-bypassed {
+  border-style: dashed;
+  border-color: rgba(194, 202, 213, 0.5);
+  background: rgba(128, 140, 155, 0.16);
+  color: #c4ccd5;
+}
+
+.track-plugin-icon.is-bypassed::before {
+  content: '○';
+  color: #c4ccd5;
+}
+
+.track-plugin-icon.is-unavailable {
+  border-color: rgba(255, 132, 132, 0.65);
+  background: rgba(167, 44, 44, 0.3);
+  color: #ffd5d5;
+}
+
+.track-plugin-icon.is-unavailable::before {
+  content: '!';
+  color: #ff9c9c;
+  font-size: 10px;
+}
+
+.track-plugin-icon-format {
+  flex: 0 0 auto;
+  opacity: 0.82;
+  font-size: 8px;
+  letter-spacing: 0.025em;
+}
+
+.track-plugin-icon-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-plugin-icon--overflow {
+  flex: 0 0 auto;
+  border-color: rgba(211, 169, 255, 0.52);
+  background: rgba(111, 47, 171, 0.28);
+  color: #ead7ff;
+}
+
+.track-plugin-icon--overflow::before {
+  content: none;
+}
+
+.track-plugin-indicator--compact {
+  max-width: 164px;
+  flex: 0 1 auto;
+}
+
+.track-plugin-indicator--compact .track-plugin-count-badge {
+  min-height: 18px;
+  padding: 1px 5px 1px 3px;
+  font-size: 8px;
+}
+
+.track-plugin-indicator--compact .track-plugin-count-badge-icon {
+  width: 14px;
+  height: 14px;
+  font-size: 7px;
+}
+
+.track-plugin-indicator--compact .track-plugin-icon {
+  width: 20px;
+  justify-content: center;
+  padding: 2px;
+}
+
+.track-plugin-indicator--compact .track-plugin-icon::before {
+  display: none;
 }
 
 .main-list-row-title-edit-zone {

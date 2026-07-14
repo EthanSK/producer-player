@@ -172,11 +172,36 @@ test.describe('Plugin audio routing invariants @smoke', () => {
         'true',
       );
 
+      // Regression guard for the Cafe Loulou nightmare: as soon as a saved
+      // insert exists, the ordinary-looking track row is forbidden. The text
+      // count is permanent, the row gets its accent class, and the per-slot
+      // icon reports the configured state without claiming native processing.
+      const trackRow = page.getByTestId('main-list-row').first();
+      const trackPluginIndicator = trackRow.getByTestId('track-plugin-indicator');
+      await expect(trackRow).toHaveClass(/has-plugin-chain/);
+      await expect(trackRow).toHaveAttribute('data-plugin-count', '1');
+      await expect(trackPluginIndicator).toContainText('Plugins 1');
+      await expect(trackPluginIndicator).toHaveAttribute('data-enabled-count', '1');
+
       await strip.getByTestId('plugin-pill-toggle').first().click();
       await expect(strip.getByTestId('plugin-pill').first()).toHaveAttribute(
         'data-enabled',
         'false',
       );
+      await expect(trackPluginIndicator).toHaveAttribute('data-bypassed-count', '1');
+      await expect(trackRow).toHaveClass(/has-plugin-chain-attention/);
+
+      // The floating song switcher is the other primary song-selection
+      // surface. It must repeat the same explicit plugin count so switching
+      // tracks cannot make the warning disappear.
+      await page.getByTestId('analysis-close-button').click();
+      await page.getByTestId('quick-switcher-button').click();
+      const switcherIndicator = page.getByTestId('quick-switcher-plugin-indicator');
+      await expect(switcherIndicator).toContainText('Plugins 1');
+      await expect(switcherIndicator).toHaveAttribute('data-bypassed-count', '1');
+      await page.getByTestId('quick-switcher-close').click();
+      await page.getByTestId('analysis-expand-button').click();
+      await expect(page.getByTestId('analysis-modal')).toBeVisible();
 
       // Scenario 3 — Read chain back from IPC and confirm the enabled-count
       // is zero. That's exactly the signal the renderer's bypass branch
@@ -194,6 +219,8 @@ test.describe('Plugin audio routing invariants @smoke', () => {
       await strip.getByTestId('plugin-pill-remove').first().click();
       await expect(strip.getByTestId('plugin-pill')).toHaveCount(0);
       await expect(strip.getByTestId('plugin-chain-strip-empty')).toBeVisible();
+      await expect(trackRow.getByTestId('track-plugin-indicator')).toHaveCount(0);
+      await expect(trackRow).toHaveAttribute('data-plugin-count', '0');
 
       const chainItemsCount = await page.evaluate(async () => {
         const api = (window as unknown as {

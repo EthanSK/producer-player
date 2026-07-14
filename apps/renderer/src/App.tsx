@@ -253,6 +253,10 @@ import type {
 } from '@producer-player/contracts';
 import { PluginChainStrip } from './lib/PluginChainStrip';
 import {
+  getTrackPluginDisplayModel,
+  TrackPluginIndicator,
+} from './lib/TrackPluginIndicator';
+import {
   MasteringChecklistImportanceMeter,
   MasteringChecklistRowHelp,
 } from './lib/MasteringChecklistImportance';
@@ -4241,6 +4245,13 @@ export function App(): JSX.Element {
   );
   const loadedInstanceIdsRef = useRef<ReadonlySet<string>>(new Set());
   const pluginChainsBySongIdRef = useRef<Map<string, TrackPluginChain>>(new Map());
+  // The ref above remains the synchronous source used by the audio route, but
+  // the parallel React record makes every background chain read observable by
+  // the track list. Without this state, a non-selected song could acquire a
+  // cached chain silently and keep looking like a plugin-free ordinary row.
+  const [pluginChainsBySongId, setPluginChainsBySongId] = useState<
+    Record<string, TrackPluginChain>
+  >({});
   const prewarmedPluginSongIdsRef = useRef<Set<string>>(new Set());
   const pluginNativePrewarmInFlightRef = useRef<{
     songId: string;
@@ -4273,14 +4284,19 @@ export function App(): JSX.Element {
   const selectedSongIdForPluginChainRef = useRef<string | null>(null);
   selectedSongIdForPluginChainRef.current = selectedSongId;
   const pluginChainRef = useRef<TrackPluginChain>(pluginChain);
+  const rememberPluginChain = useCallback((chain: TrackPluginChain) => {
+    if (!chain.songId) return;
+    pluginChainsBySongIdRef.current.set(chain.songId, chain);
+    setPluginChainsBySongId((current) =>
+      current[chain.songId] === chain ? current : { ...current, [chain.songId]: chain }
+    );
+  }, []);
   const commitPluginChain = useCallback((chain: TrackPluginChain) => {
-    if (chain.songId) {
-      pluginChainsBySongIdRef.current.set(chain.songId, chain);
-    }
+    rememberPluginChain(chain);
     if (chain.songId !== (selectedSongIdForPluginChainRef.current ?? '')) return;
     pluginChainRef.current = chain;
     setPluginChain(chain);
-  }, []);
+  }, [rememberPluginChain]);
   /**
    * v3.186 — sliding 30s window of unexpected pp-audio-host exits. When
    * we see >= 2 within the window we mark the chain `unstable` and pause
@@ -15241,7 +15257,7 @@ export function App(): JSX.Element {
               reconcilePlugins: false,
             });
             if (cancelled) return;
-            pluginChainsBySongIdRef.current.set(song.id, chain);
+            rememberPluginChain(chain);
             if (selectedSongIdForPluginChainRef.current === song.id) {
               commitPluginChain(chain);
             }
@@ -15288,7 +15304,7 @@ export function App(): JSX.Element {
             },
           );
           if (!warmedChain || cancelled) return;
-          pluginChainsBySongIdRef.current.set(song.id, warmedChain);
+          rememberPluginChain(warmedChain);
           prewarmedPluginSongIdsRef.current.add(song.id);
           if (selectedSongIdForPluginChainRef.current === song.id) {
             commitPluginChain(warmedChain);
@@ -15312,7 +15328,7 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [albumSongs, commitPluginChain, pluginPrewarmRetrySignal]);
+  }, [albumSongs, commitPluginChain, pluginPrewarmRetrySignal, rememberPluginChain]);
 
   // v3.45 — Plugin library bootstrap: only load the CACHED library from
   // disk at startup. Do NOT trigger a background scan here.
@@ -21362,6 +21378,8 @@ export function App(): JSX.Element {
               : null;
             const songDateOpacity =
               songDateOpacityBySongId.get(song.id) ?? SONG_DATE_OPACITY_RANGE.unknown;
+            const songPluginChain = pluginChainsBySongId[song.id];
+            const songPluginDisplay = getTrackPluginDisplayModel(songPluginChain, pluginLibrary);
 
             return (
               <li
@@ -21388,6 +21406,8 @@ export function App(): JSX.Element {
                   tabIndex={0}
                   className={`main-list-row ${song.id === selectedSongId ? 'selected' : ''} ${
                     dragSongId === song.id ? 'drag-source' : ''
+                  } ${songPluginDisplay ? 'has-plugin-chain' : ''} ${
+                    songPluginDisplay?.hasAttention ? 'has-plugin-chain-attention' : ''
                   } ${
                     // v3.195 — Click-feedback UX. When the user selects a row whose
                     // measured analysis hasn't resolved yet, mark it `is-analyzing` so
@@ -21420,6 +21440,7 @@ export function App(): JSX.Element {
                   }}
                   data-testid="main-list-row"
                   data-song-id={song.id}
+                  data-plugin-count={songPluginDisplay?.totalCount ?? 0}
                   draggable={canReorderSongs}
                   onDragStart={(event) => {
                     if (!canReorderSongs) {
@@ -21484,6 +21505,10 @@ export function App(): JSX.Element {
                           </strong>
                         </span>
                       )}
+                      <TrackPluginIndicator
+                        chain={songPluginChain}
+                        library={pluginLibrary}
+                      />
                     </div>
                     {/* v3.108 — LUFS now stands alone in the top-right (no more
                         V·WAV pill alongside it). The version capsule moved to
@@ -27107,18 +27132,29 @@ export function App(): JSX.Element {
             {albumSongs.map((song) => {
               const isActive = song.id === selectedPlaybackSongId;
               const versionCount = song.versions.length;
+              const songPluginChain = pluginChainsBySongId[song.id];
+              const songPluginDisplay = getTrackPluginDisplayModel(songPluginChain, pluginLibrary);
               return (
                 <button
                   key={song.id}
                   type="button"
                   role="option"
                   aria-selected={isActive}
-                  className={`quick-switcher-item${isActive ? ' quick-switcher-item--active' : ''}`}
+                  className={`quick-switcher-item${isActive ? ' quick-switcher-item--active' : ''}${
+                    songPluginDisplay ? ' has-plugin-chain' : ''
+                  }${songPluginDisplay?.hasAttention ? ' has-plugin-chain-attention' : ''}`}
                   onClick={() => handleQuickSwitcherSelect(song.id)}
                   data-testid={`quick-switcher-item-${song.id}`}
                   title={song.title}
                 >
-                  <span className="quick-switcher-item-title">{song.title}</span>
+                  <span className="quick-switcher-item-title-group">
+                    <span className="quick-switcher-item-title">{song.title}</span>
+                    <TrackPluginIndicator
+                      chain={songPluginChain}
+                      library={pluginLibrary}
+                      compact
+                    />
+                  </span>
                   <span className="quick-switcher-item-meta">
                     {versionCount} {versionCount === 1 ? 'version' : 'versions'}
                   </span>

@@ -275,6 +275,23 @@ producer-player/
 
 ---
 
+## 2026-07-24 — Lazy Per-Track Version History
+
+### Ethan request (verbatim)
+
+> You must be— You know what, producer play is awfully slow to load, the top-level tracks. Is it loading all the version history for each track? Like, I feel like the top-level ones should be loaded first, and then we can do— When we actually are on a track, it loads the version history, to be honest. It's just standard UX. Maybe get a Fable V subagent to take a look, and then after you review and fix his code and release it.
+
+### Outcome
+
+- Confirmed startup was blocked before window creation while every archived file under each linked folder's `old/` directory was enumerated and statted.
+- Changed startup and ordinary rescans to index only top-level/current exports.
+- Added a cached, deduplicated per-song history request that loads archived versions when the song is selected.
+- Preserved full-history scans for explicit organize workflows, with revision guards so overlapping rescans or rapid track switching cannot merge stale history.
+- Added a visible loading state and avoids showing an inaccurate version count for tracks whose history has not loaded yet.
+- Added domain regression coverage plus Electron E2E verification for version history, linking, rapid track switching, and version switching.
+
+---
+
 ## Timeline Summary
 
 | Date | Milestone |

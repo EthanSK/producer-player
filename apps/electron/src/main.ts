@@ -6625,6 +6625,16 @@ async function loadDataFromICloud(): Promise<ICloudLoadResult> {
 
 function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(IPC_CHANNELS.GET_LIBRARY_SNAPSHOT, async () => service.getSnapshot());
+  ipcMain.handle(
+    IPC_CHANNELS.LOAD_SONG_VERSION_HISTORY,
+    async (_event, songId: string) => {
+      if (typeof songId !== 'string' || songId.length === 0) {
+        return service.getSnapshot();
+      }
+
+      return service.loadSongVersionHistory(songId);
+    }
+  );
   ipcMain.handle(IPC_CHANNELS.GET_ENVIRONMENT, async () => buildEnvironmentInfo());
   ipcMain.handle(IPC_CHANNELS.GET_UI_ZOOM_STATE, async () => readUiZoomState(null, mainWindow));
   ipcMain.handle(IPC_CHANNELS.SET_UI_ZOOM_FACTOR, async (_event, factor: number | null) => {

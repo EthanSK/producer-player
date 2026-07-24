@@ -182,6 +182,14 @@ export interface LibrarySnapshot {
   linkedFolders: LinkedFolder[];
   songs: SongWithVersions[];
   versions: SongVersion[];
+  /**
+   * Song ids whose archived `old/` entries have been read into this snapshot.
+   *
+   * Top-level/current exports intentionally arrive before version history.
+   * Consumers use this marker to request the selected song's history exactly
+   * once, and to retry after a watched-folder rescan invalidates that cache.
+   */
+  versionHistoryLoadedSongIds: string[];
   status: LibraryStatus;
   statusMessage: string;
   scannedAt: string | null;
@@ -268,6 +276,7 @@ export const ENABLE_AGENT_FEATURES = true;
 
 export const IPC_CHANNELS = {
   GET_LIBRARY_SNAPSHOT: 'producer-player:get-library-snapshot',
+  LOAD_SONG_VERSION_HISTORY: 'producer-player:load-song-version-history',
   GET_ENVIRONMENT: 'producer-player:get-environment',
   GET_UI_ZOOM_STATE: 'producer-player:get-ui-zoom-state',
   SET_UI_ZOOM_FACTOR: 'producer-player:set-ui-zoom-factor',
@@ -1587,6 +1596,7 @@ export interface ActionLogEntry {
 
 export interface ProducerPlayerBridge {
   getLibrarySnapshot(): Promise<LibrarySnapshot>;
+  loadSongVersionHistory(songId: string): Promise<LibrarySnapshot>;
   getEnvironment(): Promise<ProducerPlayerEnvironment>;
   linkFolderWithDialog(): Promise<LibrarySnapshot>;
   linkFolder(folderPath: string): Promise<LibrarySnapshot>;

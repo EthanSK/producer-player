@@ -225,20 +225,72 @@ async function collectAudioFilesInDirectory(
   return files.filter((file): file is ScannedAudioFile => file !== null);
 }
 
-async function collectAudioFiles(
+async function collectTopLevelAudioFiles(
   folderPath: string,
   folderId: string
 ): Promise<ScannedAudioFile[]> {
+  return collectAudioFilesInDirectory(folderPath, folderId);
+}
+
+async function collectArchivedAudioFiles(
+  folderPath: string,
+  folderId: string
+): Promise<ScannedAudioFile[]> {
+  return collectAudioFilesInDirectory(path.join(folderPath, 'old'), folderId);
+}
+
+async function collectArchivedAudioFilesForSong(
+  folderPath: string,
+  folderId: string,
+  normalizedTitle: string
+): Promise<ScannedAudioFile[]> {
   const archivedDirectory = path.join(folderPath, 'old');
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(archivedDirectory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
 
-  const [topLevelFiles, archivedFiles] = await Promise.all([
-    // Track top-level exports only.
-    collectAudioFilesInDirectory(folderPath, folderId),
-    // Track archived versions from the reserved old/ folder only.
-    collectAudioFilesInDirectory(archivedDirectory, folderId),
-  ]);
+  const matchingAudioFilePaths = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(archivedDirectory, entry.name))
+    .filter((absolutePath) => {
+      if (!isSupportedAudioFile(absolutePath)) {
+        return false;
+      }
 
-  return [...topLevelFiles, ...archivedFiles];
+      const stem = getFileStem(absolutePath);
+      return (
+        hasSupportedVersionSuffix(stem) &&
+        normalizeSongStem(stem) === normalizedTitle
+      );
+    });
+
+  // A selected-song history load still reads the archive directory names so
+  // it can find matches, but metadata I/O is restricted to that song. This is
+  // the performance boundary that keeps a large album's unopened histories
+  // off the startup and track-list critical paths.
+  const files = await mapWithConcurrency(
+    matchingAudioFilePaths,
+    FILE_METADATA_CONCURRENCY,
+    async (absolutePath): Promise<ScannedAudioFile | null> => {
+      try {
+        const stats = await fs.stat(absolutePath);
+        return {
+          folderId,
+          filePath: absolutePath,
+          sizeBytes: stats.size,
+          createdAt: getFileCreatedAt(stats),
+          modifiedAt: stats.mtime,
+        };
+      } catch {
+        return null;
+      }
+    }
+  );
+
+  return files.filter((file): file is ScannedAudioFile => file !== null);
 }
 
 function isInsideOldDirectory(filePath: string, folderPath: string): boolean {
@@ -268,7 +320,19 @@ async function moveFile(sourcePath: string, targetPath: string): Promise<void> {
 
 export class FileLibraryService {
   private readonly linkedFolders = new Map<string, LinkedFolder>();
+  // Top-level/current exports are the only files on the startup critical path.
   private readonly folderFiles = new Map<string, ScannedAudioFile[]>();
+  private readonly versionHistoryBySongId = new Map<
+    string,
+    { folderId: string; files: ScannedAudioFile[] }
+  >();
+  private readonly versionHistoryLoadedSongIds = new Set<string>();
+  private readonly versionHistoryLoadPromises = new Map<
+    string,
+    Promise<LibrarySnapshot>
+  >();
+  private readonly folderScanRevisions = new Map<string, number>();
+  private versionOrganizationTail: Promise<void> = Promise.resolve();
   private readonly folderWatchers = new Map<string, FSWatcher>();
   private readonly folderScanTimers = new Map<string, NodeJS.Timeout>();
   private readonly subscribers = new Set<SnapshotSubscriber>();
@@ -279,6 +343,7 @@ export class FileLibraryService {
     linkedFolders: [],
     songs: [],
     versions: [],
+    versionHistoryLoadedSongIds: [],
     status: 'idle',
     statusMessage: 'No folders linked yet.',
     scannedAt: null,
@@ -314,6 +379,40 @@ export class FileLibraryService {
 
   getLinkedFolderPaths(): string[] {
     return Array.from(this.linkedFolders.values()).map((folder) => folder.path);
+  }
+
+  async loadSongVersionHistory(songId: string): Promise<LibrarySnapshot> {
+    if (this.versionHistoryLoadedSongIds.has(songId)) {
+      return this.getSnapshot();
+    }
+
+    // React effects can legitimately ask twice during StrictMode, and rapid
+    // selection changes may return to a song before its first archive read
+    // finishes. Share that work instead of issuing duplicate readdir/stat
+    // batches; the result is library cache state, not selection state, so a
+    // late completion cannot overwrite the user's newer selection.
+    const existingLoad = this.versionHistoryLoadPromises.get(songId);
+    if (existingLoad) {
+      return existingLoad;
+    }
+
+    const load = this.loadSongVersionHistoryInternal(songId);
+    this.versionHistoryLoadPromises.set(songId, load);
+
+    try {
+      return await load;
+    } catch (error) {
+      // Do not let a failed metadata read/organize pass poison the cache as
+      // "loaded"; leaving the marker clear allows a later selection/rescan to
+      // retry instead of permanently showing a partial history.
+      this.versionHistoryBySongId.delete(songId);
+      this.versionHistoryLoadedSongIds.delete(songId);
+      throw error;
+    } finally {
+      if (this.versionHistoryLoadPromises.get(songId) === load) {
+        this.versionHistoryLoadPromises.delete(songId);
+      }
+    }
   }
 
   async hydrateLinkedFolders(folderPaths: string[]): Promise<LibrarySnapshot> {
@@ -392,8 +491,10 @@ export class FileLibraryService {
   }
 
   async unlinkFolder(folderId: string): Promise<LibrarySnapshot> {
+    this.clearVersionHistoryForFolder(folderId);
     this.linkedFolders.delete(folderId);
     this.folderFiles.delete(folderId);
+    this.folderScanRevisions.delete(folderId);
 
     const watcher = this.folderWatchers.get(folderId);
     if (watcher) {
@@ -452,10 +553,14 @@ export class FileLibraryService {
     this.setStatus('scanning', 'Organizing old versions…');
 
     await Promise.all(
-      Array.from(this.linkedFolders.keys()).map((folderId) => this.scanFolder(folderId))
+      Array.from(this.linkedFolders.keys()).map((folderId) =>
+        this.scanFolder(folderId, { includeVersionHistory: true })
+      )
     );
 
-    const movedCount = await this.organizeOldVersionsInternal();
+    const movedCount = await this.queueVersionOrganization({
+      preserveVersionHistory: true,
+    });
 
     const statusMessage =
       movedCount > 0
@@ -501,10 +606,14 @@ export class FileLibraryService {
     this.setStatus('scanning', 'Auto-organize enabled. Organizing old versions…');
 
     await Promise.all(
-      Array.from(this.linkedFolders.keys()).map((folderId) => this.scanFolder(folderId))
+      Array.from(this.linkedFolders.keys()).map((folderId) =>
+        this.scanFolder(folderId, { includeVersionHistory: true })
+      )
     );
 
-    const movedCount = await this.organizeOldVersionsInternal();
+    const movedCount = await this.queueVersionOrganization({
+      preserveVersionHistory: true,
+    });
 
     const statusMessage =
       movedCount > 0
@@ -561,6 +670,10 @@ export class FileLibraryService {
     this.folderWatchers.clear();
     this.linkedFolders.clear();
     this.folderFiles.clear();
+    this.versionHistoryBySongId.clear();
+    this.versionHistoryLoadedSongIds.clear();
+    this.versionHistoryLoadPromises.clear();
+    this.folderScanRevisions.clear();
     this.subscribers.clear();
   }
 
@@ -582,25 +695,171 @@ export class FileLibraryService {
     this.emitSnapshot();
   }
 
-  private async scanFolder(folderId: string): Promise<void> {
+  private async scanFolder(
+    folderId: string,
+    options: { includeVersionHistory?: boolean } = {}
+  ): Promise<void> {
     const folder = this.linkedFolders.get(folderId);
     if (!folder) {
       return;
     }
 
-    let files = await collectAudioFiles(folder.path, folderId);
-    const renamedUnversionedExports = await this.autoVersionUnversionedExports(folder, files);
+    const scanRevision = (this.folderScanRevisions.get(folderId) ?? 0) + 1;
+    this.folderScanRevisions.set(folderId, scanRevision);
+
+    let topLevelFiles = await collectTopLevelAudioFiles(folder.path, folderId);
+    let archivedFiles = options.includeVersionHistory
+      ? await collectArchivedAudioFiles(folder.path, folderId)
+      : [];
+    const renamedUnversionedExports = await this.autoVersionUnversionedExports(
+      folder,
+      [...topLevelFiles, ...archivedFiles]
+    );
 
     if (renamedUnversionedExports > 0) {
-      files = await collectAudioFiles(folder.path, folderId);
+      topLevelFiles = await collectTopLevelAudioFiles(folder.path, folderId);
+      archivedFiles = options.includeVersionHistory
+        ? await collectArchivedAudioFiles(folder.path, folderId)
+        : [];
     }
 
-    // Guard against unlink races where an in-flight scan completes after folder removal.
-    if (!this.linkedFolders.has(folderId)) {
+    // Guard both unlink races and overlapping watcher/manual rescans. An older
+    // scan must never replace newer top-level metadata or resurrect a cache
+    // that the newer scan deliberately invalidated.
+    if (
+      !this.linkedFolders.has(folderId) ||
+      this.folderScanRevisions.get(folderId) !== scanRevision
+    ) {
       return;
     }
 
-    this.folderFiles.set(folderId, files);
+    this.folderFiles.set(folderId, topLevelFiles);
+    this.clearVersionHistoryForFolder(folderId, {
+      // Ordinary watcher/manual rescans use stale-while-revalidate for
+      // histories that were already opened. Dropping those files outright
+      // briefly makes an explicitly cued old version disappear from the
+      // renderer, which resets playback to the latest export before the
+      // selected-song reload can restore history. The loaded marker is still
+      // cleared below, so the renderer immediately refreshes the selected
+      // song; keeping the prior files only preserves continuity during that
+      // narrow async window. Full-history scans replace the cache atomically.
+      dropCachedFiles: options.includeVersionHistory === true,
+    });
+
+    if (options.includeVersionHistory) {
+      this.cacheAllVersionHistoryForFolder(folderId, topLevelFiles, archivedFiles);
+    }
+  }
+
+  private async loadSongVersionHistoryInternal(songId: string): Promise<LibrarySnapshot> {
+    while (true) {
+      if (this.versionHistoryLoadedSongIds.has(songId)) {
+        return this.getSnapshot();
+      }
+
+      const song = this.snapshot.songs.find((entry) => entry.id === songId);
+      if (!song) {
+        return this.getSnapshot();
+      }
+
+      const folder = this.linkedFolders.get(song.folderId);
+      if (!folder) {
+        return this.getSnapshot();
+      }
+
+      const scanRevision = this.folderScanRevisions.get(folder.id) ?? 0;
+      const archivedFiles = await collectArchivedAudioFilesForSong(
+        folder.path,
+        folder.id,
+        song.normalizedTitle
+      );
+
+      if (!this.linkedFolders.has(folder.id)) {
+        return this.getSnapshot();
+      }
+
+      if ((this.folderScanRevisions.get(folder.id) ?? 0) !== scanRevision) {
+        // A watcher/manual scan changed the top-level source of truth while
+        // this history was being read. Retry against the new generation so a
+        // stale archive result cannot leak into the selected song.
+        continue;
+      }
+
+      const currentSong = this.snapshot.songs.find((entry) => entry.id === songId);
+      if (!currentSong || currentSong.folderId !== folder.id) {
+        return this.getSnapshot();
+      }
+
+      this.versionHistoryBySongId.set(songId, {
+        folderId: folder.id,
+        files: archivedFiles,
+      });
+      this.versionHistoryLoadedSongIds.add(songId);
+
+      if (this.matcherSettings.autoMoveOld) {
+        const movedCount = await this.queueVersionOrganization();
+        if (
+          movedCount > 0 ||
+          !this.versionHistoryLoadedSongIds.has(songId) ||
+          (this.folderScanRevisions.get(folder.id) ?? 0) !== scanRevision
+        ) {
+          // Organizing invalidates the affected folder cache and advances its
+          // scan revision. Re-read just this selected song so callers receive
+          // the same complete history after any promotion/archive moves.
+          continue;
+        }
+      }
+
+      this.rebuildSnapshot(this.snapshot.status, this.snapshot.statusMessage);
+      return this.getSnapshot();
+    }
+  }
+
+  private clearVersionHistoryForFolder(
+    folderId: string,
+    options: { dropCachedFiles?: boolean } = { dropCachedFiles: true }
+  ): void {
+    if (options.dropCachedFiles !== false) {
+      for (const [songId, cachedHistory] of this.versionHistoryBySongId.entries()) {
+        if (cachedHistory.folderId === folderId) {
+          this.versionHistoryBySongId.delete(songId);
+        }
+      }
+    }
+
+    // Clearing the marker is what makes the renderer request fresh history.
+    // A normal rescan can deliberately retain the previous cached files as a
+    // stale-while-revalidate bridge, but those files are never treated as
+    // current after this point.
+    for (const song of this.snapshot.songs) {
+      if (song.folderId === folderId) {
+        this.versionHistoryLoadedSongIds.delete(song.id);
+      }
+    }
+  }
+
+  private cacheAllVersionHistoryForFolder(
+    folderId: string,
+    topLevelFiles: ScannedAudioFile[],
+    archivedFiles: ScannedAudioFile[]
+  ): void {
+    const topLevelSongs = buildSongsFromFiles(topLevelFiles);
+
+    for (const song of topLevelSongs) {
+      const matchingArchivedFiles = archivedFiles.filter((file) => {
+        const stem = getFileStem(file.filePath);
+        return (
+          hasSupportedVersionSuffix(stem) &&
+          normalizeSongStem(stem) === song.normalizedTitle
+        );
+      });
+
+      this.versionHistoryBySongId.set(song.id, {
+        folderId,
+        files: matchingArchivedFiles,
+      });
+      this.versionHistoryLoadedSongIds.add(song.id);
+    }
   }
 
   private async autoVersionUnversionedExports(
@@ -710,6 +969,14 @@ export class FileLibraryService {
       files.push(...folderFiles);
     }
 
+    for (const cachedHistory of this.versionHistoryBySongId.values()) {
+      if (!linkedFolderIds.has(cachedHistory.folderId)) {
+        continue;
+      }
+
+      files.push(...cachedHistory.files);
+    }
+
     return files;
   }
 
@@ -796,10 +1063,29 @@ export class FileLibraryService {
       return 0;
     }
 
-    return this.organizeOldVersionsInternal();
+    return this.queueVersionOrganization();
   }
 
-  private async organizeOldVersionsInternal(): Promise<number> {
+  private queueVersionOrganization(
+    options: { preserveVersionHistory?: boolean } = {}
+  ): Promise<number> {
+    // A quick A → B selection can finish two archive reads together. Serialize
+    // the rare auto-organize/promotion pass so both cannot rename the same
+    // files, while keeping ordinary read-only history loads independently
+    // concurrent.
+    const operation = this.versionOrganizationTail.then(() =>
+      this.organizeOldVersionsInternal(options)
+    );
+    this.versionOrganizationTail = operation.then(
+      () => undefined,
+      () => undefined
+    );
+    return operation;
+  }
+
+  private async organizeOldVersionsInternal(
+    options: { preserveVersionHistory?: boolean } = {}
+  ): Promise<number> {
     const files = this.collectTrackedFiles();
     const songs = buildSongsFromFiles(files);
 
@@ -893,7 +1179,9 @@ export class FileLibraryService {
     }
 
     for (const folderId of affectedFolderIds) {
-      await this.scanFolder(folderId);
+      await this.scanFolder(folderId, {
+        includeVersionHistory: options.preserveVersionHistory === true,
+      });
     }
 
     return movedCount;
@@ -1057,6 +1345,20 @@ export class FileLibraryService {
     const unorderedSongs = buildSongsFromFiles(files);
     const songs = this.applySongOrder(unorderedSongs);
     const versions = songs.flatMap((song) => song.versions);
+    const currentSongIds = new Set(songs.map((song) => song.id));
+    const versionHistoryLoadedSongIds = songs
+      .filter((song) => this.versionHistoryLoadedSongIds.has(song.id))
+      .map((song) => song.id);
+
+    // Drop cache entries whose top-level song disappeared. Archived files do
+    // not create album rows on their own, and retaining them here would make a
+    // future id collision look falsely "loaded".
+    for (const songId of this.versionHistoryLoadedSongIds) {
+      if (!currentSongIds.has(songId)) {
+        this.versionHistoryLoadedSongIds.delete(songId);
+        this.versionHistoryBySongId.delete(songId);
+      }
+    }
 
     const fileCountByFolder = new Map<string, number>();
     for (const version of versions) {
@@ -1075,6 +1377,7 @@ export class FileLibraryService {
       linkedFolders,
       songs,
       versions,
+      versionHistoryLoadedSongIds,
       status,
       statusMessage,
       scannedAt: new Date().toISOString(),

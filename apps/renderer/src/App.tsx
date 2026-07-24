@@ -677,6 +677,7 @@ const EMPTY_SNAPSHOT: LibrarySnapshot = {
   linkedFolders: [],
   songs: [],
   versions: [],
+  versionHistoryLoadedSongIds: [],
   status: 'idle',
   statusMessage: 'No folders linked yet.',
   scannedAt: null,
@@ -8524,6 +8525,35 @@ export function App(): JSX.Element {
   const selectedSong: SongWithVersions | undefined = songs.find(
     (song) => song.id === selectedSongId
   );
+  const selectedSongVersionHistoryLoaded =
+    selectedSongId !== null &&
+    snapshot.versionHistoryLoadedSongIds.includes(selectedSongId);
+
+  useEffect(() => {
+    if (
+      !selectedSongId ||
+      snapshot.versionHistoryLoadedSongIds.includes(selectedSongId)
+    ) {
+      return;
+    }
+
+    // Version history is deliberately absent from the initial library
+    // snapshot. Ask for it only after selection; the main-process service
+    // caches and dedupes by song id. This effect never applies the returned
+    // snapshot directly, so a slow request for song A cannot roll selection
+    // back after the user has already moved to song B. Snapshot broadcasts
+    // merge whichever history completed into the library-wide cache instead.
+    void window.producerPlayer.loadSongVersionHistory(selectedSongId).catch((cause: unknown) => {
+      void window.producerPlayer.rendererLog(
+        'warn',
+        'Could not load selected song version history',
+        {
+          songId: selectedSongId,
+          error: cause instanceof Error ? cause.message : String(cause),
+        }
+      );
+    });
+  }, [selectedSongId, snapshot.versionHistoryLoadedSongIds]);
 
   const inspectorVersions = useMemo(
     () => (selectedSong ? sortVersions(selectedSong.versions) : []),
@@ -22141,6 +22171,15 @@ export function App(): JSX.Element {
 
           <section className="inspector-card">
             <h3>Version History <HelpTooltip text={`What this is: A timeline of every exported version of this song — each time you bounce/export from your DAW with a version number (e.g. v1, v2, v3), it shows up here.\n\nHow to use it: Click 'Cue' on any version to load it into the player. Click 'Open in ${fileManagerLabel(environment.platform)}' to locate the file on disk. The newest version is selected by default.\n\nWhy you'd want to: Quickly A/B your latest mix against an older version to hear if your changes actually improved the track.\n\nBest practice: Name exports with version suffixes (e.g. 'My Song v3.wav'). If a newer unversioned export has the same song name and changed contents, Producer Player can add the next v-number during rescan.`} /></h3>
+            {selectedSong && !selectedSongVersionHistoryLoaded ? (
+              <p
+                className="muted"
+                data-testid="inspector-version-history-loading"
+                role="status"
+              >
+                Loading this track&apos;s version history…
+              </p>
+            ) : null}
             <ul className="version-list">
               {inspectorVersions.map((version) => (
                 <li
@@ -27132,6 +27171,8 @@ export function App(): JSX.Element {
             {albumSongs.map((song) => {
               const isActive = song.id === selectedPlaybackSongId;
               const versionCount = song.versions.length;
+              const versionHistoryLoaded =
+                snapshot.versionHistoryLoadedSongIds.includes(song.id);
               const songPluginChain = pluginChainsBySongId[song.id];
               const songPluginDisplay = getTrackPluginDisplayModel(songPluginChain, pluginLibrary);
               return (
@@ -27156,7 +27197,9 @@ export function App(): JSX.Element {
                     />
                   </span>
                   <span className="quick-switcher-item-meta">
-                    {versionCount} {versionCount === 1 ? 'version' : 'versions'}
+                    {versionHistoryLoaded
+                      ? `${versionCount} ${versionCount === 1 ? 'version' : 'versions'}`
+                      : 'Versions load on select'}
                   </span>
                 </button>
               );

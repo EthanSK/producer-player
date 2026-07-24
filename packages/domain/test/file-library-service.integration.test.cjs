@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const nodeFs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -63,6 +64,113 @@ test('scanner indexes only intended top-level audio files and ignores nested ran
   }
 });
 
+test('startup exposes top-level tracks first and loads only the selected song history on demand', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-lazy-history-'
+  );
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Alpha v3.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:03.000Z'),
+      },
+      {
+        relativePath: 'Beta v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        relativePath: 'old/Alpha v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'old/Alpha v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        relativePath: 'old/Beta v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+    ]);
+
+    const originalStat = nodeFs.promises.stat;
+    const statPaths = [];
+    nodeFs.promises.stat = async (...args) => {
+      statPaths.push(String(args[0]));
+      return originalStat(...args);
+    };
+
+    try {
+      await withService({ autoMoveOld: false }, async (service) => {
+        const initialSnapshot = await service.linkFolder(fixtureDirectory);
+        const alpha = initialSnapshot.songs.find((song) => song.title === 'Alpha');
+        const beta = initialSnapshot.songs.find((song) => song.title === 'Beta');
+
+        assert(alpha);
+        assert(beta);
+        assert.deepEqual(initialSnapshot.versionHistoryLoadedSongIds, []);
+        assert.deepEqual(alpha.versions.map((version) => version.fileName), ['Alpha v3.wav']);
+        assert.deepEqual(beta.versions.map((version) => version.fileName), ['Beta v2.wav']);
+        assert.equal(
+          statPaths.some((filePath) => path.dirname(filePath) === path.join(fixtureDirectory, 'old')),
+          false,
+          'startup must not stat any archived version'
+        );
+
+        // Concurrent consumers (for example React StrictMode plus a quick
+        // selection return) share the service's one in-flight song load.
+        const [firstLoaded, secondLoaded] = await Promise.all([
+          service.loadSongVersionHistory(alpha.id),
+          service.loadSongVersionHistory(alpha.id),
+        ]);
+
+        for (const loadedSnapshot of [firstLoaded, secondLoaded]) {
+          const loadedAlpha = loadedSnapshot.songs.find((song) => song.id === alpha.id);
+          const stillColdBeta = loadedSnapshot.songs.find((song) => song.id === beta.id);
+
+          assert(loadedAlpha);
+          assert(stillColdBeta);
+          assert.deepEqual(
+            loadedAlpha.versions.map((version) => version.fileName),
+            ['Alpha v3.wav', 'Alpha v2.wav', 'Alpha v1.wav']
+          );
+          assert.deepEqual(
+            stillColdBeta.versions.map((version) => version.fileName),
+            ['Beta v2.wav']
+          );
+          assert.deepEqual(loadedSnapshot.versionHistoryLoadedSongIds, [alpha.id]);
+        }
+
+        const archivedStatsAfterAlpha = statPaths
+          .filter((filePath) => path.dirname(filePath) === path.join(fixtureDirectory, 'old'))
+          .map((filePath) => path.basename(filePath))
+          .sort();
+        assert.deepEqual(
+          archivedStatsAfterAlpha,
+          ['Alpha v1.wav', 'Alpha v2.wav'],
+          'selecting Alpha must stat its history exactly once and leave Beta cold'
+        );
+
+        const fullyLoaded = await service.loadSongVersionHistory(beta.id);
+        assert.deepEqual(
+          fullyLoaded.songs
+            .find((song) => song.id === beta.id)
+            ?.versions.map((version) => version.fileName),
+          ['Beta v2.wav', 'Beta v1.wav']
+        );
+        assert.deepEqual(
+          new Set(fullyLoaded.versionHistoryLoadedSongIds),
+          new Set([alpha.id, beta.id])
+        );
+      });
+    } finally {
+      nodeFs.promises.stat = originalStat;
+    }
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
 test('old/ version-history moves are deterministic and avoid timestamp-based archive names', async () => {
   const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-old-history-');
 
@@ -87,7 +195,10 @@ test('old/ version-history moves are deterministic and avoid timestamp-based arc
     ]);
 
     await withService({ autoMoveOld: true }, async (service) => {
-      const firstSnapshot = await service.linkFolder(fixtureDirectory);
+      const initialSnapshot = await service.linkFolder(fixtureDirectory);
+      const firstSnapshot = await service.loadSongVersionHistory(
+        initialSnapshot.songs[0].id
+      );
 
       assert.equal(firstSnapshot.songs.length, 1);
       assert.deepEqual(
@@ -98,7 +209,16 @@ test('old/ version-history moves are deterministic and avoid timestamp-based arc
 
       // Running organize again should be stable and not create new archive variants.
       await service.organizeOldVersions();
-      const rescanned = await service.rescanLibrary();
+      const coldRescan = await service.rescanLibrary();
+      assert.deepEqual(coldRescan.versionHistoryLoadedSongIds, []);
+      assert.deepEqual(
+        coldRescan.songs[0].versions.map((version) => version.fileName).sort(),
+        ['Leaky v1-archived-1.wav', 'Leaky v1.wav', 'Leaky-v3.wav', 'Leakyv2.wav'].sort(),
+        'a rescan keeps the last history visible while its loaded marker triggers revalidation'
+      );
+      const rescanned = await service.loadSongVersionHistory(
+        coldRescan.songs[0].id
+      );
 
       assert.equal(rescanned.songs.length, 1);
       assert.deepEqual(
@@ -141,7 +261,10 @@ test('auto-organize promotes the newest version out of old/ and archives the pre
     ]);
 
     await withService({ autoMoveOld: true }, async (service) => {
-      const firstSnapshot = await service.linkFolder(fixtureDirectory);
+      const initialSnapshot = await service.linkFolder(fixtureDirectory);
+      const firstSnapshot = await service.loadSongVersionHistory(
+        initialSnapshot.songs[0].id
+      );
 
       assert.equal(firstSnapshot.songs.length, 1);
       assert.equal(firstSnapshot.songs[0].versions[0].fileName, 'Pulse-v3.wav');
@@ -295,7 +418,10 @@ test('old-only tracks never become album songs, and old/ typos do not fuzzy-matc
     ]);
 
     await withService({ autoMoveOld: false }, async (service) => {
-      const snapshot = await service.linkFolder(fixtureDirectory);
+      const initialSnapshot = await service.linkFolder(fixtureDirectory);
+      const snapshot = await service.loadSongVersionHistory(
+        initialSnapshot.songs[0].id
+      );
 
       assert.deepEqual(snapshot.songs.map((song) => song.title), ['Bend The Knees']);
       assert.equal(snapshot.versions.length, 2);
@@ -515,7 +641,8 @@ test('promoting an audio file from old/ back to the top drags its sidecar with i
     ]);
 
     await withService({ autoMoveOld: true }, async (service) => {
-      await service.linkFolder(fixtureDirectory);
+      const initialSnapshot = await service.linkFolder(fixtureDirectory);
+      await service.loadSongVersionHistory(initialSnapshot.songs[0].id);
     });
 
     assert.deepEqual(await listRelativeFiles(fixtureDirectory), [

@@ -39,6 +39,10 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_LIBRARY_SNAPSHOT);
   },
 
+  async loadSongVersionHistory(songId: string) {
+    return ipcRenderer.invoke(IPC_CHANNELS.LOAD_SONG_VERSION_HISTORY, songId);
+  },
+
   async getEnvironment() {
     return ipcRenderer.invoke(IPC_CHANNELS.GET_ENVIRONMENT);
   },

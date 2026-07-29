@@ -1434,8 +1434,10 @@ interface RunMeasuredAnalysisOptions {
    * UI abort "nice to have" selected-track work when the user starts listening.
    */
   signal?: AbortSignal;
-  /** Fast first-pass data for the top-level LUFS badges, or full enrichment. */
-  scope?: 'loudness' | 'full';
+  /** Fast LUFS, enrichment-only follow-up, or the complete analysis. */
+  scope?: 'loudness' | 'enrichment' | 'full';
+  /** Existing first-pass data merged into an enrichment-only response. */
+  baseAnalysis?: AudioFileAnalysis;
   /** Lower the spawned ffmpeg/ffprobe priority for background-safe progress. */
   processPriority?: 'normal' | 'background';
 }
@@ -1548,7 +1550,7 @@ function runMeasuredAnalysis(
         // so a "background" LUFS read could compete with the audible file even
         // when no Spotify/platform gain was being previewed.
         throwIfAborted();
-        return await window.producerPlayer.analyzeAudioFile(
+        const measured = await window.producerPlayer.analyzeAudioFile(
           filePath,
           requestId,
           options.projectFilePath ?? null,
@@ -1557,6 +1559,25 @@ function runMeasuredAnalysis(
             processPriority: options.processPriority ?? 'normal',
           }
         );
+        if (options.scope !== 'enrichment' || !options.baseAnalysis) {
+          return measured;
+        }
+
+        // Merge before the shared queue promise resolves. Any concurrent
+        // consumer deduped onto this cache key must receive a complete result,
+        // never the enrichment-only null loudness placeholders.
+        return {
+          ...measured,
+          measuredWith: 'ffmpeg-ebur128-volumedetect' as const,
+          integratedLufs: options.baseAnalysis.integratedLufs,
+          loudnessRangeLufs: options.baseAnalysis.loudnessRangeLufs,
+          truePeakDbfs: options.baseAnalysis.truePeakDbfs,
+          maxMomentaryLufs: options.baseAnalysis.maxMomentaryLufs,
+          maxShortTermLufs: options.baseAnalysis.maxShortTermLufs,
+          sampleRateHz: measured.sampleRateHz ?? options.baseAnalysis.sampleRateHz,
+          durationSeconds:
+            options.baseAnalysis.durationSeconds ?? measured.durationSeconds,
+        };
       } finally {
         signal.removeEventListener('abort', handleAbort);
         options.signal?.removeEventListener('abort', handleAbort);
@@ -4069,6 +4090,11 @@ export function App(): JSX.Element {
   const masteringCacheBpmRefreshedVersionIdsRef = useRef<Set<string>>(new Set());
   const latestTrackWarmupKnownActiveVersionKeysRef = useRef<Map<string, string>>(new Map());
   const latestTrackWarmupDetectedVersionIdsRef = useRef<Set<string>>(new Set());
+  const latestTrackWarmupRetryAttemptsByVersionIdRef = useRef<Map<string, number>>(
+    new Map()
+  );
+  const [latestTrackWarmupRetryGeneration, setLatestTrackWarmupRetryGeneration] =
+    useState(0);
   // v3.259 — The selected-track effect deliberately waits before enqueueing its
   // own analysis jobs, so the latest-track warmup needs this separate timestamp
   // to know that playback is still settling even before USER_SELECTED queue work
@@ -4899,6 +4925,10 @@ export function App(): JSX.Element {
     }
   }, [checklistModalSongId, currentTimeSeconds]);
 
+  const selectedPlaybackMasteringCacheEntry = selectedPlaybackVersionId
+    ? masteringCacheByVersionId[selectedPlaybackVersionId]
+    : undefined;
+
   useEffect(() => {
     const selectedVersion =
       snapshot.versions.find((version) => version.id === selectedPlaybackVersionId) ?? null;
@@ -4931,6 +4961,11 @@ export function App(): JSX.Element {
 
     const cached = getCachedMasteringAnalysisForVersion(selectedVersion);
     const analysisCacheKey = cached.cacheKey;
+    const selectedCacheEntry =
+      masteringCacheByVersionIdRef.current[selectedVersion.id];
+    const needsSelectedMeasuredEnrichment =
+      cached.measuredAnalysis !== null &&
+      !isMasteringCacheEntryFullyEnriched(selectedCacheEntry, selectedVersion);
     const selectedPlaybackSourceUrl =
       mixPlaybackSourceSelectedFilePath === analysisFilePath
         ? mixPlaybackSource?.url ?? null
@@ -4976,7 +5011,7 @@ export function App(): JSX.Element {
         explicitAnalysisRequested: analysisExpanded,
       });
     const shouldDeferMeasuredAnalysis =
-      !cached.measuredAnalysis &&
+      (!cached.measuredAnalysis || needsSelectedMeasuredEnrichment) &&
       shouldDeferNonEssentialAnalysisDuringPlayback({
         ...analysisGateTransport,
         cachedAnalysisReady: false,
@@ -5120,7 +5155,10 @@ export function App(): JSX.Element {
         });
     }
 
-    if (!cached.measuredAnalysis && !shouldDeferMeasuredAnalysis) {
+    if (
+      (!cached.measuredAnalysis || needsSelectedMeasuredEnrichment) &&
+      !shouldDeferMeasuredAnalysis
+    ) {
       const measuredFilePath = analysisFilePath;
       const measuredKey = analysisCacheKey;
       const measuredLabel = selectedVersion.fileName;
@@ -5134,6 +5172,10 @@ export function App(): JSX.Element {
         projectFilePath: selectedVersionProjectFilePath,
         startDelayMs: selectedMeasuredJobDelayMs,
         signal: measuredAbortController.signal,
+        scope: needsSelectedMeasuredEnrichment ? 'enrichment' : 'full',
+        baseAnalysis: needsSelectedMeasuredEnrichment
+          ? cached.measuredAnalysis ?? undefined
+          : undefined,
       })
         .then((measuredResult) => {
           // Always populate the measured session cache and mastering entry,
@@ -5217,6 +5259,7 @@ export function App(): JSX.Element {
     normalizationPreviewEnabled,
     playbackPreviewMode,
     referenceLevelMatchEnabled,
+    selectedPlaybackMasteringCacheEntry,
     selectedPlaybackVersionId,
     songProjectFilePaths,
     snapshot.songs,
@@ -8576,82 +8619,29 @@ export function App(): JSX.Element {
   const selectedSongVersionHistoryLoaded =
     selectedSongId !== null &&
     snapshot.versionHistoryLoadedSongIds.includes(selectedSongId);
-  const visibleTopLevelLufsSettled = useMemo(
-    () =>
-      songs.every((song) => {
-        const version = getLatestSongVersion(song);
-        if (!version) {
-          return true;
-        }
-        return isLatestTrackLufsSettled({
-          cacheFresh: isMasteringCacheEntryFresh(
-            masteringCacheByVersionId[version.id],
-            version
-          ),
-          status: masteringCacheStatusByVersionId[version.id]?.status,
-        });
-      }),
-    [songs, masteringCacheByVersionId, masteringCacheStatusByVersionId]
-  );
 
   useEffect(() => {
-    if (
-      !selectedSongId ||
-      snapshot.versionHistoryLoadedSongIds.includes(selectedSongId)
-    ) {
+    if (!selectedSongId || selectedSongVersionHistoryLoaded) {
       return;
     }
 
-    let cancelled = false;
-    const visibleLatestVersions = songs
-      .map((song) => getLatestSongVersion(song))
-      .filter((version): version is SongVersion => version !== null);
-    const visibleTopLevelLufsSettled = (): boolean =>
-      visibleLatestVersions.every((version) =>
-        isLatestTrackLufsSettled({
-          cacheFresh: isMasteringCacheEntryFresh(
-            masteringCacheByVersionIdRef.current[version.id],
-            version
-          ),
-          status: masteringCacheStatusByVersionIdRef.current[version.id]?.status,
-        })
-      );
-
-    // v3.337 — The v3.336 lazy-history change removed old/ metadata from the
-    // initial filesystem scan, but immediately loaded the selected song's old/
-    // files while top-level LUFS was still warming. That let selected/history
-    // effects enqueue an archived file in parallel with the main rows. Hold the
-    // history read itself behind the visible top-level LUFS phase so old files
-    // cannot enter any renderer analysis path early.
-    void (async () => {
-      while (!cancelled && !visibleTopLevelLufsSettled()) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS);
-        });
+    // v3.338 — History structure is cheap filesystem metadata and must appear
+    // independently of measured audio analysis. The separate inspector effect
+    // below keeps archived LUFS/sample-rate work behind visible latest-track
+    // warmup; delaying this request only hides filenames, dates, and sizes.
+    void window.producerPlayer.loadSongVersionHistory(selectedSongId).catch(
+      (cause: unknown) => {
+        void window.producerPlayer.rendererLog(
+          'warn',
+          'Could not load selected song version history',
+          {
+            songId: selectedSongId,
+            error: cause instanceof Error ? cause.message : String(cause),
+          }
+        );
       }
-      if (cancelled) {
-        return;
-      }
-
-      await window.producerPlayer.loadSongVersionHistory(selectedSongId);
-    })().catch((cause: unknown) => {
-      if (cancelled) {
-        return;
-      }
-      void window.producerPlayer.rendererLog(
-        'warn',
-        'Could not load selected song version history',
-        {
-          songId: selectedSongId,
-          error: cause instanceof Error ? cause.message : String(cause),
-        }
-      );
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedSongId, snapshot.versionHistoryLoadedSongIds, songs]);
+    );
+  }, [selectedSongId, selectedSongVersionHistoryLoaded]);
 
   const inspectorVersions = useMemo(
     () => (selectedSong ? sortVersions(selectedSong.versions) : []),
@@ -8776,10 +8766,11 @@ export function App(): JSX.Element {
 
     // v3.140/v3.265/v3.282 — selected-song/version-history analysis is useful,
     // but it must not outrank what Ethan sees first on cold open: the main
-    // track list's LUFS badges. Version-history rows therefore wait until the
-    // visible latest-track warmup has either cached LUFS for every visible row
-    // or recorded an error, then enqueue at BACKGROUND priority. Clicking/cueing
-    // a version still promotes that file through the selected-track USER path.
+    // track list's LUFS badges. Version-history analysis therefore waits until
+    // the visible latest-track warmup has either cached LUFS for every visible
+    // row or recorded an error, then enqueues at BACKGROUND priority.
+    // Clicking/cueing a version still promotes that file through the selected-
+    // track USER path.
     void (async () => {
       await waitForVisibleMainListWarmup();
       if (cancelled) {
@@ -9007,6 +8998,10 @@ export function App(): JSX.Element {
                 label: `${version.fileName} — version history`,
                 projectFilePath,
                 signal,
+                scope: needsFullEnrichment ? 'enrichment' : 'full',
+                baseAnalysis: needsFullEnrichment
+                  ? cachedEntry?.measuredAnalysis
+                  : undefined,
               })
           );
           if (!measured) {
@@ -9398,6 +9393,8 @@ export function App(): JSX.Element {
     );
 
     let cancelled = false;
+    const interruptedWarmupVersionIds = new Set<string>();
+    let interruptedWarmupRetryTimer: number | null = null;
     const runId = latestTrackWarmupDebugRef.current.runId + 1;
     latestTrackWarmupDebugRef.current = {
       runId,
@@ -9694,7 +9691,13 @@ export function App(): JSX.Element {
             scope:
               isVisibleTopLevelEntry && !options.forceFullEnrichment
                 ? 'loudness'
+                : options.forceFullEnrichment && isFresh
+                  ? 'enrichment'
                 : 'full',
+            baseAnalysis:
+              options.forceFullEnrichment && isFresh
+                ? cachedEntry?.measuredAnalysis
+                : undefined,
             processPriority:
               isVisibleTopLevelEntry && !options.forceFullEnrichment
                 ? 'background'
@@ -9841,30 +9844,39 @@ export function App(): JSX.Element {
       }
 
       const finalEntry = masteringCacheByVersionIdRef.current[version.id];
+      const finalEntryFresh = isMasteringCacheEntryFresh(finalEntry, version);
+      const finalStatus = masteringCacheStatusByVersionIdRef.current[version.id]?.status;
       if (
         !cancelled &&
-        !isMasteringCacheEntryFresh(finalEntry, version) &&
-        masteringCacheStatusByVersionIdRef.current[version.id]?.status !== 'error'
+        !finalEntryFresh &&
+        finalStatus !== 'error'
       ) {
+        // Three queue interruptions are not a file-analysis error. Keep the
+        // current row visibly loading, keep archived analysis gated, and start
+        // a fresh bounded warmup generation after this runner unwinds.
+        interruptedWarmupVersionIds.add(version.id);
         setMasteringCacheStatusByVersionId((previous) => ({
           ...previous,
           [version.id]: {
-            status: 'error',
-            error: 'Analysis was interrupted. Select this track to retry.',
+            status: 'pending',
+            error: null,
           },
         }));
       }
 
-      if (options.updateDebug) {
-        markWarmupCompleted(version.id);
+      if (finalEntryFresh || finalStatus === 'error') {
+        latestTrackWarmupRetryAttemptsByVersionIdRef.current.delete(version.id);
+        if (options.updateDebug) {
+          markWarmupCompleted(version.id);
+        }
       }
     };
 
     // Phase 1 is the visible contract: one gentle ebur128-only pass per main
     // row, allowed during established playback. Phase 2 fills the rest of the
     // current-version details only while paused. Hidden-library latest tracks
-    // remain last and also wait for pause. Version-history loading observes the
-    // Phase-1 cache state directly, so it cannot jump this boundary.
+    // remain last and also wait for pause. Version-history analysis observes
+    // the Phase-1 cache state directly, so it cannot jump this boundary.
     const runPromise = latestTrackWarmupTailRef.current
       .catch(() => undefined)
       .then(async () => {
@@ -9900,6 +9912,30 @@ export function App(): JSX.Element {
         error: error instanceof Error ? error.message : String(error),
       });
     }).finally(() => {
+      if (!cancelled && interruptedWarmupVersionIds.size > 0) {
+        let retryDelayMs = 0;
+        for (const versionId of interruptedWarmupVersionIds) {
+          const previousAttempts =
+            latestTrackWarmupRetryAttemptsByVersionIdRef.current.get(versionId) ?? 0;
+          if (previousAttempts >= 3) {
+            continue;
+          }
+          const nextAttempts = previousAttempts + 1;
+          latestTrackWarmupRetryAttemptsByVersionIdRef.current.set(
+            versionId,
+            nextAttempts
+          );
+          retryDelayMs = Math.max(
+            retryDelayMs,
+            DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS * 4 * 2 ** (nextAttempts - 1)
+          );
+        }
+        if (retryDelayMs > 0) {
+          interruptedWarmupRetryTimer = window.setTimeout(() => {
+            setLatestTrackWarmupRetryGeneration((generation) => generation + 1);
+          }, retryDelayMs);
+        }
+      }
       const debug = latestTrackWarmupDebugRef.current;
       if (debug.runId === runId) {
         latestTrackWarmupDebugRef.current = {
@@ -9911,6 +9947,9 @@ export function App(): JSX.Element {
 
     return () => {
       cancelled = true;
+      if (interruptedWarmupRetryTimer !== null) {
+        window.clearTimeout(interruptedWarmupRetryTimer);
+      }
       const debug = latestTrackWarmupDebugRef.current;
       if (debug.runId === runId) {
         latestTrackWarmupDebugRef.current = {
@@ -9921,6 +9960,7 @@ export function App(): JSX.Element {
     };
   }, [
     masteringAnalysisCacheLoaded,
+    latestTrackWarmupRetryGeneration,
     libraryActiveVersionAnalysisKey,
     // v3.121 (Concern 3) — re-run when the visible-songs subset changes
     // so newly-visible rows are promoted to NEIGHBOR priority.
@@ -22415,15 +22455,15 @@ export function App(): JSX.Element {
 
           <section className="inspector-card">
             <h3>Version History <HelpTooltip text={`What this is: A timeline of every exported version of this song — each time you bounce/export from your DAW with a version number (e.g. v1, v2, v3), it shows up here.\n\nHow to use it: Click 'Cue' on any version to load it into the player. Click 'Open in ${fileManagerLabel(environment.platform)}' to locate the file on disk. The newest version is selected by default.\n\nWhy you'd want to: Quickly A/B your latest mix against an older version to hear if your changes actually improved the track.\n\nBest practice: Name exports with version suffixes (e.g. 'My Song v3.wav'). If a newer unversioned export has the same song name and changed contents, Producer Player can add the next v-number during rescan.`} /></h3>
-            {selectedSong && !selectedSongVersionHistoryLoaded ? (
+            {selectedSong &&
+            !selectedSongVersionHistoryLoaded &&
+            inspectorVersions.length <= 1 ? (
               <p
                 className="muted"
                 data-testid="inspector-version-history-loading"
                 role="status"
               >
-                {visibleTopLevelLufsSettled
-                  ? 'Loading this track\'s version history…'
-                  : 'Finishing latest-track LUFS before version history…'}
+                Loading this track's version history…
               </p>
             ) : null}
             <ul className="version-list">

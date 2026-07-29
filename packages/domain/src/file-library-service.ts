@@ -752,7 +752,7 @@ export class FileLibraryService {
   }
 
   private async loadSongVersionHistoryInternal(songId: string): Promise<LibrarySnapshot> {
-    while (true) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       if (this.versionHistoryLoadedSongIds.has(songId)) {
         return this.getSnapshot();
       }
@@ -796,6 +796,12 @@ export class FileLibraryService {
       });
       this.versionHistoryLoadedSongIds.add(songId);
 
+      // v3.338 — Emit the cheap structure lane as soon as readdir/stat has
+      // completed. Auto-organization can still finish before the IPC request
+      // resolves, but it must never hold filenames, dates, and sizes behind a
+      // potentially expensive all-folder organization pass.
+      this.rebuildSnapshot(this.snapshot.status, this.snapshot.statusMessage);
+
       if (this.matcherSettings.autoMoveOld) {
         const movedCount = await this.queueVersionOrganization();
         if (
@@ -803,9 +809,10 @@ export class FileLibraryService {
           !this.versionHistoryLoadedSongIds.has(songId) ||
           (this.folderScanRevisions.get(folder.id) ?? 0) !== scanRevision
         ) {
-          // Organizing invalidates the affected folder cache and advances its
-          // scan revision. Re-read just this selected song so callers receive
-          // the same complete history after any promotion/archive moves.
+          // Organizing invalidates the top-level cache and advances its scan
+          // revision. Re-read only this selected song so its visible action
+          // paths follow any moves without eagerly statting every other song's
+          // archived files in the folder.
           continue;
         }
       }
@@ -813,6 +820,12 @@ export class FileLibraryService {
       this.rebuildSnapshot(this.snapshot.status, this.snapshot.statusMessage);
       return this.getSnapshot();
     }
+
+    // A very busy watcher can invalidate each bounded attempt. Keep the last
+    // coherent snapshot and let the renderer retry on the next selection or
+    // version-history-loaded marker change instead of looping forever.
+    this.rebuildSnapshot(this.snapshot.status, this.snapshot.statusMessage);
+    return this.getSnapshot();
   }
 
   private clearVersionHistoryForFolder(

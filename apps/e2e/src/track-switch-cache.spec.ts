@@ -37,6 +37,7 @@ interface WarmupState {
   cacheKey: string;
   previewReady: boolean;
   measuredReady: boolean;
+  fullyEnriched: boolean;
 }
 
 interface QueueDump {
@@ -780,6 +781,19 @@ test.describe('Track-switch precompute cache @smoke', () => {
           fileNames: ['Alpha v1.wav', 'Bravo v1.wav', 'Charlie v2.wav'],
           allMeasuredReady: true,
         });
+
+      // Phase 1 makes LUFS visible first. Once paused, the selected track and
+      // remaining visible rows must also finish sample-peak/format enrichment
+      // without overwriting the already-ready LUFS values.
+      await expect
+        .poll(
+          async () =>
+            (await readVisibleWarmupState(page)).every(
+              (entry) => entry.fullyEnriched
+            ),
+          { timeout: 60_000, intervals: [250, 500, 1000] }
+        )
+        .toBe(true);
 
       await expectStartupQueuesDrained(page);
       await expectNoPersistentMasteringAnalysisCache(userDataDirectory);

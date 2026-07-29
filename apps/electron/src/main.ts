@@ -4116,58 +4116,77 @@ async function analyzeAudioFileInternal(
       ? ['-threads', '1', '-filter_threads', '1', '-filter_complex_threads', '1']
       : [];
 
-  const ebur128Result = await runProcessCapture(ffmpegCommand, [
-    '-hide_banner',
-    '-loglevel',
-    'verbose',
-    '-nostats',
-    ...backgroundThreadLimitArgs,
-    '-i',
-    resolvedPath,
-    '-filter_complex',
-    'ebur128=peak=true:framelog=verbose',
-    '-f',
-    'null',
-    '-',
-  ], { requestId, processPriority: options.processPriority });
-
-  const integratedMatches = Array.from(
-    ebur128Result.stderr.matchAll(/\bI:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LUFS/gi)
-  );
-  const lraMatches = Array.from(
-    ebur128Result.stderr.matchAll(/\bLRA:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LU/gi)
-  );
-  const truePeakMatch = ebur128Result.stderr.match(/True peak:[\s\S]*?Peak:\s*(-?\d+(?:\.\d+)?)\s+dBFS/);
-  const momentaryMatches = Array.from(
-    ebur128Result.stderr.matchAll(/\bM:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
-  )
-    .map((match) => parseMeasuredLevel(match[1]))
-    .filter((value): value is number => value !== null && value > -100);
-  const shortTermMatches = Array.from(
-    ebur128Result.stderr.matchAll(/\bS:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
-  )
-    .map((match) => parseMeasuredLevel(match[1]))
-    .filter((value): value is number => value !== null && value > -100);
-
-  const loudnessOnlyAnalysis: AudioFileAnalysis = {
+  let loudnessDiagnostics = '';
+  let loudnessOnlyAnalysis: AudioFileAnalysis = {
     filePath: resolvedPath,
     measuredWith: 'ffmpeg-ebur128',
-    integratedLufs: parseMeasuredLevel(
-      integratedMatches.length > 0 ? integratedMatches[integratedMatches.length - 1][1] : undefined
-    ),
-    loudnessRangeLufs: parseMeasuredLevel(
-      lraMatches.length > 0 ? lraMatches[lraMatches.length - 1][1] : undefined
-    ),
-    truePeakDbfs: parseMeasuredLevel(truePeakMatch?.[1]),
+    integratedLufs: null,
+    loudnessRangeLufs: null,
+    truePeakDbfs: null,
     samplePeakDbfs: null,
     meanVolumeDbfs: null,
-    maxMomentaryLufs:
-      momentaryMatches.length > 0 ? Math.max(...momentaryMatches) : null,
-    maxShortTermLufs:
-      shortTermMatches.length > 0 ? Math.max(...shortTermMatches) : null,
-    sampleRateHz: parseSampleRateHzFromDiagnostics(ebur128Result.stderr),
-    durationSeconds: parseDurationSecondsFromDiagnostics(ebur128Result.stderr),
+    maxMomentaryLufs: null,
+    maxShortTermLufs: null,
+    sampleRateHz: null,
+    durationSeconds: null,
   };
+
+  if (options.scope !== 'enrichment') {
+    const ebur128Result = await runProcessCapture(ffmpegCommand, [
+      '-hide_banner',
+      '-loglevel',
+      'verbose',
+      '-nostats',
+      ...backgroundThreadLimitArgs,
+      '-i',
+      resolvedPath,
+      '-filter_complex',
+      'ebur128=peak=true:framelog=verbose',
+      '-f',
+      'null',
+      '-',
+    ], { requestId, processPriority: options.processPriority });
+    loudnessDiagnostics = ebur128Result.stderr;
+
+    const integratedMatches = Array.from(
+      loudnessDiagnostics.matchAll(/\bI:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LUFS/gi)
+    );
+    const lraMatches = Array.from(
+      loudnessDiagnostics.matchAll(/\bLRA:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LU/gi)
+    );
+    const truePeakMatch = loudnessDiagnostics.match(
+      /True peak:[\s\S]*?Peak:\s*(-?\d+(?:\.\d+)?)\s+dBFS/
+    );
+    const momentaryMatches = Array.from(
+      loudnessDiagnostics.matchAll(/\bM:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
+    )
+      .map((match) => parseMeasuredLevel(match[1]))
+      .filter((value): value is number => value !== null && value > -100);
+    const shortTermMatches = Array.from(
+      loudnessDiagnostics.matchAll(/\bS:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
+    )
+      .map((match) => parseMeasuredLevel(match[1]))
+      .filter((value): value is number => value !== null && value > -100);
+
+    loudnessOnlyAnalysis = {
+      ...loudnessOnlyAnalysis,
+      integratedLufs: parseMeasuredLevel(
+        integratedMatches.length > 0
+          ? integratedMatches[integratedMatches.length - 1][1]
+          : undefined
+      ),
+      loudnessRangeLufs: parseMeasuredLevel(
+        lraMatches.length > 0 ? lraMatches[lraMatches.length - 1][1] : undefined
+      ),
+      truePeakDbfs: parseMeasuredLevel(truePeakMatch?.[1]),
+      maxMomentaryLufs:
+        momentaryMatches.length > 0 ? Math.max(...momentaryMatches) : null,
+      maxShortTermLufs:
+        shortTermMatches.length > 0 ? Math.max(...shortTermMatches) : null,
+      sampleRateHz: parseSampleRateHzFromDiagnostics(loudnessDiagnostics),
+      durationSeconds: parseDurationSecondsFromDiagnostics(loudnessDiagnostics),
+    };
+  }
 
   // Main-list rows need integrated LUFS/true peak, not a second full decode or
   // archive metadata. Return that first-pass result immediately; selected-track
@@ -4292,7 +4311,7 @@ async function analyzeAudioFileInternal(
 
   const sampleRateHz =
     probedAudioFormat?.sampleRateHz ??
-    parseSampleRateHzFromDiagnostics(ebur128Result.stderr) ??
+    parseSampleRateHzFromDiagnostics(loudnessDiagnostics) ??
     parseSampleRateHzFromDiagnostics(volumedetectResult.stderr);
 
   // v3.275 — Bit-depth resolution now goes through the deterministic
@@ -4371,19 +4390,13 @@ async function analyzeAudioFileInternal(
   return {
     filePath: resolvedPath,
     measuredWith: 'ffmpeg-ebur128-volumedetect',
-    integratedLufs: parseMeasuredLevel(
-      integratedMatches.length > 0 ? integratedMatches[integratedMatches.length - 1][1] : undefined
-    ),
-    loudnessRangeLufs: parseMeasuredLevel(
-      lraMatches.length > 0 ? lraMatches[lraMatches.length - 1][1] : undefined
-    ),
-    truePeakDbfs: parseMeasuredLevel(truePeakMatch?.[1]),
+    integratedLufs: loudnessOnlyAnalysis.integratedLufs,
+    loudnessRangeLufs: loudnessOnlyAnalysis.loudnessRangeLufs,
+    truePeakDbfs: loudnessOnlyAnalysis.truePeakDbfs,
     samplePeakDbfs: parseMeasuredLevel(samplePeakMatch?.[1]),
     meanVolumeDbfs: parseMeasuredLevel(meanVolumeMatch?.[1]),
-    maxMomentaryLufs:
-      momentaryMatches.length > 0 ? Math.max(...momentaryMatches) : null,
-    maxShortTermLufs:
-      shortTermMatches.length > 0 ? Math.max(...shortTermMatches) : null,
+    maxMomentaryLufs: loudnessOnlyAnalysis.maxMomentaryLufs,
+    maxShortTermLufs: loudnessOnlyAnalysis.maxShortTermLufs,
     sampleRateHz,
     durationSeconds: loudnessOnlyAnalysis.durationSeconds,
     // v3.269 — Bit depth + sample format surfaced for the Inspector
@@ -7098,7 +7111,10 @@ function registerIpcHandlers(service: FileLibraryService): void {
       options: AnalyzeAudioFileOptions = {}
     ) => {
       return analyzeAudioFile(filePath, requestId, projectFilePath, {
-        scope: options.scope === 'loudness' ? 'loudness' : 'full',
+        scope:
+          options.scope === 'loudness' || options.scope === 'enrichment'
+            ? options.scope
+            : 'full',
         processPriority: options.processPriority === 'background' ? 'background' : 'normal',
       });
     }

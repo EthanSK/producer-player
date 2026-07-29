@@ -171,6 +171,120 @@ test('startup exposes top-level tracks first and loads only the selected song hi
   }
 });
 
+test('selected history metadata emits before auto-organization finishes', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-history-before-organize-'
+  );
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Alpha v3.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:03.000Z'),
+      },
+      {
+        relativePath: 'old/Alpha v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+      {
+        relativePath: 'old/Alpha v4.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:04.000Z'),
+      },
+      {
+        relativePath: 'Beta v2.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:02.000Z'),
+      },
+      {
+        relativePath: 'old/Beta v1.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:01.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: false }, async (service) => {
+      const initialSnapshot = await service.linkFolder(fixtureDirectory);
+      const alpha = initialSnapshot.songs.find((song) => song.title === 'Alpha');
+      const beta = initialSnapshot.songs.find((song) => song.title === 'Beta');
+      assert(alpha);
+      assert(beta);
+
+      // Simulate a newer archived export arriving after startup. The history
+      // load will publish its metadata first, then auto-organization promotes
+      // it and refreshes every user-visible path.
+      service.matcherSettings = {
+        ...service.matcherSettings,
+        autoMoveOld: true,
+      };
+
+      let releaseOrganization = () => {};
+      service.versionOrganizationTail = new Promise((resolve) => {
+        releaseOrganization = resolve;
+      });
+
+      let resolveHistorySnapshot;
+      const historySnapshotEmitted = new Promise((resolve) => {
+        resolveHistorySnapshot = resolve;
+      });
+      const unsubscribe = service.subscribe((snapshot) => {
+        const emittedAlpha = snapshot.songs.find((song) => song.id === alpha.id);
+        if (
+          snapshot.versionHistoryLoadedSongIds.includes(alpha.id) &&
+          emittedAlpha?.versions.length === 3
+        ) {
+          resolveHistorySnapshot(snapshot);
+        }
+      });
+
+      const loadPromise = service.loadSongVersionHistory(alpha.id);
+
+      try {
+        const earlySnapshot = await Promise.race([
+          historySnapshotEmitted,
+          new Promise((resolve) => {
+            setTimeout(() => resolve(null), 1_000);
+          }),
+        ]);
+        assert(earlySnapshot, 'history metadata should emit before organization unblocks');
+        const earlyAlpha = earlySnapshot.songs.find((song) => song.id === alpha.id);
+        assert(earlyAlpha);
+        assert.deepEqual(
+          new Set(earlyAlpha.versions.map((version) => version.fileName)),
+          new Set(['Alpha v4.wav', 'Alpha v3.wav', 'Alpha v1.wav'])
+        );
+
+        let loadSettled = false;
+        void loadPromise.then(() => {
+          loadSettled = true;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(loadSettled, false, 'the organizer should still be blocked');
+      } finally {
+        releaseOrganization();
+        unsubscribe();
+        const organizedSnapshot = await loadPromise;
+        const organizedAlpha = organizedSnapshot.songs.find((song) => song.id === alpha.id);
+        assert(organizedAlpha);
+        assert.equal(organizedAlpha.versions[0].fileName, 'Alpha v4.wav');
+        assert(
+          organizedAlpha.versions.every((version) =>
+            nodeFs.existsSync(version.filePath)
+          ),
+          'every published row action path must exist after organization'
+        );
+        assert.deepEqual(organizedSnapshot.versionHistoryLoadedSongIds, [alpha.id]);
+        assert.deepEqual(
+          organizedSnapshot.songs
+            .find((song) => song.id === beta.id)
+            ?.versions.map((version) => version.fileName),
+          ['Beta v2.wav'],
+          'organizing Alpha must leave Beta history lazy'
+        );
+      }
+    });
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
 test('loading history never promotes a newer-mtime archived copy over the top-level export', async () => {
   const fixtureDirectory = await createTemporaryDirectory(
     'producer-player-domain-archive-mtime-'

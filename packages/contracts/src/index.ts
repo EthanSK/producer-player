@@ -82,10 +82,11 @@ export interface AudioFileAnalysis {
 export interface AnalyzeAudioFileOptions {
   /**
    * `loudness` stops after the first ebur128 pass so top-level LUFS can become
-   * usable before secondary version metadata. `full` also collects sample peak,
-   * bit depth, sample format, and BPM enrichment.
+   * usable before secondary version metadata. `enrichment` skips ebur128 and
+   * collects only the later sample-peak/format/BPM fields for merging with an
+   * existing loudness result. `full` collects both in one request.
    */
-  scope?: 'loudness' | 'full';
+  scope?: 'loudness' | 'enrichment' | 'full';
   /** Ask the main process to lower child-process priority for background work. */
   processPriority?: 'normal' | 'background';
 }

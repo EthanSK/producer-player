@@ -266,11 +266,11 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       'producer-player-bg-tasks-version-history-priority'
     );
 
-    // Alpha has old versions, so the Inspector's Version History has real work
-    // to do. Write Alpha last so its latest v3 file is the initially-selected
-    // row; Bravo/Charlie prove that the visible main-list LUFS pass still gets
-    // priority across all current track rows before those old Alpha versions
-    // start spending measured-analysis slots.
+    // Alpha has archived versions, so the Inspector must load their cheap row
+    // metadata immediately while leaving their measured analysis behind all
+    // visible latest rows.
+    const oldDirectory = path.join(directories.fixtureDirectory, 'old');
+    await fs.mkdir(oldDirectory, { recursive: true });
     await writeTestWav(
       path.join(directories.fixtureDirectory, 'Bravo Track v1.wav')
     );
@@ -278,10 +278,10 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       path.join(directories.fixtureDirectory, 'Charlie Track v1.wav')
     );
     await writeTestWav(
-      path.join(directories.fixtureDirectory, 'Alpha Track v1.wav')
+      path.join(oldDirectory, 'Alpha Track v1.wav')
     );
     await writeTestWav(
-      path.join(directories.fixtureDirectory, 'Alpha Track v2.wav')
+      path.join(oldDirectory, 'Alpha Track v2.wav')
     );
     await writeTestWav(
       path.join(directories.fixtureDirectory, 'Alpha Track v3.wav')
@@ -308,6 +308,30 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       await expect(page.getByTestId('main-list-row')).toHaveCount(3, {
         timeout: 15_000,
       });
+
+      await page
+        .getByTestId('main-list-row')
+        .filter({ hasText: 'Alpha Track' })
+        .click();
+
+      // The visible warmup is deliberately slow in this fixture. History row
+      // structure must still appear first; v3.337 incorrectly waited for all
+      // three 900 ms latest-track analyses and showed only the current row.
+      await expect(page.getByTestId('inspector-version-row')).toHaveCount(3, {
+        timeout: 1_500,
+      });
+      await expect(
+        page
+          .getByTestId('inspector-version-row')
+          .filter({ hasText: 'Alpha Track v1.wav' })
+          .getByTestId('inspector-version-integrated-lufs')
+      ).toHaveText('Integrated LUFS: —');
+      await expect(
+        page
+          .getByTestId('inspector-version-row')
+          .filter({ hasText: 'Alpha Track v2.wav' })
+          .getByTestId('inspector-version-integrated-lufs')
+      ).toHaveText('Integrated LUFS: —');
 
       await page.waitForFunction(
         () =>

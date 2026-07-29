@@ -1,5 +1,19 @@
 export const DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS = 25;
 
+export interface LatestTrackLufsReadiness {
+  cacheFresh: boolean;
+  status: 'stale' | 'missing' | 'pending' | 'fresh' | 'error' | undefined;
+}
+
+/**
+ * A top-level row is settled once its current file produced a cache result or
+ * a terminal error. A successful silent/unreadable-LUFS result is still settled
+ * and should render "No LUFS" instead of blocking version history forever.
+ */
+export function isLatestTrackLufsSettled(state: LatestTrackLufsReadiness): boolean {
+  return state.cacheFresh || state.status === 'error';
+}
+
 export interface RunSequentialLatestTrackWarmupOptions<TEntry> {
   entries: readonly TEntry[];
   isCancelled: () => boolean;

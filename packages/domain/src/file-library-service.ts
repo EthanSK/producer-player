@@ -1093,7 +1093,20 @@ export class FileLibraryService {
     let movedCount = 0;
 
     for (const song of songs) {
-      const newestVersion = song.versions[0];
+      // Version suffix is the primary chronology. A copied/touched old file can
+      // have the newest mtime without being the newest bounce (for example old
+      // v79 beside top-level v80); only a genuinely higher-numbered archived
+      // version should be promoted back out of old/.
+      const newestVersion = [...song.versions].sort((left, right) => {
+        const leftNumber = getVersionNumberFromStem(path.parse(left.fileName).name) ?? 0;
+        const rightNumber = getVersionNumberFromStem(path.parse(right.fileName).name) ?? 0;
+        if (leftNumber !== rightNumber) {
+          return rightNumber - leftNumber;
+        }
+        return (
+          new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime()
+        );
+      })[0];
       if (!newestVersion) {
         continue;
       }

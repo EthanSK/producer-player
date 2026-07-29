@@ -50,7 +50,7 @@ export interface PlaybackSourceInfo {
 
 export interface AudioFileAnalysis {
   filePath: string;
-  measuredWith: 'ffmpeg-ebur128-volumedetect';
+  measuredWith: 'ffmpeg-ebur128' | 'ffmpeg-ebur128-volumedetect';
   integratedLufs: number | null;
   loudnessRangeLufs: number | null;
   truePeakDbfs: number | null;
@@ -59,6 +59,8 @@ export interface AudioFileAnalysis {
   maxMomentaryLufs: number | null;
   maxShortTermLufs: number | null;
   sampleRateHz: number | null;
+  /** Duration parsed from ffmpeg's input diagnostics during the loudness pass. */
+  durationSeconds?: number | null;
   // v3.269 — Bit depth + sample format (Ethan voice 7201, 2026-05-29).
   // Bit depth tells producers whether a master is 16-bit (CD quality),
   // 24-bit (typical studio master), 32-bit float (high-headroom master),
@@ -75,6 +77,17 @@ export interface AudioFileAnalysis {
   // the probe ran and no supported metadata/project source advertised a usable
   // tempo.
   bpm?: number | null;
+}
+
+export interface AnalyzeAudioFileOptions {
+  /**
+   * `loudness` stops after the first ebur128 pass so top-level LUFS can become
+   * usable before secondary version metadata. `full` also collects sample peak,
+   * bit depth, sample format, and BPM enrichment.
+   */
+  scope?: 'loudness' | 'full';
+  /** Ask the main process to lower child-process priority for background work. */
+  processPriority?: 'normal' | 'background';
 }
 
 export interface AudioMetadataProbeResult {
@@ -1626,7 +1639,8 @@ export interface ProducerPlayerBridge {
   analyzeAudioFile(
     filePath: string,
     requestId?: string,
-    projectFilePath?: string | null
+    projectFilePath?: string | null,
+    options?: AnalyzeAudioFileOptions
   ): Promise<AudioFileAnalysis>;
   probeAudioMetadata(
     filePath: string,

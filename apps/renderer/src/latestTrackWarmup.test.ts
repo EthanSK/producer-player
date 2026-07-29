@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isLatestTrackLufsSettled,
   orderLatestTrackWarmupEntries,
   runSequentialLatestTrackWarmup,
 } from './latestTrackWarmup';
+
+describe('isLatestTrackLufsSettled', () => {
+  it('keeps history gated until the top-level row has a result', () => {
+    expect(isLatestTrackLufsSettled({ cacheFresh: false, status: 'missing' })).toBe(false);
+    expect(isLatestTrackLufsSettled({ cacheFresh: false, status: 'pending' })).toBe(false);
+  });
+
+  it('treats a cache result or terminal error as settled', () => {
+    expect(isLatestTrackLufsSettled({ cacheFresh: true, status: 'fresh' })).toBe(true);
+    expect(isLatestTrackLufsSettled({ cacheFresh: true, status: 'pending' })).toBe(true);
+    expect(isLatestTrackLufsSettled({ cacheFresh: false, status: 'error' })).toBe(true);
+  });
+});
 
 function deferred<T>(): {
   promise: Promise<T>;

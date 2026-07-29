@@ -56,6 +56,7 @@ async function migrateEncToKey(baseName: string): Promise<void> {
 }
 import type { OpenDialogOptions } from 'electron';
 import { createReadStream, existsSync, statSync, promises as fs, readFileSync } from 'node:fs';
+import { constants as osConstants, setPriority } from 'node:os';
 import { basename, dirname, extname, join, parse, relative, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import log from 'electron-log/main';
@@ -87,6 +88,7 @@ import type {
   AgentSendTurnPayload,
   AgentRespondApprovalPayload,
   AiRecommendation,
+  AnalyzeAudioFileOptions,
   AudioFileAnalysis,
   AudioMetadataProbeResult,
   AutoUpdateDowngradeResult,
@@ -3754,6 +3756,20 @@ function parseMeasuredLevel(value: string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseDurationSecondsFromDiagnostics(diagnostics: string): number | null {
+  const match = diagnostics.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i);
+  if (!match) {
+    return null;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const durationSeconds = hours * 3600 + minutes * 60 + seconds;
+  return Number.isFinite(durationSeconds) && durationSeconds > 0
+    ? durationSeconds
+    : null;
+}
+
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolvePromise) => {
     setTimeout(resolvePromise, milliseconds);
@@ -3896,7 +3912,7 @@ function cancelAnalysisRequest(requestId: string): void {
 async function runProcessCapture(
   command: string,
   args: string[],
-  options: { requestId?: string | null } = {}
+  options: { requestId?: string | null; processPriority?: 'normal' | 'background' } = {}
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolvePromise, rejectPromise) => {
     const requestId = options.requestId ?? null;
@@ -3913,6 +3929,18 @@ async function runProcessCapture(
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+
+    // Top-level LUFS is allowed to keep making gentle progress while music is
+    // playing. Lowering only those child processes protects the transport from
+    // the CPU contention that previously forced all analysis to stop outright.
+    if (options.processPriority === 'background' && child.pid !== undefined) {
+      try {
+        setPriority(child.pid, osConstants.priority.PRIORITY_BELOW_NORMAL);
+      } catch {
+        // Best effort across macOS/Windows/Linux. Failure only means the child
+        // keeps the platform default priority; analysis correctness is unchanged.
+      }
+    }
 
     registerAnalysisChild(requestId, child);
 
@@ -3968,10 +3996,11 @@ async function runProcessCapture(
 async function analyzeAudioFile(
   filePath: string,
   requestId: string | null = null,
-  projectFilePath: string | null = null
+  projectFilePath: string | null = null,
+  options: AnalyzeAudioFileOptions = {}
 ): Promise<AudioFileAnalysis> {
   try {
-    return await analyzeAudioFileInternal(filePath, requestId, projectFilePath);
+    return await analyzeAudioFileInternal(filePath, requestId, projectFilePath, options);
   } finally {
     // v3.200 — Always clear cancellation bookkeeping for this requestId
     // once the whole call has unwound, regardless of how it ended (success,
@@ -4060,7 +4089,8 @@ async function probeAudioMetadataInternal(
 async function analyzeAudioFileInternal(
   filePath: string,
   requestId: string | null,
-  projectFilePath: string | null
+  projectFilePath: string | null,
+  options: AnalyzeAudioFileOptions
 ): Promise<AudioFileAnalysis> {
   const resolvedPath = resolve(filePath);
   const stats = await fs.stat(resolvedPath);
@@ -4081,12 +4111,17 @@ async function analyzeAudioFileInternal(
 
   const ffmpegCommand = getBinaryCommandPath('ffmpeg');
   const ffprobeCommand = getBinaryCommandPath('ffprobe');
+  const backgroundThreadLimitArgs =
+    options.processPriority === 'background'
+      ? ['-threads', '1', '-filter_threads', '1', '-filter_complex_threads', '1']
+      : [];
 
   const ebur128Result = await runProcessCapture(ffmpegCommand, [
     '-hide_banner',
     '-loglevel',
     'verbose',
     '-nostats',
+    ...backgroundThreadLimitArgs,
     '-i',
     resolvedPath,
     '-filter_complex',
@@ -4094,7 +4129,52 @@ async function analyzeAudioFileInternal(
     '-f',
     'null',
     '-',
-  ], { requestId });
+  ], { requestId, processPriority: options.processPriority });
+
+  const integratedMatches = Array.from(
+    ebur128Result.stderr.matchAll(/\bI:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LUFS/gi)
+  );
+  const lraMatches = Array.from(
+    ebur128Result.stderr.matchAll(/\bLRA:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LU/gi)
+  );
+  const truePeakMatch = ebur128Result.stderr.match(/True peak:[\s\S]*?Peak:\s*(-?\d+(?:\.\d+)?)\s+dBFS/);
+  const momentaryMatches = Array.from(
+    ebur128Result.stderr.matchAll(/\bM:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
+  )
+    .map((match) => parseMeasuredLevel(match[1]))
+    .filter((value): value is number => value !== null && value > -100);
+  const shortTermMatches = Array.from(
+    ebur128Result.stderr.matchAll(/\bS:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
+  )
+    .map((match) => parseMeasuredLevel(match[1]))
+    .filter((value): value is number => value !== null && value > -100);
+
+  const loudnessOnlyAnalysis: AudioFileAnalysis = {
+    filePath: resolvedPath,
+    measuredWith: 'ffmpeg-ebur128',
+    integratedLufs: parseMeasuredLevel(
+      integratedMatches.length > 0 ? integratedMatches[integratedMatches.length - 1][1] : undefined
+    ),
+    loudnessRangeLufs: parseMeasuredLevel(
+      lraMatches.length > 0 ? lraMatches[lraMatches.length - 1][1] : undefined
+    ),
+    truePeakDbfs: parseMeasuredLevel(truePeakMatch?.[1]),
+    samplePeakDbfs: null,
+    meanVolumeDbfs: null,
+    maxMomentaryLufs:
+      momentaryMatches.length > 0 ? Math.max(...momentaryMatches) : null,
+    maxShortTermLufs:
+      shortTermMatches.length > 0 ? Math.max(...shortTermMatches) : null,
+    sampleRateHz: parseSampleRateHzFromDiagnostics(ebur128Result.stderr),
+    durationSeconds: parseDurationSecondsFromDiagnostics(ebur128Result.stderr),
+  };
+
+  // Main-list rows need integrated LUFS/true peak, not a second full decode or
+  // archive metadata. Return that first-pass result immediately; selected-track
+  // and version-history enrichment can fill the remaining fields later.
+  if (options.scope === 'loudness') {
+    return loudnessOnlyAnalysis;
+  }
 
   // v3.200 — Finding 3 fix: cancel may have arrived between ebur128 finishing
   // and the next pair of children spawning. Short-circuit so we don't waste
@@ -4133,7 +4213,7 @@ async function analyzeAudioFileInternal(
       '-f',
       'null',
       '-',
-    ], { requestId }),
+    ], { requestId, processPriority: options.processPriority }),
     (async () => {
       try {
         const probeResult = await runProcessCapture(ffprobeCommand, [
@@ -4146,7 +4226,7 @@ async function analyzeAudioFileInternal(
           '-of',
           'json',
           resolvedPath,
-        ], { requestId });
+        ], { requestId, processPriority: options.processPriority });
 
         const parsed = JSON.parse(probeResult.stdout) as {
           streams?: Array<{
@@ -4285,26 +4365,6 @@ async function analyzeAudioFileInternal(
     });
   }
 
-  const integratedMatches = Array.from(
-    ebur128Result.stderr.matchAll(/\bI:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LUFS/gi)
-  );
-  const lraMatches = Array.from(
-    ebur128Result.stderr.matchAll(/\bLRA:\s*(-?\d+(?:\.\d+)?|-?inf)\s+LU/gi)
-  );
-  const truePeakMatch = ebur128Result.stderr.match(/True peak:[\s\S]*?Peak:\s*(-?\d+(?:\.\d+)?)\s+dBFS/);
-
-  const momentaryMatches = Array.from(
-    ebur128Result.stderr.matchAll(/\bM:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
-  )
-    .map((match) => parseMeasuredLevel(match[1]))
-    .filter((value): value is number => value !== null && value > -100);
-
-  const shortTermMatches = Array.from(
-    ebur128Result.stderr.matchAll(/\bS:\s*(-?\d+(?:\.\d+)?|-?inf)/g)
-  )
-    .map((match) => parseMeasuredLevel(match[1]))
-    .filter((value): value is number => value !== null && value > -100);
-
   const meanVolumeMatch = volumedetectResult.stderr.match(/mean_volume:\s*(-?\d+(?:\.\d+)?)\s+dB/);
   const samplePeakMatch = volumedetectResult.stderr.match(/max_volume:\s*(-?\d+(?:\.\d+)?)\s+dB/);
 
@@ -4325,6 +4385,7 @@ async function analyzeAudioFileInternal(
     maxShortTermLufs:
       shortTermMatches.length > 0 ? Math.max(...shortTermMatches) : null,
     sampleRateHz,
+    durationSeconds: loudnessOnlyAnalysis.durationSeconds,
     // v3.269 — Bit depth + sample format surfaced for the Inspector
     // version-history row (Ethan voice 7201).
     bitDepth,
@@ -7033,9 +7094,13 @@ function registerIpcHandlers(service: FileLibraryService): void {
       _event,
       filePath: string,
       requestId: string | null = null,
-      projectFilePath: string | null = null
+      projectFilePath: string | null = null,
+      options: AnalyzeAudioFileOptions = {}
     ) => {
-      return analyzeAudioFile(filePath, requestId, projectFilePath);
+      return analyzeAudioFile(filePath, requestId, projectFilePath, {
+        scope: options.scope === 'loudness' ? 'loudness' : 'full',
+        processPriority: options.processPriority === 'background' ? 'background' : 'normal',
+      });
     }
   );
 

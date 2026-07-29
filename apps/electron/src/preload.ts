@@ -16,6 +16,7 @@ import {
   type AgentSendTurnPayload,
   type AgentStartSessionPayload,
   type AiRecommendation,
+  type AnalyzeAudioFileOptions,
   type AutoUpdateState,
   type AutoUpdateStateListener,
   type CustomScriptRunRequest,
@@ -143,12 +144,18 @@ const bridge: ProducerPlayerBridge = {
     return ipcRenderer.invoke(IPC_CHANNELS.RESOLVE_PLAYBACK_SOURCE, filePath);
   },
 
-  async analyzeAudioFile(filePath: string, requestId?: string, projectFilePath?: string | null) {
+  async analyzeAudioFile(
+    filePath: string,
+    requestId?: string,
+    projectFilePath?: string | null,
+    options?: AnalyzeAudioFileOptions
+  ) {
     return ipcRenderer.invoke(
       IPC_CHANNELS.ANALYZE_AUDIO_FILE,
       filePath,
       requestId ?? null,
-      projectFilePath ?? null
+      projectFilePath ?? null,
+      options ?? {}
     );
   },
 

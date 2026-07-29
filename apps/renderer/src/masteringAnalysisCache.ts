@@ -119,6 +119,21 @@ export function isMasteringCacheEntryFresh(
   return true;
 }
 
+/**
+ * Top-level rows may cache an ebur128-only first pass so their LUFS is ready
+ * before version-history enrichment. Inspector/detail consumers use this
+ * predicate when they specifically need the second volumedetect/ffprobe pass.
+ */
+export function isMasteringCacheEntryFullyEnriched(
+  entry: MasteringCacheEntry | undefined,
+  version: SongVersion
+): boolean {
+  return (
+    isMasteringCacheEntryFresh(entry, version) &&
+    entry?.measuredAnalysis?.measuredWith === 'ffmpeg-ebur128-volumedetect'
+  );
+}
+
 // v3.272 — Companion predicate that tells the renderer "the cached entry
 // is fresh enough to show, BUT it's missing a bit-depth that we'd expect
 // for this source type, so kick off a background re-analysis to fill it

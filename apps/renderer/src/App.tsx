@@ -89,6 +89,7 @@ import {
   MASTERING_SESSION_CACHE_DISCLOSURE_REMINDER,
   buildMasteringCacheKey,
   isMasteringCacheEntryFresh,
+  isMasteringCacheEntryFullyEnriched,
   // v3.272 — Separate predicate that says "the entry is fresh enough to
   // read, but bit-depth is missing on a lossless source so a background
   // re-analysis should fill it in". Decoupled from isMasteringCacheEntryFresh
@@ -100,6 +101,7 @@ import {
 } from './masteringAnalysisCache';
 import {
   DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS,
+  isLatestTrackLufsSettled,
   orderLatestTrackWarmupEntries,
   runSequentialLatestTrackWarmup,
 } from './latestTrackWarmup';
@@ -1432,6 +1434,10 @@ interface RunMeasuredAnalysisOptions {
    * UI abort "nice to have" selected-track work when the user starts listening.
    */
   signal?: AbortSignal;
+  /** Fast first-pass data for the top-level LUFS badges, or full enrichment. */
+  scope?: 'loudness' | 'full';
+  /** Lower the spawned ffmpeg/ffprobe priority for background-safe progress. */
+  processPriority?: 'normal' | 'background';
 }
 
 function getFileNameFromPath(filePath: string): string {
@@ -1545,7 +1551,11 @@ function runMeasuredAnalysis(
         return await window.producerPlayer.analyzeAudioFile(
           filePath,
           requestId,
-          options.projectFilePath ?? null
+          options.projectFilePath ?? null,
+          {
+            scope: options.scope ?? 'full',
+            processPriority: options.processPriority ?? 'normal',
+          }
         );
       } finally {
         signal.removeEventListener('abort', handleAbort);
@@ -2156,14 +2166,25 @@ function arraysEqual(left: string[], right: string[]): boolean {
 }
 
 function getLatestSongVersion(song: SongWithVersions): SongVersion | null {
-  return sortVersions(song.versions)[0] ?? null;
+  const topLevelVersions = song.versions.filter(
+    (version) => !/(?:^|[\\/])old(?:[\\/]|$)/i.test(version.filePath)
+  );
+  const candidates = topLevelVersions.length > 0 ? topLevelVersions : song.versions;
+  return [...candidates].sort((left, right) => {
+    const leftVersion = getVersionNumberFromFileName(left.fileName) ?? 0;
+    const rightVersion = getVersionNumberFromFileName(right.fileName) ?? 0;
+    if (leftVersion !== rightVersion) {
+      return rightVersion - leftVersion;
+    }
+    return new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime();
+  })[0] ?? null;
 }
 
 function getActiveSongVersion(song: SongWithVersions): SongVersion | null {
   // The scanner writes activeVersionId as the newest export, but older/imported
   // snapshots can carry a stale pointer. Renderer-facing "active" semantics
-  // must follow the latest sorted version so main-list rows, playback defaults,
-  // and startup warmup never target an older bounce when a newer one exists.
+  // must follow the latest top-level export so loading old/ history cannot make
+  // an archive copy with a newer mtime replace the main row/playback default.
   return getLatestSongVersion(song);
 }
 
@@ -4684,6 +4705,17 @@ export function App(): JSX.Element {
       setMasteringCacheDirectoryPath(null);
       setMasteringCacheFilePath(null);
       setMasteringCacheUpdatedAt(entry.analyzedAt);
+      if (
+        entry.durationSeconds !== null &&
+        Number.isFinite(entry.durationSeconds) &&
+        entry.durationSeconds > 0
+      ) {
+        setResolvedAlbumDurationSecondsByVersionId((previous) =>
+          previous[entry.versionId] === entry.durationSeconds
+            ? previous
+            : { ...previous, [entry.versionId]: entry.durationSeconds as number }
+        );
+      }
       setMasteringCacheStatusByVersionId((previous) => ({
         ...previous,
         [entry.versionId]: { status: 'fresh', error: null },
@@ -4712,7 +4744,9 @@ export function App(): JSX.Element {
         filePath: version.filePath,
         fileName: version.fileName,
         extension: version.extension,
-        durationSeconds: version.durationMs === null ? null : version.durationMs / 1000,
+        durationSeconds:
+          measured.durationSeconds ??
+          (version.durationMs === null ? null : version.durationMs / 1000),
         fileSizeBytes: version.sizeBytes,
         fileModifiedAtMs: parseVersionModifiedAtMs(version),
         measuredAnalysis: measured,
@@ -7751,9 +7785,14 @@ export function App(): JSX.Element {
   }
 
   async function waitForNonEssentialAnalysisWindow(
-    isCancelled: () => boolean
+    isCancelled: () => boolean,
+    options: { allowDuringPlayback?: boolean } = {}
   ): Promise<boolean> {
-    while (!isCancelled() && isAudiblePlaybackActiveForAnalysis()) {
+    const isBlocked = (): boolean =>
+      Date.now() < playbackBackgroundWarmupPausedUntilRef.current ||
+      (!options.allowDuringPlayback && isAudiblePlaybackActiveForAnalysis());
+
+    while (!isCancelled() && isBlocked()) {
       await new Promise<void>((resolve) => {
         window.setTimeout(resolve, PLAYBACK_DEFERRED_METADATA_PROBE_POLL_MS);
       });
@@ -7762,13 +7801,18 @@ export function App(): JSX.Element {
     return !isCancelled();
   }
 
-  function watchPlaybackForNonEssentialAnalysis(): {
+  function watchPlaybackForNonEssentialAnalysis(
+    options: { allowDuringPlayback?: boolean } = {}
+  ): {
     signal: AbortSignal;
     stop: () => void;
   } {
     const controller = new AbortController();
     const abortIfPlaybackStarts = (): void => {
-      if (isAudiblePlaybackActiveForAnalysis() && !controller.signal.aborted) {
+      const playbackBlocksAnalysis =
+        Date.now() < playbackBackgroundWarmupPausedUntilRef.current ||
+        (!options.allowDuringPlayback && isAudiblePlaybackActiveForAnalysis());
+      if (playbackBlocksAnalysis && !controller.signal.aborted) {
         controller.abort();
       }
     };
@@ -7789,15 +7833,19 @@ export function App(): JSX.Element {
 
   async function runNonEssentialAudioAnalysisWhenIdle<T>(
     isCancelled: () => boolean,
-    run: (signal: AbortSignal) => Promise<T>
+    run: (signal: AbortSignal) => Promise<T>,
+    options: { allowDuringPlayback?: boolean } = {}
   ): Promise<T | null> {
     for (;;) {
-      const idleWindowAvailable = await waitForNonEssentialAnalysisWindow(isCancelled);
+      const idleWindowAvailable = await waitForNonEssentialAnalysisWindow(
+        isCancelled,
+        options
+      );
       if (!idleWindowAvailable) {
         return null;
       }
 
-      const playbackWatch = watchPlaybackForNonEssentialAnalysis();
+      const playbackWatch = watchPlaybackForNonEssentialAnalysis(options);
       try {
         return await run(playbackWatch.signal);
       } catch (error) {
@@ -8528,6 +8576,23 @@ export function App(): JSX.Element {
   const selectedSongVersionHistoryLoaded =
     selectedSongId !== null &&
     snapshot.versionHistoryLoadedSongIds.includes(selectedSongId);
+  const visibleTopLevelLufsSettled = useMemo(
+    () =>
+      songs.every((song) => {
+        const version = getLatestSongVersion(song);
+        if (!version) {
+          return true;
+        }
+        return isLatestTrackLufsSettled({
+          cacheFresh: isMasteringCacheEntryFresh(
+            masteringCacheByVersionId[version.id],
+            version
+          ),
+          status: masteringCacheStatusByVersionId[version.id]?.status,
+        });
+      }),
+    [songs, masteringCacheByVersionId, masteringCacheStatusByVersionId]
+  );
 
   useEffect(() => {
     if (
@@ -8537,13 +8602,42 @@ export function App(): JSX.Element {
       return;
     }
 
-    // Version history is deliberately absent from the initial library
-    // snapshot. Ask for it only after selection; the main-process service
-    // caches and dedupes by song id. This effect never applies the returned
-    // snapshot directly, so a slow request for song A cannot roll selection
-    // back after the user has already moved to song B. Snapshot broadcasts
-    // merge whichever history completed into the library-wide cache instead.
-    void window.producerPlayer.loadSongVersionHistory(selectedSongId).catch((cause: unknown) => {
+    let cancelled = false;
+    const visibleLatestVersions = songs
+      .map((song) => getLatestSongVersion(song))
+      .filter((version): version is SongVersion => version !== null);
+    const visibleTopLevelLufsSettled = (): boolean =>
+      visibleLatestVersions.every((version) =>
+        isLatestTrackLufsSettled({
+          cacheFresh: isMasteringCacheEntryFresh(
+            masteringCacheByVersionIdRef.current[version.id],
+            version
+          ),
+          status: masteringCacheStatusByVersionIdRef.current[version.id]?.status,
+        })
+      );
+
+    // v3.337 — The v3.336 lazy-history change removed old/ metadata from the
+    // initial filesystem scan, but immediately loaded the selected song's old/
+    // files while top-level LUFS was still warming. That let selected/history
+    // effects enqueue an archived file in parallel with the main rows. Hold the
+    // history read itself behind the visible top-level LUFS phase so old files
+    // cannot enter any renderer analysis path early.
+    void (async () => {
+      while (!cancelled && !visibleTopLevelLufsSettled()) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS);
+        });
+      }
+      if (cancelled) {
+        return;
+      }
+
+      await window.producerPlayer.loadSongVersionHistory(selectedSongId);
+    })().catch((cause: unknown) => {
+      if (cancelled) {
+        return;
+      }
       void window.producerPlayer.rendererLog(
         'warn',
         'Could not load selected song version history',
@@ -8553,7 +8647,11 @@ export function App(): JSX.Element {
         }
       );
     });
-  }, [selectedSongId, snapshot.versionHistoryLoadedSongIds]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSongId, snapshot.versionHistoryLoadedSongIds, songs]);
 
   const inspectorVersions = useMemo(
     () => (selectedSong ? sortVersions(selectedSong.versions) : []),
@@ -8662,12 +8760,11 @@ export function App(): JSX.Element {
       const visibleMainListStillNeedsLufs = (): boolean =>
         visibleLatestVersions.some((version) => {
           const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
-          if (isMasteringCacheEntryFresh(cachedEntry, version)) {
-            return false;
-          }
-
           const statusState = masteringCacheStatusByVersionIdRef.current[version.id];
-          return statusState?.status !== 'error';
+          return !isLatestTrackLufsSettled({
+            cacheFresh: isMasteringCacheEntryFresh(cachedEntry, version),
+            status: statusState?.status,
+          });
         });
 
       while (!cancelled && visibleMainListStillNeedsLufs()) {
@@ -8710,13 +8807,16 @@ export function App(): JSX.Element {
         // already returned bitDepth=null for this version once, don't
         // re-dispatch indefinitely.
         const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
+        const needsFullEnrichment =
+          isFresh && !isMasteringCacheEntryFullyEnriched(cachedEntry, version);
         const isMissingBitDepth =
           !masteringCacheBitDepthRefreshedVersionIdsRef.current.has(version.id) &&
           isMasteringCacheEntryMissingBitDepth(cachedEntry, version);
         const isMissingBpm =
           !masteringCacheBpmRefreshedVersionIdsRef.current.has(version.id) &&
           isMasteringCacheEntryMissingBpm(cachedEntry, version, projectFilePath);
-        const needsMetadataRefresh = isMissingBitDepth || isMissingBpm;
+        const needsMetadataRefresh =
+          needsFullEnrichment || isMissingBitDepth || isMissingBpm;
         if (isFresh && !needsMetadataRefresh) {
           return;
         }
@@ -8821,7 +8921,13 @@ export function App(): JSX.Element {
         // in `finally`, which blocked retries after an abort.
         let probeYieldedResult = false;
         try {
-          if (isFresh && isMissingBpm && !isMissingBitDepth && cachedEntry) {
+          if (
+            isFresh &&
+            !needsFullEnrichment &&
+            isMissingBpm &&
+            !isMissingBitDepth &&
+            cachedEntry
+          ) {
             // BUGFIX 2026-06-28 ("cafe lool" stuck processing / inspector
             // unloading loop): claim the once-per-session BPM-refresh slot
             // for this version *before* we await the probe.
@@ -8999,7 +9105,7 @@ export function App(): JSX.Element {
             if (!isFresh) resetLoadingRowToIdle();
             return;
           }
-          if (isFresh && isMissingBpm && !isMissingBitDepth) {
+          if (isFresh && !needsFullEnrichment && isMissingBpm && !isMissingBitDepth) {
             // BPM-only refresh is intentionally silent: the existing LUFS /
             // sample-rate cache entry is still valid, so a transient ffprobe
             // metadata failure should not turn the row into "Unavailable".
@@ -9155,6 +9261,10 @@ export function App(): JSX.Element {
         .join('|'),
     [visibleActiveVersions]
   );
+  const libraryActiveVersionsRef = useRef(libraryActiveVersions);
+  const visibleActiveVersionsRef = useRef(visibleActiveVersions);
+  libraryActiveVersionsRef.current = libraryActiveVersions;
+  visibleActiveVersionsRef.current = visibleActiveVersions;
   const handleCopyNextVersionExportFileName = useCallback(
     (
       event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
@@ -9275,9 +9385,17 @@ export function App(): JSX.Element {
       return;
     }
 
-    if (libraryActiveVersions.length === 0 && visibleActiveVersions.length === 0) {
+    const currentLibraryActiveVersions = libraryActiveVersionsRef.current;
+    const currentVisibleActiveVersions = visibleActiveVersionsRef.current;
+    if (
+      currentLibraryActiveVersions.length === 0 &&
+      currentVisibleActiveVersions.length === 0
+    ) {
       return;
     }
+    const visibleTopLevelVersionIds = new Set(
+      currentVisibleActiveVersions.map(({ version }) => version.id)
+    );
 
     let cancelled = false;
     const runId = latestTrackWarmupDebugRef.current.runId + 1;
@@ -9314,7 +9432,7 @@ export function App(): JSX.Element {
     const previousActiveVersionKeys = latestTrackWarmupKnownActiveVersionKeysRef.current;
     const nextActiveVersionKeys = new Map<string, string>();
 
-    for (const { version } of libraryActiveVersions) {
+    for (const { version } of currentLibraryActiveVersions) {
       nextActiveVersionKeys.set(version.id, buildMasteringCacheKey(version));
     }
 
@@ -9340,8 +9458,8 @@ export function App(): JSX.Element {
     latestTrackWarmupKnownActiveVersionKeysRef.current = nextActiveVersionKeys;
 
     const orderedPreloadEntries = orderLatestTrackWarmupEntries({
-      visibleEntries: visibleActiveVersions,
-      libraryEntries: libraryActiveVersions,
+      visibleEntries: currentVisibleActiveVersions,
+      libraryEntries: currentLibraryActiveVersions,
       getVersionId: ({ version }) => version.id,
       detectedVersionIds: latestTrackWarmupDetectedVersionIdsRef.current,
     });
@@ -9379,7 +9497,7 @@ export function App(): JSX.Element {
       };
     };
 
-    const hasUrgentAnalysisWork = (_entry: (typeof orderedPreloadEntries)[number]): boolean => {
+    const hasUrgentAnalysisWork = (entry: (typeof orderedPreloadEntries)[number]): boolean => {
       const measured = MEASURED_ANALYSIS_QUEUE.dump();
 
       // v3.259 — The selected-track jobs are intentionally delayed so they do
@@ -9392,13 +9510,14 @@ export function App(): JSX.Element {
       // warmup. Preview decode is graph/UI work; letting it pause LUFS/stat
       // warmup would reintroduce the exact coupling Ethan rejected.
       //
-      // v3.317 — Also pause *all* latest-track warmup while audible playback
-      // is active. These jobs are useful cache fills, not something the player
-      // must do to sound correct. Letting them start mid-listen was exactly the
-      // "analysis jobs loaded in and I hear a crackle" failure mode.
+      // v3.337 — Visible top-level LUFS is user-facing readiness, so it may keep
+      // making one low-priority ebur128-only pass at a time during established
+      // playback. Hidden-library and enrichment work still wait for pause, and
+      // every lane still respects the protected playback-settle window.
       //
       return (
-        isAudiblePlaybackActiveForAnalysis() ||
+        (isAudiblePlaybackActiveForAnalysis() &&
+          !visibleTopLevelVersionIds.has(entry.version.id)) ||
         playbackSettling ||
         measured.activeByPriority.user > 0 ||
         measured.userBypassActive > 0 ||
@@ -9423,12 +9542,26 @@ export function App(): JSX.Element {
 
     async function warmMeasuredAnalysis(
       entry: (typeof orderedPreloadEntries)[number],
-      cacheKey: string
+      cacheKey: string,
+      options: { forceFullEnrichment?: boolean } = {}
     ): Promise<void> {
       const { song, version } = entry;
       const projectFilePath = songProjectFilePaths[song.id] ?? null;
       const cachedEntry = masteringCacheByVersionIdRef.current[version.id];
       const isFresh = isMasteringCacheEntryFresh(cachedEntry, version);
+      const needsFullEnrichment =
+        isFresh && !isMasteringCacheEntryFullyEnriched(cachedEntry, version);
+      const resetPendingRowToIdle = (): void => {
+        setMasteringCacheStatusByVersionId((previous) => {
+          if (previous[version.id]?.status !== 'pending') {
+            return previous;
+          }
+          return {
+            ...previous,
+            [version.id]: { status: 'missing', error: null },
+          };
+        });
+      };
       // v3.272 — Even if the entry is fresh, we may want to refresh it in
       // the background to fill in a missing bit-depth on a lossless
       // source. Mark the row 'fresh' immediately (the LUFS column shows
@@ -9448,22 +9581,32 @@ export function App(): JSX.Element {
         isFresh &&
         !masteringCacheBpmRefreshedVersionIdsRef.current.has(version.id) &&
         isMasteringCacheEntryMissingBpm(cachedEntry, version, projectFilePath);
-      const needsMetadataRefresh = isMissingBitDepth || isMissingBpm;
+      const needsMetadataRefresh =
+        needsFullEnrichment || isMissingBitDepth || isMissingBpm;
+      const isVisibleTopLevelEntry = visibleTopLevelVersionIds.has(version.id);
 
       if (isFresh) {
         latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
         if (!cancelled) {
-          setMasteringCacheStatusByVersionId((previous) => ({
-            ...previous,
-            [version.id]: { status: 'fresh', error: null },
-          }));
+          setMasteringCacheStatusByVersionId((previous) =>
+            previous[version.id]?.status === 'fresh' &&
+            previous[version.id]?.error === null
+              ? previous
+              : {
+                  ...previous,
+                  [version.id]: { status: 'fresh', error: null },
+                }
+          );
         }
         // Only return early when we have NO reason to re-analyse. If
         // bit-depth is missing, fall through to the re-analysis path —
         // the status stays 'fresh' (LUFS keeps showing) and the upsert
         // at the end will overwrite the entry with the bit-depth-filled
         // version.
-        if (!needsMetadataRefresh) {
+        if (
+          !needsMetadataRefresh ||
+          (isVisibleTopLevelEntry && !options.forceFullEnrichment)
+        ) {
           return;
         }
       }
@@ -9479,13 +9622,18 @@ export function App(): JSX.Element {
         // metadata-only background refreshes (bit depth or linked-project
         // BPM), leave the status at 'fresh' so the row stays calm while the
         // enrichment probe runs.
-        setMasteringCacheStatusByVersionId((previous) => ({
-          ...previous,
-          [version.id]: {
-            status: 'pending',
-            error: null,
-          },
-        }));
+        setMasteringCacheStatusByVersionId((previous) =>
+          previous[version.id]?.status === 'pending' &&
+          previous[version.id]?.error === null
+            ? previous
+            : {
+                ...previous,
+                [version.id]: {
+                  status: 'pending',
+                  error: null,
+                },
+              }
+        );
       }
 
       // v3.273 — Only mark the bit-depth-refresh as "tried" when the probe
@@ -9496,7 +9644,13 @@ export function App(): JSX.Element {
       // because `finally` always runs even on early `return`.
       let probeYieldedResult = false;
       try {
-        if (isFresh && isMissingBpm && !isMissingBitDepth && cachedEntry) {
+        if (
+          isFresh &&
+          !needsFullEnrichment &&
+          isMissingBpm &&
+          !isMissingBitDepth &&
+          cachedEntry
+        ) {
           // BUGFIX 2026-06-28 — same unbounded-redispatch loop as the inspector
           // dispatch above (see the long comment there). Claim the once-per-
           // session BPM-refresh slot BEFORE awaiting the probe so a cancelled
@@ -9537,13 +9691,22 @@ export function App(): JSX.Element {
             label: `${song.title} — ${version.fileName}`,
             projectFilePath,
             signal,
+            scope:
+              isVisibleTopLevelEntry && !options.forceFullEnrichment
+                ? 'loudness'
+                : 'full',
+            processPriority:
+              isVisibleTopLevelEntry && !options.forceFullEnrichment
+                ? 'background'
+                : 'normal',
           });
-        // Even a newly detected export is secondary once the transport is
-        // audible. Its row may say Loading until pause; it must never launch
-        // ffmpeg in the middle of album playback.
         const measured = await runNonEssentialAudioAnalysisWhenIdle(
           () => cancelled,
-          (signal) => runWarmupMeasuredAnalysis(signal)
+          (signal) => runWarmupMeasuredAnalysis(signal),
+          {
+            allowDuringPlayback:
+              isVisibleTopLevelEntry && !options.forceFullEnrichment,
+          }
         );
         if (!measured) {
           return;
@@ -9574,7 +9737,7 @@ export function App(): JSX.Element {
           // another shot at the bit-depth refresh.
           return;
         }
-        if (isFresh && isMissingBpm && !isMissingBitDepth) {
+        if (isFresh && !needsFullEnrichment && isMissingBpm && !isMissingBitDepth) {
           // BPM-only probes should never poison the visible LUFS status. The
           // cached mastering entry is still fresh; this just means we failed
           // to enrich it with an optional embedded tempo tag this session.
@@ -9609,6 +9772,9 @@ export function App(): JSX.Element {
       } finally {
         masteringCachePendingVersionIdsRef.current.delete(version.id);
         latestTrackWarmupDetectedVersionIdsRef.current.delete(version.id);
+        if (!probeYieldedResult && !isFresh) {
+          resetPendingRowToIdle();
+        }
         // v3.272 + v3.273 — Mark bit-depth-refreshed ONLY when the probe
         // yielded a definitive result (success or genuine error). Aborts
         // get retried by the queue and must NOT be marked, otherwise the
@@ -9625,35 +9791,109 @@ export function App(): JSX.Element {
       }
     }
 
-    // Measured processing is sequential at the top level. That keeps startup
-    // gentle and avoids a many-at-once ffmpeg burst while preserving the LUFS /
-    // normalization readiness invariant once the warmup drains. Preview decode
-    // remains user-selected/lazy because it is only needed for graphs.
+    const visiblePreloadEntries = orderedPreloadEntries.filter(({ version }) =>
+      visibleTopLevelVersionIds.has(version.id)
+    );
+    const hiddenPreloadEntries = orderedPreloadEntries.filter(
+      ({ version }) => !visibleTopLevelVersionIds.has(version.id)
+    );
+    const hasUrgentFullAnalysisWork = (
+      _entry: (typeof orderedPreloadEntries)[number]
+    ): boolean => {
+      const measured = MEASURED_ANALYSIS_QUEUE.dump();
+      return (
+        isAudiblePlaybackActiveForAnalysis() ||
+        Date.now() < playbackBackgroundWarmupPausedUntilRef.current ||
+        measured.activeByPriority.user > 0 ||
+        measured.userBypassActive > 0 ||
+        measured.pendingByPriority.user > 0
+      );
+    };
+    const processWarmupEntry = async (
+      entry: (typeof orderedPreloadEntries)[number],
+      options: { forceFullEnrichment?: boolean; updateDebug?: boolean } = {}
+    ): Promise<void> => {
+      const { version } = entry;
+      const cacheKey = buildMasteringCacheKey(version);
+      promoteMeasuredAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
+
+      if (options.updateDebug) {
+        markWarmupStarted(version.id);
+      }
+
+      // A cancellation/preemption should not strand the row at Loading now
+      // that snapshot identity churn is no longer our accidental retry pump.
+      // Retry the same stable version a bounded number of times in this run.
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
+        await warmMeasuredAnalysis(entry, cacheKey, {
+          forceFullEnrichment: options.forceFullEnrichment,
+        });
+        const currentEntry = masteringCacheByVersionIdRef.current[version.id];
+        const complete = options.forceFullEnrichment
+          ? isMasteringCacheEntryFullyEnriched(currentEntry, version)
+          : isMasteringCacheEntryFresh(currentEntry, version);
+        const terminalError =
+          masteringCacheStatusByVersionIdRef.current[version.id]?.status === 'error';
+        if (complete || terminalError) {
+          break;
+        }
+        await sleep(DEFAULT_LATEST_TRACK_WARMUP_URGENT_POLL_MS);
+      }
+
+      const finalEntry = masteringCacheByVersionIdRef.current[version.id];
+      if (
+        !cancelled &&
+        !isMasteringCacheEntryFresh(finalEntry, version) &&
+        masteringCacheStatusByVersionIdRef.current[version.id]?.status !== 'error'
+      ) {
+        setMasteringCacheStatusByVersionId((previous) => ({
+          ...previous,
+          [version.id]: {
+            status: 'error',
+            error: 'Analysis was interrupted. Select this track to retry.',
+          },
+        }));
+      }
+
+      if (options.updateDebug) {
+        markWarmupCompleted(version.id);
+      }
+    };
+
+    // Phase 1 is the visible contract: one gentle ebur128-only pass per main
+    // row, allowed during established playback. Phase 2 fills the rest of the
+    // current-version details only while paused. Hidden-library latest tracks
+    // remain last and also wait for pause. Version-history loading observes the
+    // Phase-1 cache state directly, so it cannot jump this boundary.
     const runPromise = latestTrackWarmupTailRef.current
       .catch(() => undefined)
-      .then(() =>
-        runSequentialLatestTrackWarmup({
-          entries: orderedPreloadEntries,
+      .then(async () => {
+        await runSequentialLatestTrackWarmup({
+          entries: visiblePreloadEntries,
           isCancelled: () => cancelled,
           hasUrgentWork: hasUrgentAnalysisWork,
           wait: sleep,
           onUrgentPause: recordUrgentWarmupPause,
-          processEntry: async (entry) => {
-            const { version } = entry;
-            const cacheKey = buildMasteringCacheKey(version);
-
-            // If this version was already pending from an older render, make sure
-            // it stays at the normal/latest-track bucket rather than the optional
-            // background bucket. The selected-track effect can still promote the
-            // same key to USER_SELECTED if Ethan clicks it.
-            promoteMeasuredAnalysis(cacheKey, ANALYSIS_PRIORITY_NEIGHBOR);
-
-            markWarmupStarted(version.id);
-            await warmMeasuredAnalysis(entry, cacheKey);
-            markWarmupCompleted(version.id);
-          },
-        })
-      );
+          processEntry: (entry) => processWarmupEntry(entry, { updateDebug: true }),
+        });
+        await runSequentialLatestTrackWarmup({
+          entries: visiblePreloadEntries,
+          isCancelled: () => cancelled,
+          hasUrgentWork: hasUrgentFullAnalysisWork,
+          wait: sleep,
+          onUrgentPause: recordUrgentWarmupPause,
+          processEntry: (entry) =>
+            processWarmupEntry(entry, { forceFullEnrichment: true }),
+        });
+        await runSequentialLatestTrackWarmup({
+          entries: hiddenPreloadEntries,
+          isCancelled: () => cancelled,
+          hasUrgentWork: hasUrgentFullAnalysisWork,
+          wait: sleep,
+          onUrgentPause: recordUrgentWarmupPause,
+          processEntry: (entry) => processWarmupEntry(entry),
+        });
+      });
     latestTrackWarmupTailRef.current = runPromise;
     void runPromise.catch((error: unknown) => {
       void window.producerPlayer.rendererLog('warn', 'Latest-track warmup runner failed', {
@@ -9682,11 +9922,9 @@ export function App(): JSX.Element {
   }, [
     masteringAnalysisCacheLoaded,
     libraryActiveVersionAnalysisKey,
-    libraryActiveVersions,
     // v3.121 (Concern 3) — re-run when the visible-songs subset changes
     // so newly-visible rows are promoted to NEIGHBOR priority.
     visibleActiveVersionAnalysisKey,
-    visibleActiveVersions,
     songProjectFilePaths,
     createMasteringCacheEntry,
     upsertMasteringCacheEntry,
@@ -12897,6 +13135,7 @@ export function App(): JSX.Element {
           measuredReady:
             measuredAnalysisCacheRef.current.has(cacheKey) ||
             isMasteringCacheEntryFresh(cachedEntry, version),
+          fullyEnriched: isMasteringCacheEntryFullyEnriched(cachedEntry, version),
         };
       });
     (window as unknown as {
@@ -12907,6 +13146,7 @@ export function App(): JSX.Element {
         cacheKey: string;
         previewReady: boolean;
         measuredReady: boolean;
+        fullyEnriched: boolean;
       }>;
     }).__producerPlayerGetVisibleLatestWarmupState = () =>
       readWarmupState(visibleActiveVersions);
@@ -12918,6 +13158,7 @@ export function App(): JSX.Element {
         cacheKey: string;
         previewReady: boolean;
         measuredReady: boolean;
+        fullyEnriched: boolean;
       }>;
     }).__producerPlayerGetAlbumLatestWarmupState = () =>
       readWarmupState(albumActiveVersions);
@@ -12929,6 +13170,7 @@ export function App(): JSX.Element {
         cacheKey: string;
         previewReady: boolean;
         measuredReady: boolean;
+        fullyEnriched: boolean;
       }>;
     }).__producerPlayerGetLibraryLatestWarmupState = () =>
       readWarmupState(libraryActiveVersions);
@@ -21363,6 +21605,8 @@ export function App(): JSX.Element {
             const activeSongIntegratedLufsStatus =
               activeSongIntegratedLufs !== null && Number.isFinite(activeSongIntegratedLufs)
                 ? 'ready'
+                : activeSongCacheFresh
+                  ? 'empty'
                 : activeSongCacheStatus === 'error'
                   ? 'error'
                   : activeSongVersion
@@ -22177,7 +22421,9 @@ export function App(): JSX.Element {
                 data-testid="inspector-version-history-loading"
                 role="status"
               >
-                Loading this track&apos;s version history…
+                {visibleTopLevelLufsSettled
+                  ? 'Loading this track\'s version history…'
+                  : 'Finishing latest-track LUFS before version history…'}
               </p>
             ) : null}
             <ul className="version-list">

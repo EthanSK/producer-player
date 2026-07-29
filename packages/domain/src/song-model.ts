@@ -102,8 +102,20 @@ function titleFromNormalized(normalized: string): string {
     .join(' ');
 }
 
-function isArchivedFilePath(filePath: string): boolean {
+export function isArchivedFilePath(filePath: string): boolean {
   return /(?:^|[\\/])old(?:[\\/]|$)/i.test(filePath);
+}
+
+function compareVersionsNewestFirst(left: SongVersion, right: SongVersion): number {
+  const leftVersion = getVersionNumberFromStem(path.parse(left.fileName).name) ?? 0;
+  const rightVersion = getVersionNumberFromStem(path.parse(right.fileName).name) ?? 0;
+  if (leftVersion !== rightVersion) {
+    return rightVersion - leftVersion;
+  }
+
+  const modifiedAtDelta =
+    new Date(right.modifiedAt).getTime() - new Date(left.modifiedAt).getTime();
+  return modifiedAtDelta !== 0 ? modifiedAtDelta : left.filePath.localeCompare(right.filePath);
 }
 
 export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions[] {
@@ -203,7 +215,15 @@ export function buildSongsFromFiles(files: ScannedAudioFile[]): SongWithVersions
       return a.filePath.localeCompare(b.filePath);
     });
 
-    const activeVersion = versions[0] ?? null;
+    // Archive files are historical even if a copy/sync operation gave one a
+    // newer mtime than the current top-level export. Loading `old/` must never
+    // change the album row, playback default, or latest-track analysis target.
+    const activeVersion =
+      versions
+        .filter((version) => !isArchivedFilePath(version.filePath))
+        .sort(compareVersionsNewestFirst)[0] ??
+      versions[0] ??
+      null;
 
     for (const version of versions) {
       version.isActive = activeVersion?.id === version.id;

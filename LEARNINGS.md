@@ -24,6 +24,16 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-07-29T17:10:19Z
+**Trigger:** Ethan report: top-level tracks still take too long to leave Loading after the v3.336 lazy version-history fix
+**Symptom:** On cold launch, the first few main-row LUFS values appeared, then the remaining current tracks could stay on Loading for as long as playback continued; one archived Barber Smith version also analyzed alongside the top-level warmup.
+**Root cause:** v3.336 made the filesystem snapshot latest-only, but the renderer immediately loaded the selected song's `old/` history before top-level LUFS settled, allowing selected/history effects to see archived versions early. Independently, v3.325 deliberately suspended every nonessential ffmpeg job during audible playback, so the production v3.336 log showed top-level progress stop from 17:43:01 to 17:43:40 while Ethan listened. Snapshot broadcasts also restarted the warmup effect because its dependency list contained newly allocated version arrays, and both domain/renderer "latest" selection trusted mtime across top-level plus `old/`, so a touched/copied archive could replace the current row.
+**Fix:** Give visible top-level versions an explicit first phase: run one sequential, below-normal-priority, single-threaded ebur128-only pass (LUFS/LRA/true peak plus input duration) even during established playback, while still honoring the playback settle window. Do not request selected-song history until every visible latest row has a cache result or terminal error; then full volumedetect/ffprobe enrichment fills every visible current version while paused, followed by hidden-library latest tracks, with archived versions remaining secondary. Pin active/latest and organizer chronology to version number while preferring non-`old/` exports, key the warmup effect by stable analysis strings instead of array identities, make status writes idempotent, use bounded retry for interrupted rows, render a fresh null-LUFS result as `No LUFS`, and show the inspector's current phase in its loading copy. Session-only analysis caching remains unchanged.
+**Commit:** this change (target v3.337)
+**Guard:** `bg-tasks-visible-tracks.spec.ts` requires a newly detected visible export to finish LUFS while playback remains active and keeps history analysis behind all visible rows. `latestTrackWarmup.test.ts` pins terminal gating, `masteringAnalysisCache.test.ts` pins readable first-pass versus full-enrichment semantics, and the domain integration test pins top-level selection against a newer-mtime archived copy. Electron E2E launches use Chromium's `--mute-audio` switch so real media time and events remain testable without sending tones to the developer's speakers.
+---
+
+---
 **Date:** 2026-07-12T20:12:00Z
 **Trigger:** Ethan live report immediately after installing v3.326: Café Lool stuttered and restarted two or three times at its opening
 **Symptom:** The Amazone → Café Lool autoplay handoff began successfully, then Café visibly/audibly jumped back and cycled through buffering several times about 2.5 seconds into the song.

@@ -96,6 +96,7 @@ interface QueueDump {
 type WarmupState = Array<{
   fileName: string;
   measuredReady: boolean;
+  fullyEnriched: boolean;
 }>;
 
 async function readMeasuredQueueDump(page: import('@playwright/test').Page): Promise<QueueDump> {
@@ -121,6 +122,20 @@ async function readVisibleWarmupState(page: import('@playwright/test').Page): Pr
     ).__producerPlayerGetVisibleLatestWarmupState?.();
     if (!state) {
       throw new Error('__producerPlayerGetVisibleLatestWarmupState not exposed yet');
+    }
+    return state;
+  }) as Promise<WarmupState>;
+}
+
+async function readLibraryWarmupState(page: import('@playwright/test').Page): Promise<WarmupState> {
+  return page.evaluate(() => {
+    const state = (
+      window as unknown as {
+        __producerPlayerGetLibraryLatestWarmupState?: () => WarmupState;
+      }
+    ).__producerPlayerGetLibraryLatestWarmupState?.();
+    if (!state) {
+      throw new Error('__producerPlayerGetLibraryLatestWarmupState not exposed yet');
     }
     return state;
   }) as Promise<WarmupState>;
@@ -342,7 +357,7 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
     }
   });
 
-  test('new latest export waits for paused playback before warming LUFS @smoke', async () => {
+  test('visible latest export warms LUFS gently during playback @smoke', async () => {
     const directories = await createE2ETestDirectories(
       'producer-player-bg-tasks-new-version-during-playback'
     );
@@ -408,27 +423,72 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
       await alphaRow.click();
       await page.getByTestId('player-play-toggle').click();
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      await page.evaluate(() => {
+        (
+          window as unknown as {
+            __producerPlayerSetSearchText?: (next: string) => void;
+          }
+        ).__producerPlayerSetSearchText?.('NewVersion Alpha');
+      });
+      await expect(page.getByTestId('main-list-row')).toHaveCount(1);
+      await page.evaluate(() => {
+        const target = window as unknown as {
+          __producerPlayerClearPlaybackEventLog?: () => void;
+        };
+        target.__producerPlayerClearPlaybackEventLog?.();
+      });
 
       // Simulate the real watched-folder path: a fresh bounce lands while the
-      // older version is still playing. Analysis is useful, but the audible
-      // transport owns the machine until the user pauses it.
+      // older version is still playing. The top-level row should finish its
+      // low-priority loudness-only pass without changing transport intent.
       await writeTestWav(
         path.join(directories.fixtureDirectory, 'NewVersion Alpha v2.wav'),
         { durationMs: 15_000, frequencyHz: 520 }
       );
+      await writeTestWav(
+        path.join(directories.fixtureDirectory, 'NewVersion Bravo v2.wav'),
+        { durationMs: 15_000, frequencyHz: 620 }
+      );
       await page.getByTestId('rescan-button').click();
 
-      await expect(alphaRow.getByTestId('main-list-row-metadata')).toContainText('v2', {
-        timeout: 10_000,
+      // The rescan intentionally hands the selected song from v1 to the new
+      // latest v2 source. Ignore that source-change buffering and observe
+      // continuity only after v2 has actually started playing.
+      await expect
+        .poll(async () => {
+          const events = await page.evaluate(() => {
+            const target = window as unknown as {
+              __producerPlayerGetPlaybackEventLog?: () => Array<{
+                event: string;
+                selectedFilePath?: string;
+              }>;
+            };
+            return target.__producerPlayerGetPlaybackEventLog?.() ?? [];
+          });
+          return events.some(
+            (entry) =>
+              entry.event === 'playing' &&
+              entry.selectedFilePath?.endsWith('NewVersion Alpha v2.wav')
+          );
+        }, { timeout: 10_000 })
+        .toBe(true);
+      const playbackAfterHandoffSeconds = await page.evaluate(() => {
+        const target = window as unknown as {
+          __producerPlayerClearPlaybackEventLog?: () => void;
+          __producerPlayerGetPlaybackHandoffState?: () => {
+            currentAudioTimeSeconds: number | null;
+          };
+        };
+        target.__producerPlayerClearPlaybackEventLog?.();
+        return target.__producerPlayerGetPlaybackHandoffState?.().currentAudioTimeSeconds ?? 0;
       });
-      await page.waitForTimeout(1_500);
-      await expect(alphaRow.getByTestId('main-list-row-integrated-lufs')).toContainText(
-        'Loading'
-      );
-      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
 
-      await page.getByTestId('player-play-toggle').click();
-      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+      await expect
+        .poll(async () => {
+          const state = await readVisibleWarmupState(page);
+          return state.some((entry) => entry.fileName === 'NewVersion Alpha v2.wav');
+        }, { timeout: 10_000 })
+        .toBe(true);
       await expect(alphaRow.getByTestId('main-list-row-integrated-lufs')).not.toContainText(
         'Loading',
         { timeout: 30_000 }
@@ -437,9 +497,53 @@ test.describe('Background tasks visible-songs prioritization @smoke', () => {
         'data-status',
         'ready'
       );
-      // Background analysis becoming ready must not change transport intent:
-      // the user paused above, so playback stays paused.
+      await expect(alphaRow.getByTestId('main-list-row-duration')).not.toContainText(
+        'Loading'
+      );
+      await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Pause');
+      const playbackEvidence = await page.evaluate(() => {
+        const target = window as unknown as {
+          __producerPlayerGetPlaybackEventLog?: () => Array<{ event: string }>;
+          __producerPlayerGetPlaybackHandoffState?: () => {
+            currentAudioTimeSeconds: number | null;
+          };
+        };
+        return {
+          currentAudioTimeSeconds:
+            target.__producerPlayerGetPlaybackHandoffState?.().currentAudioTimeSeconds ?? 0,
+          events: target.__producerPlayerGetPlaybackEventLog?.() ?? [],
+        };
+      });
+      expect(playbackEvidence.currentAudioTimeSeconds).toBeGreaterThan(
+        playbackAfterHandoffSeconds + 0.1
+      );
+      expect(
+        playbackEvidence.events.filter(
+          ({ event }) => event === 'waiting' || event === 'stalled'
+        )
+      ).toEqual([]);
+      expect(
+        (await readLibraryWarmupState(page)).find(
+          (entry) => entry.fileName === 'NewVersion Bravo v2.wav'
+        )?.measuredReady ?? false
+      ).toBe(false);
+
+      await page.getByTestId('player-play-toggle').click();
       await expect(page.getByTestId('player-play-toggle')).toHaveAttribute('aria-label', 'Play');
+      await expect
+        .poll(async () => {
+          const state = await readVisibleWarmupState(page);
+          return state.find((entry) => entry.fileName === 'NewVersion Alpha v2.wav')
+            ?.fullyEnriched ?? false;
+        }, { timeout: 30_000 })
+        .toBe(true);
+      await expect
+        .poll(async () => {
+          const state = await readLibraryWarmupState(page);
+          return state.find((entry) => entry.fileName === 'NewVersion Bravo v2.wav')
+            ?.fullyEnriched ?? false;
+        }, { timeout: 30_000 })
+        .toBe(true);
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(directories);

@@ -50,7 +50,10 @@ export async function launchProducerPlayer(
   const workspaceRoot = path.resolve(__dirname, '../../../..');
   const electronEntry = path.join(workspaceRoot, 'apps/electron/dist/main.cjs');
 
-  const launchArgs = [electronEntry];
+  // Exercise the real media pipeline without sending test tones to the
+  // developer's speakers. Chromium still advances media and emits playback
+  // events under this switch, so continuity assertions remain meaningful.
+  const launchArgs = [electronEntry, '--mute-audio'];
   if (process.platform === 'linux' && process.env.CI) {
     launchArgs.unshift('--disable-setuid-sandbox');
     launchArgs.unshift('--no-sandbox');

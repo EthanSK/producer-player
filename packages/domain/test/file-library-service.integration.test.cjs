@@ -171,6 +171,47 @@ test('startup exposes top-level tracks first and loads only the selected song hi
   }
 });
 
+test('loading history never promotes a newer-mtime archived copy over the top-level export', async () => {
+  const fixtureDirectory = await createTemporaryDirectory(
+    'producer-player-domain-archive-mtime-'
+  );
+
+  try {
+    await writeFixtureFiles(fixtureDirectory, [
+      {
+        relativePath: 'Current Mix v8.wav',
+        modifiedAtMs: Date.parse('2026-01-01T00:00:08.000Z'),
+      },
+      {
+        relativePath: 'old/Current Mix v7.wav',
+        modifiedAtMs: Date.parse('2026-02-01T00:00:07.000Z'),
+      },
+    ]);
+
+    await withService({ autoMoveOld: true }, async (service) => {
+      const initialSnapshot = await service.linkFolder(fixtureDirectory);
+      const loadedSnapshot = await service.loadSongVersionHistory(
+        initialSnapshot.songs[0].id
+      );
+      const song = loadedSnapshot.songs[0];
+      const activeVersion = song.versions.find(
+        (version) => version.id === song.activeVersionId
+      );
+
+      assert(activeVersion);
+      assert.equal(activeVersion.fileName, 'Current Mix v8.wav');
+      assert.equal(activeVersion.isActive, true);
+      assert.equal(song.latestExportAt, activeVersion.modifiedAt);
+      assert.deepEqual(await listRelativeFiles(fixtureDirectory), [
+        'Current Mix v8.wav',
+        'old/Current Mix v7.wav',
+      ]);
+    });
+  } finally {
+    await cleanupDirectory(fixtureDirectory);
+  }
+});
+
 test('old/ version-history moves are deterministic and avoid timestamp-based archive names', async () => {
   const fixtureDirectory = await createTemporaryDirectory('producer-player-domain-old-history-');
 

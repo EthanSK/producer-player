@@ -4,6 +4,7 @@ import {
   MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION,
   buildMasteringCacheKey,
   isMasteringCacheEntryFresh,
+  isMasteringCacheEntryFullyEnriched,
   isMasteringCacheEntryMissingBitDepth,
   isMasteringCacheEntryMissingBpm,
   parseVersionModifiedAtMs,
@@ -112,6 +113,38 @@ describe('mastering analysis session cache keys', () => {
     expect(
       isMasteringCacheEntryFresh(
         { ...entry, schemaVersion: MASTERING_ANALYSIS_CACHE_SCHEMA_VERSION + 1 },
+        version
+      )
+    ).toBe(false);
+  });
+
+  it('keeps a fast LUFS pass readable while flagging it for later enrichment', () => {
+    const version = makeVersion();
+    const fullEntry = makeEntry(version);
+    const loudnessEntry = makeEntry(version, {}, {
+      measuredAnalysis: {
+        ...fullEntry.measuredAnalysis,
+        measuredWith: 'ffmpeg-ebur128',
+        samplePeakDbfs: null,
+        meanVolumeDbfs: null,
+        bitDepth: undefined,
+        sampleFormat: undefined,
+        bpm: undefined,
+      },
+    });
+
+    expect(isMasteringCacheEntryFresh(loudnessEntry, version)).toBe(true);
+    expect(isMasteringCacheEntryFullyEnriched(loudnessEntry, version)).toBe(false);
+    expect(isMasteringCacheEntryFullyEnriched(fullEntry, version)).toBe(true);
+    expect(
+      isMasteringCacheEntryFullyEnriched(
+        { ...fullEntry, cacheKey: `${fullEntry.cacheKey}-stale` },
+        version
+      )
+    ).toBe(false);
+    expect(
+      isMasteringCacheEntryFullyEnriched(
+        { ...fullEntry, measuredAnalysis: undefined } as unknown as MasteringCacheEntry,
         version
       )
     ).toBe(false);

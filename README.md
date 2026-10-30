@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/EthanSK/producer-player/actions/workflows/ci.yml/badge.svg)](https://github.com/EthanSK/producer-player/actions/workflows/ci.yml)
 [![Release](https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/EthanSK/producer-player/actions/workflows/release-desktop.yml)
-[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-purple.svg)](LICENSE)
+[![License: No-sale source](https://img.shields.io/badge/License-No--sale%20source-purple.svg)](LICENSE)
 
 A desktop app for producers who bounce a lot. Drag in a folder of exports and Producer Player auto-groups versions, organizes your album, and gives you a full mastering workspace -- all in one place.
 
@@ -123,4 +123,4 @@ See [docs/RELEASING.md](docs/RELEASING.md) for packaging and release details.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) -- free for noncommercial use.
+Source-available under [Ethan Source-Available No-Sale Terms 1.0](LICENSE). You can use and modify the covered code, including internally at work, and share it without charge. Selling the software, modified versions, paid access, or bundles requires a separate commercial license. Earlier licenses and third-party rights remain in force. See [scope and release policy](LICENSING.md).

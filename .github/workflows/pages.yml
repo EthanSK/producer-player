@@ -45,6 +45,9 @@ jobs:
       - name: Sync landing page version metadata
         run: npm run version:sync
 
+      - name: Test published download links
+        run: node --test scripts/site-release-downloads.test.mjs
+
       - name: Validate landing page files
         run: |
           test -f site/index.html

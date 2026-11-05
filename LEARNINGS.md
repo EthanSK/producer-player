@@ -161,3 +161,15 @@ Each entry looks like:
 **Commit:** 97c2365
 **Guard:** agentChatSelection.test.ts pins the helpers (truncate cap, blockquote format, append-no-overwrite, tooltip position math incl. viewport-edge + container clamp)
 ---
+
+## 2026-11-05 — Website downloads follow the published release
+
+The site previously read source `site/version.json` and constructed versioned
+files under GitHub latest. A failed release therefore broke website buttons
+even when the stable aliases worked. The website now reads the public latest
+release and uses its exact three versioned asset URLs; offline, rate-limited or
+partial responses retain the stable aliases. CI and Pages test the actual
+script against the complete v3.338 and observed incomplete v3.339 metadata.
+Recheck exact-source CI immediately before draft promotion as well as before
+packaging, and serialize release workflows so an older build cannot finish
+after a newer one and move latest backwards.

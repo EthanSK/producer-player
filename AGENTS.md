@@ -23,7 +23,9 @@ The in-app "Check for Updates" flow is electron-updater pointed at GitHub
 Releases (see `apps/electron/src/main.ts` → `configureAutoUpdater`). It
 fetches `latest-mac.yml` from the newest release of `EthanSK/producer-player`
 and compares versions. **It does NOT read `site/version.json`** — that file is
-only used by the marketing site for the displayed download version.
+source version metadata. The marketing site reads GitHub's latest published
+release and exact asset URLs, so an unreleased source version cannot replace
+working download links.
 
 Therefore: if existing installs report "you're up to date" on a stale
 version even though `package.json` (and the repo) is newer, the cause is

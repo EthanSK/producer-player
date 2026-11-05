@@ -190,5 +190,9 @@ source commit. Files upload to a draft first; only a successful complete
 upload is promoted to the public latest release. Existing clients keep
 seeing the previous complete release while the next upload is in progress.
 
+Release workflows run one at a time and recheck exact-source CI immediately
+before promotion. The website reads the actual published release and its
+versioned download URLs; source version bumps cannot advertise missing files.
+
 Build and release workflows use Node 22, matching the notarization tools'
 supported runtime. The packaged app retains its existing Electron runtime.

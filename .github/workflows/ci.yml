@@ -111,6 +111,9 @@ jobs:
           npm run build -w packages/contracts
           npm run build -w packages/domain
 
+      - name: Test release publication and website download guards
+        run: node --test scripts/check-release-artifacts.test.mjs scripts/site-release-downloads.test.mjs
+
       - name: Run domain unit tests
         run: npm test -w packages/domain
 

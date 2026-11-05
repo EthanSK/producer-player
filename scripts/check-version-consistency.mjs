@@ -10,6 +10,7 @@ const repoRoot = path.resolve(scriptDirectory, '..');
 const packageJsonPath = path.join(repoRoot, 'package.json');
 const siteVersionPath = path.join(repoRoot, 'site', 'version.json');
 const siteIndexPath = path.join(repoRoot, 'site', 'index.html');
+const siteReleaseScriptPath = path.join(repoRoot, 'site', 'release-downloads.js');
 const releaseWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'release-desktop.yml');
 const pagesWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'pages.yml');
 const ciWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'ci.yml');
@@ -49,8 +50,10 @@ async function main() {
     throw new Error('site/index.html is missing the #site-version-label element.');
   }
 
-  if (!siteIndex.includes("fetch('./version.json'")) {
-    throw new Error('site/index.html must read version metadata from ./version.json.');
+  const siteReleaseScript = await readFile(siteReleaseScriptPath, 'utf8');
+  if (!siteIndex.includes('src="./release-downloads.js" defer') ||
+      !siteReleaseScript.includes("fetch('https://api.github.com/repos/EthanSK/producer-player/releases/latest'")) {
+    throw new Error('The website must load published release metadata before setting its download version.');
   }
 
   const hardcodedSiteVersionPattern =

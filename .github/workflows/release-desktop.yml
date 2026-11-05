@@ -37,6 +37,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
 permissions:
   contents: write
   actions: read
@@ -63,15 +67,7 @@ jobs:
       - name: Require successful CI for this source commit
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          ci_run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -z "$ci_run" ]; then
-            echo "::error::No CI run found for this exact source commit; refusing publication."
-            exit 1
-          fi
-          gh run watch "$ci_run" --repo "$GITHUB_REPOSITORY" --exit-status
+        run: bash scripts/require-successful-ci.sh
 
       - name: Test complete-release publication guard
         run: node --test scripts/check-release-artifacts.test.mjs
@@ -581,6 +577,11 @@ jobs:
           body_path: /tmp/release_body.md
           files: |
             release-assets/*
+
+      - name: Recheck successful CI before public promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/require-successful-ci.sh
 
       - name: Publish complete GitHub release
         env:

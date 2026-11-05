@@ -121,22 +121,29 @@ export async function suppressAgentPanelOnboarding(
 export async function openMasteringWithDiagnostics(
   page: Page, electronApp: ElectronApplication
 ): Promise<void> {
+  const bounded = <T>(operation: Promise<T>, timeoutMs = 5_000): Promise<T> => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Diagnostic timed out')), timeoutMs);
+    operation.then((value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); });
+  });
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Profiler.enable');
-  await cdp.send('Profiler.start');
+  await cdp.send('Debugger.enable');
+  const paused = new Promise((resolve) => cdp.once('Debugger.paused', (event) => {
+    const frames = event.callFrames.slice(0, 12).map((frame) => ({
+      functionName: frame.functionName, url: frame.url, location: frame.location,
+    }));
+    console.log('[mastering-click-stack]', JSON.stringify(frames));
+    resolve(frames);
+  }));
   try {
     await page.getByTestId('analysis-expand-button').click();
   } catch (failure) {
-    const bounded = <T>(operation: Promise<T>): Promise<T> => Promise.race([
-      operation,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Diagnostic timed out')), 5_000)),
-    ]);
     const diagnostics = await Promise.allSettled([
       page.screenshot({ timeout: 5_000 }).then((body) =>
         test.info().attach('mastering-click-screen', { body, contentType: 'image/png' })
       ),
-      bounded(cdp.send('Profiler.stop')).then((profile) => test.info().attach('mastering-click-profile', {
-        body: JSON.stringify(profile), contentType: 'application/json',
+      bounded(cdp.send('Debugger.pause').then(() => paused)).then((frames) => test.info().attach('mastering-click-stack', {
+        body: JSON.stringify(frames), contentType: 'application/json',
       })),
       bounded(electronApp.evaluate(({ app, BrowserWindow }) => {
         const windows = BrowserWindow.getAllWindows();
@@ -165,8 +172,9 @@ export async function openMasteringWithDiagnostics(
     ));
     throw failure;
   } finally {
-    // Successful click profiles are discarded. Failed profiles remain attached.
-    await cdp.detach().catch(() => undefined);
+    // Only a failed disposable fixture is paused, then released before teardown.
+    await bounded(cdp.send('Debugger.resume'), 1_000).catch(() => undefined);
+    await bounded(cdp.detach(), 1_000).catch(() => undefined);
   }
 }
 

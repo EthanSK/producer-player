@@ -138,10 +138,24 @@ jobs:
       # pp-audio-host (JUCE) sidecar is macOS-only and skipped on Linux by
       # apps/electron/scripts/build-main.mjs.
 
+      # Each Electron instance shares this Xvfb display. Keep native input
+      # serial while investigating the existing fullscreen-click timeouts;
+      # preserve every smoke case and retain diagnostics on failure.
       - name: Run runtime smoke tests
         env:
-          PLAYWRIGHT_WORKERS: 2
+          PLAYWRIGHT_WORKERS: 1
         run: npm run e2e:smoke
+
+      - name: Upload Linux Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-playwright-artifacts
+          path: |
+            apps/e2e/test-results/
+            apps/e2e/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   linux-package-smoke:
     name: Linux desktop package smoke

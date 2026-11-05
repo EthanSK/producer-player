@@ -39,6 +39,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   compute-version:
@@ -552,14 +553,38 @@ jobs:
             echo "**Full Changelog**: https://github.com/${repo}/compare/${prev_tag}...${release_tag}"
           } > /tmp/release_body.md
 
-      - name: Publish GitHub Release
+      - name: Require successful CI for this source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$ci_run" ]; then
+            echo "::error::No CI run found for this exact source commit; refusing publication."
+            exit 1
+          fi
+          gh run watch "$ci_run" --repo "$GITHUB_REPOSITORY" --exit-status
+
+      # Attach every file while the release is private. Only the final edit
+      # moves the shared latest pointer, so clients never see a half-uploaded
+      # release with a missing platform feed.
+      - name: Upload complete draft release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.compute-version.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ needs.compute-version.outputs.release_name }}
           prerelease: false
-          make_latest: true
+          draft: true
+          make_latest: false
           body_path: /tmp/release_body.md
           files: |
             release-assets/*
+
+      - name: Publish complete GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.compute-version.outputs.release_tag }}
+        shell: bash
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

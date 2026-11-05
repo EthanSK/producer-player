@@ -128,11 +128,25 @@ export async function openMasteringWithDiagnostics(
   });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Debugger.enable');
-  const paused = new Promise((resolve) => cdp.once('Debugger.paused', (event) => {
+  const paused = new Promise((resolve) => cdp.once('Debugger.paused', async (event) => {
     const frames = event.callFrames.slice(0, 12).map((frame) => ({
       functionName: frame.functionName, url: frame.url, location: frame.location,
     }));
     console.log('[mastering-click-stack]', JSON.stringify(frames));
+    try {
+      const layout = await bounded(cdp.send('Debugger.evaluateOnCallFrame', {
+        callFrameId: event.callFrames[0].callFrameId,
+        returnByValue: true,
+        expression: `JSON.stringify({ viewport: [innerWidth, innerHeight], elements: Array.from(document.querySelectorAll('.analysis-overlay-card, .analysis-overlay-grid, .analysis-overlay-viz-spectrum, [data-testid="analysis-loudness-histogram"], .analysis-overlay canvas')).map(el => ({className: el.className, width: el.getBoundingClientRect().width, canvasWidth: el instanceof HTMLCanvasElement ? el.width : null, height: el.getBoundingClientRect().height})) })`,
+      }));
+      console.log('[mastering-click-layout]', layout.result.value);
+      const script = await bounded(cdp.send('Debugger.getScriptSource', {
+        scriptId: event.callFrames[0].location.scriptId,
+      }));
+      await test.info().attach('mastering-renderer-source', {
+        body: script.scriptSource, contentType: 'text/javascript',
+      });
+    } catch (error) { console.log('[mastering-click-paused-diagnostic]', String(error)); }
     resolve(frames);
   }));
   try {

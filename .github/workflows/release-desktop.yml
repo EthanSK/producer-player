@@ -58,7 +58,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Test complete-release publication guard
         run: node --test scripts/check-release-artifacts.test.mjs
@@ -152,7 +152,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -321,7 +321,7 @@ jobs:
       - name: Setup Node for artifact verification
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Verify required platform artifacts
         env:

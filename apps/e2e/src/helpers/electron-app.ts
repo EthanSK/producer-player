@@ -1,3 +1,4 @@
+// Launch isolated Electron test profiles and expose bounded renderer errors in CI.
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -74,6 +75,16 @@ export async function launchProducerPlayer(
   });
 
   const page = await electronApp.firstWindow();
+  if (process.env.CI) {
+    let reportedErrors = 0;
+    const reportError = (message: string): void => {
+      if (reportedErrors++ < 10) console.error('[electron-renderer-error]', message);
+    };
+    page.on('pageerror', (error) => reportError(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') reportError(message.text());
+    });
+  }
   await page.waitForSelector('[data-testid="app-shell"]');
 
   return {

@@ -1,6 +1,6 @@
 {
   "name": "producer-player",
-  "version": "3.341.0",
+  "version": "3.342.0",
   "private": true,
   "description": "Producer Player desktop app for producers managing album tracks, exports, and ordering.",
   "author": "EthanSK",
@@ -86,7 +86,6 @@
       "apps/renderer/dist/**/*",
       "package.json"
     ],
-    "afterSign": "scripts/notarize.js",
     "mac": {
       "target": [
         "zip"

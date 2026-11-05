@@ -1,3 +1,4 @@
+// Run Electron tests with a virtual screen that fits the normal 1380px app window.
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -26,7 +27,7 @@ const playwrightCliPath = path.join(path.dirname(playwrightPackagePath), 'cli.js
 let command = [process.execPath, playwrightCliPath, 'test', ...workerArgs, ...grepArgs, ...forwardedArgs];
 
 if (isLinux && hasCommand('xvfb-run')) {
-  command = ['xvfb-run', '-a', ...command];
+  command = ['xvfb-run', '-a', '--server-args=-screen 0 1920x1080x24', ...command];
 }
 
 const run = spawnSync(command[0], command.slice(1), {

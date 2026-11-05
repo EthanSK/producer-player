@@ -135,11 +135,14 @@ spctl --assess --type execute --verbose=2 \
    `build/entitlements.mac.inherit.plist`.
 2. **electron-builder** reads `CSC_LINK` / `CSC_KEY_PASSWORD` from the
    environment and signs the app automatically.
-3. **`afterSign` → `scripts/notarize.js`** runs after signing. It calls
-   `@electron/notarize` which submits the app to Apple's notary service and
-   waits for approval (~1-5 min).
-4. If `APPLE_*` env vars aren't set, the notarize script is a no-op —
-   builds still succeed unsigned.
+3. **electron-builder's built-in notarization** reads the `APPLE_*` credentials,
+   submits the signed app to Apple and staples the accepted ticket. Do not add
+   a second afterSign submission: the old hook submitted the same app again
+   after the built-in notarization had already succeeded.
+4. Local builds without notarization credentials may remain unsigned or
+   unnotarized. Release CI requires all credentials and verifies the actual
+   signature, stapled ticket and Gatekeeper acceptance before publishing.
+
 
 ### Files involved
 
@@ -148,7 +151,6 @@ build/entitlements.mac.plist     ← main-app runtime entitlements for direct di
 build/entitlements.mac.inherit.plist ← child-process runtime entitlements for the native sidecar/plugin host
 build/entitlements.mas.plist     ← sandbox entitlements for Mac App Store
 build/entitlements.mas.inherit.plist
-scripts/notarize.js              ← afterSign notarization hook
 scripts/build-mac.mjs            ← build orchestrator (respects CSC_LINK/CSC_NAME)
 .github/workflows/release-desktop.yml  ← CI with signing secret env vars
 ```
@@ -188,3 +190,6 @@ The publication job also requires the CI workflow to pass for the exact
 source commit. Files upload to a draft first; only a successful complete
 upload is promoted to the public latest release. Existing clients keep
 seeing the previous complete release while the next upload is in progress.
+
+Build and release workflows use Node 22, matching the notarization tools'
+supported runtime. The packaged app retains its existing Electron runtime.

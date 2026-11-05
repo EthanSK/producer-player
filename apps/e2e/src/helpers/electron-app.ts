@@ -118,37 +118,55 @@ export async function suppressAgentPanelOnboarding(
 
 // Preserve the real pointer click; capture this custom Electron page before
 // each spec's finally block closes it (Playwright's page fixture does not own it).
-export async function openMasteringWithDiagnostics(page: Page): Promise<void> {
+export async function openMasteringWithDiagnostics(
+  page: Page, electronApp: ElectronApplication
+): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.start');
   try {
     await page.getByTestId('analysis-expand-button').click();
   } catch (failure) {
-    await Promise.allSettled([
+    const bounded = <T>(operation: Promise<T>): Promise<T> => Promise.race([
+      operation,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Diagnostic timed out')), 5_000)),
+    ]);
+    const diagnostics = await Promise.allSettled([
       page.screenshot({ timeout: 5_000 }).then((body) =>
         test.info().attach('mastering-click-screen', { body, contentType: 'image/png' })
       ),
-      Promise.race([
-        page.evaluate(() => {
-          const button = document.querySelector('[data-testid="analysis-expand-button"]');
-          const rect = button?.getBoundingClientRect();
-          return {
-            viewport: { width: innerWidth, height: innerHeight },
-            focused: document.hasFocus(),
-            visibility: document.visibilityState,
-            button: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-            elementsAtButton: rect && document.elementsFromPoint(
-              rect.x + rect.width / 2, rect.y + rect.height / 2
-            ).map((element) => ({ tag: element.tagName, className: element.className,
-              testId: element.getAttribute('data-testid') })),
-            masteringOpen: !!document.querySelector('[data-testid="analysis-modal"]'),
-            agentPanelClass: document.querySelector('.agent-chat-panel')?.className,
-          };
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Renderer snapshot timed out')), 5_000)),
-      ]).then((state) => test.info().attach('mastering-click-state', {
-        body: JSON.stringify(state), contentType: 'application/json',
+      bounded(cdp.send('Profiler.stop')).then((profile) => test.info().attach('mastering-click-profile', {
+        body: JSON.stringify(profile), contentType: 'application/json',
+      })),
+      bounded(electronApp.evaluate(({ app, BrowserWindow }) => {
+        const windows = BrowserWindow.getAllWindows();
+        return {
+          windows: windows.map((window) => ({
+            bounds: window.getBounds(), focused: window.isFocused(), visible: window.isVisible(),
+            destroyed: window.isDestroyed(), crashed: window.webContents.isCrashed(),
+            rendererPid: window.webContents.getOSProcessId(),
+          })),
+          metrics: app.getAppMetrics(),
+        };
+      })).then(async (state) => {
+        console.log('[mastering-click-main-state]', JSON.stringify(state));
+        await test.info().attach('mastering-click-main-state', {
+          body: JSON.stringify(state), contentType: 'application/json',
+        });
+      }),
+      bounded(electronApp.evaluate(async ({ BrowserWindow }) =>
+        (await BrowserWindow.getAllWindows()[0].capturePage()).toPNG().toString('base64')
+      )).then((screenshot) => test.info().attach('mastering-click-native-screen', {
+        body: Buffer.from(screenshot, 'base64'), contentType: 'image/png',
       })),
     ]);
+    console.log('[mastering-click-diagnostics]', diagnostics.map((result) =>
+      result.status === 'fulfilled' ? 'captured' : String(result.reason)
+    ));
     throw failure;
+  } finally {
+    // Successful click profiles are discarded. Failed profiles remain attached.
+    await cdp.detach().catch(() => undefined);
   }
 }
 

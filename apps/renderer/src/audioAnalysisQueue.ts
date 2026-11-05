@@ -936,7 +936,12 @@ export class AnalysisQueue {
     // started.
     let settled = false;
     const settle = (action: () => void): void => {
-      if (settled) {
+      // An interrupted run already released its slot and handed the shared
+      // caller promise to a retry. A late IPC/decode success must not resolve
+      // that promise with partial warmup data: selected-track enrichment would
+      // keep reusing that resolved result while the real retry waits to run,
+      // causing the Mastering view's endless analysis/render loop.
+      if (settled || next.releasedForPreemption) {
         return;
       }
       settled = true;
@@ -1060,19 +1065,9 @@ export class AnalysisQueue {
           if (!settled && !next.preempted) {
             this.firstSuccessSettled = true;
           }
-          // v3.195 — if a value comes back AFTER preemption fired (the task
-          // ignored the abort signal and finished naturally) we still treat
-          // the slot release as a settle. The caller's promise was kept
-          // alive; we resolve with the late value.
-          settle(() => {
-            if (next.preempted) {
-              // Treat as if the requeued task will pick this up — but the
-              // value is still useful; pass it through.
-              next.resolve(value);
-            } else {
-              next.resolve(value);
-            }
-          });
+          // Only the current run owns completion; settle ignores a replaced
+          // run even if its underlying operation did not honor cancellation.
+          settle(() => next.resolve(value));
         },
         (reason) => {
           if (timeoutHandle !== null) {

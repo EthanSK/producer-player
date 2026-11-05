@@ -1,3 +1,4 @@
+// Exercise analysis scheduling, cancellation ownership and shared keyed results.
 import { describe, expect, it, vi } from 'vitest';
 import {
   AnalysisQueue,
@@ -1791,16 +1792,65 @@ describe('AnalysisQueue', () => {
       expect(err.message).toContain('some-key');
     });
 
-    it('a cancellable task that ignores the abort signal and resolves anyway has its value passed through', async () => {
-      // Defensive: a task may legitimately finish a hair after we tried to
-      // abort it (e.g. the ffmpeg child already had results buffered when we
-      // SIGKILLed). We don't requeue in that case; we just pass the value
-      // through and free the slot.
-      //
-      // Note: when preempted=true, our `then(resolve)` path resolves the
-      // caller's promise with the value. The USER pending was already going
-      // to be served by the bypass + maybeStart loop, so the slot release
-      // here is bonus.
+    it('keeps the shared promise pending when an interrupted run returns before its retry', async () => {
+      const queue = new AnalysisQueue({ concurrency: 1, taskTimeoutMs: 0 });
+      const interrupted = deferred<string>();
+      const retry = deferred<string>();
+      let runs = 0;
+      const promise = queue.enqueue(() => ++runs === 1 ? interrupted.promise : retry.promise, {
+        key: 'selected-track', priority: ANALYSIS_PRIORITY_NEIGHBOR, cancellable: true,
+      });
+      await flushMicrotasks();
+
+      // The selected-track request restarts the same warmup job. Its old IPC
+      // response can still arrive after abort; only the retry owns completion.
+      const duplicate = queue.enqueue(async () => 'must-not-run', {
+        key: 'selected-track', priority: ANALYSIS_PRIORITY_USER_SELECTED, cancellable: true,
+      });
+      expect(duplicate).toBe(promise);
+      await flushMicrotasks();
+      expect(runs).toBe(2);
+      let settled = false;
+      void promise.then(() => { settled = true; });
+      interrupted.resolve('partial-loudness');
+      await flushMicrotasks();
+      expect(settled).toBe(false);
+      expect(queue.enqueue(async () => 'must-not-run', { key: 'selected-track' })).toBe(promise);
+      retry.resolve('complete-analysis');
+      await expect(promise).resolves.toBe('complete-analysis');
+      await expect(queue.enqueue(async () => 'fresh-analysis', { key: 'selected-track' })).resolves.toBe('fresh-analysis');
+      expect(queue.stats().active).toBe(0);
+    });
+
+    it('ignores an interrupted result arriving after its retry and a newer keyed job', async () => {
+      const queue = new AnalysisQueue({ concurrency: 1, taskTimeoutMs: 0 });
+      const interrupted = deferred<string>();
+      const retry = deferred<string>();
+      const newer = deferred<string>();
+      let runs = 0;
+      const promise = queue.enqueue(() => ++runs === 1 ? interrupted.promise : retry.promise, {
+        key: 'selected-track', priority: ANALYSIS_PRIORITY_NEIGHBOR, cancellable: true,
+      });
+      await flushMicrotasks();
+      queue.enqueue(async () => 'must-not-run', {
+        key: 'selected-track', priority: ANALYSIS_PRIORITY_USER_SELECTED, cancellable: true,
+      });
+      await flushMicrotasks();
+      retry.resolve('complete-analysis');
+      await expect(promise).resolves.toBe('complete-analysis');
+      const newerPromise = queue.enqueue(() => newer.promise, { key: 'selected-track' });
+      await flushMicrotasks();
+      interrupted.resolve('stale-partial');
+      await flushMicrotasks();
+      expect(queue.enqueue(async () => 'must-not-run', { key: 'selected-track' })).toBe(newerPromise);
+      expect(queue.stats().active).toBe(1);
+      newer.resolve('newer-analysis');
+      await expect(newerPromise).resolves.toBe('newer-analysis');
+      expect(queue.stats().active).toBe(0);
+    });
+
+    it('passes through a cancellable result when no interruption occurred', async () => {
+      // A normal, uninterrupted task still returns its result directly.
       const queue = new AnalysisQueue({
         concurrency: 1,
         maxUserBypassSlots: 0,

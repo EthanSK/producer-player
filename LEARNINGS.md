@@ -173,3 +173,19 @@ script against the complete v3.338 and observed incomplete v3.339 metadata.
 Recheck exact-source CI immediately before draft promotion as well as before
 packaging, and serialize release workflows so an older build cannot finish
 after a newer one and move latest backwards.
+
+## 2026-11-05 — Interrupted analysis runs must not complete their retries
+
+Linux smoke failures stalled real clicks in Mastering while the Electron main
+process stayed responsive. Paused-renderer precise coverage showed over 10,000
+selected-analysis completions/upserts, not an oversized canvas. AnalysisQueue
+released and immediately cloned an interrupted task for retry, but a late
+success from the old run still resolved their shared caller promise. A partial
+loudness result could then be reused repeatedly while the actual retry waited
+for its start timer, starving rendering. The settlement guard now ignores runs
+whose slot was already released for preemption. The retry keeps ownership of
+completion and deduplication. A deterministic regression failed on the old
+code and passed after this change; all 57 queue cases passed. A second case
+covers a late result arriving after the retry and a newer same-key request.
+Keep production timing and native pointer assertions; remove temporary CDP
+profiling after diagnosis rather than hiding the failed click behind retries.

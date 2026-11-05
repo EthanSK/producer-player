@@ -6,7 +6,6 @@ import {
   cleanupE2ETestDirectories,
   createE2ETestDirectories,
   launchProducerPlayer,
-  openMasteringWithDiagnostics,
   suppressAgentPanelOnboarding,
 } from './helpers/electron-app';
 
@@ -151,7 +150,7 @@ test.describe('Plugin audio routing invariants @smoke', () => {
       await seedFakePluginLibrary(page);
 
       await expect(page.getByTestId('analysis-expand-button')).toBeEnabled();
-      await openMasteringWithDiagnostics(page, electronApp);
+      await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
 
       const strip = page.getByTestId('plugin-chain-strip-fullscreen');

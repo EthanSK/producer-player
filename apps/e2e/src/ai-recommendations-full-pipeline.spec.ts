@@ -5,7 +5,6 @@ import {
   cleanupE2ETestDirectories,
   createE2ETestDirectories,
   launchProducerPlayer,
-  openMasteringWithDiagnostics,
 } from './helpers/electron-app';
 
 /**
@@ -230,7 +229,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
 
       // Open fullscreen mastering overlay to satisfy the toggle-ON gate AND
       // so the ai-rec captions render inside the overlay.
-      await openMasteringWithDiagnostics(page, electronApp);
+      await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
 
       // Auto-run should fire within a few seconds once analysis completes.
@@ -299,7 +298,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       await setAgentAutoRecommendEnabled(page, true);
       await closeAgentPanelIfOpen(page);
       await page.getByTestId('main-list-row').first().click();
-      await openMasteringWithDiagnostics(page, electronApp);
+      await page.getByTestId('analysis-expand-button').click();
 
       try {
         await expect
@@ -368,7 +367,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       // header. Correct fix: minimize the panel if it's open, then click.
       await closeAgentPanelIfOpen(page);
       await page.getByTestId('main-list-row').first().click();
-      await openMasteringWithDiagnostics(page, electronApp);
+      await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
 
       // Give the app time to settle analysis — if the gate were ON, the
@@ -437,7 +436,7 @@ test.describe('AI recommendations full pipeline (Phase 4) @smoke', () => {
       await setAgentAutoRecommendEnabled(page, true);
       await closeAgentPanelIfOpen(page);
       await page.getByTestId('main-list-row').first().click();
-      await openMasteringWithDiagnostics(page, electronApp);
+      await page.getByTestId('analysis-expand-button').click();
 
       try {
         await expect

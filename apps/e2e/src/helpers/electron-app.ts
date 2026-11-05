@@ -6,8 +6,6 @@ import path from 'node:path';
 import {
   _electron as electron,
   type ElectronApplication,
-  type Page,
-  test,
 } from '@playwright/test';
 
 // macOS app activation is the main source of local focus-stealing during Electron E2Es,
@@ -114,118 +112,6 @@ export async function suppressAgentPanelOnboarding(
   });
   await page.reload();
   await page.waitForSelector('[data-testid="app-shell"]');
-}
-
-// Preserve the real pointer click; capture this custom Electron page before
-// each spec's finally block closes it (Playwright's page fixture does not own it).
-export async function openMasteringWithDiagnostics(
-  page: Page, electronApp: ElectronApplication
-): Promise<void> {
-  const bounded = <T>(operation: Promise<T>, timeoutMs = 5_000): Promise<T> => new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Diagnostic timed out')), timeoutMs);
-    operation.then((value) => { clearTimeout(timer); resolve(value); },
-      (error) => { clearTimeout(timer); reject(error); });
-  });
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Debugger.enable');
-  await cdp.send('Profiler.enable');
-  await cdp.send('Profiler.startPreciseCoverage', { callCount: true, detailed: true });
-  const paused = new Promise((resolve) => cdp.once('Debugger.paused', async (event) => {
-    const frames = event.callFrames.slice(0, 12).map((frame) => ({
-      functionName: frame.functionName, url: frame.url, location: frame.location,
-    }));
-    console.log('[mastering-click-stack]', JSON.stringify(frames));
-    try {
-      const layout = await bounded(cdp.send('Debugger.evaluateOnCallFrame', {
-        callFrameId: event.callFrames[0].callFrameId,
-        returnByValue: true,
-        expression: `JSON.stringify({ viewport: [innerWidth, innerHeight], elements: Array.from(document.querySelectorAll('.analysis-overlay-card, .analysis-overlay-grid, .analysis-overlay-viz-spectrum, [data-testid="analysis-loudness-histogram"], .analysis-overlay canvas')).map(el => ({className: el.className, width: el.getBoundingClientRect().width, canvasWidth: el instanceof HTMLCanvasElement ? el.width : null, height: el.getBoundingClientRect().height})) })`,
-      }));
-      console.log('[mastering-click-layout]', layout.result.value);
-      const hooks = await bounded(cdp.send('Debugger.evaluateOnCallFrame', {
-        callFrameId: event.callFrames[0].callFrameId,
-        returnByValue: true,
-        expression: `JSON.stringify((() => {
-          const root = document.querySelector('[data-testid="app-shell"]');
-          const key = root && Object.keys(root).find(key => key.startsWith('__reactFiber$'));
-          let fiber = key && root[key]; const components = [];
-          function summary(value) {
-            if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
-            if (typeof value === 'string') return {type:'string',length:value.length,status:/^(idle|loading|ready|error|mix|reference|full|loudness|enrichment)$/.test(value)?value:undefined};
-            if (Array.isArray(value)) return {type:'array',length:value.length};
-            if (typeof value === 'object' && value) {
-              const keys = Object.keys(value); const first = value[keys[0]];
-              return {keys:keys.slice(0,8),count:keys.length,measuredWith:value.measuredWith,status:value.status,firstObjectKeys:typeof first==='object'&&first?Object.keys(first).slice(0,8):undefined,firstMeasuredWith:first&&first.measuredAnalysis&&first.measuredAnalysis.measuredWith};
-            }
-            return {type:typeof value};
-          }
-          for (let depth=0; fiber && depth<12; depth++, fiber=fiber.return) {
-            if (typeof fiber.type !== 'function') continue;
-            let hook=fiber.memoizedState, other=fiber.alternate&&fiber.alternate.memoizedState;
-            const changes=[];
-            for(let index=0;hook&&other&&index<600;index++,hook=hook.next,other=other.next) {
-              if(hook.queue && other.queue && hook.memoizedState!==other.memoizedState) changes.push({index,before:summary(other.memoizedState),after:summary(hook.memoizedState)});
-            }
-            components.push({name:fiber.type.name,changes});
-          }
-          return components;
-        })())`,
-      }));
-      console.log('[mastering-click-hook-changes]', hooks.result.value);
-      const coverage = await bounded(cdp.send('Profiler.takePreciseCoverage'));
-      await test.info().attach('mastering-call-counts', {
-        body: JSON.stringify(coverage), contentType: 'application/json',
-      });
-      const script = await bounded(cdp.send('Debugger.getScriptSource', {
-        scriptId: event.callFrames[0].location.scriptId,
-      }));
-      await test.info().attach('mastering-renderer-source', {
-        body: script.scriptSource, contentType: 'text/javascript',
-      });
-    } catch (error) { console.log('[mastering-click-paused-diagnostic]', String(error)); }
-    resolve(frames);
-  }));
-  try {
-    await page.getByTestId('analysis-expand-button').click();
-  } catch (failure) {
-    const diagnostics = await Promise.allSettled([
-      page.screenshot({ timeout: 5_000 }).then((body) =>
-        test.info().attach('mastering-click-screen', { body, contentType: 'image/png' })
-      ),
-      bounded(cdp.send('Debugger.pause').then(() => paused)).then((frames) => test.info().attach('mastering-click-stack', {
-        body: JSON.stringify(frames), contentType: 'application/json',
-      })),
-      bounded(electronApp.evaluate(({ app, BrowserWindow }) => {
-        const windows = BrowserWindow.getAllWindows();
-        return {
-          windows: windows.map((window) => ({
-            bounds: window.getBounds(), focused: window.isFocused(), visible: window.isVisible(),
-            destroyed: window.isDestroyed(), crashed: window.webContents.isCrashed(),
-            rendererPid: window.webContents.getOSProcessId(),
-          })),
-          metrics: app.getAppMetrics(),
-        };
-      })).then(async (state) => {
-        console.log('[mastering-click-main-state]', JSON.stringify(state));
-        await test.info().attach('mastering-click-main-state', {
-          body: JSON.stringify(state), contentType: 'application/json',
-        });
-      }),
-      bounded(electronApp.evaluate(async ({ BrowserWindow }) =>
-        (await BrowserWindow.getAllWindows()[0].capturePage()).toPNG().toString('base64')
-      )).then((screenshot) => test.info().attach('mastering-click-native-screen', {
-        body: Buffer.from(screenshot, 'base64'), contentType: 'image/png',
-      })),
-    ]);
-    console.log('[mastering-click-diagnostics]', diagnostics.map((result) =>
-      result.status === 'fulfilled' ? 'captured' : String(result.reason)
-    ));
-    throw failure;
-  } finally {
-    // Only a failed disposable fixture is paused, then released before teardown.
-    await bounded(cdp.send('Debugger.resume'), 1_000).catch(() => undefined);
-    await bounded(cdp.detach(), 1_000).catch(() => undefined);
-  }
 }
 
 export async function createE2ETestDirectories(prefix: string): Promise<E2ETestDirectories> {

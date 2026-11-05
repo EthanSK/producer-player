@@ -5,7 +5,6 @@ import {
   cleanupE2ETestDirectories,
   createE2ETestDirectories,
   launchProducerPlayer,
-  openMasteringWithDiagnostics,
 } from './helpers/electron-app';
 
 /**
@@ -150,7 +149,7 @@ test.describe('Plugin chain strip @smoke', () => {
 
       // --- Open the fullscreen Mastering overlay -------------------------
       await expect(page.getByTestId('analysis-expand-button')).toBeEnabled();
-      await openMasteringWithDiagnostics(page, electronApp);
+      await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
 
       // Scenario 1: Fullscreen chain strip is visible + empty state.
@@ -201,7 +200,7 @@ test.describe('Plugin chain strip @smoke', () => {
       await expect(page.getByTestId('analysis-modal')).not.toBeVisible();
 
       // Reopen — chain should rehydrate from per-track persistence.
-      await openMasteringWithDiagnostics(page, electronApp);
+      await page.getByTestId('analysis-expand-button').click();
       await expect(page.getByTestId('analysis-modal')).toBeVisible();
       await expect(
         page.getByTestId('plugin-chain-strip-fullscreen').getByTestId('plugin-pill'),

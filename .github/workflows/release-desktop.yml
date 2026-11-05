@@ -202,7 +202,7 @@ jobs:
       #   APPLE_TEAM_ID                – 10-character Apple Developer Team ID
       #
       # electron-builder reads CSC_LINK / CSC_KEY_PASSWORD automatically.
-      # The notarize.js afterSign hook reads the APPLE_* variables.
+      # electron-builder's built-in notarization reads the APPLE_* variables.
       # Release builds require every credential; unsigned Mac releases are refused.
       # ─────────────────────────────────────────────────────────────────
 

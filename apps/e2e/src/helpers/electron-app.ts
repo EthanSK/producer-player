@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   _electron as electron,
   type ElectronApplication,
+  type Page,
 } from '@playwright/test';
 
 // macOS app activation is the main source of local focus-stealing during Electron E2Es,

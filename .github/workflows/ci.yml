@@ -138,9 +138,11 @@ jobs:
       # pp-audio-host (JUCE) sidecar is macOS-only and skipped on Linux by
       # apps/electron/scripts/build-main.mjs.
 
+      # Each native input test owns the active window on this isolated CI desktop.
       - name: Run runtime smoke tests
         env:
-          PLAYWRIGHT_WORKERS: 2
+          PLAYWRIGHT_WORKERS: 1
+          PRODUCER_PLAYER_E2E_WINDOW_MODE: foreground
         run: npm run e2e:smoke
 
       - name: Upload Linux Playwright artifacts on failure
@@ -241,9 +243,11 @@ jobs:
           }
           Write-Host "Renderer build output exists: apps/renderer/dist/index.html"
 
+      # Each native input test owns the active window on this isolated CI desktop.
       - name: Run E2E smoke tests
         env:
-          PLAYWRIGHT_WORKERS: 2
+          PLAYWRIGHT_WORKERS: 1
+          PRODUCER_PLAYER_E2E_WINDOW_MODE: foreground
         run: npm run ci:smoke -w @producer-player/e2e
 
       - name: Upload Playwright artifacts on failure

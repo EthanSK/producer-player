@@ -7,6 +7,7 @@ import {
   _electron as electron,
   type ElectronApplication,
   type Page,
+  test,
 } from '@playwright/test';
 
 // macOS app activation is the main source of local focus-stealing during Electron E2Es,
@@ -113,6 +114,42 @@ export async function suppressAgentPanelOnboarding(
   });
   await page.reload();
   await page.waitForSelector('[data-testid="app-shell"]');
+}
+
+// Preserve the real pointer click; capture this custom Electron page before
+// each spec's finally block closes it (Playwright's page fixture does not own it).
+export async function openMasteringWithDiagnostics(page: Page): Promise<void> {
+  try {
+    await page.getByTestId('analysis-expand-button').click();
+  } catch (failure) {
+    await Promise.allSettled([
+      page.screenshot({ timeout: 5_000 }).then((body) =>
+        test.info().attach('mastering-click-screen', { body, contentType: 'image/png' })
+      ),
+      Promise.race([
+        page.evaluate(() => {
+          const button = document.querySelector('[data-testid="analysis-expand-button"]');
+          const rect = button?.getBoundingClientRect();
+          return {
+            viewport: { width: innerWidth, height: innerHeight },
+            focused: document.hasFocus(),
+            visibility: document.visibilityState,
+            button: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            elementsAtButton: rect && document.elementsFromPoint(
+              rect.x + rect.width / 2, rect.y + rect.height / 2
+            ).map((element) => ({ tag: element.tagName, className: element.className,
+              testId: element.getAttribute('data-testid') })),
+            masteringOpen: !!document.querySelector('[data-testid="analysis-modal"]'),
+            agentPanelClass: document.querySelector('.agent-chat-panel')?.className,
+          };
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Renderer snapshot timed out')), 5_000)),
+      ]).then((state) => test.info().attach('mastering-click-state', {
+        body: JSON.stringify(state), contentType: 'application/json',
+      })),
+    ]);
+    throw failure;
+  }
 }
 
 export async function createE2ETestDirectories(prefix: string): Promise<E2ETestDirectories> {

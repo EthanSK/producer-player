@@ -24,6 +24,15 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-11-05T19:25:00Z
+**Trigger:** Repair Producer Player updates and verify the effect on existing users.
+**Symptom:** The public latest release v3.339 contained Windows/Linux downloads but no Mac ZIP or latest-mac.yml; the normal Mac feed URL returned HTTP 404.
+**Root cause:** Locked app-builder-lib 26.8.1 created a temporary Keychain with a random unlock password, then incorrectly used the certificate export password for security set-key-partition-list. Upstream PR #10101 fixes that distinction. The publication job ran despite the Mac failure and required only Linux files, moving GitHub's shared latest pointer to an incomplete release.
+**Fix:** Pin electron-builder 26.16.1 and its lockfile, require every platform build to succeed, verify Mac signing and stapled notarization, and run scripts/check-release-artifacts.mjs before publishing. Keep per-platform signing credentials scoped to the Mac build. Report the first actual failed step instead of diagnosing every Mac error as an Apple agreement issue.
+**Guard:** Ten publication-gate tests run on the Mac Mini, covering complete releases, the observed v3.339 asset-list fixture, missing feeds, empty files, stale metadata and wrong Mac download paths. The release workflow runs these tests before building and validates the actual platform artifacts before publishing. No playback or user-state source changed.
+---
+
+---
 **Date:** 2026-07-29T18:30:00Z
 **Trigger:** Ethan production report immediately after v3.337: opening Version History showed only the current export until latest-track LUFS warmup finished
 **Symptom:** The selected track's older version rows, filenames, dates, and sizes were hidden for seconds even though only their LUFS/sample-rate analysis needed to remain deferred.

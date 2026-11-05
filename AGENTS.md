@@ -38,10 +38,17 @@ Program License Agreement, then re-run the latest failed workflow run
 commit. Until that's done, NO new mac release exists for users to update
 to, regardless of how many times anyone hits "Check for Updates".
 
-The workflow now (a) emits a loud `::error` annotation when mac
-notarization fails, and (b) lets `publish-release` ship whatever
-platforms DID build, so a single-platform failure no longer blocks the
-others.
+Read the first failed step before diagnosing an Apple agreement problem.
+v3.339 failed before notarization: electron-builder 26.8.1 passed the
+certificate password instead of the temporary Keychain password to
+`security set-key-partition-list`. The locked electron-builder 26.16.1
+contains the upstream fix; do not reset working credentials for that bug.
+
+All platforms share GitHub's newest release. The workflow requires every
+platform build to succeed and validates Mac, Linux and Windows downloads
+and feeds before publishing. Never publish a partial latest release:
+missing `latest-mac.yml` breaks existing Mac update checks and stable
+Mac download links instead of keeping those clients on an older feed.
 
 ## Screenshots
 

@@ -1,0 +1,94 @@
+{
+  "_provenance": {
+    "kind": "observed public GitHub release projection",
+    "observedAt": "2026-11-05T19:24:13.893775+00:00",
+    "source": "https://api.github.com/repos/EthanSK/producer-player/releases/tags/v3.339",
+    "retainedFields": [
+      "tag_name",
+      "assets.name",
+      "assets.browser_download_url"
+    ],
+    "note": "Asset names and URLs are observed; tests use synthetic payload bytes."
+  },
+  "release": {
+    "tag_name": "v3.339",
+    "assets": [
+      {
+        "name": "latest-linux.yml",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/latest-linux.yml"
+      },
+      {
+        "name": "latest.yml",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/latest.yml"
+      },
+      {
+        "name": "Producer-Player-3.339.0-linux-x64.AppImage",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-3.339.0-linux-x64.AppImage"
+      },
+      {
+        "name": "Producer-Player-3.339.0-linux-x64.AppImage.sha256",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-3.339.0-linux-x64.AppImage.sha256"
+      },
+      {
+        "name": "Producer-Player-3.339.0-linux-x64.deb",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-3.339.0-linux-x64.deb"
+      },
+      {
+        "name": "Producer-Player-3.339.0-linux-x64.deb.sha256",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-3.339.0-linux-x64.deb.sha256"
+      },
+      {
+        "name": "Producer-Player-3.339.0-linux-x64.zip",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-3.339.0-linux-x64.zip"
+      },
+      {
+        "name": "Producer-Player-3.339.0-linux-x64.zip.sha256",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-3.339.0-linux-x64.zip.sha256"
+      },
+      {
+        "name": "Producer-Player-3.339.0-win-x64.exe",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-3.339.0-win-x64.exe"
+      },
+      {
+        "name": "Producer-Player-3.339.0-win-x64.exe.blockmap",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-3.339.0-win-x64.exe.blockmap"
+      },
+      {
+        "name": "Producer-Player-3.339.0-win-x64.exe.sha256",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-3.339.0-win-x64.exe.sha256"
+      },
+      {
+        "name": "Producer-Player-latest-linux-x64.AppImage",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-latest-linux-x64.AppImage"
+      },
+      {
+        "name": "Producer-Player-latest-linux-x64.AppImage.sha256",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-latest-linux-x64.AppImage.sha256"
+      },
+      {
+        "name": "Producer-Player-latest-linux-x64.deb",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-latest-linux-x64.deb"
+      },
+      {
+        "name": "Producer-Player-latest-linux-x64.deb.sha256",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-latest-linux-x64.deb.sha256"
+      },
+      {
+        "name": "Producer-Player-latest-linux-x64.zip",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-latest-linux-x64.zip"
+      },
+      {
+        "name": "Producer-Player-latest-linux-x64.zip.sha256",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-latest-linux-x64.zip.sha256"
+      },
+      {
+        "name": "Producer-Player-latest-win-x64.exe",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-latest-win-x64.exe"
+      },
+      {
+        "name": "Producer-Player-latest-win-x64.exe.sha256",
+        "browser_download_url": "https://github.com/EthanSK/producer-player/releases/download/v3.339/Producer-Player-latest-win-x64.exe.sha256"
+      }
+    ]
+  }
+}

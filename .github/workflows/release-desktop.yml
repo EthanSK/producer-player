@@ -59,6 +59,9 @@ jobs:
         with:
           node-version: 20
 
+      - name: Test complete-release publication guard
+        run: node --test scripts/check-release-artifacts.test.mjs
+
       - name: Sync and verify version metadata
         run: |
           npm run version:sync
@@ -190,7 +193,7 @@ jobs:
       #
       # electron-builder reads CSC_LINK / CSC_KEY_PASSWORD automatically.
       # The notarize.js afterSign hook reads the APPLE_* variables.
-      # If secrets are not set the build produces an unsigned binary (no error).
+      # Release builds require every credential; unsigned Mac releases are refused.
       # ─────────────────────────────────────────────────────────────────
 
       - name: Build desktop package
@@ -209,16 +212,36 @@ jobs:
           APPLE_ID: ${{ matrix.slug == 'mac' && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.slug == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.slug == 'mac' && secrets.APPLE_TEAM_ID || '' }}
-        run: npm run release:desktop:${{ matrix.slug }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.slug }}" = "mac" ]; then
+            for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+              if [ -z "${!name}" ]; then
+                echo "::error::Missing required macOS release credential: $name"
+                exit 1
+              fi
+            done
+          fi
+          npm run release:desktop:${{ matrix.slug }}
 
-      # BUG FIX (2026-04-16, 68fd717): every Release Desktop run since 2026-04-12 failed silently
-      # at notarization 403. Users stuck on v2.82 for days with no visible error. This annotation
-      # surfaces the failure mode loudly so it can't happen again.
-      - name: Annotate notarization failure
+      - name: Verify Mac signature and stapled notarization
+        if: matrix.slug == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app='release/mac-universal/Producer Player.app'
+          codesign --verify --deep --strict "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+
+      # Report the real failed step instead of diagnosing every Mac failure as
+      # an expired Apple agreement. v3.339 failed in temporary Keychain setup.
+      - name: Report macOS build failure
         if: failure() && matrix.slug == 'mac'
         shell: bash
         run: |
-          echo "::error title=macOS notarization failed::The macOS build failed, most likely because the Apple Developer Program License Agreement needs to be re-accepted at https://developer.apple.com/account/ (look for the yellow banner). After accepting it, re-run this workflow to publish the macOS update. Until then existing installs will see 'You are up to date' on the previously published version even though new versions exist in the repo."
+          echo "::error title=macOS release failed::Read the first failed macOS step for the packaging, signing or notarization error. No incomplete latest release will be published."
 
       - name: Generate SHA-256 checksum (macOS/Linux)
         if: runner.os != 'Windows'
@@ -271,14 +294,13 @@ jobs:
 
   publish-release:
     name: Publish release
-    # Run as long as compute-version succeeded — even if some build-desktop
-    # matrix legs failed. This way a macOS notarization/account failure can
-    # still publish Linux/Windows. The publish job below now treats Linux
-    # AppImage + latest-linux.yml as required so Linux users never get a
-    # latest release with a missing/broken update feed.
+    # All platforms share GitHub's latest release. Publishing Linux/Windows
+    # alone makes existing Mac updaters request a missing latest-mac.yml;
+    # retain the previous complete release whenever any build fails.
     if: |
       always() &&
       needs.compute-version.result == 'success' &&
+      needs.build-desktop.result == 'success' &&
       (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     needs:
       - compute-version
@@ -295,34 +317,15 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      # Linux is now a first-class release platform. macOS can still be
-      # skipped when notarization/account state is broken, but publishing a
-      # latest release without Linux AppImage + latest-linux.yml would strand
-      # Linux users on a broken/missing update feed.
+      - name: Setup Node for artifact verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Verify required platform artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          mac_zips=(release-assets/Producer-Player-*-mac-universal.zip)
-          linux_appimages=(release-assets/Producer-Player-*-linux-x64.AppImage)
-          linux_debs=(release-assets/Producer-Player-*-linux-x64.deb)
-          linux_zips=(release-assets/Producer-Player-*-linux-x64.zip)
-          linux_feeds=(release-assets/latest-linux.yml)
-          win_installers=(release-assets/Producer-Player-*-win-x64.exe)
-
-          if [ ${#linux_appimages[@]} -ne 1 ] || [ ${#linux_debs[@]} -ne 1 ] || [ ${#linux_zips[@]} -ne 1 ] || [ ${#linux_feeds[@]} -ne 1 ]; then
-            echo "::error title=Linux release incomplete::Expected exactly one Linux AppImage, deb, zip, and latest-linux.yml. Refusing to publish a latest release that Linux users cannot install/update."
-            ls -lah release-assets || true
-            exit 1
-          fi
-
-          if [ ${#mac_zips[@]} -eq 0 ]; then
-            echo "::warning title=Skipping macOS in this release::No mac build artifact present (mac job likely failed). Existing macOS users will stay on the last successfully published macOS version. Re-run this workflow once mac notarization is restored."
-          fi
-          if [ ${#win_installers[@]} -eq 0 ]; then
-            echo "::warning title=Skipping Windows in this release::No windows installer artifact present."
-          fi
+        env:
+          EXPECTED_VERSION: ${{ needs.compute-version.outputs.app_version }}
+        run: node scripts/check-release-artifacts.mjs release-assets
 
       - name: Create stable latest-download aliases
         shell: bash
@@ -353,10 +356,8 @@ jobs:
             matches=($pattern)
 
             if [ ${#matches[@]} -eq 0 ]; then
-              # Platform's build job failed — skip its alias rather than
-              # failing the whole release. Other platforms still publish.
-              echo "::warning title=Missing build for $pattern::Skipping latest-alias for $alias_name; that platform did not build."
-              continue
+              echo "::error::Missing required download alias source: $pattern"
+              exit 1
             fi
 
             if [ ${#matches[@]} -gt 1 ]; then
@@ -392,8 +393,8 @@ jobs:
           shopt -s nullglob
           ymls=(release-assets/latest*.yml)
           if [ ${#ymls[@]} -eq 0 ]; then
-            echo "::warning title=No latest-*.yml published::electron-updater clients will not discover this release. Verify the electron-builder publish step ran."
-            exit 0
+            echo "::error::No updater feeds found; refusing to publish."
+            exit 1
           fi
           for f in "${ymls[@]}"; do
             if [ "$(basename "$f")" = "latest-linux.yml" ]; then

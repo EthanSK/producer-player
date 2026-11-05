@@ -164,3 +164,22 @@ scripts/build-mac.mjs            ← build orchestrator (respects CSC_LINK/CSC_N
 | "The developer cannot be verified" | Certificate isn't Developer ID Application, or notarization wasn't completed. |
 | Build fails on CI with signing error | Check that `CSC_LINK` is a valid base64 string, not a file path. |
 | Local build ignores cert | Make sure `CSC_LINK` or `CSC_NAME` is exported — otherwise auto-discovery is disabled. |
+
+## Complete desktop releases
+
+Release Desktop uses the locked electron-builder 26.16.1, which fixes
+upstream issue [#10066](https://github.com/electron-userland/electron-builder/issues/10066)
+and [PR #10101](https://github.com/electron-userland/electron-builder/pull/10101).
+Older versions passed the certificate export password to the temporary
+Keychain unlock operation; the resulting signing error did not mean the
+certificate password or Apple account needed resetting.
+
+Public Mac releases require all signing/notarization credentials, a valid
+Developer ID signature, and a stapled notarization ticket. Unsigned local
+development remains available, but cannot pass the release workflow.
+
+The publication job requires successful Mac, Linux and Windows builds.
+`node scripts/check-release-artifacts.mjs release-assets` then requires all
+platform downloads and their matching-version update feeds before moving
+GitHub's shared latest release. A failed platform leaves the previous
+complete release in place, preserving existing update and download links.

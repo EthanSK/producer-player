@@ -1,6 +1,6 @@
 {
   "name": "producer-player",
-  "version": "3.339.0",
+  "version": "3.340.0",
   "private": true,
   "description": "Producer Player desktop app for producers managing album tracks, exports, and ordering.",
   "author": "EthanSK",
@@ -155,7 +155,7 @@
     "@electron/notarize": "^3.1.1",
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
-    "electron-builder": "^26.0.12",
+    "electron-builder": "26.16.1",
     "rimraf": "^6.0.1",
     "typescript": "^5.8.2",
     "wait-on": "^9.0.1"

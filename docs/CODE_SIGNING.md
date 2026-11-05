@@ -143,7 +143,6 @@ spctl --assess --type execute --verbose=2 \
    unnotarized. Release CI requires all credentials and verifies the actual
    signature, stapled ticket and Gatekeeper acceptance before publishing.
 
-
 ### Files involved
 
 ```
@@ -186,7 +185,7 @@ platform downloads and their matching-version update feeds before moving
 GitHub's shared latest release. A failed platform leaves the previous
 complete release in place, preserving existing update and download links.
 
-The publication job also requires the CI workflow to pass for the exact
+Desktop packaging starts only after the CI workflow passes for the exact
 source commit. Files upload to a draft first; only a successful complete
 upload is promoted to the public latest release. Existing clients keep
 seeing the previous complete release while the next upload is in progress.

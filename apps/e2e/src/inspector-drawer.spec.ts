@@ -3,6 +3,7 @@ import {
   cleanupE2ETestDirectories,
   createE2ETestDirectories,
   launchProducerPlayer,
+  suppressAgentPanelOnboarding,
 } from './helpers/electron-app';
 
 // v3.20: The right-hand inspector pane collapses into a slide-in drawer at
@@ -35,25 +36,6 @@ async function setWindowContentSize(
     // window.innerWidth / the CSS @media queries key off of.
     window.setContentSize(size.width, size.height);
   }, { width, height });
-}
-
-// Suppress the first-launch auto-open of the Agent Chat Panel (which would
-// otherwise cover the bottom-right corner of the viewport and intercept
-// clicks on the inspector-toggle button). We do this by setting the same
-// localStorage flag the panel itself writes after its first appearance, then
-// reloading so the panel initializes with that flag in scope.
-async function suppressAgentPanelOnboarding(
-  page: Awaited<ReturnType<typeof launchProducerPlayer>>['page']
-): Promise<void> {
-  await page.evaluate(() => {
-    window.localStorage.setItem('producer-player.agent-panel-seen', 'true');
-    window.localStorage.setItem(
-      'producer-player.agent-panel-onboarding-armed',
-      'true'
-    );
-  });
-  await page.reload();
-  await page.waitForSelector('[data-testid="app-shell"]');
 }
 
 test.describe('Inspector drawer (v3.20)', () => {

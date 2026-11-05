@@ -33,6 +33,7 @@ on:
       - 'scripts/install-git-hooks.mjs'
       - 'scripts/run-pre-push-version-check.mjs'
   pull_request:
+  workflow_dispatch:
 
 jobs:
   node-build:

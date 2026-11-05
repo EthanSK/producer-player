@@ -60,6 +60,19 @@ jobs:
         with:
           node-version: 22
 
+      - name: Require successful CI for this source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$ci_run" ]; then
+            echo "::error::No CI run found for this exact source commit; refusing publication."
+            exit 1
+          fi
+          gh run watch "$ci_run" --repo "$GITHUB_REPOSITORY" --exit-status
+
       - name: Test complete-release publication guard
         run: node --test scripts/check-release-artifacts.test.mjs
 
@@ -552,19 +565,6 @@ jobs:
             echo ""
             echo "**Full Changelog**: https://github.com/${repo}/compare/${prev_tag}...${release_tag}"
           } > /tmp/release_body.md
-
-      - name: Require successful CI for this source commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          ci_run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -z "$ci_run" ]; then
-            echo "::error::No CI run found for this exact source commit; refusing publication."
-            exit 1
-          fi
-          gh run watch "$ci_run" --repo "$GITHUB_REPOSITORY" --exit-status
 
       # Attach every file while the release is private. Only the final edit
       # moves the shared latest pointer, so clients never see a half-uploaded

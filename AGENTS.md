@@ -39,10 +39,8 @@ commit. Until that's done, NO new mac release exists for users to update
 to, regardless of how many times anyone hits "Check for Updates".
 
 Read the first failed step before diagnosing an Apple agreement problem.
-v3.339 failed before notarization: electron-builder 26.8.1 passed the
-certificate password instead of the temporary Keychain password to
-`security set-key-partition-list`. The locked electron-builder 26.16.1
-contains the upstream fix; do not reset working credentials for that bug.
+Check that the locked packager contains the upstream temporary Keychain
+password fix before changing working credentials.
 
 All platforms share GitHub's newest release. The workflow requires every
 platform build to succeed and validates Mac, Linux and Windows downloads

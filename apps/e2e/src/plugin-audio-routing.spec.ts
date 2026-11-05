@@ -1,3 +1,4 @@
+// Verify saved plugin bypass state in an isolated app, with onboarding out of the way.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -5,6 +6,7 @@ import {
   cleanupE2ETestDirectories,
   createE2ETestDirectories,
   launchProducerPlayer,
+  suppressAgentPanelOnboarding,
 } from './helpers/electron-app';
 
 /**
@@ -131,6 +133,7 @@ test.describe('Plugin audio routing invariants @smoke', () => {
     const { electronApp, page } = await launchProducerPlayer(directories.userDataDirectory);
 
     try {
+      await suppressAgentPanelOnboarding(page);
       await seedFakePluginLibrary(page);
 
       await page.evaluate(async (folderPath) => {

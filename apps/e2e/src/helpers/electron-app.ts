@@ -93,6 +93,28 @@ export async function launchProducerPlayer(
   };
 }
 
+// Extraction of existing inspector-drawer.spec.ts onboarding setup, shared
+// by tests that need first-launch Agent Chat out of the way. Flags and reload
+// are unchanged; the production app and its onboarding behavior are unchanged.
+// Suppress the first-launch auto-open of the Agent Chat Panel (which would
+// otherwise cover the bottom-right corner of the viewport and intercept
+// clicks on the inspector-toggle button). We do this by setting the same
+// localStorage flag the panel itself writes after its first appearance, then
+// reloading so the panel initializes with that flag in scope.
+export async function suppressAgentPanelOnboarding(
+  page: Awaited<ReturnType<typeof launchProducerPlayer>>['page']
+): Promise<void> {
+  await page.evaluate(() => {
+    window.localStorage.setItem('producer-player.agent-panel-seen', 'true');
+    window.localStorage.setItem(
+      'producer-player.agent-panel-onboarding-armed',
+      'true'
+    );
+  });
+  await page.reload();
+  await page.waitForSelector('[data-testid="app-shell"]');
+}
+
 export async function createE2ETestDirectories(prefix: string): Promise<E2ETestDirectories> {
   const fixtureDirectory = await fs.mkdtemp(path.join(os.tmpdir(), `${prefix}-fixture-`));
   const userDataDirectory = await fs.mkdtemp(path.join(os.tmpdir(), `${prefix}-user-data-`));

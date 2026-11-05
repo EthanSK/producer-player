@@ -128,6 +128,8 @@ export async function openMasteringWithDiagnostics(
   });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Debugger.enable');
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.startPreciseCoverage', { callCount: true, detailed: true });
   const paused = new Promise((resolve) => cdp.once('Debugger.paused', async (event) => {
     const frames = event.callFrames.slice(0, 12).map((frame) => ({
       functionName: frame.functionName, url: frame.url, location: frame.location,
@@ -140,6 +142,40 @@ export async function openMasteringWithDiagnostics(
         expression: `JSON.stringify({ viewport: [innerWidth, innerHeight], elements: Array.from(document.querySelectorAll('.analysis-overlay-card, .analysis-overlay-grid, .analysis-overlay-viz-spectrum, [data-testid="analysis-loudness-histogram"], .analysis-overlay canvas')).map(el => ({className: el.className, width: el.getBoundingClientRect().width, canvasWidth: el instanceof HTMLCanvasElement ? el.width : null, height: el.getBoundingClientRect().height})) })`,
       }));
       console.log('[mastering-click-layout]', layout.result.value);
+      const hooks = await bounded(cdp.send('Debugger.evaluateOnCallFrame', {
+        callFrameId: event.callFrames[0].callFrameId,
+        returnByValue: true,
+        expression: `JSON.stringify((() => {
+          const root = document.querySelector('[data-testid="app-shell"]');
+          const key = root && Object.keys(root).find(key => key.startsWith('__reactFiber$'));
+          let fiber = key && root[key]; const components = [];
+          function summary(value) {
+            if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
+            if (typeof value === 'string') return {type:'string',length:value.length,status:/^(idle|loading|ready|error|mix|reference|full|loudness|enrichment)$/.test(value)?value:undefined};
+            if (Array.isArray(value)) return {type:'array',length:value.length};
+            if (typeof value === 'object' && value) {
+              const keys = Object.keys(value); const first = value[keys[0]];
+              return {keys:keys.slice(0,8),count:keys.length,measuredWith:value.measuredWith,status:value.status,firstObjectKeys:typeof first==='object'&&first?Object.keys(first).slice(0,8):undefined,firstMeasuredWith:first&&first.measuredAnalysis&&first.measuredAnalysis.measuredWith};
+            }
+            return {type:typeof value};
+          }
+          for (let depth=0; fiber && depth<12; depth++, fiber=fiber.return) {
+            if (typeof fiber.type !== 'function') continue;
+            let hook=fiber.memoizedState, other=fiber.alternate&&fiber.alternate.memoizedState;
+            const changes=[];
+            for(let index=0;hook&&other&&index<600;index++,hook=hook.next,other=other.next) {
+              if(hook.queue && other.queue && hook.memoizedState!==other.memoizedState) changes.push({index,before:summary(other.memoizedState),after:summary(hook.memoizedState)});
+            }
+            components.push({name:fiber.type.name,changes});
+          }
+          return components;
+        })())`,
+      }));
+      console.log('[mastering-click-hook-changes]', hooks.result.value);
+      const coverage = await bounded(cdp.send('Profiler.takePreciseCoverage'));
+      await test.info().attach('mastering-call-counts', {
+        body: JSON.stringify(coverage), contentType: 'application/json',
+      });
       const script = await bounded(cdp.send('Debugger.getScriptSource', {
         scriptId: event.callFrames[0].location.scriptId,
       }));

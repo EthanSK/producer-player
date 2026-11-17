@@ -303,8 +303,8 @@ const bridge: ProducerPlayerBridge = {
     };
   },
 
-  async agentStartSession(payload: AgentStartSessionPayload) {
-    await ipcRenderer.invoke(IPC_CHANNELS.AGENT_START_SESSION, payload);
+  async agentStartSession(payload: AgentStartSessionPayload): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AGENT_START_SESSION, payload);
   },
 
   async agentSendTurn(payload: AgentSendTurnPayload) {
@@ -329,6 +329,10 @@ const bridge: ProducerPlayerBridge = {
 
   async agentDestroySession() {
     await ipcRenderer.invoke(IPC_CHANNELS.AGENT_DESTROY_SESSION);
+  },
+
+  async agentListModels(provider: AgentProviderId) {
+    return ipcRenderer.invoke(IPC_CHANNELS.AGENT_LIST_MODELS, provider);
   },
 
   async agentCheckProvider(provider: AgentProviderId) {

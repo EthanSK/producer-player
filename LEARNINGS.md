@@ -24,6 +24,14 @@ Each entry looks like:
 (newest first)
 
 ---
+**Date:** 2026-11-17
+**Symptom:** A desktop Codex model can be missing from the standalone CLI even when both are installed on the same Mac.
+**Root cause:** The Homebrew 0.145.0 binary listed two older models, while the current desktop launcher listed eight, including GPT-6.2 Sol.
+**Fix:** Discover the catalogue from each standard available CLI and launch the selected model with the CLI that listed it. Preserve custom CLI launchers and saved model IDs.
+**Guard:** The Agent Chat settings test serves a fixture catalogue and checks that visible and hidden entries receive the expected treatment.
+---
+
+---
 **Date:** 2026-11-05T19:25:00Z
 **Trigger:** Repair Producer Player updates and verify the effect on existing users.
 **Symptom:** The public latest release v3.339 contained Windows/Linux downloads but no Mac ZIP or latest-mac.yml; the normal Mac feed URL returned HTTP 404.

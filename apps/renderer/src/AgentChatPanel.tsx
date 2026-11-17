@@ -11,6 +11,7 @@ import type {
   AgentContext,
   AgentConversationHistoryEntry,
   AgentEvent,
+  AgentModelDefinition,
   AgentModelId,
   AgentProviderId,
   AgentThinkingEffort,
@@ -28,9 +29,7 @@ import {
   readStoredAgentSystemPrompt,
 } from './agentPrompts';
 import {
-  AGENT_MODEL_OPTIONS_BY_PROVIDER,
   AGENT_THINKING_OPTIONS,
-  DEFAULT_AGENT_MODEL_BY_PROVIDER,
   DEFAULT_AGENT_THINKING_BY_PROVIDER,
 } from './agentModels';
 import {
@@ -311,9 +310,7 @@ function readStoredProvider(): AgentProviderId {
 
 function readStoredModel(provider: AgentProviderId): AgentModelId {
   const stored = localStorage.getItem(`${AGENT_MODEL_STORAGE_PREFIX}${provider}`)?.trim();
-  return stored && stored.length > 0
-    ? stored
-    : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
+  return stored ?? '';
 }
 
 function readStoredThinking(provider: AgentProviderId): AgentThinkingEffort {
@@ -731,6 +728,7 @@ export function AgentChatPanel({
   }, [isStreaming, onChatStreamingChange]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [sessionActive, setSessionActive] = useState(false);
+  const pendingSessionStart = useRef<symbol | null>(null);
   const [provider, setProvider] = useState<AgentProviderId>(() => readStoredProvider());
   const [modelByProvider, setModelByProvider] = useState<
     Record<AgentProviderId, AgentModelId>
@@ -1078,10 +1076,12 @@ export function AgentChatPanel({
     [resetPanelBounds]
   );
 
-  const availableModels = AGENT_MODEL_OPTIONS_BY_PROVIDER[provider];
-  const currentModel = availableModels.some((option) => option.id === modelByProvider[provider])
-    ? modelByProvider[provider]
-    : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
+  const [modelsByProvider, setModelsByProvider] = useState<Partial<Record<AgentProviderId, AgentModelDefinition[]>>>({});
+  const currentModel = modelByProvider[provider];
+  const availableModels = modelsByProvider[provider] ?? [];
+  const modelOptions = currentModel && !availableModels.some(({ id }) => id === currentModel)
+    ? [...availableModels, { id: currentModel, label: currentModel }]
+    : availableModels;
   const currentThinking =
     thinkingByProvider[provider] ?? DEFAULT_AGENT_THINKING_BY_PROVIDER[provider];
   const effectiveSystemPrompt = systemPrompt.trim() || DEFAULT_AGENT_SYSTEM_PROMPT;
@@ -1105,10 +1105,15 @@ export function AgentChatPanel({
 
   useEffect(() => {
     if (!isOpen) return;
+    let active = true;
     void window.producerPlayer.agentCheckProvider(provider).then((available) => {
-      setProviderAvailable(available);
+      if (active) setProviderAvailable(available);
     });
-  }, [isOpen, provider]);
+    void window.producerPlayer.agentListModels(provider).then((models) => {
+      if (active) setModelsByProvider((previous) => ({ ...previous, [provider]: models }));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [isOpen, provider, settingsOpen]);
 
   useEffect(() => {
     let alive = true;
@@ -1386,7 +1391,8 @@ export function AgentChatPanel({
   }, []);
 
   const resetActiveSession = useCallback(() => {
-    if (sessionActive) {
+    if (sessionActive || pendingSessionStart.current) {
+      pendingSessionStart.current = null;
       void window.producerPlayer.agentDestroySession();
       setSessionActive(false);
     }
@@ -1774,20 +1780,31 @@ export function AgentChatPanel({
       }
 
       if (!sessionActive) {
-        const historySeed = buildHistorySeed(messages);
-        await window.producerPlayer.agentStartSession({
-          provider,
-          mode: 'analysis',
-          model: currentModel,
-          thinking: currentThinking,
-          systemPrompt: effectiveSystemPrompt,
-          ...(historySeed.length > 0 ? { history: historySeed } : {}),
-          // Item #13 (v3.113) — forward the user's persisted bypass-permissions
-          // setting on every fresh session. The main process plumbs this into
-          // `agentService.startSession`, which sets the per-session flag that
-          // `getSpawnArgs` reads when building the CLI argv.
-          dangerouslyBypassPermissions,
-        });
+        if (pendingSessionStart.current) {
+          if (options?.promptRequestId) onSilentPromptDropped?.(options.promptRequestId);
+          return;
+        }
+        const start = Symbol();
+        pendingSessionStart.current = start;
+        try {
+          const historySeed = buildHistorySeed(messages);
+          const started = await window.producerPlayer.agentStartSession({
+            provider,
+            mode: 'analysis',
+            model: currentModel,
+            thinking: currentThinking,
+            systemPrompt: effectiveSystemPrompt,
+            ...(historySeed.length > 0 ? { history: historySeed } : {}),
+            // Item #13 (v3.113) — pass the saved permission setting on every new session.
+            dangerouslyBypassPermissions,
+          });
+          if (!started || pendingSessionStart.current !== start) {
+            if (options?.promptRequestId) onSilentPromptDropped?.(options.promptRequestId);
+            return;
+          }
+        } finally {
+          if (pendingSessionStart.current === start) pendingSessionStart.current = null;
+        }
         setSessionActive(true);
       }
 
@@ -1960,9 +1977,6 @@ export function AgentChatPanel({
       localStorage.setItem(AGENT_PROVIDER_STORAGE_KEY, newProvider);
       setProvider(newProvider);
       setProviderAvailable(null);
-      void window.producerPlayer.agentCheckProvider(newProvider).then((available) => {
-        setProviderAvailable(available);
-      });
     },
     [provider, resetActiveSession]
   );
@@ -2254,7 +2268,7 @@ export function AgentChatPanel({
             provider={provider}
             model={currentModel}
             thinking={currentThinking}
-            availableModels={availableModels}
+            availableModels={modelOptions}
             availableThinkingOptions={AGENT_THINKING_OPTIONS}
             systemPrompt={systemPrompt}
             onProviderChange={handleProviderChange}

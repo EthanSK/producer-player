@@ -1,14 +1,15 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { listCodexModels, latestSolModel } from './codex-model-catalog';
 import {
-  DEFAULT_AGENT_MODEL_BY_PROVIDER,
   DEFAULT_AGENT_THINKING_BY_PROVIDER,
   type AgentAttachment,
   type AgentContext,
   type AgentConversationHistoryEntry,
   type AgentEvent,
   type AgentMode,
+  type AgentModelDefinition,
   type AgentModelId,
   type AgentProviderId,
   type AgentThinkingEffort,
@@ -118,6 +119,7 @@ interface AgentTurnState {
 
 interface AgentSessionState {
   provider: AgentProviderId;
+  cliPath: string;
   mode: AgentMode;
   model: AgentModelId;
   thinking: AgentThinkingEffort;
@@ -137,6 +139,7 @@ interface AgentSessionState {
 }
 
 let currentSession: AgentSessionState | null = null;
+let sessionGeneration = 0;
 let eventCallback: ((event: AgentEvent) => void) | null = null;
 
 function emitEvent(event: AgentEvent): void {
@@ -215,7 +218,7 @@ function isIgnoredInputStreamError(error: unknown): boolean {
 
 function normalizeModel(provider: AgentProviderId, model?: AgentModelId): AgentModelId {
   const trimmed = typeof model === 'string' ? model.trim() : '';
-  return trimmed.length > 0 ? trimmed : DEFAULT_AGENT_MODEL_BY_PROVIDER[provider];
+  return trimmed || (provider === 'claude' ? 'sonnet' : '');
 }
 
 function normalizeThinking(
@@ -407,7 +410,7 @@ function buildAccumulatedAttachmentsSection(
 }
 
 function buildTurnPrompt(
-  session: AgentSessionState,
+  session: Pick<AgentSessionState, 'provider' | 'systemPrompt' | 'history'>,
   message: string,
   context?: AgentContext | null,
   uiContext?: AgentUiContext | null,
@@ -499,9 +502,8 @@ function getSpawnArgs(session: AgentSessionState): string[] {
   if (session.dangerouslyBypassPermissions) {
     args.push('--dangerously-bypass-approvals-and-sandbox');
   }
+  if (session.model) args.push('--model', session.model);
   args.push(
-    '--model',
-    session.model,
     '-c',
     `model_reasoning_effort="${session.thinking}"`,
     '--json',
@@ -768,10 +770,40 @@ function handleCodexJsonLine(session: AgentSessionState, parsed: Record<string, 
 }
 
 export function isProviderAvailable(provider: AgentProviderId): boolean {
-  return resolveCliPath(getCommandName(provider)) !== null;
+  return agentCliPaths(provider).length > 0;
 }
 
-export function startSession(
+export async function listAgentModels(provider: AgentProviderId): Promise<AgentModelDefinition[]> {
+  if (provider === 'claude') {
+    return [
+      { id: 'opus', label: 'Claude Opus' },
+      { id: 'sonnet', label: 'Claude Sonnet' },
+      { id: 'haiku', label: 'Claude Haiku' },
+    ];
+  }
+  const catalogues = await Promise.all(agentCliPaths(provider).map(listCodexModels));
+  return Array.from(new Map(catalogues.flat().map((model) => [model.id, model])).values());
+}
+
+function agentCliPaths(provider: AgentProviderId): string[] {
+  const cliPath = resolveCliPath(getCommandName(provider));
+  const paths = cliPath ? [cliPath] : [];
+  if (provider !== 'codex' || process.platform !== 'darwin') return paths;
+
+  // Keep custom PATH launchers authoritative. Standard standalone installs can
+  // lag the newer bundled CLI, which uses the same signed-in Codex account.
+  if (!cliPath || ['/opt/homebrew/bin/codex', '/usr/local/bin/codex'].includes(cliPath)) {
+    const bundledPaths = [
+      '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+      '/Applications/ChatGPT.app/Contents/Resources/codex',
+      '/Applications/Codex.app/Contents/Resources/codex',
+    ];
+    paths.push(...bundledPaths.filter((path) => existsSync(path)));
+  }
+  return paths;
+}
+
+export async function startSession(
   provider: AgentProviderId,
   mode: AgentMode,
   systemPrompt?: string,
@@ -784,25 +816,36 @@ export function startSession(
    * `agentDangerouslyBypassPermissions` user setting in unified state.
    */
   dangerouslyBypassPermissions?: boolean,
-): void {
+): Promise<boolean> {
   if (currentSession?.alive) {
     destroySession();
   }
+  const generation = ++sessionGeneration;
 
-  const cliPath = resolveCliPath(getCommandName(provider));
-  if (!cliPath) {
+  const cliPaths = agentCliPaths(provider);
+  if (cliPaths.length === 0) {
     emitEvent({
       type: 'error',
       code: 'CLI_NOT_FOUND',
       message: getCliNotFoundMessage(provider),
     });
-    return;
+    return false;
   }
+
+  const selectedModel = normalizeModel(provider, model);
+  const catalogues = provider === 'codex' && (!selectedModel || cliPaths.length > 1)
+    ? await Promise.all(cliPaths.map(listCodexModels))
+    : [];
+  const resolvedModel = selectedModel || latestSolModel(catalogues.flat()) || '';
+  const matchingRuntime = catalogues.findIndex((models) => models.some(({ id }) => id === resolvedModel));
+  const cliPath = cliPaths[matchingRuntime < 0 ? 0 : matchingRuntime];
+  if (generation !== sessionGeneration) return false;
 
   currentSession = {
     provider,
+    cliPath,
     mode,
-    model: normalizeModel(provider, model),
+    model: resolvedModel,
     thinking: normalizeThinking(provider, thinking),
     process: null,
     systemPrompt: buildEffectiveSystemPrompt(systemPrompt),
@@ -811,6 +854,7 @@ export function startSession(
     activeTurn: null,
     dangerouslyBypassPermissions: dangerouslyBypassPermissions === true,
   };
+  return true;
 }
 
 export function sendTurn(
@@ -857,15 +901,7 @@ export function sendTurn(
     previousProcess.on('exit', () => clearTimeout(killTimeout));
   }
 
-  const cliPath = resolveCliPath(getCommandName(session.provider));
-  if (!cliPath) {
-    emitEvent({
-      type: 'error',
-      code: 'CLI_NOT_FOUND',
-      message: getCliNotFoundMessage(session.provider),
-    });
-    return;
-  }
+  const cliPath = session.cliPath;
 
   const prompt = buildTurnPrompt(
     session,
@@ -1039,6 +1075,7 @@ export function respondToApproval(
 }
 
 export function destroySession(): void {
+  sessionGeneration++;
   if (currentSession) {
     currentSession.alive = false;
     if (currentSession.process) {
@@ -1101,25 +1138,8 @@ export const __testing__ = {
       attachments?: AgentAttachment[];
     } = {},
   ): string {
-    // Reconstruct a minimal AgentSessionState-shaped object — buildTurnPrompt
-    // only reads provider, systemPrompt, and history, so this is sufficient.
-    // `dangerouslyBypassPermissions: false` is the prompt-building tests'
-    // safe default; argv-construction tests use `getSpawnArgs` below and
-    // pass the flag explicitly there.
-    const fakeSession: AgentSessionState = {
-      provider: session.provider,
-      mode: 'analysis' as AgentMode,
-      model: '' as AgentModelId,
-      thinking: 'high' as AgentThinkingEffort,
-      process: null,
-      systemPrompt: buildEffectiveSystemPrompt(session.systemPrompt),
-      alive: true,
-      history: session.history,
-      activeTurn: null,
-      dangerouslyBypassPermissions: false,
-    };
     return buildTurnPrompt(
-      fakeSession,
+      { ...session, systemPrompt: buildEffectiveSystemPrompt(session.systemPrompt) },
       message,
       options.context ?? null,
       options.uiContext ?? null,
@@ -1175,6 +1195,7 @@ export const __testing__ = {
   }): string[] {
     const fakeSession: AgentSessionState = {
       provider: input.provider,
+      cliPath: '',
       mode: 'analysis',
       model: normalizeModel(input.provider, input.model),
       thinking: normalizeThinking(input.provider, input.thinking),

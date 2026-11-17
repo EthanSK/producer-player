@@ -81,6 +81,7 @@ test('Codex — bypass OFF: --dangerously-bypass-approvals-and-sandbox is NOT in
   assert.equal(args[0], 'exec');
   assert.ok(args.includes('--ephemeral'));
   assert.ok(args.includes('--json'));
+  assert.ok(!args.includes('--model'), 'the CLI chooses its default when no model resolved');
   assert.equal(args[args.length - 1], '-');
 });
 
@@ -95,6 +96,7 @@ test('Codex — bypass undefined defaults to OFF (safe-by-default)', () => {
 test('Codex — bypass ON: --dangerously-bypass-approvals-and-sandbox IS in argv', () => {
   const args = __testing__.getSpawnArgs({
     provider: 'codex',
+    model: 'gpt-6.2-sol',
     dangerouslyBypassPermissions: true,
   });
   assert.ok(

@@ -359,6 +359,7 @@ export const IPC_CHANNELS = {
   AGENT_DESTROY_SESSION: 'producer-player:agent-destroy-session',
   AGENT_EVENT: 'producer-player:agent-event',
   AGENT_CHECK_PROVIDER: 'producer-player:agent-check-provider',
+  AGENT_LIST_MODELS: 'producer-player:agent-list-models',
   AGENT_STORE_DEEPGRAM_KEY: 'producer-player:agent-store-deepgram-key',
   AGENT_GET_DEEPGRAM_KEY: 'producer-player:agent-get-deepgram-key',
   AGENT_CLEAR_DEEPGRAM_KEY: 'producer-player:agent-clear-deepgram-key',
@@ -1201,31 +1202,7 @@ export interface AgentModelDefinition {
   label: string;
 }
 
-export const AGENT_MODEL_OPTIONS_BY_PROVIDER = {
-  codex: [
-    { id: 'gpt-5.5', label: 'GPT-5.5' },
-    { id: 'gpt-5.4', label: 'GPT-5.4' },
-    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-    { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-    { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
-    { id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
-    { id: 'gpt-5.2', label: 'GPT-5.2' },
-  ],
-  claude: [
-    { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-    { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
-  ],
-} as const satisfies Record<AgentProviderId, readonly AgentModelDefinition[]>;
-
-export type AgentModelId =
-  | (typeof AGENT_MODEL_OPTIONS_BY_PROVIDER)[AgentProviderId][number]['id']
-  | (string & {});
-
-export const DEFAULT_AGENT_MODEL_BY_PROVIDER: Record<AgentProviderId, AgentModelId> = {
-  codex: 'gpt-5.4',
-  claude: 'claude-sonnet-4-6',
-};
+export type AgentModelId = string;
 
 export const AGENT_PROVIDER_LABELS: Record<AgentProviderId, string> = {
   codex: 'Codex',
@@ -1692,7 +1669,7 @@ export interface ProducerPlayerBridge {
   onAutoUpdateStateChanged(listener: AutoUpdateStateListener): () => void;
   onSnapshotUpdated(listener: SnapshotListener): () => void;
   onTransportCommand(listener: TransportCommandListener): () => void;
-  agentStartSession(payload: AgentStartSessionPayload): Promise<void>;
+  agentStartSession(payload: AgentStartSessionPayload): Promise<boolean>;
   agentSendTurn(payload: AgentSendTurnPayload): Promise<void>;
   agentSaveAttachment(payload: AgentSaveAttachmentPayload): Promise<AgentAttachment>;
   agentClearAttachments(paths: string[]): Promise<void>;
@@ -1700,6 +1677,7 @@ export interface ProducerPlayerBridge {
   agentRespondApproval(payload: AgentRespondApprovalPayload): Promise<void>;
   agentDestroySession(): Promise<void>;
   agentCheckProvider(provider: AgentProviderId): Promise<boolean>;
+  agentListModels(provider: AgentProviderId): Promise<AgentModelDefinition[]>;
   agentStoreDeepgramKey(key: string): Promise<void>;
   agentGetDeepgramKey(): Promise<string | null>;
   agentClearDeepgramKey(): Promise<void>;

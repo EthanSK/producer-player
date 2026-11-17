@@ -524,6 +524,7 @@ export function AgentSettings({
           disabled={controlsDisabled}
           data-testid="agent-model-select"
         >
+          <option value="">Default</option>
           {availableModels.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}

@@ -56,6 +56,20 @@ if (args.includes('--version') || args.includes('-V') || args.includes('-v')) {
   process.exit(0);
 }
 
+if (provider === 'codex' && args[0] === 'app-server') {
+  const lines = require('node:readline').createInterface({ input: process.stdin });
+  lines.on('line', (line) => {
+    const request = JSON.parse(line);
+    if (request.method === 'initialize') emit({ id: request.id, result: {} });
+    if (request.method === 'model/list') emit({ id: request.id, result: { data: [
+      { model: 'gpt-6.2-sol', displayName: 'GPT-6.2 Sol' },
+      { model: 'gpt-5.5', displayName: 'GPT-5.5' },
+      { model: 'gpt-5.3-codex', displayName: 'GPT-5.3 Codex' },
+      { model: 'gpt-99-sol', displayName: 'Hidden model', hidden: true },
+    ], nextCursor: null } });
+  });
+} else {
+
 let stdin = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
@@ -188,6 +202,7 @@ process.stdin.on('end', () => {
   emitNextChunk();
 });
 process.stdin.resume();
+}
 `;
 }
 
@@ -404,8 +419,8 @@ test.describe('Agent Chat Panel', () => {
       const systemPromptInput = page.getByTestId('agent-system-prompt-input');
       await expect(page.getByTestId('agent-provider-claude')).toBeVisible();
       await expect(page.getByTestId('agent-provider-codex')).toBeVisible();
-      await expect(modelSelect).toHaveValue('claude-sonnet-4-6');
-      await expect(modelSelect.locator('option')).toHaveCount(3);
+      await expect(modelSelect).toHaveValue('');
+      await expect(modelSelect.locator('option')).toHaveCount(4);
       await expect(thinkingSelect).toHaveValue('high');
       await expect(systemPromptInput).toBeVisible();
       await expect(systemPromptInput).toHaveValue(/full-access mastering agent/i);
@@ -417,13 +432,13 @@ test.describe('Agent Chat Panel', () => {
       await expect(page.getByTestId('agent-open-chat-history')).toContainText('Chat history');
 
       await page.getByTestId('agent-provider-codex').click();
-      await expect(modelSelect).toHaveValue('gpt-5.4');
-      await expect(modelSelect.locator('option')).toHaveCount(7);
+      await expect(modelSelect).toHaveValue('');
+      await expect(modelSelect.locator('option')).toHaveCount(4);
       await expect(thinkingSelect).toHaveValue('high');
       await expect(modelSelect.locator('option')).toContainText([
+        'Default',
+        'GPT-6.2 Sol',
         'GPT-5.5',
-        'GPT-5.4',
-        'GPT-5.4 Mini',
         'GPT-5.3 Codex',
       ]);
 
@@ -741,7 +756,7 @@ test.describe('Agent Chat Panel', () => {
 
       await page.getByTestId('agent-panel-toggle').click();
       await page.getByTestId('agent-settings-toggle').click();
-      await page.getByTestId('agent-model-select').selectOption('claude-haiku-4-5');
+      await page.getByTestId('agent-model-select').selectOption('haiku');
       await page.getByTestId('agent-thinking-select').selectOption('medium');
       await page.getByTestId('agent-system-prompt-input').fill(customSystemPrompt);
       await page.getByTestId('agent-settings-bypass-permissions-toggle').check();
@@ -751,13 +766,13 @@ test.describe('Agent Chat Panel', () => {
       await input.fill('First test question');
       await page.getByTestId('agent-send-button').click();
       await expect(page.getByTestId('agent-message-agent').last()).toContainText(
-        'CLAUDE(claude-haiku-4-5): First test question'
+        'CLAUDE(haiku): First test question'
       );
 
       await input.fill('Follow up question');
       await page.getByTestId('agent-send-button').click();
       await expect(page.getByTestId('agent-message-agent').last()).toContainText(
-        'CLAUDE(claude-haiku-4-5): Follow up question'
+        'CLAUDE(haiku): Follow up question'
       );
 
       const claudeLogs = await readJsonLines(path.join(fakeCli.logDirectory, 'claude.jsonl'));
@@ -772,7 +787,7 @@ test.describe('Agent Chat Panel', () => {
       expect(firstArgs).toContain('--effort');
       expect(firstArgs).toContain('--system-prompt');
       expect(firstArgs).not.toContain('--tools');
-      expect(firstArgs[firstArgs.indexOf('--model') + 1]).toBe('claude-haiku-4-5');
+      expect(firstArgs[firstArgs.indexOf('--model') + 1]).toBe('haiku');
       expect(firstArgs[firstArgs.indexOf('--effort') + 1]).toBe('medium');
       const claudeSystemPrompt = firstArgs[firstArgs.indexOf('--system-prompt') + 1];
       expect(claudeSystemPrompt).toContain(customSystemPrompt);
@@ -791,7 +806,7 @@ test.describe('Agent Chat Panel', () => {
       const secondPrompt = String(claudeLogs[1]?.stdin ?? '');
       expect(secondPrompt).toContain('<conversation-history>');
       expect(secondPrompt).toContain('User:\nFirst test question');
-      expect(secondPrompt).toContain('Assistant:\nCLAUDE(claude-haiku-4-5): First test question');
+      expect(secondPrompt).toContain('Assistant:\nCLAUDE(haiku): First test question');
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
@@ -873,9 +888,9 @@ test.describe('Agent Chat Panel', () => {
         .locator('.agent-message-content');
 
       await expect(content.locator('.agent-thinking-label')).toBeVisible();
-      await expect(content).toContainText('CLAUDE(claude-sonnet-4-6):', { timeout: 5000 });
+      await expect(content).toContainText('CLAUDE(sonnet):', { timeout: 5000 });
 
-      const fullText = 'CLAUDE(claude-sonnet-4-6): Claude streaming check';
+      const fullText = 'CLAUDE(sonnet): Claude streaming check';
       await expect
         .poll(async () => {
           const text = (await content.innerText()).trim();
@@ -914,7 +929,7 @@ test.describe('Agent Chat Panel', () => {
         .first()
         .locator('.agent-message-content');
 
-      await expect(firstAssistantContent).toContainText('CLAUDE(claude-sonnet-4-6):', {
+      await expect(firstAssistantContent).toContainText('CLAUDE(sonnet):', {
         timeout: 5000,
       });
 
@@ -928,7 +943,7 @@ test.describe('Agent Chat Panel', () => {
 
       await expect(page.getByTestId('agent-message-agent').first()).toContainText('(stopped)');
       await expect(page.getByTestId('agent-message-agent').last()).toContainText(
-        'CLAUDE(claude-sonnet-4-6): Second steering turn'
+        'CLAUDE(sonnet): Second steering turn'
       );
 
       const claudeLogs = await readJsonLines(path.join(fakeCli.logDirectory, 'claude.jsonl'));
@@ -1106,7 +1121,7 @@ test.describe('Agent Chat Panel', () => {
       await firstInput.fill('History autosave check');
       await firstRun.page.getByTestId('agent-send-button').click();
       await expect(firstRun.page.getByTestId('agent-message-agent').last()).toContainText(
-        'CLAUDE(claude-sonnet-4-6): History autosave check'
+        'CLAUDE(sonnet): History autosave check'
       );
 
       await firstRun.page.getByTestId('agent-history-toggle').click();

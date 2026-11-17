@@ -8331,6 +8331,8 @@ function registerIpcHandlers(service: FileLibraryService): void {
       // No-op while the feature is disabled.
     });
 
+    ipcMain.handle(IPC_CHANNELS.AGENT_LIST_MODELS, async () => []);
+
     ipcMain.handle(IPC_CHANNELS.AGENT_CHECK_PROVIDER, async () => {
       return false;
     });
@@ -8372,7 +8374,7 @@ function registerIpcHandlers(service: FileLibraryService): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_START_SESSION,
     async (_event, payload: AgentStartSessionPayload) => {
-      agentService.startSession(
+      return agentService.startSession(
         payload.provider,
         payload.mode,
         payload.systemPrompt,
@@ -8437,6 +8439,10 @@ function registerIpcHandlers(service: FileLibraryService): void {
       return agentService.isProviderAvailable(provider);
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_LIST_MODELS, async (_event, provider: AgentProviderId) => {
+    return agentService.listAgentModels(provider);
+  });
 
   // ---- Producee Boy UI control surface (v3.90) -----------------------------
   // Lets the embedded agent eval JS / take screenshots / pull a structured DOM

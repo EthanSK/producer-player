@@ -444,6 +444,12 @@ test.describe('Agent Chat Panel', () => {
 
       await page.getByTestId('agent-settings-toggle').click();
       await expect(page.getByTestId('agent-settings')).not.toBeVisible();
+
+      await page.getByTestId('agent-composer-input').fill('Run with the default model');
+      await page.getByTestId('agent-send-button').click();
+      await expect(page.getByTestId('agent-message-agent').last()).toContainText(
+        'CODEX(gpt-6.2-sol): Run with the default model'
+      );
     } finally {
       await electronApp.close();
       await cleanupE2ETestDirectories(dirs);
